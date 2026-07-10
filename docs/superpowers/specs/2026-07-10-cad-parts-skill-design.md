@@ -76,10 +76,13 @@ skills/cad-parts/
 Die Referenzen werden nur in der jeweils passenden Phase gelesen
 (`spatial-reasoning.md` in Phase 3, `troubleshooting.md` nur bei Fails usw.).
 
-**Kein API-Drift:** `SKILL.md` dupliziert die cadkit-API **nicht**. Sie weist an, zu
-Beginn `cadkit://reference` und `cadkit://build123d-subset` live vom Server zu lesen.
-Der Skill liefert nur, was der Server nicht liefern kann: Methode, Helfer, Rezepte,
-Diagnose.
+**Kein API-Drift:** `SKILL.md` dupliziert die cadkit-API-Signaturen **nicht**. Sie
+weist an, zu Beginn `cadkit://reference` und `cadkit://build123d-subset` live vom
+Server zu lesen — diese Resources sind die einzige Autorität für die aktuelle
+API-Oberfläche. Die Referenzdateien des Skills bauen nur auf dem **stabilen Kern**
+auf (Box/Cylinder, `+`/`-`, `Pos`/`Rot`, Zentrierung im Ursprung) und lehren
+Nutzungsmuster darauf; der Skill liefert, was der Server nicht liefern kann:
+Methode, Helfer, Rezepte, Diagnose.
 
 **Frontmatter-Entwurf (Trigger deutsch + englisch, Muster wie `handoff`):**
 
