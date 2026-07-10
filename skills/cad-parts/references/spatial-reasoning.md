@@ -27,7 +27,8 @@ Standard formulas (h = solid height):
 - Cutters must be LONGER than the material: use 2x the local thickness.
   For guaranteed through holes use `through_hole` (server extends the cutter
   beyond the part automatically).
-- A cut that removes everything -> `empty_geometry`. Predict what remains.
+- A cut that removes everything surfaces as `export_failed` (NOT
+  `empty_geometry` — measured). Predict what remains before cutting.
 - CAUTION `must_be_through`: the server measures hole length against the
   GLOBAL part extent along the axis. A hole through a 4 mm wall of a 40 mm
   deep part is NOT "through" — omit `must_be_through` for local walls.
