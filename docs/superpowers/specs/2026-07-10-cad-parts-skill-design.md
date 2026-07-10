@@ -72,17 +72,31 @@ skills/cad-parts/
     └── troubleshooting.md         # Diagnose-Tabellen (Fehlertypen, Check-Fails)
 ```
 
-**Progressive Disclosure:** `SKILL.md` bleibt schlank (Workflow + Regeln + Verweise).
-Die Referenzen werden nur in der jeweils passenden Phase gelesen
-(`spatial-reasoning.md` in Phase 3, `troubleshooting.md` nur bei Fails usw.).
+**Progressive Disclosure & Wortbudget:** `SKILL.md` bleibt schlank (Ziel gemäß
+writing-skills: < 500 Wörter). Die 6 Phasen werden als kompakte Checkliste
+formuliert; die Fehlerbehandlung (§8) wandert bis auf den Verbindungs-Abbruch
+nach `troubleshooting.md`; die Iterationsregeln (§7) bleiben als Disziplin-Kern
+in der `SKILL.md`. Die Referenzen werden nur in der jeweils passenden Phase
+gelesen (`spatial-reasoning.md` in Phase 3, `troubleshooting.md` nur bei Fails
+usw.).
 
 **Kein API-Drift:** `SKILL.md` dupliziert die cadkit-API-Signaturen **nicht**. Sie
 weist an, zu Beginn `cadkit://reference` und `cadkit://build123d-subset` live vom
 Server zu lesen — diese Resources sind die einzige Autorität für die aktuelle
 API-Oberfläche. Die Referenzdateien des Skills bauen nur auf dem **stabilen Kern**
-auf (Box/Cylinder, `+`/`-`, `Pos`/`Rot`, Zentrierung im Ursprung) und lehren
-Nutzungsmuster darauf; der Skill liefert, was der Server nicht liefern kann:
+auf und lehren Nutzungsmuster darauf. Der stabile Kern umfasst das
+build123d-Subset (Box/Cylinder, `+`/`-`, `Pos`/`Rot`, Zentrierung im Ursprung)
+**und die cadkit-Primitive der gepinnten Version** (`box`, `cylinder`, `plate`,
+`through_hole`, `counterbore_hole`, `pattern_holes`); bei Widerspruch gewinnen
+die Live-Resources. Der Skill liefert, was der Server nicht liefern kann:
 Methode, Helfer, Rezepte, Diagnose.
+
+**Operationalisierung des Resource-Zugriffs:** `SKILL.md` nennt den konkreten
+Mechanismus in Claude Code — `ListMcpResourcesTool`/`ReadMcpResourceTool` mit
+Servername + URI — und legt sich **nicht** auf einen festen Servernamen fest:
+Es zählt der tatsächlich verbundene `stl-cad-server*`-Alias (z. B.
+`stl-cad-server` oder `stl-cad-server-http`); erkennbar an den verfügbaren
+`render_model`/`check_model`-Tools.
 
 **Frontmatter-Entwurf (Trigger deutsch + englisch, Muster wie `handoff`):**
 
@@ -108,7 +122,9 @@ Verbindungshinweis (HTTP-URL + Bearer-Token, siehe Server-README).
 Fragen (eine nach der anderen, mit sinnvollen Ingenieurs-Defaults als Vorschlag),
 **bis alle relevanten Angaben zu 100 % vorliegen**: Funktion & Einbausituation,
 Schraubengrößen/Lochbilder, kritische Maße, Passungen/Spiel, Wandstärken,
-Druckrichtung/Orientierung. Ergebnis:
+Druckrichtung/Orientierung. „Vollständig" ist operational definiert: jedes Feld,
+das Spec-JSON **und** Annahmenliste benötigen, hat einen Wert; ein vom Nutzer
+bestätigter Default zählt als vorhanden. Ergebnis:
 1. eine messbare **Spec** (JSON gemäß `spec://schema`: bounding_box, holes,
    min_wall_thickness_mm, max_overhang_deg, Volumen-Fenster, watertight/manifold),
 2. eine explizite **Annahmenliste**.
@@ -145,6 +161,24 @@ an den Nutzer, dazu Zusammenfassung (finale Maße, Annahmen, Spec-Ergebnis).
 Nutzer-OK = fertig. Optional anbieten, das Teil als Regressions-Benchmark-Fall
 für den Server zu dokumentieren (Code + Spec + expected_status).
 
+### Grenzen der deterministischen Abnahme (explizit)
+`check_model` matcht Löcher nur über **Durchmesser + Achse + Durchgängigkeit** —
+`HoleSpec` hat kein Positionsfeld. Lochpositionen und Lochbild-Geometrie
+(Abstände, Symmetrie) sind serverseitig **unverifiziert**, obwohl sie der
+wahrscheinlichste Fehler eines blind arbeitenden Modells sind. Zusätzlich meldet
+die Locherkennung *alle* Zylinderflächen, auch Außenflächen (z. B. den Mantel
+einer Buchse) — ein Hole-Check kann daran fälschlich matchen. Der Skill
+kompensiert:
+- **Lochvolumina sind Pflichtposten im Volumen-Budget** (Phase 3) — fängt
+  fehlende/zu viele Bohrungen, aber nicht falsche Positionen;
+- **Lochbild-Probe:** Isolations-Render nur der Cutter (Vereinigung der
+  Bohrzylinder); deren Bounding-Box verifiziert Abstände und Ausdehnung des
+  Musters analytisch (Beispiel: 2×2-Raster, spacing 40×20, ø 4,5 →
+  BBox 44,5 × 24,5 × L);
+- die **Phase-6-Zusammenfassung kennzeichnet je Spec-Punkt**, ob er
+  *servergeprüft* oder *nur sichtgeprüft* ist — Lochpositionen sind immer
+  „sichtgeprüft" und damit Teil der menschlichen Abnahme im Dashboard.
+
 ## 6. Referenzdateien
 
 ### 6.1 `spatial-reasoning.md` — die Denk-Methode
@@ -158,7 +192,13 @@ für den Server zu dokumentieren (Code + Spec + expected_status).
   3 um 0°/60°/120° rotierten Boxen (Schnittmenge); Dreiecks-Rippe aus rotierter Box
   + Schnittmengen-Trick.
 - **Volumen-Budget-Methode:** jedes Feature mit Volumenformel; Überlappungen
-  abziehen; Ergebnis als Intervall mit begründeter Toleranz (Mesh-Tesselation).
+  abziehen; Ergebnis als Intervall. Toleranzregel konkret: Die STL-Tesselation
+  beschreibt Zylinderflächen mit einbeschriebenen Facetten — Zylinder-Volumen im
+  Mesh liegt systematisch **unter** πr²h; bei geschnittenen Löchern liegt das
+  Teilvolumen entsprechend leicht **über** der analytischen Vorhersage. Der
+  Export nutzt build123d-Defaults (lineare Toleranz ~10⁻³ mm), die erwartete
+  Abweichung ist damit deutlich unter 1 %; der konkrete Zahlenwert wird bei der
+  Helfer-Validierung (§9) **gemessen** und dann hier festgeschrieben.
 - **2–3 vollständig durchgerechnete Beispiele** (u. a. Wandhalter: jede Position,
   jede Zwischensumme, Vorhersagetabelle → tatsächliche Metriken).
 
@@ -166,7 +206,11 @@ für den Server zu dokumentieren (Code + Spec + expected_status).
 Design-Regeln: nur erlaubte API; explizite Maß-Parameter (keine
 Bounding-Box-Introspektion); jede Funktion pur (Part rein → Part raus bzw. Maße
 rein → Part raus); Docstring enthält Volumenformel fürs Budget; jede Funktion ist
-gegen den laufenden Server validiert (siehe §9).
+gegen den laufenden Server validiert (siehe §9). Platzierungsparameter spiegeln
+die cadkit-Konvention (`at=(x, y)` planar bzw. `at=(x, y, z)` mit `axis`), damit
+keine zweite Konvention neben den Primitiven entsteht. Keine Duplikate zu
+vorhandenen Primitiven: Senkungen macht `counterbore_hole`, Lochraster
+`pattern_holes` — Helfer füllen nur echte Lücken.
 
 | Funktion | Zweck |
 |---|---|
@@ -193,7 +237,9 @@ Default-Spec, typische Annahmen.
 Engineering-Tabellen:
 - **Schrauben-Durchgangslöcher** M2,5–M8 (Nennmaß → Durchgangsloch mittel,
   Senkungs-Ø/-Tiefe für Zylinderkopf DIN 912, Sechskant-Schlüsselweiten für
-  `nut_pocket`).
+  `nut_pocket`). Die DIN-912-Werte sind direkt als Parameter für das vorhandene
+  cadkit-Primitiv `counterbore_hole` formuliert — Senkungen werden **nicht**
+  manuell aus Zylindern nachgebaut.
 - **FDM-Defaults:** Wand ≥ 1,2 mm (0,4er-Düse), Überhang ≤ 45°, horizontale
   Bohrungen +0,2–0,4 mm Zuschlag, Spielpassung 0,2 mm (eng) / 0,4 mm (locker).
 
@@ -205,8 +251,13 @@ Engineering-Tabellen:
 2. **Fehlgeschlagener Check → wahrscheinlichste Denkfehler**, z. B. Volumen zu
    niedrig → Körper überlappen nicht / Cutter zu groß; BBox-Z doppelt so groß wie
    erwartet → Zentrierung vergessen; Loch-Check fail → falsche Achse oder Material
-   blockiert den Durchgang; not watertight → sich berührende, aber nicht
-   überlappende Körper.
+   blockiert den Durchgang; Loch-Check pass trotz fehlendem Loch → Match auf einer
+   zylindrischen **Außenfläche** (Locherkennung filtert alle Zylinderflächen);
+   not watertight → sich berührende, aber nicht überlappende Körper.
+
+Beide Tabellen werden **aus der Baseline abgeleitet** (§9, RED-Phase): Die dort
+wörtlich dokumentierten Fehlermuster sind die Primärquelle; die obigen Beispiele
+sind Startpunkte und werden ersetzt oder bestätigt.
 
 ## 7. Iterationssteuerung (Regeln in SKILL.md)
 
@@ -221,6 +272,9 @@ Engineering-Tabellen:
 
 ## 8. Fehlerbehandlung
 
+Im Skill lebt davon nur der Verbindungs-Abbruch in der `SKILL.md`; der Rest
+wandert nach `troubleshooting.md` (Wortbudget, siehe §4).
+
 - MCP-Server nicht verbunden → Abbruch mit Anleitung (Server-URL `http://<host>:8000/mcp`,
   `Authorization: Bearer <token>`, siehe stl-mcp-server-README).
 - `timeout`/`resource_limit` → Komplexität reduzieren (weniger Booleans,
@@ -230,17 +284,33 @@ Engineering-Tabellen:
 
 ## 9. Validierung / Definition of Done
 
+**RED — Baseline zuerst (gemäß writing-skills: kein Skill ohne beobachtetes
+Scheitern):**
+
+0. Die 3 End-to-End-Beispielteile (Wandhalter mit Schraubbild, Buchse,
+   Gehäuseschale) werden **zuerst in frischen Sessions ohne Skill** gebaut
+   (nur MCP-Server + Aufgabenstellung). Die tatsächlichen Fehlermuster werden
+   **wörtlich dokumentiert** (Fehlertypen, gescheiterte Checks, Denk- und
+   Platzierungsfehler, Rationalisierungen). `troubleshooting.md` (§6.4) und die
+   Iterationsregeln (§7) werden aus diesen Mustern abgeleitet statt aus
+   Hypothesen. Nebeneffekt: belastbarer Vorher/Nachher-Nachweis für die Abnahme.
+
+**GREEN — mit Skill:**
+
 1. **Helfer-Validierung:** jede Funktion in `helpers.py` wird gegen den laufenden
    Server render-getestet: Status `ok`, watertight, Volumen im per Docstring-Formel
-   vorhergesagten Budget.
-2. **End-to-End:** mindestens 3 Beispielteile (Wandhalter mit Schraubbild, Buchse,
-   Gehäuseschale) durchlaufen den kompletten Workflow und bestehen ihre Spec via
-   `render_model` → `check_model`.
+   vorhergesagten Budget. Dabei wird die tatsächliche Tesselation-Abweichung
+   gemessen und in `spatial-reasoning.md` festgeschrieben (§6.1).
+2. **End-to-End:** dieselben 3 Beispielteile durchlaufen mit Skill den kompletten
+   Workflow und bestehen ihre Spec via `render_model` → `check_model` —
+   nachweislich besser als die Baseline (weniger Iterationen, keine
+   Wiederholung der Baseline-Fehlermuster).
 3. **Benchmark-tauglich:** die validierten Beispiele sind als `(code, spec,
    expected_status)` dokumentiert, sodass sie 1:1 ins Regressions-Benchmark des
    Servers übernommen werden können (Nebenprodukt, kein Muss).
 4. Skill-Qualität gemäß `superpowers:writing-skills` (Frontmatter, Trigger,
-   Struktur) — der Skill wird vor Abnahme in einer frischen Session ausprobiert.
+   Struktur, Wortbudget) — der Skill wird vor Abnahme in einer frischen Session
+   ausprobiert.
 
 ## 10. Spätere Ausbaustufen (außerhalb dieses Projekts)
 
