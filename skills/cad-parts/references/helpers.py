@@ -51,3 +51,28 @@ def l_bracket(width, leg_a, leg_b, t):
     horizontal = Pos(0, leg_a / 2, t / 2) * box(width, leg_a, t)
     vertical = Pos(0, t / 2, leg_b / 2) * box(width, t, leg_b)
     return horizontal + vertical
+
+
+# --- profiles & shells ---
+
+def u_channel(w, d, h, wall):
+    """U-profile extruded along Y (full depth d), opening towards +Z,
+    floor thickness = wall. Requires w > 2*wall and h > wall.
+    Volume = w*d*h - (w - 2*wall) * d * (h - wall)."""
+    outer = box(w, d, h)
+    cavity = Pos(0, 0, wall) * box(w - 2 * wall, 2 * d, h)
+    return outer - cavity
+
+
+def enclosure_shell(w, d, h, wall, open_top=True):
+    """Rectangular enclosure, walls and floor = wall thick.
+    open_top=True: cavity breaks through +Z.
+      Volume = w*d*h - (w-2*wall)*(d-2*wall)*(h-wall)
+    open_top=False: fully closed hollow box (two nested shells, watertight).
+      Volume = w*d*h - (w-2*wall)*(d-2*wall)*(h-2*wall)."""
+    outer = box(w, d, h)
+    if open_top:
+        cavity = Pos(0, 0, wall) * box(w - 2 * wall, d - 2 * wall, h)
+    else:
+        cavity = box(w - 2 * wall, d - 2 * wall, h - 2 * wall)
+    return outer - cavity

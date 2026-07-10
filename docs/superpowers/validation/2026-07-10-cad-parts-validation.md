@@ -30,13 +30,18 @@ Task 4 (Platzierung & Grundkörper), Renders A–D gegen `stl-cad-server-http`, 
 | grid_positions (Render B, holes_plate) | 9345,5 | 9345,636420211435 | +0,00146 % | (60, 40, 4) | true |
 | bushing (Render C) | 848,2300164692441 | 847,8785144489898 | −0,04144 % | (12; 11,996270179748535; 10) | true |
 | l_bracket (Render D) | 23040 | 23040,0 | 0,000 % | (60, 40, 60) | true |
+| u_channel (Render E) | 9600 | 9600,0 | 0,000 % | (30, 50, 20) | true |
+| enclosure_shell open_top=True (Render F) | 10312,5 | 10312,5 | 0,000 % | (50, 30, 20) | true |
+| enclosure_shell open_top=False (Render G) | 13125 | 13125,0 | 0,000 % | (50, 30, 20) | true |
 
 Anmerkungen:
 - Render A/B waren im Brief als zwei separate Renders vorgesehen (statt des kombinierten `result`), um Stack- und Platten-BBox getrennt prüfbar zu machen; `grid_positions`-Log bestätigte `[(-20.0, -10.0), (-20.0, 10.0), (20.0, -10.0), (20.0, 10.0)]`.
 - bushing-Abweichung (−0,04144 %) deckt sich mit der Zylinder-Kalibrierung aus Task 3 (−0,0414 %) — reine Tesselationsabweichung, keine Logikfehler.
 - l_bracket und die Stack-Boxen sind reine Polyeder (Box-Ecken), daher exakte Übereinstimmung mit der analytischen Formel.
+- Renders E–G (`u_channel`, `enclosure_shell`) sind ebenfalls reine Polyeder-Boolesche (Box minus Box), daher exakte Übereinstimmung (0,000 %) ohne Korrekturbedarf am ersten Versuch.
+- Render G (`enclosure_shell(..., open_top=False)`) beweist verschachtelte Schalen: äußere Box minus vollständig innenliegende Kavität-Box liefert `is_watertight: true` und `is_manifold: true` (Server-Metriken) — die geschlossene Hülle ist ein sauberes, wasserdichtes Mesh trotz komplett eingeschlossener Kavität.
 
-(weitere Zeilen: Tasks 5–6 ergänzen hier Profile/Schalen bzw. Schnitt-Features & Tricks)
+(weitere Zeile: Task 6 ergänzt hier Schnitt-Features & Tricks)
 
 ## Fehlertaxonomie-Trigger
 (ausfüllen in Task 9)
