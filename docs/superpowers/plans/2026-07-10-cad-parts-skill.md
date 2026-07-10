@@ -688,8 +688,10 @@ no max_overhang_deg — horizontal holes).
 plate(W, D, T) + `pattern_holes` or per-position `counterbore_hole`.
 Default: 80x60x6, 4x M4 cbore (4.5/8.0/4.2), grid 60x40.
 V = 80*60*6 - 4*(pi/4*4.5^2*6 + pi/4*8^2*4.2 - pi/4*4.5^2*4.2) = 27841.
-Spec: bbox (80, 60, 6); holes 4x {diameter_mm: 4.5, axis: "Z",
-must_be_through: true}; min_wall 1.5; max_overhang_deg 45 (cbore shoulders
+Spec: bbox (80, 60, 6); holes 4x {diameter_mm: 4.5, axis: "Z"} — NO
+must_be_through: the cbore shortens the pilot's cylindrical face to
+T - cbore_depth (baseline probe E proved stepped bores can never satisfy
+must_be_through); min_wall 1.5; max_overhang_deg 45 (cbore shoulders
 face UP -> fine); volume [27300, 28200].
 
 ```python
