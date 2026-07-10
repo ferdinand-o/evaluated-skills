@@ -51,8 +51,11 @@ Standard formulas (h = solid height):
 | feature | primitive/helper | dims | center position (computed) | op |
 |---|---|---|---|---|
 
-Every add must OVERLAP the union built so far (state the overlap solid and
-its volume) — tangent contact produces non-watertight or multi-body results.
+Every add must join the union built so far through either a genuine volume
+overlap (state the overlap solid and its volume) or FULL-FACE coplanar
+contact (stacking with on_top_of / bottom-at-top formulas — validated
+watertight). What is forbidden is line- or point-tangency (edge touching
+edge): that produces non-watertight or multi-body results.
 
 ## 5. Volume budget
 
@@ -64,6 +67,10 @@ export tolerances): cylinder side faces are inscribed facets —
 - parts with cut holes measure ~0.0004 % ABOVE the analytic value
 Budget interval: polyhedral-only parts +/-0.1 %; parts with cylinder faces
 +/-0.5 %. Wider deviation = placement or boolean error, not tessellation.
+This ± band is your SELF-PREDICTION gate (phase 5, step 1). The check_model
+spec window is a separate, deliberately wider acceptance range — derive it
+from the analytic value, round outward generously (functional tolerance),
+never reuse the tight band as the spec window.
 
 ## 6. Probes (self-measurement without eyes)
 
@@ -90,7 +97,9 @@ Decomposition:
 | 4 holes | through_hole | d4.5, axis Y | (+/-20, -, 15/45) | cut |
 
 Budget: 9600 + 14400 - 960 = 23040; holes 4 * (pi/4 * 4.5^2 * 4) = 254.5
--> V_pred = 22785.5, interval [22400, 23100] (holes -> measured slightly above).
+-> V_pred = 22785.5, spec window [22400, 23100] (check_model acceptance);
+self-prediction band per §5: 22785.5 +/- 0.5 % = [22672, 22899] (holes ->
+measured slightly above).
 BBox prediction: (60, 40, 60). Edge clearance check: z=15-2.25=12.75 > 4 (wall
 leg only), x=20+2.25=22.25 < 30. OK.
 

@@ -26,12 +26,14 @@ before writing any code — they are the only authority on the current API.
 2. **Spec interview** — one question at a time, suggest engineering defaults
    (references/recipes.md tables), until every field the spec JSON and the
    assumptions list need has a value; a user-confirmed default counts. Write
-   the check_model spec + explicit assumptions; get confirmation BEFORE code.
+   the check_model spec + explicit assumptions. Name and resolve
+   contradictory inputs before finalizing. Get confirmation BEFORE code.
 3. **Spatial plan** — read references/spatial-reasoning.md. Declare the
    coordinate frame (Z = print direction). Decomposition table: feature ->
    primitive/helper -> dims -> computed center -> add/cut. Predict bbox,
-   volume budget interval, and argue pairwise overlap (never tangent).
-   Holes are mandatory budget items.
+   volume budget interval, and argue how each add joins: volume overlap or
+   full-face contact (line/point tangency forbidden). Holes are mandatory
+   budget items.
 4. **Code** — prefer cadkit primitives (counterbores: `counterbore_hole`,
    grids: `pattern_holes`, through holes: `through_hole`); copy needed
    helpers from references/helpers.py unchanged; start with the explicit

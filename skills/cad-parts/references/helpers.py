@@ -107,7 +107,7 @@ def hex_prism(across_flats, h):
     return r - (r - s120)    # ... & s120
 
 
-NUT_AF = {"M3": 5.5, "M4": 7.0, "M5": 8.0, "M6": 10.0, "M8": 13.0}
+NUT_AF = {"M2.5": 5.0, "M3": 5.5, "M4": 7.0, "M5": 8.0, "M6": 10.0, "M8": 13.0}
 
 
 def nut_pocket(part, size, at, depth, clearance=0.3):

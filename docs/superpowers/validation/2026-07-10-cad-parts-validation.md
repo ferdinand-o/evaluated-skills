@@ -37,6 +37,7 @@ Task 4 (Platzierung & Grundkörper), Renders A–D gegen `stl-cad-server-http`, 
 | hex_prism (Render I) | 277,128129 | 277,12812423706055 | −0,0000019 % | (8; 9,237604141235352; 5) | true |
 | nut_pocket (Render J) | 2252,3057 | 2252,318420686445 | +0,000565 % | (20, 20, 6) | true |
 | gusset (Render K) | 800 | 800,0 | 0,000 % | (4, 20, 20) | true |
+| nut_pocket NUT_AF["M2.5"] (Final-Review-Fix 6, Render O, job run_fc6be87875bd) | 1071,48 | 1071,4813624639626 | +0,000127 % | (15, 15, 5) | true |
 
 Anmerkungen:
 - Render A/B waren im Brief als zwei separate Renders vorgesehen (statt des kombinierten `result`), um Stack- und Platten-BBox getrennt prüfbar zu machen; `grid_positions`-Log bestätigte `[(-20.0, -10.0), (-20.0, 10.0), (20.0, -10.0), (20.0, 10.0)]`.

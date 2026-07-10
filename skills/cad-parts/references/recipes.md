@@ -43,7 +43,9 @@ cbore_depth, at=(x, y))` — never stack cylinders manually.
 ## Archetypes
 
 Each: params -> decomposition -> default spec. Volumes: state the analytic
-formula, set the spec window per spatial-reasoning.md §5.
+formula. The spec window is a deliberately wider acceptance range around it
+(round outward); the tight §5 band is only your self-prediction gate, never
+the spec window.
 
 ### 1. Wall bracket (Wandhalter)
 See the fully computed worked example in spatial-reasoning.md §7 (params:
@@ -80,8 +82,9 @@ C-ring: bushing minus a front opening cut.
 Default: cable d8 -> inner 8, wall 2 (outer 12), h 8, opening 6 wide (+Y).
 Removed opening ~ arc*wall*h with arc = 2*asin(3/r_mid)*r_mid, r_mid=5
 -> 6.44*2*8 = 103. V = pi/4*(144-64)*8 - 103 = 399.7 -> window [370, 430].
-No max_overhang_deg (axis is Z, walls vertical -> 45 is fine, but a local
-feature like the rest of the archetypes: omit and sight-check).
+max_overhang_deg is omitted here: the C-opening's cut faces and the bore
+ceiling would need case-by-case analysis — mark overhang as sight-checked
+(unlike archetypes 2/3/5/6, which set 45).
 
 BBox correction (server-verified, deviation from an earlier draft): the box
 cutter's flat faces at x=+-opening/2 (here +-3) do NOT reach the ring's
