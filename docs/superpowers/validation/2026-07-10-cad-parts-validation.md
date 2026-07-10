@@ -51,6 +51,23 @@ Anmerkungen:
 - Render K (`gusset`) bestätigt die 45°-Hypotenusen-Schnittebene (`y + z = size`); reines Polyeder-Boolesches, daher exakte Übereinstimmung (0,000 %).
 - Task 7 (`references/spatial-reasoning.md`), Worked Example (Wall Bracket, l_bracket-Muster + 4 through_hole d4,5) gegen `stl-cad-server-http` verifiziert: V_pred 22785,5, V_gemessen 22785,636418532406 mm³ (+0,0006 %, innerhalb Budget-Intervall [22400, 23100]), bbox (60, 40, 60) exakt wie prognostiziert, watertight true, manifold true — Datei musste nicht korrigiert werden (erster Versuch GREEN); Nachtrag: `print()`-Ausgaben werden von der Sandbox verworfen (`logs` bleibt leer — verifiziert, Job run_86b6cd6ac62f), daher §6-Sonde auf Isolations-Renders umgestellt und Beispiel-Code ohne print neu gerendert (Job run_76e413f6aadb, Metriken identisch: 22785,636418532406 mm³, bbox (60, 40, 60), watertight true).
 
+## Rezept-Validierung
+
+Task 8 (`references/recipes.md`), die drei nicht E2E-gedeckten Archetypen (Wandhalter/Buchse/Gehäuse laufen in Task 11) gegen `stl-cad-server-http` — Code jeweils wörtlich aus dem zugehörigen Rezept, Spec-Schema via Resource `spec://schema` verifiziert (Feldnamen `bounding_box{x,y,z}`, `min_wall_thickness_mm`, `max_overhang_deg`, `require_watertight`, `require_manifold`, `holes[{diameter_mm, must_be_through, axis}]`, `min_volume_mm3`/`max_volume_mm3` — abweichend von der Kurzschreibweise im Brief).
+
+| Rezept | Job-ID | V_analytisch (mm³) | V_gemessen (mm³) | bbox gemessen (mm) | check_model |
+|---|---|---|---|---|---|
+| 2 Montageplatte (Render L) | run_377f545e3bf7 | 27841 | 27841,426265287853 | (80, 60, 6) | **pass** (10/10 Checks: bbox, volume, watertight, manifold, overhang 0°, 4x hole d4.5 through=false, wall 1.862mm) |
+| 4 Kabelclip (Render M) | run_2fb7b2509f73 | 399,7 | 399,00987073706756 | (12; 11,194287300109863; 8) | **pass** nach Spec-Fix (3/3 Checks: bbox, volume, watertight) — siehe Anmerkungen |
+| 6 Flansch-Adapter (Render N) | run_190ec93c44b1 | 17982 | 17974,23943969789 | (60; 59,98134994506836; 20) | **pass** (11/11 Checks: bbox, volume, watertight, manifold, overhang 0°, center-hole d20 through=true, 4x hole d5.5 through=false, wall 4.844mm) |
+
+Anmerkungen:
+- Montageplatte und Flansch-Adapter bestanden die im Rezept-Brief angegebene Spec beim ersten Versuch unverändert (Volumen/bbox/Löcher/min_wall/overhang alle GREEN) — keine Korrektur nötig.
+- Kabelclip: die ursprüngliche Rezept-Spec (`bbox (12, 12, 8)`, `min_wall 1.6`) schlug fehl. Root-Cause-Analyse statt Fenster-Anpassung:
+  - **bbox_y**: Vorhersage 12 war falsch (Denkfehler) — der Box-Cutter (x=±3) erreicht den Außenradius (6) nicht, daher ist die Bbox-Obergrenze die Kreisbogenhöhe am Schnittrand `sqrt(6²-3²)=5.196`, nicht der volle Radius. Korrekte Formel `bbox_y = outer_r + sqrt(outer_r²-(opening/2)²) = 11.196`; gemessen 11.194287 (Abweichung 0,02 %, Tesselation). `recipes.md` korrigiert auf `bbox (12, 11.2, 8)`.
+  - **min_wall**: Server meldete 0,001 mm (Konfidenz 1.00). Gegenprobe mit engerer Öffnung (4 mm statt 6 mm, Job run_56bdd461c3e7) reproduzierte denselben Effekt (0,017 mm) — reproduzierbar über verschiedene Parameter hinweg, also ein systematischer Erkennungs-Artefakt des Kegel-Ray-Schätzers an der Kerbe/Außenfläche-Kante (vom Server selbst als "bei organischen Formen unzuverlässig" gekennzeichnet), kein echter Geometriefehler (nomineller Wandstärke = (12-8)/2 = 2 mm laut Konstruktion). `min_wall_thickness_mm` daher aus der Spec entfernt (analog zur bereits dokumentierten Loch-Erkennungs-Lücke bei diesem Archetyp) und stattdessen als Sicht-Check vermerkt.
+  - Nach beiden Korrekturen: `check_model` mit `{bounding_box:{x:12,y:11.2,z:8}, require_watertight:true, min_volume_mm3:370, max_volume_mm3:430}` → **pass** (3/3).
+
 ## Fehlertaxonomie-Trigger
 (ausfüllen in Task 9)
 
