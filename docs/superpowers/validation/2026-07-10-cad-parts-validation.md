@@ -69,7 +69,24 @@ Anmerkungen:
   - Nach beiden Korrekturen: `check_model` mit `{bounding_box:{x:12,y:11.2,z:8}, require_watertight:true, min_volume_mm3:370, max_volume_mm3:430}` → **pass** (3/3).
 
 ## Fehlertaxonomie-Trigger
-(ausfüllen in Task 9)
+
+Task 9 (`references/troubleshooting.md`), vier Mini-Renders gegen
+`stl-cad-server-http` zur Erhebung der tatsächlichen `error.type`/`message`-
+Paare je Fehlerklasse aus dem Task-9-Brief.
+
+| Render | Code | erwarteter error.type | gemessener error.type | gemessene message |
+|---|---|---|---|---|
+| T1 | `import os` + `from cadkit import box` + `result = box(10,10,10)` | static_check_failed | **static_check_failed** (bestätigt) | „Import nicht erlaubt: os" |
+| T2 | `from cadkit import box` + `result = box(10, 10, 10` | syntax_error | **syntax_error** (bestätigt) | „'(' was never closed (Zeile 2)" |
+| T3 | `from cadkit import box` + `result = box(10,10,10) - box(20,20,20)` | empty_geometry | **export_failed** (abweichend, reproduziert über 2 Läufe: run_451f5fa751c3, run_fb1e4358ab9f) | „Artefakte konnten nicht aus dem Container übertragen werden (docker cp/cat)" |
+| T4 | `from cadkit import cylinder` + `result = cylinder(-5, 10)` | runtime_error | **runtime_error** (Typ bestätigt), aber `message` leer (reproduziert über 2 Läufe: run_104c5149af20, run_bb8d85fe0708) | `""` (leerer String) |
+
+Konsequenz für `troubleshooting.md`: Tabelle 1 mit dem **gemessenen** Verhalten
+geschrieben — T3 als `export_failed` (nicht `empty_geometry`) mit der exakten
+Docker-cp-Meldung als Erkennungsmerkmal für degenerierte/leere Geometrie;
+T4 mit dem Hinweis, dass `runtime_error` bei ungültigen Primitiv-Argumenten
+keine erklärende `message` liefert (leerer String), Diagnose muss also über
+Wertebereichs-Prüfung vor dem Call erfolgen, nicht über die Fehlermeldung.
 
 ## GREEN-E2E (mit Skill)
 (ausfüllen in Task 11)
