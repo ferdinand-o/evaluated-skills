@@ -76,3 +76,56 @@ def enclosure_shell(w, d, h, wall, open_top=True):
     else:
         cavity = box(w - 2 * wall, d - 2 * wall, h - 2 * wall)
     return outer - cavity
+
+
+# --- cut features & emulation tricks ---
+# Intersection is not in the allowed subset; emulate: a & b == a - (a - b).
+
+def slot_cut(part, width, length, cut_h, at=(0.0, 0.0), along_deg=0.0):
+    """Cut a slot (stadium shape) along Z through the part. length = overall
+    (incl. end radii), width = slot width, cut_h = cutter height — pass
+    2 * material thickness so the cut fully penetrates. at=(x, y) is the slot
+    center, along_deg rotates the slot in the XY plane (0 = along X).
+    Removed volume (full penetration through thickness t):
+      (width * (length - width) + pi/4 * width**2) * t."""
+    straight = length - width
+    cutter = box(straight, width, cut_h)
+    cutter = cutter + Pos(-straight / 2, 0, 0) * cylinder(width / 2, cut_h)
+    cutter = cutter + Pos(straight / 2, 0, 0) * cylinder(width / 2, cut_h)
+    return part - Pos(at[0], at[1], 0) * (Rot(0, 0, along_deg) * cutter)
+
+
+def hex_prism(across_flats, h):
+    """Hexagonal prism around Z (flats at x = +/- across_flats/2) via
+    intersection of three slabs rotated 0/60/120 deg.
+    Volume = (sqrt(3)/2) * across_flats**2 * h.
+    BBox = (across_flats, 2*across_flats/sqrt(3), h)."""
+    s0 = box(across_flats, 2 * across_flats, h)
+    s60 = Rot(0, 0, 60) * box(across_flats, 2 * across_flats, h)
+    s120 = Rot(0, 0, 120) * box(across_flats, 2 * across_flats, h)
+    r = s0 - (s0 - s60)      # s0 & s60
+    return r - (r - s120)    # ... & s120
+
+
+NUT_AF = {"M3": 5.5, "M4": 7.0, "M5": 8.0, "M6": 10.0, "M8": 13.0}
+
+
+def nut_pocket(part, size, at, depth, clearance=0.3):
+    """Hex pocket for a DIN 934 nut, cut along Z. at=(x, y, z) is the point ON
+    the surface where the pocket opens (cutter is 2*depth tall and centered
+    there -> exactly `depth` goes into the material). size e.g. "M4".
+    Removed volume = (sqrt(3)/2) * (NUT_AF[size] + clearance)**2 * depth."""
+    af = NUT_AF[size] + clearance
+    cutter = Pos(at[0], at[1], at[2]) * hex_prism(af, 2 * depth)
+    return part - cutter
+
+
+def gusset(size, t):
+    """Triangular stiffener rib: right triangle in the YZ plane (legs = size
+    on y=0 wall and z=0 floor), thickness t along X. Hypotenuse via a 45deg
+    rotated cutter box on the plane y + z = size.
+    Volume = t * size**2 / 2. BBox = (t, size, size)."""
+    block = Pos(0, size / 2, size / 2) * box(t, size, size)
+    c = size / 2 + size / math.sqrt(2)
+    cutter = Pos(0, c, c) * (Rot(45, 0, 0) * box(2 * t, 2 * size, 2 * size))
+    return block - cutter
