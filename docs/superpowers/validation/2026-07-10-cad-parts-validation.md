@@ -90,7 +90,98 @@ keine erklärende `message` liefert (leerer String), Diagnose muss also über
 Wertebereichs-Prüfung vor dem Call erfolgen, nicht über die Fehlermeldung.
 
 ## GREEN-E2E (mit Skill)
-(ausfüllen in Task 11)
+
+Task 11: identische Aufgaben-Prompts und Specs wie die RED-Baseline (Teile
+A–C), identisches Modell (sonnet), frische Subagenten — einziger Unterschied:
+Anweisung, zuerst `skills/cad-parts/SKILL.md` zu lesen und dem Workflow zu
+folgen.
+
+| Teil | RED: Renders | RED: Fehler | GREEN: Renders | GREEN: Fehler | GREEN: Checks | Job-ID |
+|---|---|---|---|---|---|---|
+| A Wandhalter | 2 | 1× Import-NameError | **1** | 0 | pass 9/9 | run_34553c7a83c8 |
+| B Buchse | 4 | 3× Import-NameError | **1** | 0 | pass 7/7 | run_54d19189c74f |
+| C Gehäuseschale | 3 | 2× Import-NameError | **1** | 0 | pass 6/6 | run_23a43c2353d7 |
+
+Akzeptanzkriterien (alle erfüllt):
+1. Endstatus pass via render_model → check_model: ✅ 3/3.
+2. Render-Anzahl ≤ Baseline: ✅ überall strikt weniger (3 vs. 9 gesamt).
+3. Keine Wiederholung der Baseline-Fehlerklassen: ✅ kein einziger
+   Import-Fehler (alle drei nutzten die Präambel aus spatial-reasoning §0);
+   keine Spec-Fallen (Teil A klassifizierte `through=false` korrekt als
+   erwartet, weil `must_be_through` bewusst fehlt).
+4. Vorhersagetabelle vorhanden, Metriken in den vorhergesagten Intervallen:
+   ✅ A: V_pred 22785,5 → gemessen 22785,64 (Intervall [22400, 23100]);
+   B: ±0,5-%-Band [843,9, 852,5] → gemessen 847,88; C: ±0,1-%-Band
+   [10302,2, 10322,7] → gemessen 10312,5 (exakt). Teil C lieferte zusätzlich
+   ein explizites Überlappungs-Argument (Kavität z∈[2,5, 22,5] vs. Körper
+   [0, 20]).
+5. Phase-6-Kennzeichnung servergeprüft/sichtgeprüft: ✅ alle drei Berichte
+   klassifizieren korrekt (Lochpositionen sichtgeprüft; Teil C benennt
+   selbständig, dass „richtige Seite offen" kein Server-Check ist).
 
 ## Benchmark-Fälle (code, spec, expected_status)
-(ausfüllen in Task 11)
+
+Copy-paste-fähig für `tests/benchmark/test_regression.py` im stl-mcp-server
+(Übernahme dorthin ist nicht Teil dieses Projekts).
+
+### Fall A — Wandhalter (expected_status: "pass")
+
+```python
+from build123d import Pos
+from cadkit import box, through_hole
+
+W, LEG_A, LEG_B, T = 60.0, 40.0, 60.0, 4.0
+base = Pos(0, LEG_A / 2, T / 2) * box(W, LEG_A, T)
+wall = Pos(0, T / 2, LEG_B / 2) * box(W, T, LEG_B)
+part = base + wall
+for x, z in [(-20, 15), (20, 15), (-20, 45), (20, 45)]:
+    part = through_hole(part, diameter=4.5, at=(x, 0.0, z), axis="Y")
+result = part
+```
+
+```json
+{"bounding_box": {"x": 60, "y": 40, "z": 60, "tolerance_mm": 0.5},
+ "min_wall_thickness_mm": 3.5, "require_watertight": true,
+ "require_manifold": true,
+ "holes": [{"diameter_mm": 4.5, "axis": "Y", "tolerance_mm": 0.2},
+           {"diameter_mm": 4.5, "axis": "Y", "tolerance_mm": 0.2},
+           {"diameter_mm": 4.5, "axis": "Y", "tolerance_mm": 0.2},
+           {"diameter_mm": 4.5, "axis": "Y", "tolerance_mm": 0.2}],
+ "min_volume_mm3": 22400, "max_volume_mm3": 23100}
+```
+
+### Fall B — Distanzbuchse (expected_status: "pass")
+
+```python
+from cadkit import cylinder, through_hole
+
+result = through_hole(cylinder(6, 10), diameter=6, axis="Z")
+```
+
+```json
+{"bounding_box": {"x": 12, "y": 12, "z": 10, "tolerance_mm": 0.5},
+ "min_wall_thickness_mm": 2.5, "max_overhang_deg": 45,
+ "require_watertight": true, "require_manifold": true,
+ "holes": [{"diameter_mm": 6, "must_be_through": true, "axis": "Z",
+            "tolerance_mm": 0.2}],
+ "min_volume_mm3": 800, "max_volume_mm3": 880}
+```
+
+### Fall C — Gehäuseschale oben offen (expected_status: "pass")
+
+```python
+from build123d import Pos
+from cadkit import box
+
+W, D, H, WALL = 50.0, 30.0, 20.0, 2.5
+outer = box(W, D, H)
+cavity = Pos(0, 0, WALL) * box(W - 2 * WALL, D - 2 * WALL, H)
+result = outer - cavity
+```
+
+```json
+{"bounding_box": {"x": 50, "y": 30, "z": 20, "tolerance_mm": 0.5},
+ "min_wall_thickness_mm": 2.0, "max_overhang_deg": 45,
+ "require_watertight": true, "require_manifold": true,
+ "min_volume_mm3": 9900, "max_volume_mm3": 10700}
+```
