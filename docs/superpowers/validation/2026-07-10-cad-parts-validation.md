@@ -20,7 +20,23 @@ Berechnung:
 **Abgeleitete Budget-Regel:** Zylindervolumen im Mesh liegt 0,0414 % unter πr²h; Budget-Intervalle für Teile mit Zylinderflächen: ±max(2·0,0414, 0,5) % = ±0,5 %. Für geschnittene Löcher (Abweichung 0,000416 % über analytisch) reicht dasselbe ±0,5 %-Budget mit deutlicher Marge.
 
 ## Helfer-Validierung
-(ausfüllen in Tasks 4–6: Funktion, V_analytisch, V_gemessen, Abweichung %, bbox, watertight)
+
+Task 4 (Platzierung & Grundkörper), Renders A–D gegen `stl-cad-server-http`, Helferquelle jeweils inline aus `skills/cad-parts/references/helpers.py` kopiert. Keine Korrektur an den Helfern nötig — alle vier Renders lagen beim ersten Versuch innerhalb der Budget-Toleranz aus der Tesselation-Kalibrierung (±0,5 % für Zylinderflächen, ±0,1 % für Polyeder).
+
+| Funktion | V_analytisch (mm³) | V_gemessen (mm³) | Abweichung (%) | bbox (mm) | watertight |
+|---|---|---|---|---|---|
+| bottom_at_zero (Render A, stack = b1+b2) | 4600 | 4600,0 | 0,000 % | (20, 20, 16) | true |
+| on_top_of (Render A, stack = b1+b2) | 4600 | 4600,0 | 0,000 % | (20, 20, 16) | true |
+| grid_positions (Render B, holes_plate) | 9345,5 | 9345,636420211435 | +0,00146 % | (60, 40, 4) | true |
+| bushing (Render C) | 848,2300164692441 | 847,8785144489898 | −0,04144 % | (12; 11,996270179748535; 10) | true |
+| l_bracket (Render D) | 23040 | 23040,0 | 0,000 % | (60, 40, 60) | true |
+
+Anmerkungen:
+- Render A/B waren im Brief als zwei separate Renders vorgesehen (statt des kombinierten `result`), um Stack- und Platten-BBox getrennt prüfbar zu machen; `grid_positions`-Log bestätigte `[(-20.0, -10.0), (-20.0, 10.0), (20.0, -10.0), (20.0, 10.0)]`.
+- bushing-Abweichung (−0,04144 %) deckt sich mit der Zylinder-Kalibrierung aus Task 3 (−0,0414 %) — reine Tesselationsabweichung, keine Logikfehler.
+- l_bracket und die Stack-Boxen sind reine Polyeder (Box-Ecken), daher exakte Übereinstimmung mit der analytischen Formel.
+
+(weitere Zeilen: Tasks 5–6 ergänzen hier Profile/Schalen bzw. Schnitt-Features & Tricks)
 
 ## Fehlertaxonomie-Trigger
 (ausfüllen in Task 9)
