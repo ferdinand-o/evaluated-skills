@@ -66,7 +66,9 @@ Budget interval: polyhedral-only parts +/-0.1 %; parts with cylinder faces
 
 ## 6. Probes (self-measurement without eyes)
 
-- `print()` any computed control value — it returns in `logs`.
+- print() output is DISCARDED by the sandbox (logs stays empty) — do not
+  rely on it. Your probes are renders themselves: metrics of an isolated
+  feature ARE the measurement.
 - Isolation render: render a single feature (or the cutter union) alone; its
   bbox verifies pattern spacing/extents. Example: 2x2 hole cutter grid,
   spacing 40x20, d=4.5 -> cutter-union bbox = (44.5, 24.5, L).
@@ -101,6 +103,5 @@ wall = Pos(0, T / 2, LEG_B / 2) * box(W, T, LEG_B)
 part = base + wall
 for x, z in [(-20, 15), (20, 15), (-20, 45), (20, 45)]:
     part = through_hole(part, diameter=4.5, at=(x, 0.0, z), axis="Y")
-print("V_pred", 22785.5)
 result = part
 ```

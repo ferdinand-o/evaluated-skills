@@ -49,7 +49,7 @@ Anmerkungen:
 - Render I (`hex_prism`) bestätigt die Intersection-Emulation `a & b == a - (a - b)` über drei 0/60/120°-rotierte Slabs; gemessene bbox-Y (9,237604) trifft `2*8/sqrt(3) = 9,237604307` praktisch exakt.
 - Render J (`nut_pocket`) baut direkt auf `hex_prism` und `NUT_AF["M4"] = 7,0` auf; Cutter-Zentrierung bei `at=(0,0,3)` mit `2*depth`-Höhe durchdringt die Platte exakt `depth=3,2` tief.
 - Render K (`gusset`) bestätigt die 45°-Hypotenusen-Schnittebene (`y + z = size`); reines Polyeder-Boolesches, daher exakte Übereinstimmung (0,000 %).
-- Task 7 (`references/spatial-reasoning.md`), Worked Example (Wall Bracket, l_bracket-Muster + 4 through_hole d4,5) gegen `stl-cad-server-http` verifiziert: V_pred 22785,5, V_gemessen 22785,636418532406 mm³ (+0,0006 %, innerhalb Budget-Intervall [22400, 23100]), bbox (60, 40, 60) exakt wie prognostiziert, watertight true, manifold true — Datei musste nicht korrigiert werden (erster Versuch GREEN).
+- Task 7 (`references/spatial-reasoning.md`), Worked Example (Wall Bracket, l_bracket-Muster + 4 through_hole d4,5) gegen `stl-cad-server-http` verifiziert: V_pred 22785,5, V_gemessen 22785,636418532406 mm³ (+0,0006 %, innerhalb Budget-Intervall [22400, 23100]), bbox (60, 40, 60) exakt wie prognostiziert, watertight true, manifold true — Datei musste nicht korrigiert werden (erster Versuch GREEN); Nachtrag: `print()`-Ausgaben werden von der Sandbox verworfen (`logs` bleibt leer — verifiziert, Job run_86b6cd6ac62f), daher §6-Sonde auf Isolations-Renders umgestellt und Beispiel-Code ohne print neu gerendert (Job run_76e413f6aadb, Metriken identisch: 22785,636418532406 mm³, bbox (60, 40, 60), watertight true).
 
 ## Fehlertaxonomie-Trigger
 (ausfüllen in Task 9)
