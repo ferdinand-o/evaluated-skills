@@ -9,7 +9,7 @@
 | syntax_error | unbalanced parens/quotes — measured (T2, unclosed `(`): `message = "'(' was never closed (Zeile 2)"` | fix syntax; keep code short |
 | runtime_error (bad primitive args) | negative radius, zero dims, wrong signature — measured (T4, `cylinder(-5, 10)`): type confirmed `runtime_error`, but **`message` was an empty string** (no diagnostic text returned) | check signature and value ranges against `cadkit://reference` BEFORE calling; do not expect the error message to explain what was wrong |
 | export_failed (degenerate/empty result) | a boolean cut that removes everything, or `result` never assigned — measured (T3, `box(10,10,10) - box(20,20,20)`, second box fully engulfs the first): type was **`export_failed`**, `message = "Artefakte konnten nicht aus dem Container übertragen werden (docker cp/cat)"`, **not** `empty_geometry` as one might expect | predict the remainder before cutting; assign `result`; if you see this exact export_failed message, suspect an empty/degenerate solid first — it is not necessarily an infra problem |
-| export_failed (tangent contact) | degenerate geometry from tangent-only contact between solids | ensure real overlap (>= 0.5 mm), never tangent |
+| export_failed (tangent contact) | degenerate geometry from line/point tangency between solids | add volume overlap (>= 0.5 mm) or full-face contact; eliminate line/point tangency |
 | empty_geometry | documented type, but never observed in testing — the empty-result condition (cut removed everything) measurably surfaces as export_failed instead | treat like export_failed: predict what remains before cutting; assign result |
 | timeout / resource_limit | too many booleans (large hole loops) | use pattern_holes; merge cutters with + before subtracting |
 

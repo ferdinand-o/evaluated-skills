@@ -53,7 +53,7 @@ Standard formulas (h = solid height):
 
 Every add must join the union built so far through either a genuine volume
 overlap (state the overlap solid and its volume) or FULL-FACE coplanar
-contact (stacking with on_top_of / bottom-at-top formulas — validated
+contact (stacking with on_top_of / the §1 stacking formulas — validated
 watertight). What is forbidden is line- or point-tangency (edge touching
 edge): that produces non-watertight or multi-body results.
 
