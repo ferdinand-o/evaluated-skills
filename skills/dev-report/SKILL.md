@@ -52,9 +52,11 @@ Report rendert `facts.json`, nicht deine Erinnerung.
   Namen („3 Commits, Fokus lag auf X") und wird kurz.
 - Revert-Ketten und Fix-auf-Fix aus `patterns` erscheinen im Report. Für
   Vorgesetzte abstrahiert als Risiko oder Erkenntnis, nie weggelassen.
-- Ist `patterns.fix_chains` leer, gehört keine Aussage über Zähigkeit in den
-  Report — dann heißt es „Keine.", wie im Template. Hat `patterns.fix_chains`
-  genau einen Eintrag, war es eine Stelle, nicht mehrere — sprich nicht von
+- Sind `patterns.reverts` und `patterns.fix_chains` beide leer, gehört keine
+  Aussage über Zähigkeit in den Report — dann heißt es „Keine.", wie im
+  Template. Ist nur `patterns.fix_chains` leer, bleibt es bei den
+  Revert-Einträgen aus der Zeile oben. Hat `patterns.fix_chains` genau einen
+  Eintrag, war es eine Stelle, nicht mehrere — sprich nicht von
   „verschiedenen Stellen". Sonst gilt: mehr Einträge in `patterns.fix_chains`
   als der Wert in `patterns.fix_commits` heißt breiter Fix mit Nachzieher —
   schreib das als ein Satz, nie als Aufzählung. Andernfalls war es
