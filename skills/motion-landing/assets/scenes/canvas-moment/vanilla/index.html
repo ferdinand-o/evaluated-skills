@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>canvas-moment — motion-landing Demo</title>
+<style>
+  :root {
+    --bg: #05060a;
+    --fg: #f4f5f7;
+    --muted: #a3a9b7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .spacer { min-height: 60vh; display: grid; place-items: center; color: var(--muted); }
+
+  .moment {
+    position: relative;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  .moment canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .moment .caption {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 2rem;
+    max-width: 42ch;
+  }
+  .moment h2 { font-size: clamp(2rem, 5vw, 3.5rem); margin: 0 0 0.75rem; }
+  .moment p { color: var(--muted); margin: 0; }
+</style>
+</head>
+<body>
+  <div class="spacer">↓ der Höhepunkt der Seite</div>
+
+  <section class="moment" id="moment">
+    <canvas id="moment-canvas" aria-hidden="true"></canvas>
+    <div class="caption">
+      <h2>Der eine Moment.</h2>
+      <!-- Text bleibt unabhängig vom Canvas im DOM — "Inhalte sind ohne JS
+           lesbar" gilt auch hier, das Canvas ist reine Verzierung. -->
+      <p>Ein generatives Partikelfeld, reserviert für genau diese Szene. Läuft nur, während sie im Viewport ist, und respektiert reduzierte Bewegung als Standbild statt als Loop.</p>
+    </div>
+  </section>
+
+  <div class="spacer">Seite geht hier normal weiter.</div>
+
+<script>
+(function () {
+  var section = document.getElementById('moment');
+  var canvas = document.getElementById('moment-canvas');
+  var ctx = canvas.getContext('2d');
+  var particles = [];
+  var particleCount = 90; // an ein gedrosseltes Profil angepasst, nicht an die Entwicklungsmaschine
+  var rafId = null;
+  var reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function resize() {
+    canvas.width = section.clientWidth;
+    canvas.height = section.clientHeight;
+  }
+
+  function makeParticles() {
+    particles = [];
+    for (var i = 0; i < particleCount; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        r: 1 + Math.random() * 2,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+      });
+    }
+  }
+
+  function drawFrame(advance) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(110, 231, 183, 0.7)';
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      if (advance) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function loop() {
+    drawFrame(true);
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    if (rafId !== null) return;
+    if (reducedMotionQuery.matches) {
+      // Pflicht-Gate: kein Loop, ein einzelnes Standbild statt Bewegung.
+      drawFrame(false);
+      return;
+    }
+    loop();
+  }
+
+  function stop() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  resize();
+  makeParticles();
+  window.addEventListener('resize', function () {
+    resize();
+    makeParticles();
+    drawFrame(false);
+  });
+
+  // Läuft nur, während die Szene im Viewport ist — sonst kostet der Loop
+  // Main-Thread-Zeit weit weg von der eigentlichen Szene.
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) start(); else stop();
+    });
+  }, { threshold: 0.1 });
+  observer.observe(section);
+
+  reducedMotionQuery.addEventListener('change', function () {
+    stop();
+    if (section.getBoundingClientRect().top < window.innerHeight) start();
+  });
+})();
+</script>
+</body>
+</html>

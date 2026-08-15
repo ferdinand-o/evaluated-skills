@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>scroll-telling — motion-landing Demo</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --fg: #f4f5f7;
+    --muted: #a3a9b7;
+    --panel-bg: #151924;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .spacer { min-height: 60vh; display: grid; place-items: center; color: var(--muted); }
+
+  .sequence {
+    /* Scroll-Strecke, über die die Sequenz läuft — bestimmt, wie lange
+       jedes Panel "aktiv" ist. */
+    height: 300vh;
+    position: relative;
+  }
+  .sequence-viewport {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    display: grid;
+  }
+  .panel {
+    grid-area: 1 / 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+  }
+  .panel h2 { font-size: clamp(1.75rem, 4vw, 3rem); margin: 0; }
+  .panel p  { color: var(--muted); max-width: 50ch; margin: 0; }
+
+  /* Grundzustand: alle Panels statisch übereinandergestapelt und lesbar,
+     bevor Feature-Detection überhaupt entscheidet. Inhalte sind ohne JS
+     lesbar — Animation ist Enhancement, nie Bedingung. */
+  .panel { opacity: 1; }
+
+  /* Nur wenn animation-timeline:scroll() unterstützt wird UND Scroll-Driven
+     aktiv geschaltet ist, bekommen die Panels ihre Crossfade-Choreografie. */
+  html.supports-scroll-driven .panel {
+    opacity: 0;
+    animation: cross-fade linear both;
+    animation-timeline: scroll(nearest);
+  }
+  html.supports-scroll-driven .panel:nth-child(1) { animation-range: 0% 33%; }
+  html.supports-scroll-driven .panel:nth-child(2) { animation-range: 25% 66%; }
+  html.supports-scroll-driven .panel:nth-child(3) { animation-range: 58% 100%; }
+
+  @keyframes cross-fade {
+    0%   { opacity: 0; transform: translateY(24px); }
+    20%  { opacity: 1; transform: translateY(0); }
+    80%  { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-24px); }
+  }
+
+  /* Pflicht-Gate: reduced-motion deaktiviert die Scroll-Choreografie
+     vollständig, auch wenn der Browser animation-timeline unterstützt —
+     alle Panels bleiben statisch sichtbar wie im Grundzustand. */
+  @media (prefers-reduced-motion: reduce) {
+    html.supports-scroll-driven .panel {
+      opacity: 1;
+      transform: none;
+      animation: none;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="spacer">↓ scrollen, um die Sequenz zu starten</div>
+
+  <section class="sequence">
+    <div class="sequence-viewport">
+      <article class="panel">
+        <h2>Erst die Idee.</h2>
+        <p>Jedes Panel trägt einen Gedanken. Der Scroll-Fortschritt entscheidet, welcher gerade zu sehen ist — kein Timer.</p>
+      </article>
+      <article class="panel">
+        <h2>Dann die Form.</h2>
+        <p>Ohne unterstützten Browser oder ohne JavaScript bleiben alle drei Panels einfach untereinander lesbar.</p>
+      </article>
+      <article class="panel">
+        <h2>Am Ende die Wirkung.</h2>
+        <p>Der letzte Gedanke der Sequenz — danach geht die Seite normal weiter.</p>
+      </article>
+    </div>
+  </section>
+
+  <div class="spacer">Seite geht hier normal weiter.</div>
+
+<script>
+  // Feature-Detection ist Pflicht (SKILL.md, references/tech-tree.md):
+  // Fehlt die Unterstützung, bleibt der Grundzustand aus dem CSS oben aktiv
+  // — statisch und vollständig sichtbar, nicht animiert, nicht kaputt, nicht leer.
+  if (window.CSS && CSS.supports && CSS.supports('animation-timeline: scroll()')) {
+    document.documentElement.classList.add('supports-scroll-driven');
+  }
+</script>
+</body>
+</html>
