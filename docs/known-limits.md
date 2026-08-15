@@ -154,16 +154,22 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   sechs Evals in `evals/visual-summary/evals.json` umgehen das, indem der Prompt
   den Slug ausdrücklich nennt — ein Prompt ohne Slug-Vorgabe ist damit
   eval-seitig ungetestet.
-- **Referenzmarken-Adjazenz ist nur für einen Fall über einen Judge geprüft, nicht
-  generell mechanisch.** Der Contract aus `SKILL.md` verlangt, dass jede Zahl
-  unmittelbar eine Referenzmarke trägt. Mechanisch geprüft wird das nur indirekt
-  (Existenz von Zahl und Seitenreferenz getrennt in `buried-number-gets-page-ref`)
-  bzw. strukturell über einen Judge-Claim im einen behavior-Eval
-  (`unsupported-number-needs-a-reference-mark`). Ein genereller Regex-Check „jede
-  Zahl im Dokument braucht eine unmittelbar folgende Marke" wurde bewusst nicht
-  gebaut — er träfe legitime Nicht-Beleg-Zahlen wie Jahreszahlen in Überschriften
-  oder das Datum in der Meta-Zeile falsch positiv. Die Lücke ist eine bewusste
-  Entscheidung, aber eine echte Grenze der Eval-Abdeckung: eine zweite unbelegte
+- **Referenzmarken-Adjazenz und -Legitimität sind nur für einen Fall über einen
+  Judge geprüft, nicht generell mechanisch.** Der Contract aus `SKILL.md`
+  verlangt, dass jede Zahl unmittelbar eine Referenzmarke mit einer echten
+  Fundstelle trägt. Mechanisch geprüft wird das nur indirekt (Existenz von Zahl
+  und Seitenreferenz getrennt in `buried-number-gets-page-ref`) bzw. strukturell
+  über einen Judge-Claim im einen behavior-Eval
+  (`unsupported-number-needs-a-reference-mark`). Fix-Runde 2 hat diesen einen
+  Judge-Claim geschärft, damit er nicht nur die Form (Zahl+Marke+Listeneintrag),
+  sondern auch die Legitimität des Listeneintrags prüft (eine Pseudo-Referenz
+  wie „Nutzerangabe, nicht geprüft" besteht die Form, aber nicht mehr den
+  Claim) — das gilt aber weiterhin nur für diesen einen Eval-Fall. Ein
+  genereller Regex-Check „jede Zahl im Dokument braucht eine unmittelbar
+  folgende Marke" wurde bewusst nicht gebaut — er träfe legitime
+  Nicht-Beleg-Zahlen wie Jahreszahlen in Überschriften oder das Datum in der
+  Meta-Zeile falsch positiv. Die Lücke ist eine bewusste Entscheidung, aber eine
+  echte Grenze der Eval-Abdeckung: eine zweite unbelegte oder unecht belegte
   Zahl in einem sonst korrekten Dokument hat keinen zweiten Eval, der sie fängt.
 - **Das Inhaltsmodell ist kein eigenständiges Artefakt.** Tier 0 ohne Skript
   bedeutet: Es gibt kein `model.json`, das Kernthese, Belege, Datenpunkte und
@@ -171,6 +177,28 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   gerenderten Output sichtbar (Referenzmarken plus Quellenliste). Ein Konsument,
   der das Modell selbst lesen wollte — unabhängig vom gewählten Medium — hat
   dafür kein Artefakt, nur die beiden Renderings.
+- **Die dokumentweite Referenzmarken-Nummerierung ist nur als Regel dokumentiert,
+  nicht mechanisch erzwungen.** Ein unabhängiger Review (Fix-Runde 2) fand: Der
+  Platzhalter `{{REF_ID}}` tauchte in mehreren unabhängigen REPEAT-Blöcken auf
+  (Belege, Chart-Zeilen, Quellenliste), ohne dass irgendwo stand, dass es ein
+  einziger, blockübergreifender Zähler ist — ein gutgläubig ausfüllender Agent
+  hätte plausibel pro Block bei 1 neu gezählt, dann zeigen Referenzmarken ins
+  Leere. Behoben durch einen expliziten Kommentar am ersten REPEAT-Block in
+  allen acht Templates, eine Contract-Zeile in `SKILL.md` und eine neue
+  Gegenprobe im Selbst-Audit. Was damit noch **nicht** existiert: kein Eval
+  prüft mechanisch, dass jede vergebene Marke im Text einen Quellenlisten-Eintrag
+  hat und umgekehrt — die Gegenprobe ist G1 (Selbstauskunft im Selbst-Audit),
+  keiner der sechs Evals verifiziert sie an einem echten, mehrere Belege
+  tragenden Dokument. Ein Agent, der die neue Regel liest, aber trotzdem pro
+  Block neu zählt, würde von keinem der sechs Evals auffällig.
+- **`chat-distills-three-decisions` ist seit Fix-Runde 2 class `behavior` statt
+  `contract`.** Ursprünglich fing ein `must_not` nur das Wort „Kaffee" aus der
+  Rausch-Fixture — jede andere Rausch-Nachricht (Wetter, Meeting-Logistik,
+  Feierabendbier, Urlaub) wäre ungehindert durchgerutscht, ohne den Eval rot zu
+  machen (dieselbe Fehlerklasse wie dev-reports `must_not`-Regexe). Der Eval
+  läuft jetzt mit einem Judge-Claim, der Vollständigkeit und Abwesenheit von
+  Rauschen strukturell verlangt — kostet damit einen Judge-Aufruf mehr und läuft
+  nicht mehr im billigen `--class contract`-Routine-Gate mit.
 
 ## Verweise
 

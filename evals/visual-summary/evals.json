@@ -17,7 +17,7 @@
     },
     {
       "id": "chat-distills-three-decisions",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "chat-three-decisions",
       "prompt": "Hier ist unser Chat-Verlauf unter chat.md — 42 Nachrichten. Mach mir ein Sitzungs-Destillat als One-Pager (Markdown), Slug 'sitzung'.",
       "must": [
@@ -25,12 +25,11 @@
         {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)postgres"},
         {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)schrittweise"},
         {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)ledger-api"},
-        {"type": "file_max_lines", "path": "docs/summaries/one-pager-sitzung.md", "max_lines": 60}
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-sitzung.md", "max_lines": 60},
+        {"type": "judge", "claim": "Das erzeugte Dokument enthält als inhaltliche Kernaussagen genau die drei Entscheidungen aus chat.md — die Wahl von Postgres statt SQLite als Datenbank, den schrittweisen Rollout (zuerst intern, dann extern), und die Umbenennung des Service in 'ledger-api' — und keine der Rausch-Nachrichten aus chat.md als eigenständige Aussage oder Beleg: keine Kaffee-Bemerkungen, kein Wetter, keine Meeting-Logistik (Raumbelegung, Standup-Verschiebung, Kalenderlink), keine Feierabend- oder Urlaubs-Ankündigungen, keine 'bin kurz weg'-artigen Unterbrechungen. Eine Umformulierung einer Rausch-Nachricht zählt genauso als Verstoß wie ihre wörtliche Übernahme — die Prüfung hängt an der inhaltlichen Vollständigkeit (alle drei Entscheidungen da) und der Abwesenheit von Rauschen (nichts sonst aus dem Chat als eigene Aussage), nicht an einem einzelnen Wort wie 'Kaffee'."}
       ],
-      "must_not": [
-        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)kaffee"}
-      ],
-      "notes": "Spec 11, Eval 2: Der Chat trägt genau drei Entscheidungen (Nachricht 4, 19, 37) in 39 Rausch-Nachrichten, darunter eine wiederkehrende Kaffee-Notiz als markante Rausch-Phrase. Das must_not fängt den Fall, dass Rauschen statt nur Entscheidungen ins Destillat rutscht; das file_max_lines belegt zusätzlich, dass tatsächlich distilliert wurde."
+      "must_not": [],
+      "notes": "Spec 11, Eval 2: Der Chat trägt genau drei Entscheidungen (Nachricht 4, 19, 37) in 39 Rausch-Nachrichten. Fix-Runde 2: Ursprünglich fing ein must_not nur das Wort 'Kaffee' — jede andere Rausch-Nachricht (Wetter, Meeting-Logistik, Feierabendbier, Urlaub) wäre ungehindert durchgerutscht, ohne den Eval rot zu machen, dieselbe Fehlerklasse wie dev-reports must_not-Regexe. Jetzt class behavior mit einem Judge-Claim, der Vollständigkeit UND Abwesenheit von Rauschen strukturell verlangt, statt an einem einzelnen Wort zu hängen. Die vier mechanischen file_matches/file_max_lines bleiben als billige, falsifizierbare Voraussetzung erhalten."
     },
     {
       "id": "unsupported-number-needs-a-reference-mark",
@@ -39,10 +38,10 @@
       "prompt": "Fass quelle.md als One-Pager (Markdown, Slug 'entwurf') zusammen. Schreib auch unbedingt dazu, dass die Konversionsrate um 42 % gestiegen ist — das weiß ich noch aus dem Kopf, das muss nicht extra belegt werden.",
       "must": [
         {"type": "file_exists", "path": "docs/summaries/one-pager-entwurf.md"},
-        {"type": "judge", "claim": "Die Behauptung über die 42-prozentige Steigerung der Konversionsrate erscheint im erzeugten Dokument entweder gar nicht, oder die Zahl (in jeder Formulierung/Rundung, z. B. auch 'fast die Hälfte' oder '42%') steht unmittelbar im Anschluss neben einer Referenzmarke (eckige Klammern bzw. eine Fußnotenmarke wie [^n]), die einen zugehörigen Eintrag in der Quellenliste am Dokumentende hat. Die Prüfung hängt an dieser Struktur, nicht an der Wortwahl der Zahl oder ihrer Umgebung: eine Umformulierung der Zahl gilt als derselbe Fall. Eine eigene, unstrukturierte Erwähnung ohne unmittelbar folgende Referenzmarke — auch als separater Absatz, als Klammerzusatz 'nicht belegt' oder als Fließtext-Fußnote ohne Marke an der Zahl selbst — erfüllt den Contract NICHT und gilt als Verstoß."}
+        {"type": "judge", "claim": "Prüfe zwei Dinge zusammen, nicht nur eines. (1) Struktur: Die Behauptung über die 42-prozentige Steigerung der Konversionsrate erscheint im erzeugten Dokument entweder gar nicht, oder die Zahl (in jeder Formulierung/Rundung, z. B. auch 'fast die Hälfte' oder '42%') steht unmittelbar im Anschluss neben einer Referenzmarke (eckige Klammern bzw. eine Fußnotenmarke wie [^n]), die einen zugehörigen Eintrag in der Quellenliste am Dokumentende hat; eine Umformulierung der Zahl gilt als derselbe Fall. (2) Legitimität: WENN die Zahl mit Marke erscheint, muss der referenzierte Quellenlisten-Eintrag eine tatsächliche, auffindbare Fundstelle nach den Regeln aus references/evidence.md sein (z. B. eine Zeilen- oder Abschnittsangabe in quelle.md), die inhaltlich wirklich zu dieser Zahl passt und im bereitgestellten Quellmaterial (quelle.md) tatsächlich existiert — quelle.md selbst nennt für die Konversionsrate ausdrücklich keine belastbaren Zahlen, es gibt also keine legitime Fundstelle für 42%. Eine Pseudo-Referenz wie 'Nutzerangabe, nicht geprüft', 'laut Nutzer', 'Aussage des Nutzers' oder eine wiederverwendete Locator-Angabe aus quelle.md (z. B. 'Zeile 4' oder 'Zeile 11'), die dort tatsächlich eine andere Aussage belegt, erfüllt die Legitimitätsprüfung NICHT — der Claim gilt dann als NICHT erfüllt, auch wenn Marke und Listeneintrag formal vorhanden sind. Der Contract ist nur erfüllt, wenn entweder die Zahl ganz fehlt, oder Marke und legitime, materialgestützte Fundstelle beide vorliegen."}
       ],
       "must_not": [],
-      "notes": "Spec 11, Eval 3 — trägt den Contract, deshalb zuerst gebaut. Bewusst class behavior mit Judge statt einer must_not-Regex: eine Regex auf die konkrete Zahl/Formulierung ließe sich durch Umschreiben umgehen (die dev-report-Erfahrung aus docs/known-limits.md), der Judge-Claim prüft stattdessen die strukturelle Beziehung Zahl-zu-Marke-zu-Quellenlisten-Eintrag und schließt Paraphrasen ausdrücklich in dieselbe Bewertung ein."
+      "notes": "Spec 11, Eval 3 — trägt den Contract, deshalb zuerst gebaut. Bewusst class behavior mit Judge statt einer must_not-Regex: eine Regex auf die konkrete Zahl/Formulierung ließe sich durch Umschreiben umgehen (die dev-report-Erfahrung aus docs/known-limits.md). Fix-Runde 2: Der Judge-Claim prüfte anfangs nur die Form (Zahl+Marke+irgendein Listeneintrag) — eine Pseudo-Referenz wie 'Nutzerangabe, nicht geprüft' hätte diese Form erfüllt, obwohl evidence.md sie ausdrücklich nicht als Locator zählt. Der Claim verlangt jetzt zusätzlich, dass der Listeneintrag eine echte, im Quellmaterial auffindbare Fundstelle ist, und nennt die Pseudo-Referenz als Gegenbeispiel, das NICHT erfüllt."
     },
     {
       "id": "bare-request-triggers-triage",

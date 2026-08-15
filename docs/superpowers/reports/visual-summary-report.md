@@ -3,6 +3,39 @@
 Branch `feat/visual-summary`, Basis `0831fb7` (specs/skill-foundation). Plan:
 `docs/superpowers/plans/2026-08-15-visual-summary.md`.
 
+## Fix-Runde (unabhängiger Review)
+
+Ein unabhängiger Reviewer fand keine Defekte, aber drei Lücken — zwei davon
+Bestätigungen eigener, im ersten Durchgang gemeldeter Sorgen. Alle drei sind
+behoben:
+
+1. **`{{REF_ID}}` über REPEAT-Block-Grenzen unspezifiziert.** Genau die Sorge
+   zur REPEAT/Platzhalter-Konvention aus dem ersten Durchgang, bestätigt — aber
+   aus einem anderen Grund als vermutet: nicht das Ausfüllen selbst war das
+   Risiko, sondern dass nirgends stand, dass die Nummerierung dokumentweit
+   fortlaufend ist statt pro Block neu bei 1. Behoben: expliziter Kommentar am
+   ersten REPEAT-Block aller acht Templates, eine neue Contract-Zeile in
+   `SKILL.md`, eine neue Gegenprobe im Selbst-Audit. Bleibt offen: kein Eval
+   prüft das mechanisch (siehe `docs/known-limits.md`).
+2. **Judge-Claim prüfte Form, nicht Legitimität.** In
+   `unsupported-number-needs-a-reference-mark` hätte eine Pseudo-Referenz wie
+   „Nutzerangabe, nicht geprüft" den ursprünglichen Claim formal erfüllt, obwohl
+   `evidence.md` sie ausdrücklich nicht als Locator zählt — der Eval hätte genau
+   den Fall bestanden, den er fangen soll. Der Claim verlangt jetzt zusätzlich
+   eine materialgestützte, in `quelle.md` auffindbare Fundstelle und nennt die
+   Pseudo-Referenz als Gegenbeispiel.
+3. **`must_not` in `chat-distills-three-decisions` bewachte nur „Kaffee".**
+   Dieselbe Fehlerklasse wie dev-reports `must_not`-Regexe, hier selbst
+   begangen. Eval auf `behavior` umgestellt, `must_not` durch einen
+   Judge-Claim ersetzt, der Vollständigkeit (alle drei Entscheidungen) und
+   Abwesenheit von jeglichem Rauschen verlangt, nicht nur eines Worts.
+
+Validiert: `load_evals('evals/visual-summary/evals.json')` liefert weiterhin
+`6`, keine `EvalSchemaError`. Volle Testsuite weiterhin `146 passed`.
+`docs/known-limits.md` um vier Punkte ergänzt (siehe Abschnitt „visual-summary"
+dort) — unter anderem die verbleibende Lücke, dass die Referenzmarken-Gegenprobe
+selbst noch kein Eval hat.
+
 ## Was gebaut wurde
 
 ```
