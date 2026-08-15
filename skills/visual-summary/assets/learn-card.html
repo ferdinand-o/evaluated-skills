@@ -1,0 +1,245 @@
+<!-- skill: visual-summary | schema: 1 | generated: visual-summary skill (Format: learn-card, Medium: html) -->
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{KERNIDEE}} — Learn-Card</title>
+<style>
+/* visual-summary design tokens — persönliches Token-Set, Spec 11.
+ * Editorial statt Produkt-UI: Serife für Headlines, Sans für Fließtext, ein
+ * warmer Akzent statt eines weiteren Blau-Systems (Unterscheidung zu
+ * enterprise-ui ist gewollt — diese Dokumente sollen sich wie gelesene Notizen
+ * anfühlen, nicht wie eine weitere Produktoberfläche).
+ * Theme über prefers-color-scheme (Standard) und [data-theme]-Override (bewusste
+ * Nutzerwahl gewinnt in beide Richtungen). Kein externer Font-Import — reine
+ * System-Stacks, damit die Datei ohne Netzwerk und ohne CDN funktioniert.
+ * Selbstenthalten: dieser Block wird komplett in jedes assets/*.html-Template
+ * eingebettet (kein <link>, kein Build-Schritt) — siehe SKILL.md.
+ */
+:root {
+  /* --- Primitives: warmer Graustufen-Grundton (nicht neutral-kalt wie ein UI-Grau) --- */
+  --stone-25:  #FCFBF9;  --stone-50:  #F7F5F1;  --stone-100: #EFEBE3;
+  --stone-200: #E1DACB;  --stone-300: #CBC0A9;  --stone-400: #A69A7C;
+  --stone-500: #837759;  --stone-600: #665C42;  --stone-700: #4C4430;
+  --stone-800: #33301F;  --stone-900: #201E13;  --stone-950: #14130C;
+
+  /* --- Primitives: Akzent (gebranntes Terrakotta, bewusst nicht Blau/Violett) --- */
+  --amber-50:  #FDF3EC;  --amber-100: #FAE1CE;  --amber-300: #EDA96C;
+  --amber-500: #C96A2E;  --amber-600: #AD5522;  --amber-700: #8B441C;
+
+  /* --- Primitives: Richtung/Status, farbenblind-sicher als Paar --- */
+  --green-600: #29785A;  --green-50: #EAF5EE;
+  --red-600:   #B7402F;  --red-50:  #FBECE9;
+
+  /* --- Semantisch: Flächen --- */
+  --bg-page: var(--stone-25);
+  --bg-surface: #FFFFFF;
+  --bg-subtle: var(--stone-50);
+  --bg-callout: var(--amber-50);
+
+  /* --- Semantisch: Text --- */
+  --text-strong: var(--stone-900);
+  --text-default: var(--stone-700);
+  --text-muted: var(--stone-500);
+  --text-on-accent: #FFFFFF;
+
+  /* --- Semantisch: Rahmen --- */
+  --border-subtle: var(--stone-200);
+  --border-default: var(--stone-300);
+
+  /* --- Semantisch: Akzent --- */
+  --accent: var(--amber-500);
+  --accent-strong: var(--amber-700);
+  --accent-subtle: var(--amber-100);
+
+  /* --- Semantisch: Richtung (Chart-Farbpaar, nie alleiniges Signal) --- */
+  --up: var(--green-600);
+  --down: var(--red-600);
+  --up-subtle: var(--green-50);
+  --down-subtle: var(--red-50);
+
+  /* --- Referenzmarken --- */
+  --ref-mark: var(--accent-strong);
+
+  /* --- Radius & Schatten: dezent, kein AI-Weichzeichner-Look --- */
+  --radius-sm: 3px; --radius-md: 6px; --radius-lg: 10px;
+  --shadow-card: 0 1px 2px rgba(32,30,19,.06), 0 1px 1px rgba(32,30,19,.08);
+
+  /* --- Typografie: Serife für Headlines, Sans für Fließtext, Mono für Zahlen --- */
+  --font-serif: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --size-headline: clamp(1.6rem, 1.3rem + 1.2vw, 2.4rem);
+  --size-h2: 1.15rem;
+  --size-body: 1rem;
+  --size-caption: 0.85rem;
+  --leading-body: 1.55;
+
+  /* --- Abstände --- */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px;
+
+  /* --- Seitenrahmen (Ein-Seiten-Budget als Layoutgrenze, nicht nur Vorgabe) --- */
+  --page-max-width: 760px;
+}
+
+/* --- Dunkles Theme: Systempräferenz --- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-page: var(--stone-950);
+    --bg-surface: var(--stone-900);
+    --bg-subtle: var(--stone-800);
+    --bg-callout: #3A2A18;
+
+    --text-strong: var(--stone-50);
+    --text-default: var(--stone-200);
+    --text-muted: var(--stone-400);
+
+    --border-subtle: var(--stone-800);
+    --border-default: var(--stone-700);
+
+    --accent: var(--amber-300);
+    --accent-strong: var(--amber-100);
+    --accent-subtle: #4A3018;
+
+    --up: #6FCF9E;   --up-subtle: #16342A;
+    --down: #E58A78;  --down-subtle: #3A1F1B;
+
+    --ref-mark: var(--amber-300);
+    --shadow-card: 0 1px 2px rgba(0,0,0,.35), 0 1px 1px rgba(0,0,0,.45);
+  }
+}
+
+/* --- Dunkles Theme: bewusste Nutzerwahl gewinnt in beide Richtungen --- */
+:root[data-theme="dark"] {
+  --bg-page: var(--stone-950);
+  --bg-surface: var(--stone-900);
+  --bg-subtle: var(--stone-800);
+  --bg-callout: #3A2A18;
+
+  --text-strong: var(--stone-50);
+  --text-default: var(--stone-200);
+  --text-muted: var(--stone-400);
+
+  --border-subtle: var(--stone-800);
+  --border-default: var(--stone-700);
+
+  --accent: var(--amber-300);
+  --accent-strong: var(--amber-100);
+  --accent-subtle: #4A3018;
+
+  --up: #6FCF9E;   --up-subtle: #16342A;
+  --down: #E58A78;  --down-subtle: #3A1F1B;
+
+  --ref-mark: var(--amber-300);
+  --shadow-card: 0 1px 2px rgba(0,0,0,.35), 0 1px 1px rgba(0,0,0,.45);
+}
+
+/* --- Basis-Elemente, die jedes Format teilt --- */
+body {
+  background: var(--bg-page);
+  color: var(--text-default);
+  font-family: var(--font-sans);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+}
+.page {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+}
+h1 {
+  font-family: var(--font-serif);
+  font-size: var(--size-headline);
+  color: var(--text-strong);
+  margin: 0 0 var(--space-4);
+  line-height: 1.2;
+}
+h2 {
+  font-family: var(--font-sans);
+  font-size: var(--size-h2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-1);
+  margin: var(--space-6) 0 var(--space-3);
+}
+.meta {
+  font-size: var(--size-caption);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-5);
+}
+sup.ref, .ref-mark {
+  color: var(--ref-mark);
+  font-weight: 600;
+  text-decoration: none;
+}
+table { border-collapse: collapse; width: 100%; font-size: var(--size-body); }
+th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+th { color: var(--text-muted); font-weight: 600; font-size: var(--size-caption); text-transform: uppercase; letter-spacing: .03em; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.callout {
+  background: var(--bg-callout);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  color: var(--text-strong);
+}
+ol.quellen { font-size: var(--size-caption); color: var(--text-muted); padding-left: var(--space-5); }
+ol.quellen li { margin-bottom: var(--space-1); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+svg.chart text { font-family: var(--font-mono); font-variant-numeric: tabular-nums; fill: var(--text-muted); }
+svg.chart .bar, svg.chart .line { fill: var(--accent); stroke: var(--accent); }
+svg.chart .up { fill: var(--up); stroke: var(--up); }
+svg.chart .down { fill: var(--down); stroke: var(--down); }
+svg.chart .axis { stroke: var(--border-default); }
+
+/* --- Ein-Seiten-Budget als Druckgrenze --- */
+@media print {
+  body { padding: 0; background: #FFFFFF; }
+  .page { box-shadow: none; border: none; max-width: none; }
+  @page { size: A4; margin: 2cm; }
+}
+.merksatz {
+  font-family: var(--font-serif); font-size: 1.2rem; font-style: italic;
+  color: var(--accent-strong); text-align: center; margin: var(--space-5) 0;
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <p class="meta">Learn-Card · {{DATUM}} · Slug: {{SLUG}}</p>
+  <h1>{{KERNIDEE}}</h1>
+
+  <h2>Beispiel</h2>
+  <p>{{BEISPIEL_TEXT}} <sup class="ref"><a href="#ref-{{REF_ID}}">[{{REF_ID}}]</a></sup></p>
+
+  <h2>Abgrenzung</h2>
+  <p>{{ABGRENZUNG_TEXT}}</p>
+
+  <p class="merksatz">„{{MERKSATZ}}"</p>
+
+  <h2>Quelle(n)</h2>
+  <ol class="quellen">
+    <!-- REPEAT: quelle -->
+    <li id="ref-{{REF_ID}}">{{LOCATOR}} — „{{AUSZUG}}"{{KONFIDENZ_ZUSATZ}}</li>
+    <!-- /REPEAT -->
+  </ol>
+</div>
+</body>
+</html>
