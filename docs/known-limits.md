@@ -128,6 +128,50 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## visual-summary
+
+- **HTML-Budget ist nur sichtprüfbar, nicht mechanisch.** `references/formats.md`
+  nennt harte Zeilenbudgets für die Markdown-Fassung jedes Formats (mechanisch
+  über `file_max_lines` prüfbar), aber für die HTML-Fassung gibt es kein
+  Äquivalent — die Zeilenzahl einer Markup-Datei sagt nichts über die gerenderte
+  Länge (Whitespace, eingebettetes CSS, Slot-Füllung variieren stark). Das
+  HTML-Budget bleibt Teil des Selbst-Audits aus `SKILL.md` und ist damit G1
+  (Selbstauskunft), nicht mechanisch erzwungen — keiner der sechs Evals prüft es.
+- **`tokens.css` ist in vier HTML-Templates dupliziert, nicht per Build
+  zusammengeführt.** Jedes der vier `assets/*.html`-Templates bettet den
+  vollständigen Inhalt von `assets/tokens.css` in ein eigenes `<style>`-Tag ein
+  (Entscheidung für Selbstenthaltenheit ohne Build-Schritt, siehe
+  `docs/superpowers/plans/2026-08-15-visual-summary.md`). Eine künftige
+  Token-Änderung muss von Hand in allen fünf Dateien (`tokens.css` plus vier
+  Templates) synchron gehalten werden — nichts erzwingt das mechanisch, ein
+  Auseinanderlaufen fiele nur bei einer visuellen Stichprobe auf.
+- **Der Ausgabepfad ist ohne Nutzer-Slug nicht vorhersagbar.** Ohne Sammel-Skript
+  gibt es keine deterministische Pfadberechnung wie bei dev-reports
+  `report_path`. Die Skill leitet ohne Vorgabe einen Slug aus der Kernthese ab —
+  das ist für echte Nutzung gewollt, macht den Pfad für einen externen
+  Konsumenten (ein Skript, das `docs/summaries/` durchsucht) aber nur nach dem
+  Muster `<format>-<slug>` vorhersagbar, nie nach einem konkreten Dateinamen. Alle
+  sechs Evals in `evals/visual-summary/evals.json` umgehen das, indem der Prompt
+  den Slug ausdrücklich nennt — ein Prompt ohne Slug-Vorgabe ist damit
+  eval-seitig ungetestet.
+- **Referenzmarken-Adjazenz ist nur für einen Fall über einen Judge geprüft, nicht
+  generell mechanisch.** Der Contract aus `SKILL.md` verlangt, dass jede Zahl
+  unmittelbar eine Referenzmarke trägt. Mechanisch geprüft wird das nur indirekt
+  (Existenz von Zahl und Seitenreferenz getrennt in `buried-number-gets-page-ref`)
+  bzw. strukturell über einen Judge-Claim im einen behavior-Eval
+  (`unsupported-number-needs-a-reference-mark`). Ein genereller Regex-Check „jede
+  Zahl im Dokument braucht eine unmittelbar folgende Marke" wurde bewusst nicht
+  gebaut — er träfe legitime Nicht-Beleg-Zahlen wie Jahreszahlen in Überschriften
+  oder das Datum in der Meta-Zeile falsch positiv. Die Lücke ist eine bewusste
+  Entscheidung, aber eine echte Grenze der Eval-Abdeckung: eine zweite unbelegte
+  Zahl in einem sonst korrekten Dokument hat keinen zweiten Eval, der sie fängt.
+- **Das Inhaltsmodell ist kein eigenständiges Artefakt.** Tier 0 ohne Skript
+  bedeutet: Es gibt kein `model.json`, das Kernthese, Belege, Datenpunkte und
+  offene Punkte vor dem Rendern festhält. Die Quellenbindung wird erst im
+  gerenderten Output sichtbar (Referenzmarken plus Quellenliste). Ein Konsument,
+  der das Modell selbst lesen wollte — unabhängig vom gewählten Medium — hat
+  dafür kein Artefakt, nur die beiden Renderings.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·

@@ -40,7 +40,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | UI: Stil und Tokens | ui-architect | enterprise-ui (Produktoberfläche), motion-landing (Bewegung) |
 | UI: Produktoberfläche, Tabellen, Formulare | enterprise-ui | ui-architect (Marketing/Brand) |
 | Landing-Page-Bewegung | motion-landing *(geplant)* | ui-architect (Stil/Tokens), enterprise-ui |
-| ad-hoc „fass zusammen" | visual-summary *(geplant)* | dev-report (periodisch), handoff (Sitzungsende) |
+| ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
 
 ## Konventionen
