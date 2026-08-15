@@ -123,8 +123,8 @@ def run_one(
             judge_dir = workdir / "judge"
             judge_dir.mkdir(exist_ok=True)
             dump = dump_changed_files(workspace.root, workspace.baseline)
-            verdicts = judge(claims, transcript.stdout, dump, judge_dir, cli=cli, timeout=timeout)
-        return grade(ev, workspace.root, workspace.baseline, verdicts, transcript.stdout)
+            verdicts = judge(claims, transcript.text, dump, judge_dir, cli=cli, timeout=timeout)
+        return grade(ev, workspace.root, workspace.baseline, verdicts, transcript.text)
     except (WorkspaceError, JudgeError) as exc:
         return EvalResult(ev.id, False, (f"harness: {exc}",), True, "Harness-Fehler")
     except Exception as exc:
