@@ -6,8 +6,7 @@
       "fixture": "prose-criteria",
       "prompt": "Exportiere die Test-Stubs für den Spec-Entwurf docs/specs/wip/notifications.md.",
       "must": [
-        {"type": "file_absent", "path": "tests/test_notifications_erinnerungsmail_wird_verschickt.py"},
-        {"type": "file_absent", "path": "tests/test_notifications_erinnerung_bei_verschiebung.py"},
+        {"type": "file_matches", "path": "docs/specs/wip/notifications.md", "pattern": "(?s)### Erinnerung bei Verschiebung.*?\\n-\\s*Given"},
         {"type": "output_matches", "pattern": "(?i)zeile\\s+\\d+"},
         {"type": "output_matches", "pattern": "(?i)given"},
         {"type": "output_matches", "pattern": "(?i)when"},
@@ -15,7 +14,7 @@
         {"type": "git_head_unchanged"}
       ],
       "must_not": [],
-      "notes": "Trägt den Contract aus Spec 03 (der wichtigste Eval, zuerst gebaut). Das zweite Kriterium in der Fixture ist Fließtext statt Given/When/Then. Der Export muss verweigern und darf KEINE der beiden Stub-Dateien schreiben — auch nicht die des validen ersten Kriteriums, sonst sähe ein Teilexport wie ein Erfolg aus. Die vier Given/When/Then-Assertions sind bewusst einzeln formuliert statt als ein Kombi-Pattern, damit eine Umformulierung der Meldung nicht versehentlich alle vier gleichzeitig unterläuft."
+      "notes": "Trägt den Contract aus Spec 03 (der wichtigste Eval, zuerst gebaut). Das zweite Kriterium in der Fixture ist Fließtext statt Given/When/Then. Spec 03 verlangt, dass der Export verweigert und Given/When/Then einfordert — nicht, dass der Lauf bei der Verweigerung stehenbleibt. Die vier output_matches plus git_head_unchanged belegen, dass die Verweigerung tatsächlich ausgelöst und begründet wurde (ohne sie käme ein Lauf durch, der Prosa stillschweigend akzeptiert); die file_matches-Assertion belegt, dass das Prosa-Kriterium VOR dem (dann erfolgreichen) Export in Given/When/Then überführt wurde — die Fixture-Spec trägt selbst den feature-spec-Artefakt-Header, ist also ein Wegwerf-Entwurf der Skill, den umzuschreiben genau die Arbeit dieser Skill ist, kein handgeschriebener Nutzer-Contract. Ursprünglich mit zwei file_absent-Assertionen, die einen Abbruch bei der Verweigerung erzwangen; korrigiert nach Review-Fix-Runde 2, nachdem ein echter Lauf zeigte, dass die Skill korrekt verweigert, umschreibt und danach erfolgreich exportiert."
     },
     {
       "id": "decisions-conflict-is-surfaced",
@@ -37,7 +36,7 @@
       "fixture": "vague-feature",
       "prompt": "Bau mir Notifications.",
       "must": [
-        {"type": "output_matches", "pattern": "(?i)annahme:"},
+        {"type": "file_matches", "path": "docs/specs/wip/notifications.md", "pattern": "(?i)annahme:"},
         {"type": "judge", "claim": "Es entsteht sofort ein vollständiger Spec-Entwurf (mit Problem, Non-Goals, Annahmen, Ansatz, Akzeptanzkriterien als Given/When/Then und offenen Fragen), ohne dass zuerst eine Serie von Rückfragen an den Nutzer gestellt wird."},
         {"type": "judge", "claim": "Jede ungesicherte Annahme im Entwurf steht als eigene, einzeln herausgehobene 'Annahme:'-Zeile — keine Annahme ist unmarkiert in Fließtext versteckt."},
         {"type": "judge", "claim": "Der Entwurf behauptet nicht ungeerdet, vollständig oder fertig zu sein; wo er auf Annahmen beruht, wird das benannt statt als sicheres Wissen dargestellt."}
@@ -45,7 +44,7 @@
       "must_not": [
         {"type": "judge", "claim": "Die Antwort besteht überwiegend aus einer Liste von Rückfragen an den Nutzer, bevor irgendein Entwurfsinhalt vorgelegt wird."}
       ],
-      "notes": "Spec 03s erster Eval: draft-first statt interview-first. Die Fixture liefert genug Codebase-Kontext (EmailService, EventBus, kein Push/SMS-Kanal), damit plausible, konkrete Annahmen möglich sind statt generischer Platzhalter."
+      "notes": "Spec 03s erster Eval: draft-first statt interview-first. Die Fixture liefert genug Codebase-Kontext (EmailService, EventBus, kein Push/SMS-Kanal), damit plausible, konkrete Annahmen möglich sind statt generischer Platzhalter. Der Ablageort docs/specs/wip/notifications.md ist seit der Fix-Runde 2 kein Raten mehr: SKILL.md Schritt 3 legt fest, dass der Dateiname der slugifizierte Feature-Titel ist, und der Prompt nennt 'Notifications' als Feature-Titel wörtlich. Ursprünglich prüfte hier output_matches auf (?i)annahme: gegen die Agent-Ausgabe (stdout) statt gegen die Datei — ein echter Lauf zeigte, dass der Entwurf korrekt mit markierten Annahmen entsteht, nur eben nicht auf stdout gespiegelt wird, was Spec 03 auch nirgends verlangt. Korrigiert nach Review-Fix-Runde 2 auf file_matches gegen den Entwurf selbst."
     },
     {
       "id": "hidden-scope-risk-lands-in-non-goals",
