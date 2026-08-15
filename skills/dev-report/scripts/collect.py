@@ -157,7 +157,11 @@ def detect_patterns(commits: list[dict]) -> dict:
         key=lambda entry: -entry["count"],
     )
 
-    return {"reverts": reverts, "fix_chains": fix_chains, "fix_commits": fix_commits_count, "quiet": len(commits) < QUIET_THRESHOLD}
+    # Ein leerer Bereich ist kein ruhiger Bereich: "quiet" heißt "wenige, aber
+    # echte Commits", nicht "keine Antwort von git bekommen". Die Unterscheidung
+    # zwischen beidem trifft main() anhand von len(commits) == 0.
+    quiet = 0 < len(commits) < QUIET_THRESHOLD
+    return {"reverts": reverts, "fix_chains": fix_chains, "fix_commits": fix_commits_count, "quiet": quiet}
 
 
 HARVEST_SOURCES = (
@@ -277,6 +281,17 @@ def main(argv: list[str] | None = None) -> int:
     except CollectError as exc:
         print(f"Sammeln gescheitert: {exc}", file=sys.stderr)
         return 1
+
+    if not facts["commits"]:
+        print(
+            "Sammeln ergab null Commits im angegebenen Bereich. Das ist keine "
+            "ruhige Periode, sondern vermutlich ein falsch angegebener oder "
+            "von git unlesbarer Bereich (z. B. ein Datum, das git als 'jetzt' "
+            "deutet). Kein facts.json geschrieben — Bereich prüfen und erneut "
+            "versuchen.",
+            file=sys.stderr,
+        )
+        return 2
 
     target = args.repo / CACHE_PATH
     target.parent.mkdir(parents=True, exist_ok=True)

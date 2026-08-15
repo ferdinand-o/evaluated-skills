@@ -99,6 +99,23 @@ def test_main_rejects_unknown_mode(repo, monkeypatch):
         collect.main(["--mode", "quartalsbericht", "--range", "HEAD"])
 
 
+def test_main_flags_zero_commits_loudly(repo, monkeypatch, capsys):
+    """Null gesammelte Commits sind eine Auffälligkeit, kein stiller Erfolg.
+
+    Ein unparsierbares `--since` liefert bei git Exit 0 und leere Ausgabe,
+    nicht ununterscheidbar von einem echten leeren Bereich. Damit die Skill
+    das nicht als "ruhige Woche" rendert, muss `main()` hier laut und mit
+    Exit-Code != 0 scheitern — und darf keinen Cache schreiben, der als
+    Faktengrundlage missverstanden werden könnte.
+    """
+    monkeypatch.chdir(repo)
+    rc = collect.main(["--mode", "weekly", "--since", "2099-01-01"])
+    assert rc != 0
+    captured = capsys.readouterr()
+    assert "null Commits" in captured.err or "0 Commits" in captured.err
+    assert not (repo / ".skills" / "cache" / "facts.json").exists()
+
+
 @pytest.fixture
 def repo_with_empty_commit(tmp_path):
     """Repo mit regulärem Commit, leerem Commit und dann wieder regulärem Commit.
@@ -194,6 +211,17 @@ def test_quiet_period_is_flagged():
 
 def test_busy_period_is_not_quiet():
     assert collect.detect_patterns([commit_stub("feat: x")] * 12)["quiet"] is False
+
+
+def test_empty_commit_list_is_not_quiet():
+    """Ein leeres Ergebnis ist keine ruhige Periode — nur eine kleine ist das.
+
+    Regression: `git log --since=<unparsierbar>` liefert Exit 0 und leere
+    Ausgabe, git deutet die Angabe als "jetzt". Ohne diese Unterscheidung
+    rendert die Skill eine "ruhige Woche" über ein gescheitertes Sammeln.
+    """
+    patterns = collect.detect_patterns([])
+    assert patterns["quiet"] is False
 
 
 def test_build_facts_includes_patterns(repo):
