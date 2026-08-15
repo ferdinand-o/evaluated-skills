@@ -26,6 +26,8 @@ VITEST_TODO_MARKER = "it.todo("
 STUB_HEADER_RE = re.compile(r"^#\s*spec-stub:\s*(?P<slug>[a-z0-9_-]+)\s*$")
 VITEST_HEADER_RE = re.compile(r"^//\s*spec-stub:\s*(?P<slug>[a-z0-9_-]+)\s*$")
 
+_TRIPLE_QUOTE_RE = re.compile(r'"""|\'\'\'')
+
 H1_RE = re.compile(r"^#\s+(?!#)(.+?)\s*$")
 FEATURE_HEADING_RE = re.compile(r"^#\s+Feature:\s*(.+?)\s*$")
 H2_RE = re.compile(r"^##\s+(?!#)(.+?)\s*$")
@@ -285,23 +287,64 @@ def _first_nonempty_line(text: str) -> str:
     return ""
 
 
+def _code_lines(text: str) -> list[str]:
+    """Zeilen außerhalb von Docstrings/Triple-Quote-Strings.
+
+    Naiv per Vorkommen-Parität von `'''`/`\"\"\"` erkannt, kein echter
+    Python-Parser — reicht aber, um einen Marker zu unterscheiden, der als
+    aktive Code-Zeile steht, von einem, der nur als Text innerhalb eines
+    Docstrings erwähnt wird (z. B. in einer Beschreibung, die den Marker
+    zitiert). Reicht für die generierten Stubs (ein Docstring-Block pro
+    Datei) und für die Fälle, die dieser Contract abwehren soll.
+    """
+    out: list[str] = []
+    in_string = False
+    for line in text.splitlines():
+        occurrences = len(_TRIPLE_QUOTE_RE.findall(line))
+        if in_string:
+            if occurrences % 2 == 1:
+                in_string = False
+            continue
+        if occurrences % 2 == 1:
+            in_string = True
+            continue
+        out.append(line)
+    return out
+
+
 def should_write_pytest(target: Path) -> bool:
-    """Sicher (neu) zu schreiben, solange Header UND Skip-Marker noch da sind."""
+    """Sicher (neu) zu schreiben, solange Header UND ein aktiver Skip-Marker
+    noch da sind.
+
+    "Aktiv" heißt: eine Code-Zeile (nicht in einem Docstring), deren Inhalt
+    exakt der generierte Marker ist — nicht bloß irgendwo im Dateitext
+    enthalten. Ein auskommentierter Marker (`# @pytest.mark.skip(...)`) oder
+    einer, der nur als Text in einem Docstring auftaucht, zählt nicht als
+    aktiv: Beides ist der naheliegendste Weg, einen Stub zu "aktivieren",
+    und darf den nächsten Export nicht dazu bringen, die Implementierung
+    stillschweigend mit einem leeren Stub zu überschreiben.
+    """
     if not target.is_file():
         return True
     text = target.read_text(encoding="utf-8", errors="replace")
     has_header = bool(STUB_HEADER_RE.match(_first_nonempty_line(text)))
-    has_skip = PYTEST_SKIP_MARKER in text
-    return has_header and has_skip
+    has_active_skip = any(line.strip() == PYTEST_SKIP_MARKER for line in _code_lines(text))
+    return has_header and has_active_skip
 
 
 def should_write_vitest(target: Path) -> bool:
+    """Vitest-Pendant zu `should_write_pytest`: ein aktives `it.todo(` ist eine
+    Zeile, die damit beginnt und nicht mit `//` auskommentiert ist."""
     if not target.is_file():
         return True
     text = target.read_text(encoding="utf-8", errors="replace")
     has_header = bool(VITEST_HEADER_RE.match(_first_nonempty_line(text)))
-    has_todo = VITEST_TODO_MARKER in text
-    return has_header and has_todo
+    has_active_todo = any(
+        line.strip().startswith(VITEST_TODO_MARKER)
+        for line in text.splitlines()
+        if not line.strip().startswith("//")
+    )
+    return has_header and has_active_todo
 
 
 def write_pytest_stubs(

@@ -313,6 +313,51 @@ def test_should_write_pytest_false_when_header_missing(tmp_path):
     assert export_stubs.should_write_pytest(target) is False
 
 
+def test_should_write_pytest_false_when_skip_marker_commented_out(tmp_path):
+    """Der naheliegendste Weg, einen Stub zu aktivieren: die Skip-Zeile
+    auskommentieren statt löschen. Header und Marker-Text stehen noch im
+    Dateiinhalt — should_write_pytest darf trotzdem nicht True liefern,
+    sonst überschreibt der nächste Export eine fertige Implementierung."""
+    target = tmp_path / "test_x_y.py"
+    target.write_text(
+        '# spec-stub: y\n"""alt"""\n'
+        '# @pytest.mark.skip("stub: noch nicht implementiert")\n'
+        "def test_x_y():\n    assert echte_implementierung() == 42\n",
+        encoding="utf-8",
+    )
+    assert export_stubs.should_write_pytest(target) is False
+
+
+def test_should_write_pytest_false_when_marker_only_mentioned_in_docstring(tmp_path):
+    """Der Marker-Text steht als Zitat in einem Docstring, nicht als aktive
+    Decorator-Zeile — zählt nicht als aktiver Marker."""
+    target = tmp_path / "test_x_y.py"
+    target.write_text(
+        '# spec-stub: y\n'
+        '"""\n'
+        '@pytest.mark.skip("stub: noch nicht implementiert")\n'
+        "Das oben ist nur als Beispiel im Docstring zitiert, kein echter Marker.\n"
+        '"""\n'
+        "def test_x_y():\n    assert echte_implementierung() == 42\n",
+        encoding="utf-8",
+    )
+    assert export_stubs.should_write_pytest(target) is False
+
+
+def test_should_write_pytest_true_when_active_marker_line_matches_exactly(tmp_path):
+    """Gegenprobe: eine echte, unveränderte Decorator-Zeile bleibt aktiv,
+    auch wenn der Marker-Text zusätzlich (harmlos) im Docstring vorkommt."""
+    target = tmp_path / "test_x_y.py"
+    target.write_text(
+        '# spec-stub: y\n'
+        '"""Erwähnt @pytest.mark.skip("stub: noch nicht implementiert") im Text."""\n'
+        '@pytest.mark.skip("stub: noch nicht implementiert")\n'
+        "def test_x_y():\n    ...\n",
+        encoding="utf-8",
+    )
+    assert export_stubs.should_write_pytest(target) is True
+
+
 # --- overwrite protection: vitest -------------------------------------------
 
 
@@ -335,6 +380,18 @@ def test_should_write_vitest_false_when_todo_removed(tmp_path):
 def test_should_write_vitest_false_when_header_missing(tmp_path):
     target = tmp_path / "x.y.test.ts"
     target.write_text("it.todo('y');\n", encoding="utf-8")
+    assert export_stubs.should_write_vitest(target) is False
+
+
+def test_should_write_vitest_false_when_todo_commented_out(tmp_path):
+    """Analog zu Defekt 1 bei pytest: die it.todo-Zeile auskommentiert statt
+    entfernt, während eine echte Implementierung daneben steht."""
+    target = tmp_path / "x.y.test.ts"
+    target.write_text(
+        "// spec-stub: y\n// it.todo('y');\n"
+        "it('y', () => { expect(echteImplementierung()).toBe(42); });\n",
+        encoding="utf-8",
+    )
     assert export_stubs.should_write_vitest(target) is False
 
 
@@ -380,6 +437,31 @@ def test_write_pytest_stubs_reexport_skips_when_implemented(tmp_path):
     assert target.as_posix() not in created
     assert target.as_posix() in skipped
     assert target.read_text(encoding="utf-8") == implemented
+
+
+def test_write_pytest_stubs_does_not_clobber_implementation_with_commented_marker(tmp_path):
+    """Reproduziert den Defekt aus dem Review: Skip-Zeile auskommentiert statt
+    gelöscht, Header und Marker-Text stehen textuell noch da. Vor dem Fix lieferte
+    should_write_pytest True (Substring-Suche über den ganzen Dateitext) und der
+    Re-Export überschrieb die fertige Implementierung mit einem leeren Stub."""
+    criteria = export_stubs.parse_spec(lines_of(VALID_SPEC))
+    out_dir = tmp_path / "tests"
+    spec_path = tmp_path / "notifications.md"
+    export_stubs.write_pytest_stubs(criteria, "notifications", spec_path, out_dir)
+
+    target = out_dir / "test_notifications_erinnerung_wird_verschickt.py"
+    echte_implementierung = (
+        "# spec-stub: erinnerung-wird-verschickt\n"
+        '# @pytest.mark.skip("stub: noch nicht implementiert")\n'
+        "def test_notifications_erinnerung_wird_verschickt():\n"
+        "    assert send_reminder(due_in_hours=24) is True\n"
+    )
+    target.write_text(echte_implementierung, encoding="utf-8")
+
+    created, skipped = export_stubs.write_pytest_stubs(criteria, "notifications", spec_path, out_dir)
+    assert target.as_posix() not in created
+    assert target.as_posix() in skipped
+    assert target.read_text(encoding="utf-8") == echte_implementierung
 
 
 def test_write_vitest_stubs_creates_todo_files(tmp_path):
@@ -449,10 +531,11 @@ def test_main_missing_spec_file_returns_one(tmp_path, capsys):
     assert "nicht gefunden" in capsys.readouterr().err
 
 
-def test_main_reexport_after_removing_skip_marker_leaves_file_untouched(tmp_path):
+def test_main_reexport_after_removing_skip_marker_leaves_file_untouched(tmp_path, capsys):
     spec_path = _write(tmp_path, "spec.md", VALID_SPEC)
     out_dir = tmp_path / "tests"
     export_stubs.main([str(spec_path), "--out-dir", str(out_dir)])
+    capsys.readouterr()  # ersten Lauf aus dem Puffer entfernen
 
     target = out_dir / "test_notifications_erinnerung_wird_verschickt.py"
     implemented = "# spec-stub: erinnerung-wird-verschickt\ndef test_x():\n    assert True\n"
@@ -461,6 +544,9 @@ def test_main_reexport_after_removing_skip_marker_leaves_file_untouched(tmp_path
     rc = export_stubs.main([str(spec_path), "--out-dir", str(out_dir)])
     assert rc == 0
     assert target.read_text(encoding="utf-8") == implemented
+
+    out = capsys.readouterr().out
+    assert f"übersprungen (bereits implementiert): {target.as_posix()}" in out
 
 
 def test_main_with_vitest_flag_creates_both_stub_kinds(tmp_path):
