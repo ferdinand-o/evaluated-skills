@@ -45,12 +45,20 @@ Report rendert `facts.json`, nicht deine Erinnerung.
   selbst, im Kontext der Aussage. Das ist die einzige zulässige Form: keine
   eigene Sektion für unbelegte Aussagen, das trennt die Behauptung von ihrem
   Zusammenhang. Ohne die Markierung gehört der Satz nicht in den Report.
+- Meldet `collect.py` null Commits, wird kein Report geschrieben. Frag beim
+  Nutzer nach — der angegebene Bereich ist dann vermutlich falsch oder für
+  git unlesbar, nicht wirklich leer.
 - `facts.json` meldet `patterns.quiet` — dann nennt der Report die Ruhe beim
   Namen („3 Commits, Fokus lag auf X") und wird kurz.
 - Revert-Ketten und Fix-auf-Fix aus `patterns` erscheinen im Report. Für
   Vorgesetzte abstrahiert als Risiko oder Erkenntnis, nie weggelassen.
-- Gibt es mehr Einträge in `patterns.fix_chains` als Werte in `patterns.fix_commits`,
-  war es ein breiter Fix mit Nachzieher — schreib das als ein Satz, nie als Aufzählung. Sonst war es wiederholtes Ringen an verschiedenen Stellen.
+- Ist `patterns.fix_chains` leer, gehört keine Aussage über Zähigkeit in den
+  Report — dann heißt es „Keine.", wie im Template. Hat `patterns.fix_chains`
+  genau einen Eintrag, war es eine Stelle, nicht mehrere — sprich nicht von
+  „verschiedenen Stellen". Sonst gilt: mehr Einträge in `patterns.fix_chains`
+  als der Wert in `patterns.fix_commits` heißt breiter Fix mit Nachzieher —
+  schreib das als ein Satz, nie als Aufzählung. Andernfalls war es
+  wiederholtes Ringen an verschiedenen Stellen.
 - Kein Aufruf von `git` von Hand für Zahlen, die `collect.py` schon hat.
 
 ## Anti-Rationalisierung
