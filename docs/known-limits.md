@@ -33,6 +33,33 @@ sind.
 
 ## Isolation
 
+- **Fremde Skills sind im Eval-Agenten sichtbar — `--setting-sources project` hält sie
+  nicht heraus.** Gemessen am `system.init`-Ereignis (2026-08-15): In einem leeren
+  Verzeichnis ohne jede Projektkonfiguration sieht der Agent **16 global installierte
+  Skills** (`deep-research`, `dataviz`, `code-review`, `debug`, `verify`, `simplify`,
+  `claude-api` und weitere). Mit installierter Projekt-Skill sind es 17 — die eigene
+  plus dieselben 16. `--strict-mcp-config` schaltet MCP-Server korrekt ab, für Skills
+  gibt es keine Entsprechung: `--disable-slash-commands` entfernt **alle** Skills
+  einschließlich der zu testenden und ist damit unbrauchbar. Es existiert keine
+  Flaggen-Kombination, die nur die Projekt-Skill stehen lässt.
+
+  Das beschädigt Eval-Ergebnisse in **beide** Richtungen, und die zweite ist die
+  gefährlichere:
+  - *Falsch rot:* Eine fremde Skill fängt den Prompt ab, die getestete kommt nie zum
+    Zug. Genau das ist bei `visual-summary` passiert — der Eval `bare-request-triggers-triage`
+    fiel durch, weil der Agent bei „Fass das zusammen." gar nicht erst die Skill
+    aufrief. Zwei Runden Textänderungen am Ablauf blieben wirkungslos, weil der Body
+    nie geladen wurde; die Ursache saß in der Frontmatter-`description`.
+  - *Falsch grün:* Eine fremde Skill erledigt die Arbeit, und der Eval schreibt sie der
+    getesteten gut. Von außen ist das nicht unterscheidbar.
+
+  **Konsequenz für den Eval-Entwurf:** Assertions müssen an Artefakten hängen, die
+  *nur* die getestete Skill erzeugt — ihre Ledger-Datei, ihr Registereintrag, ihre
+  Kopfzeile, ihr Ablagepfad — nie an generischer Ergebnisqualität. Besonders betroffen
+  sind Skills mit einem global installierten Gegenstück: `debug-ledger` gegen `debug`,
+  `verified-research` gegen `deep-research` (von dem es ein Fork ist), `code-review`
+  gegen `code-review`.
+
 - **Die Prozessumgebung des Agenten ist nicht isoliert.** `evalkit.dispatch.run_agent`
   erzwingt nur das Arbeitsverzeichnis, `--setting-sources project` und
   `--strict-mcp-config` — nicht `HOME` oder den Rest von `os.environ`. Ein Versuch,
