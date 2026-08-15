@@ -41,8 +41,10 @@ Report rendert `facts.json`, nicht deine Erinnerung.
 
 - Jede faktische Aussage trägt eine Referenz auf einen `facts.json`-Eintrag:
   Commit-Hash, Tag, oder Artefaktpfad.
-- Ein Satz ohne solche Referenz beginnt mit `Einschätzung:` — sonst gehört er
-  nicht in den Report.
+- Ein Satz ohne solche Referenz beginnt mit `Einschätzung:` — inline, am Satz
+  selbst, im Kontext der Aussage. Das ist die einzige zulässige Form: keine
+  eigene Sektion für unbelegte Aussagen, das trennt die Behauptung von ihrem
+  Zusammenhang. Ohne die Markierung gehört der Satz nicht in den Report.
 - `facts.json` meldet `patterns.quiet` — dann nennt der Report die Ruhe beim
   Namen („3 Commits, Fokus lag auf X") und wird kurz.
 - Revert-Ketten und Fix-auf-Fix aus `patterns` erscheinen im Report. Für
