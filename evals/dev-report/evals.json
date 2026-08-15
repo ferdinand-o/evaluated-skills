@@ -62,7 +62,7 @@
         {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)leer\\w*\\s+zeilen|leerzeilen"}
       ],
       "must_not": [
-        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)typannotation"},
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)typ-?annotation"},
         {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)nach utils verschoben"}
       ],
       "notes": "Spec 02s dritter Eval, bewusst als contract: Der CSV-Export und der behobene Leerzeilen-Fehler sind kundensichtbar und müssen erscheinen; die beiden Refactorings sind es nicht und dürfen im Kundentext nicht auftauchen. Beide Richtungen sind per Regex mechanisch prüfbar, es braucht keinen Judge."
