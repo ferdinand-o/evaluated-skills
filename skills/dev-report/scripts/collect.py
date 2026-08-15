@@ -17,6 +17,12 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 MODES = ("weekly", "feature", "release")
 CACHE_PATH = Path(".skills") / "cache" / "facts.json"
+
+# Nicht 2: den vergibt argparse selbst für Aufrufsfehler (unbekannter --mode,
+# fehlendes Pflichtargument). Teilte sich der Leer-Bereich-Fall diesen Code, könnte
+# ein Aufrufer "Bereich lieferte nichts" nicht von "du hast dich vertippt"
+# unterscheiden — und würde beim Vertippen den Bereich prüfen statt den Befehl.
+EXIT_EMPTY_RANGE = 3
 FIELD_SEP = "\x1f"
 RECORD_SEP = "\x1e"
 
@@ -352,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
             "versuchen.",
             file=sys.stderr,
         )
-        return 2
+        return EXIT_EMPTY_RANGE
 
     target = args.repo / CACHE_PATH
     target.parent.mkdir(parents=True, exist_ok=True)

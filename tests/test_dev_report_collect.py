@@ -171,10 +171,24 @@ def test_main_flags_zero_commits_loudly(repo, monkeypatch, capsys):
     """
     monkeypatch.chdir(repo)
     rc = collect.main(["--mode", "weekly", "--since", "2099-01-01"])
-    assert rc != 0
+    assert rc == collect.EXIT_EMPTY_RANGE
     captured = capsys.readouterr()
     assert "null Commits" in captured.err or "0 Commits" in captured.err
     assert not (repo / ".skills" / "cache" / "facts.json").exists()
+
+
+def test_empty_range_code_differs_from_argparse_usage_error(repo, monkeypatch):
+    """Der Leer-Bereich-Code muss von argparses Aufrufsfehler-Code trennbar sein.
+
+    argparse beendet den Prozess bei einem unbekannten --mode mit Code 2. Gäbe
+    main() für "Bereich lieferte null Commits" denselben Code zurück, führte ein
+    Tippfehler im Aufruf den Nutzer zur Bereichsprüfung statt zum Befehl.
+    """
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as excinfo:
+        collect.main(["--mode", "quartalsbericht", "--range", "HEAD"])
+    assert excinfo.value.code == 2
+    assert collect.EXIT_EMPTY_RANGE != 2
 
 
 @pytest.fixture
