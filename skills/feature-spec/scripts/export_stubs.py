@@ -12,8 +12,6 @@ Ein halber Export sieht aus wie ein voller und ist deshalb schlimmer als
 keiner.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys
