@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein fixture-eigener Registereintrag mit frei erfundenem Namen, der nicht erratbar ist — nur konsultierbar. Beweist mechanisch, dass die Register-Phase vor der freien Suche lief (R8/R11)."
+}

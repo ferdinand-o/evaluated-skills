@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval anti-ceremony-delta-no-news"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "sources/primary.md",
+        "name": "Fixture-Primärspezifikation Testkonstante",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Spezifikation des Fixture-Projekts, aktuell gehalten."
+      }
+    ]
+  },
+  "allgemein": []
+}

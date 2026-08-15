@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval fresh-topic-updates-knowledge-file"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "docs.python.org",
+        "name": "Python-Dokumentation (offiziell)",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Sprachdokumentation — themenfremd zu diesem Fixture-Fall."
+      }
+    ]
+  },
+  "allgemein": []
+}

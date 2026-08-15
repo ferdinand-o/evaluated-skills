@@ -1,10 +1,10 @@
 # Truth-Bewertung: Kriterien und Einstufungs-Leitfaden
 
 Wird eine Quelle getroffen, die nicht im Register steht, entscheidet diese Rubrik über
-ihr Tier — einmal, mit Begründung, dann via `scripts/registry.py add` eingetragen.
-Die Begründung landet in der `notiz`, nicht daneben: `add_entry()` verlangt, dass sie
-mindestens eines der fünf Kriterien unten beim Namen nennt (siehe `RUBRIC_KEYWORDS` in
-`scripts/registry.py`).
+ihr Tier — einmal, mit Begründung, dann via
+`skills/verified-research/scripts/registry.py add` eingetragen. Die Begründung landet
+in der `notiz`, nicht daneben: `add_entry()` verlangt, dass sie mindestens eines der
+fünf Kriterien unten beim Namen nennt (siehe `RUBRIC_KEYWORDS` in `registry.py`).
 
 ## Die fünf Kriterien
 
