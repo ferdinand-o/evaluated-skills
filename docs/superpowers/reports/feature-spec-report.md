@@ -180,4 +180,75 @@ ac08efa feat(feature-spec): SKILL.md — Draft-first-Doktrin, Contract, Abgrenzu
 02d07c9 feat(feature-spec): vier Eval-Fixtures — Prosa-Falle, vage Anfrage, Entscheidungs-Konflikt, Mandanten-Scope
 152542c feat(feature-spec): vier Evals — Prosa-Falle als Contract zuerst
 7021327 docs: feature-spec-Ausnahme in artifact-header.md, README-Routing aktualisiert
+f6f6cb6 docs: Abschlussbericht feature-spec
 ```
+
+## Fix-Runde (nach unabhängigem Review)
+
+Ein unabhängiger Reviewer fand zwei Defekte, beide vom Koordinator selbst
+nachvollzogen bzw. bewertet.
+
+**Defekt 1 (schwer, Datenverlust):** `should_write_pytest`/
+`should_write_vitest` prüften den Skip-/Todo-Marker per `marker in text` —
+wahr, sobald der Markertext irgendwo im Dateiinhalt stand, auch
+auskommentiert (`# @pytest.mark.skip(...)`) oder nur als Zitat in einem
+Docstring. Der naheliegendste Weg, einen Stub zu aktivieren — die Skip-Zeile
+auskommentieren statt löschen —, führte dazu, dass der nächste Re-Export
+eine fertige Testimplementierung mit einem leeren Stub überschrieb, Exit 0,
+ohne Warnung. Behoben: Der Marker zählt nur noch als aktiv, wenn eine
+Code-Zeile (außerhalb eines Docstrings/Triple-Quote-Strings, per
+Vorkommen-Parität von `'''`/`"""` naiv erkannt) exakt dem generierten
+`@pytest.mark.skip("stub: noch nicht implementiert")` entspricht bzw. bei
+Vitest mit `it.todo(` beginnt und nicht `//`-auskommentiert ist. Fünf neue
+Tests decken die drei vom Reviewer genannten Fälle ab (auskommentiert,
+Docstring-Erwähnung, echter aktiver Marker trotz harmloser
+Docstring-Koinzidenz) plus eine direkte Reproduktion des ursprünglichen
+Datenverlust-Szenarios über `write_pytest_stubs()`. Die
+„übersprungen"-Meldung pro Datei war bereits vorher in `main()` vorhanden
+(`print(f"übersprungen (bereits implementiert): {path}")`) — jetzt zusätzlich
+durch einen Test abgesichert, der die Ausgabe prüft, nicht nur den
+Rückgabewert.
+
+**Defekt 2 (Fehlklassifizierung):** `decisions-conflict-is-surfaced` war
+`class: "contract"` mit drei unabhängigen Regex-Treffern
+(`decisions\.md`, `error\.code`, `widerspr\w*|konflikt`), die auch dann
+bestehen, wenn der Entwurf die Begriffe nur beiläufig erwähnt und die
+bestehende Entscheidung trotzdem stillschweigend übergeht — es gab keine
+`must_not`-Absicherung, und die drei Treffer durften unabhängig voneinander
+an beliebigen Stellen im Output liegen. Ob ein Konflikt *substantiell*
+aufgegriffen wurde, ist ein Urteil. Behoben: `class: "behavior"`, ein
+Judge-Claim, der explizit verlangt, dass der Entwurf die bestehende
+Entscheidung benennt, den Widerspruch zur Anfrage feststellt, und eine
+bewusste Wahl trifft (folgen oder bewusst revidieren) — bloßes Erwähnen der
+Begriffe reicht dem Claim-Text nach ausdrücklich nicht. Ein `must_not`-Judge-
+Claim fängt zusätzlich den Fall der stillschweigenden Übernahme ohne jede
+Erwähnung der Entscheidung.
+
+`docs/known-limits.md` bekam einen neuen `## feature-spec`-Abschnitt: die
+naive Docstring-Erkennung in `_code_lines()` und ihre Grenzfälle, dass nach
+der Reklassifizierung nur noch ein `contract`-Eval übrig ist (die übrigen
+drei brauchen jetzt einen Judge-Lauf), dass alle drei `behavior`-Evals bis
+zum ersten echten Agentenlauf ungeprüft bleiben, und der weiterhin fehlende
+Anti-Zeremonie-Eval.
+
+**Verifikation nach der Fix-Runde:**
+```
+187 passed (146 Basis + 41 feature-spec, davon 5 neu für die Fix-Runde)
+evalkit.schema.load_evals('evals/feature-spec/evals.json') -> 4 Evals,
+  Klassen: contract, behavior, behavior, behavior
+```
+
+**Was weiterhin nicht verifiziert werden konnte:** Ob der neu formulierte
+Judge-Claim für `decisions-conflict-is-surfaced` tatsächlich trennscharf
+ist — er verlangt drei Teilaussagen in einem Claim (benennt die Entscheidung
+UND erkennt den Widerspruch UND trifft eine Wahl), was für einen Judge
+schwerer zu beurteilen sein könnte als ein einzelner, engerer Claim. Das ist
+eine Abwägung, keine Gewissheit, und bleibt bis zum ersten echten Lauf offen
+— siehe `docs/known-limits.md`.
+
+Repo-Hinweis vom Koordinator übernommen, keine Änderung nötig: Der
+`conftest.load_script`/`@dataclass`-Konflikt (siehe oben, „zusätzlich
+getroffene Entscheidungen") ist inzwischen auf `feat/dev-report` in
+`tests/conftest.py` behoben. Diese Skill behält ihre lokale Umgehung (kein
+`from __future__ import annotations` in `export_stubs.py`), weil ein
+Zurücknehmen keinen Mehrwert hätte und ein Revert-Risiko ohne Nutzen wäre.

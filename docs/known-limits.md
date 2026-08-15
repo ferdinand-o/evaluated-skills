@@ -128,7 +128,46 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## feature-spec
+
+- **`_code_lines()` in `export_stubs.py` ist kein echter Python-Parser.** Der
+  Überschreibschutz erkennt Docstrings naiv über die Parität von `'''`/`"""`
+  pro Zeile, um einen aktiven `@pytest.mark.skip(...)`-Marker von einem zu
+  unterscheiden, der nur als Text in einem Docstring zitiert wird
+  (Fix-Runde, Defekt 1). Grenzfälle, die diese naive Erkennung verwirren
+  könnten: String-Konkatenation über mehrere Zeilen mit ungerader
+  Anführungszeichen-Verteilung, gemischte `'''`/`"""` in derselben Datei,
+  oder ein einzeiliges String-Literal mit einer ungeraden Zahl von
+  Anführungszeichen (z. B. ein escaptes `\"\"\"` mitten im Text). Alle drei
+  Fälle sind für von `export_stubs.py` selbst generierte Stubs
+  ausgeschlossen (das Skript erzeugt immer genau einen sauberen
+  Docstring-Block), betreffen also nur eine Datei, die jemand von Hand stark
+  vom generierten Format abweichend umgeschrieben hat, bevor der
+  Skip-Marker entfernt wurde.
+- **Nur noch ein `contract`-Eval nach der Reklassifizierung von
+  `decisions-conflict-is-surfaced`.** Der Eval war ursprünglich `contract`
+  mit drei unabhängigen Regex-Treffern, die auch bei bloß beiläufiger
+  Erwähnung der Begriffe grün geworden wären, ohne dass der Widerspruch
+  substantiell aufgegriffen wird (Fix-Runde, Defekt 2). Jetzt `behavior`
+  mit Judge-Claim. Von den vier Evals aus Spec 03 ist damit nur noch
+  `prose-criteria-refuses-export` mechanisch und ohne Judge-Kosten prüfbar
+  — die übrigen drei brauchen einen echten Agentenlauf plus Judge, was den
+  vollen Eval-Durchlauf dieser Skill teurer macht als ursprünglich geplant.
+- **Alle drei `behavior`-Evals sind bis zum ersten echten Agentenlauf
+  ungeprüft.** `run_evals.py` wurde für diese Skill noch nicht ausgeführt
+  (zentral koordiniert). Ob die Judge-Claims tatsächlich messen, was sie zu
+  messen behaupten — insbesondere der neu formulierte Claim für
+  `decisions-conflict-is-surfaced`, der explizit „benennt UND erkennt den
+  Widerspruch UND trifft eine Wahl" in einem Claim verlangt —, ist
+  unbestätigt.
+- **Kein Pflicht-Anti-Zeremonie-Eval.** Spec 00 §2 verlangt „mindestens ein
+  Anti-Zeremonie-Eval" pro Skill; Spec 03 nennt aber vier feste, andere
+  Evals. Keiner der vier deckt den trivialen Fall ab (eine Anfrage, die
+  schon vollständig als Given/When/Then vorformuliert ankommt und keinen
+  großen Entwurf braucht).
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
-[Plan](superpowers/plans/2026-08-14-eval-harness.md)
+[Plan](superpowers/plans/2026-08-14-eval-harness.md) ·
+[Plan feature-spec](superpowers/plans/2026-08-15-feature-spec.md)

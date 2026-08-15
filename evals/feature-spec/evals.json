@@ -19,16 +19,17 @@
     },
     {
       "id": "decisions-conflict-is-surfaced",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "decisions-conflict",
       "prompt": "Ich brauche eine Spec für einen neuen Endpunkt, der Fehler als reines JSON {\"status\": \"error\", \"message\": \"...\"} zurückgibt — ganz ohne error.code, das reicht dem Frontend.",
       "must": [
         {"type": "output_matches", "pattern": "(?i)decisions\\.md"},
-        {"type": "output_matches", "pattern": "(?i)error\\.code"},
-        {"type": "output_matches", "pattern": "(?i)widerspr\\w*|konflikt"}
+        {"type": "judge", "claim": "Der Spec-Entwurf benennt explizit die bestehende Entscheidung aus docs/decisions.md (API-Fehler tragen ein Pflicht-error.code-Feld), stellt fest, dass die Anfrage — Fehler ohne error.code — dieser Entscheidung widerspricht, und trifft dazu eine bewusste Wahl: entweder folgt der Entwurf der bestehenden Entscheidung (error.code bleibt Pflicht), oder er schlägt eine Revision vor und begründet sie. Ein bloßes beiläufiges Erwähnen der Begriffe 'decisions.md' oder 'error.code', ohne den Widerspruch selbst zu benennen und eine Wahl zu treffen, erfüllt das nicht."}
       ],
-      "must_not": [],
-      "notes": "docs/decisions.md legt bereits ein Pflicht-error.code-Format fest; die Anfrage will explizit ohne error.code auskommen. Die Assertion prüft nicht nur, DASS die Skill behauptet, decisions.md geprüft zu haben, sondern DASS der konkrete entschiedene Begriff (error.code) im Output auftaucht — eine Skill, die nur pauschal 'ich prüfe decisions.md' sagt, ohne den Inhalt zu nennen, fällt durch."
+      "must_not": [
+        {"type": "judge", "claim": "Der Entwurf übernimmt die angefragte Fehlerform ohne error.code, ohne die bestehende Entscheidung aus docs/decisions.md zu erwähnen oder den Widerspruch zu ihr zu benennen — stillschweigende Übernahme der neuen Anfrage."}
+      ],
+      "notes": "War ursprünglich als 'contract' klassifiziert mit drei unabhängigen Regex-Treffern (decisions.md, error.code, Widerspruch-Wortstamm) — die bestehen aber auch dann, wenn der Entwurf die Begriffe nur beiläufig erwähnt und die Entscheidung trotzdem stillschweigend übergeht, weil die drei Muster unabhängig voneinander an beliebigen Stellen im Output treffen dürfen. Ob ein Konflikt substantiell aufgegriffen wurde (benannt, UND als Widerspruch erkannt, UND eine Wahl dazu getroffen), ist ein Urteil, kein mechanisch prüfbarer Fakt — Spec 00 §2 verlangt dafür 'behavior' mit Judge. Der Judge-Claim verlangt explizit alle drei Teile zusammen, das must_not fängt den Fall der stillschweigenden Übernahme. Reklassifiziert nach Review-Fix-Runde (Defekt 2)."
     },
     {
       "id": "vague-request-drafts-with-marked-assumptions",
