@@ -21,6 +21,13 @@ KEINE ZAHL UND KEIN CHART OHNE QUELLENREFERENZ IM MODELL.
   verlinkter Anker (`[<a href="#ref-1">1</a>]`). Jede Marke hat einen Eintrag in
   der Quellenliste am Dokumentende — Locator-Regeln je Input-Art stehen in
   `references/evidence.md`.
+- **Referenzmarken sind dokumentweit fortlaufend nummeriert (1, 2, 3, …) — nicht
+  pro REPEAT-Block neu bei 1.** Belege, Chart-Zeilen und die Quellenliste teilen
+  sich einen einzigen Zähler. Ein Beleg behält seine Nummer bei jeder erneuten
+  Erwähnung im selben Dokument. Die Quellenliste enthält jede vergebene Nummer
+  genau einmal; jede im Text vergebene Marke hat dort ihren Eintrag — sonst
+  zeigt die Marke ins Leere und der Contract bricht strukturell, auch wenn
+  jede einzelne Zahl für sich genommen eine Marke trägt.
 - Eine Zahl ohne Fundstelle im Modell gehört nicht in den Output — auch nicht als
   eigener „unbelegt"-Absatz. Ohne Beleg fliegt sie raus, Punkt.
 - Das Längenbudget des Formats ist hart (`references/formats.md` nennt die
@@ -81,6 +88,11 @@ decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
    - Überlebt die Kernaussage, wenn der Leser nur Headline und Chart sieht?
    - Ist jeder Beleg klickbar/auffindbar (Referenzmarke → Quellenlisten-Eintrag)?
    - Ist das Budget eingehalten?
+   - **Gegenprobe Referenzmarken:** Hat jede im Text vergebene Marke einen
+     Eintrag in der Quellenliste, und wird jeder Eintrag der Quellenliste
+     mindestens einmal referenziert? Eine Marke ohne Eintrag oder ein Eintrag
+     ohne Marke ist derselbe Fehler wie eine Zahl ohne Beleg — beide durchbrechen
+     den Contract, auch wenn jede einzelne Zahl für sich genommen eine Marke trägt.
    - Bei HTML zusätzlich: Layout-Sichtprüfung (Datei im Kopf durchgehen oder
      Screenshot ansehen) — das Zeilenbudget ist für HTML nicht mechanisch
      prüfbar, nur die Markdown-Fassung hat eine harte Zeilenzahl.
