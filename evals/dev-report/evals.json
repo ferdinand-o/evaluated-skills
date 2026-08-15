@@ -59,7 +59,7 @@
       "must": [
         {"type": "file_exists", "path": "docs/reports/release-HEAD.md"},
         {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)csv"},
-        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)leere? zeilen|leerzeilen"}
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)leer\\w*\\s+zeilen|leerzeilen"}
       ],
       "must_not": [
         {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)typannotation"},
