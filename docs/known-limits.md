@@ -165,29 +165,52 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   und markiert das über `BudgetCheck.note` — aber ob `run_playwright_capture`
   im Erfolgspfad überhaupt eine Interaktion simuliert, die ein echtes
   INP-Audit auslösen würde, ist ungeklärt und ungetestet (siehe Punkt eins).
-- **Die `must_not`-Regexe in den zwei neuen Fixtures sind gegen Umformulierung
-  fragil**, dieselbe Klasse von Grenze wie bei dev-report oben.
-  `cls-trap-hero-gets-fixed-to-transform` prüft `@keyframes[\s\S]{0,300}?margin-top`
-  und `@keyframes[\s\S]{0,300}?\btop\s*:` gegen die Datei `styles.css` — ein
-  Fix, der die Animation in ein anderes File, ein `<style>`-Tag in
-  `index.html` oder einen CSS-in-JS-Ansatz verschiebt, entgeht der Assertion
-  vollständig, obwohl die Falle (Animation von `top`/`margin-top`) weiterhin
-  besteht. `reduced-motion-scene-shows-static-content-not-frozen-hidden` prüft
-  nur `display: none` und `visibility: hidden` innerhalb eines 300-Zeichen-
-  Fensters nach der Media Query — ein Fix, der stattdessen `height: 0`,
-  `clip-path`, `transform: scale(0)` oder `max-height: 0` einsetzt, um den
-  Inhalt ebenso unsichtbar zu machen, würde beide `must_not`-Muster
-  passieren, obwohl der Contract („statisch sichtbar, nicht versteckt")
-  weiterhin verletzt ist. Beide Regex-Paare wurden gegen einen simulierten
-  echten Fix und einen simulierten umformulierten-aber-weiterhin-
-  verstoßenden Fix durchprobiert (siehe Commit-Historie) — das zeigt, dass
-  sie die *geprüften* Umgehungen fangen, nicht dass sie erschöpfend sind.
-- **Eval 1 (`google-labs-prompt-yields-single-highlight-storyboard`) läuft nie
-  ohne `run_evals.py`.** Die drei Judge-Claims wurden nicht gegen einen
-  echten Agentenlauf verifiziert — nur das Schema wurde mechanisch geprüft
-  (`evalkit.schema.load_evals`). Ob die Claims tatsächlich zwischen einem
-  disziplinierten Ein-Höhepunkt-Storyboard und „Effekt-Konfetti"
-  unterscheiden, zeigt sich erst beim ersten echten Judge-Lauf.
+- **`cls-trap-hero-gets-fixed-to-transform`: der Mischfall ist seit der
+  Fix-Runde geschlossen, ein Restloch bleibt.** Die `must_not`-Muster
+  (`@keyframes[\s\S]{0,300}?margin-top`, `@keyframes[\s\S]{0,300}?\btop\s*:`)
+  laufen jetzt gegen `styles.css` *und* `index.html` — ein Fix, der
+  `transform: translateY` sauber in `styles.css` einbaut, die verbotene
+  `margin-top`-Animation aber zusätzlich inline nach `index.html`
+  verschiebt, wird jetzt korrekt als Verstoß erkannt (vorher entging er der
+  Assertion, weil nur `styles.css` geprüft wurde — mechanisch nachgestellt
+  und bestätigt, siehe Commit-Historie). Was bleibt: Ein drittes, in der
+  Fixture nicht vorhandenes File (z. B. ein vom Fix selbst neu angelegtes
+  `<link>`-Stylesheet), landet außerhalb dieser beiden Pfade weiterhin
+  ungeprüft — dieselbe Grenzklasse wie dev-reports
+  `release-notes-filter-internals` oben, nur enger eingegrenzt.
+- **`reduced-motion-scene-shows-static-content-not-frozen-hidden` war ein
+  echter Defekt, kein dokumentierbarer Randfall — inzwischen auf `behavior`
+  umgebaut.** Die ursprüngliche `must`-Assertion akzeptierte `opacity: 1`
+  ODER `animation: none` im `reduce`-Block als Beleg für einen korrekten
+  Fix. Der naheliegendste Fix überhaupt —
+  `@media (prefers-reduced-motion: reduce) { .panel { animation: none; } }`
+  — erfüllte damit `must`, verletzte keines der `must_not`-Muster, ließ aber
+  die Basisregel `.panel { opacity: 0; }` unverändert stehen: Der Inhalt
+  blieb unsichtbar, der Eval wurde trotzdem grün. Der Grund war keine zu
+  lockere Regex, sondern die falsche Prüfebene — Sichtbarkeit ist eine
+  Eigenschaft der CSS-*Kaskade* (Basisregel plus Media-Query-Override
+  zusammen), keine Texteigenschaft, die sich an einer Stelle der Datei
+  ablesen lässt. Der Eval ist deshalb jetzt `class: behavior`: die vier
+  `must_not`-Muster (`display: none`, `visibility: hidden`, `height: 0`,
+  `clip-path`) bleiben als billige mechanische Vorfilter für die
+  eindeutigen Verstecken-Fälle, das eigentliche Sichtbarkeits-Urteil trägt
+  ein Judge-Claim, der die Kaskade als Ganzes bewertet. Mechanisch
+  nachgestellt (siehe Commit-Historie): Der defekte Fix erfüllt keines der
+  vier `must_not`-Muster mehr — die Erkennung hängt jetzt vollständig vom
+  Judge-Urteil ab, das nie gegen einen echten Agentenlauf geprüft wurde
+  (siehe nächster Punkt).
+- **Eval 1 und Eval 3 laufen nie ohne `run_evals.py`.** Beide sind
+  `class: behavior` mit Judge-Claims
+  (`google-labs-prompt-yields-single-highlight-storyboard`:
+  Ein-Höhepunkt-Storyboard statt Effekt-Konfetti;
+  `reduced-motion-scene-shows-static-content-not-frozen-hidden`: Sichtbarkeit
+  des Panel-Inhalts unter der CSS-Kaskade). Keiner der Claims wurde gegen
+  einen echten Agentenlauf verifiziert — nur das Schema wurde mechanisch
+  geprüft (`evalkit.schema.load_evals`). Ob die Claims tatsächlich zwischen
+  einem korrekten und einem defekten Fix unterscheiden, zeigt sich erst
+  beim ersten echten Judge-Lauf — insbesondere für Eval 3, dessen
+  Judge-Claim genau den in dieser Fix-Runde gefundenen Defekt auffangen
+  soll und dessen Formulierung deshalb noch ungeprüft ist.
 - **Die drei Szenen ohne Demo (`marquee`, `stagger-grid`, `closing-cta`) sind
   reine Prosa.** Ihre Rezepte beschreiben Technik und Fallstricke, aber ohne
   eine lauffähige Demo dahinter ist nichts davon gegen einen echten Browser

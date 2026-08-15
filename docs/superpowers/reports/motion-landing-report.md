@@ -49,8 +49,9 @@ ausgeführt):
    Judge-Claims zum Ein-Höhepunkt-Storyboard, Fixture `empty-dir`.
 3. `cls-trap-hero-gets-fixed-to-transform` (contract) — neue Fixture
    `evals/fixtures/cls-trap-hero/`.
-4. `reduced-motion-scene-shows-static-content-not-frozen-hidden` (contract) —
-   neue Fixture `evals/fixtures/frozen-reduced-motion/`.
+4. `reduced-motion-scene-shows-static-content-not-frozen-hidden` — ursprünglich
+   contract, in einer Fix-Runde auf **behavior** umgebaut (siehe „Fix-Runde"
+   unten) — neue Fixture `evals/fixtures/frozen-reduced-motion/`.
 
 **Tests** `tests/test_motion_landing_verify.py` — 30 Tests, decken Storyboard-
 Contract-Validierung, Szenen-Grenzen-Berechnung (Pixel + Prozent),
@@ -109,10 +110,10 @@ wurden auftragsgemäß nicht installiert. Konkret ungetestet:
 - **Die vier React-Adapter** wurden nie gebaut oder gerendert — kein
   Node/React-Tooling in diesem Repo. Syntaxfehler oder gebrochene Hooks
   wären hier nicht aufgefallen.
-- **Eval 1** (Judge-Claims) und **Eval 2/3** (mechanisch, aber nur gegen
-  simulierte Fix-Varianten in einem Scratch-Verzeichnis durchprobiert, nie
-  gegen einen echten Agentenlauf) wurden nicht mit `run_evals.py`
-  ausgeführt.
+- **Eval 1 und Eval 3** (beide `class: behavior`, mit Judge-Claims) und
+  **Eval 2** (mechanisch) — alle nur gegen simulierte Fix-Varianten in einem
+  Scratch-Verzeichnis durchprobiert, nie gegen einen echten Agentenlauf oder
+  echten Judge — wurden nicht mit `run_evals.py` ausgeführt.
 
 Alle diese Punkte stehen mit Details in `docs/known-limits.md`, Abschnitt
 „motion-landing". Real geprüft wurde ausschließlich der Degradationszweig
@@ -120,15 +121,51 @@ von `verify.py` (Toolchain-Erkennung, Degradations-Report, `main()` mit
 echt fehlender Toolchain) — genau der Teil, den der Auftrag als hier
 verifizierbar benannt hat.
 
+## Fix-Runde (Nachtrag)
+
+Der Koordinator hat nach dem ersten Durchlauf einen echten Defekt gefunden,
+keinen dokumentierbaren Randfall: `reduced-motion-scene-shows-static-content-not-frozen-hidden`
+akzeptierte als `must` `opacity: 1` ODER `animation: none` im
+`reduce`-Block. Der naheliegendste Fix überhaupt —
+`@media (prefers-reduced-motion: reduce) { .panel { animation: none; } }` —
+erfüllte damit `must` und verletzte kein `must_not`, obwohl die Basisregel
+`.panel { opacity: 0; }` unverändert blieb und der Inhalt weiterhin
+unsichtbar war. Der Eval wurde grün, während genau der Fehler durchging,
+den er fangen sollte. Grund: Sichtbarkeit ist eine Eigenschaft der
+CSS-Kaskade, keine Texteigenschaft einer Datei — eine engere Regex hätte
+das Loch nur verschoben (siehe Begründung des Koordinators, übernommen in
+`docs/known-limits.md`).
+
+**Behoben:** Der Eval ist jetzt `class: behavior`. Die Sichtbarkeit trägt
+ein Judge-Claim, der die Kaskade als Ganzes bewertet und ausdrücklich den
+gefundenen defekten Fix als Negativbeispiel nennt. Die vier
+`must_not`-Muster (`display: none`, `visibility: hidden`, ergänzt um
+`height: 0` und `clip-path`) bleiben als billige mechanische Vorfilter.
+Mechanisch nachgestellt (Scratch-Skript, nicht committet): Der defekte Fix
+erfüllt jetzt keine mechanische `must`-Bedingung mehr, die ihn fälschlich
+grün machen würde — die Erkennung hängt vollständig vom (noch nie real
+gelaufenen) Judge-Urteil ab.
+
+Zweiter, kleinerer Punkt: `cls-trap-hero-gets-fixed-to-transform` prüfte die
+`must_not`-Muster nur gegen `styles.css`. Ein Fix, der `transform` sauber
+dort einbaut, die verbotene `margin-top`-Animation aber zusätzlich inline
+nach `index.html` verschiebt, wäre durchgekommen. Die beiden Muster laufen
+jetzt gegen beide Dateien; mechanisch mit einem simulierten Mischfall
+bestätigt.
+
 ## Offene Sorgen
 
-- Die `must_not`-Regexe in `cls-trap-hero-gets-fixed-to-transform` und
+- Der Judge-Claim in `reduced-motion-scene-shows-static-content-not-frozen-hidden`
+  wurde nie gegen einen echten Agentenlauf geprüft — er ist die einzige
+  Verteidigungslinie gegen genau den Defekt, den die Fix-Runde gefunden hat.
+  Ob die Formulierung trägt, zeigt sich erst beim ersten echten Judge-Urteil.
+- Die `must_not`-Regexe in `cls-trap-hero-gets-fixed-to-transform` (jetzt auch
+  gegen `index.html`) und die vier Vorfilter-Muster in
   `reduced-motion-scene-shows-static-content-not-frozen-hidden` fangen die
-  Umgehungen, die ich mir ausgedacht und durchprobiert habe (Wert ändern
-  statt Eigenschaft wechseln; `visibility: hidden` statt `display: none`) —
-  nicht jede denkbare. Ein Fix, der die Trap-Datei umbenennt oder auf
-  `height`/`clip-path`/`max-height` ausweicht, entgeht ihnen. Dokumentiert,
-  nicht behoben — dieselbe Grenze, die `dev-report`s
+  Umgehungen, die ich mir ausgedacht und durchprobiert habe — nicht jede
+  denkbare. Ein drittes File bei ersterem, oder eine fünfte Verstecken-Technik
+  bei letzterem, entgeht ihnen weiterhin. Dokumentiert, nicht vollständig
+  geschlossen — dieselbe Grenze, die `dev-report`s
   `release-notes-filter-internals` schon hat.
 - React-Demos sind ungebaut/ungerendert geblieben. Ich habe sie sorgfältig
   nach der Vanilla-Mechanik und dem Adapter-Mapping geschrieben, aber ohne
