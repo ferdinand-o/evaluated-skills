@@ -83,9 +83,35 @@ ein drittes Werkzeug `handoff.md` automatisiert parst (ein Dashboard, ein
 weiterer Skill, ein CI-Schritt), kippt die Begründung, und die Datei braucht
 die Kopfzeile wie jedes andere Artefakt dieser Sammlung.
 
+## Begründete Ausnahme: die Stub-Dateien von `feature-spec`
+
+`export_stubs.py` (Skill `feature-spec`) schreibt pro Akzeptanzkriterium eine
+Test-Stub-Datei, deren erste Zeile `# spec-stub: <kriterium-slug>` lautet —
+nicht die generische `skill: … | schema: … | generated: …`-Kopfzeile. Auch
+das ist kein Versehen: Der Marker hat hier eine andere Aufgabe als die
+Kopfzeile bei jedem anderen Artefakt. Die generische Kopfzeile existiert,
+damit ein *Konsument* ein Artefakt erkennen, versionieren und bei
+unerwartetem Schema sichtbar überspringen kann (siehe Konsumenten-Regel
+oben). Eine Stub-Datei hat aber keinen solchen Konsumenten — sie wird nie
+von einer anderen Skill gelesen und geparst. Ihr Marker ist stattdessen ein
+Überschreibschutz für `export_stubs.py` selbst: Ein Re-Export überschreibt
+die Datei nur, solange sie noch `# spec-stub: <slug>` **und**
+`@pytest.mark.skip("stub: noch nicht implementiert")` trägt. Sobald jemand
+den Test implementiert und den Skip-Marker entfernt, bleibt die Datei
+unangetastet — der spezifische Marker trägt hier die Überschreiblogik direkt
+im Namen, eine zusätzliche generische Kopfzeile daneben würde nichts
+zusätzlich leisten, nur die Datei um eine Zeile verlängern, die pytest beim
+Sammeln als Docstring-fremde Zeile mitschleppt.
+
+Diese Ausnahme gilt nur für die generierten Stub-Dateien selbst — der
+Spec-Entwurf, aus dem sie erzeugt werden (`docs/specs/wip/<feature>.md`),
+und `docs/decisions.md` tragen die reguläre Kopfzeile wie jedes andere
+Wissens-Artefakt, weil beide echte Konsumenten haben (künftige Scans lesen
+`docs/decisions.md`, ein Mensch liest den Spec-Entwurf während der Arbeit).
+
 **Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben) —
-`handoff` ist die einzige gebaute Skill, die davon abweicht, und tut das aus
-einem dokumentierten Grund, nicht weil die Kopf-Regel optional wäre. Wer eine
-neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält, dokumentiert
-sie hier nach demselben Muster, statt sich stillschweigend auf den Präzedenzfall
-zu berufen.
+`handoff` und die Stub-Dateien von `feature-spec` sind die einzigen
+Ausnahmen, und beide dokumentieren ihren Grund hier, statt sich
+stillschweigend auf den jeweils anderen Präzedenzfall zu berufen. Wer eine
+neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält,
+dokumentiert sie ebenso nach diesem Muster.
