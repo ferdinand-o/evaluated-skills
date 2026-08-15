@@ -252,3 +252,88 @@ getroffene Entscheidungen") ist inzwischen auf `feat/dev-report` in
 `tests/conftest.py` behoben. Diese Skill behält ihre lokale Umgehung (kein
 `from __future__ import annotations` in `export_stubs.py`), weil ein
 Zurücknehmen keinen Mehrwert hätte und ein Revert-Risiko ohne Nutzen wäre.
+
+## Fix-Runde 2 (erster echter Eval-Lauf)
+
+Der Koordinator hat die vier Evals dieser Skill zum ersten Mal real gefahren
+und die Workspaces inspiziert (keine Vermutung). Ergebnis: 2 bestanden
+(`decisions-conflict-is-surfaced`, `hidden-scope-risk-lands-in-non-goals`
+unverändert grün), 2 gefallen — beide an zu strengen Assertionen, nicht an
+Skill-Verhalten.
+
+**`prose-criteria-refuses-export`:** Die zwei `file_absent`-Assertionen
+verlangten, dass der Lauf nach der Verweigerung stehenbleibt. Tatsächlich
+hat die Skill korrekt verweigert (alle vier `output_matches` plus
+`git_head_unchanged` bestanden), das Prosa-Kriterium sinngetreu nach
+Given/When/Then überführt (geprüft vom Koordinator: „alte Erinnerung
+stornieren, neue passend zum neuen Datum einplanen", die offene Frage zu
+bereits verschickten Erinnerungen blieb offen statt stillschweigend
+mitentschieden), und danach erfolgreich exportiert. Spec 03 verlangt nur
+Verweigerung samt Given/When/Then-Forderung, keinen Abbruch — die Fixture
+trägt selbst den feature-spec-Artefakt-Header, ist also ein Wegwerf-Entwurf
+der Skill, und genau dessen Prosa in Given/When/Then zu überführen ist die
+Arbeit dieser Skill. Behoben: die zwei `file_absent` entfernt, dafür eine
+`file_matches`-Assertion auf `docs/specs/wip/notifications.md`, die belegt,
+dass die Überschrift „Erinnerung bei Verschiebung" von einer `- Given`-Zeile
+gefolgt wird — prüft die Reihenfolge Verweigerung → Überführung → Export,
+statt den Abbruch zu erzwingen. Bleibt `class: "contract"`, wie vom
+Koordinator vorgegeben: alle Assertionen (`file_matches`, `output_matches`,
+`git_head_unchanged`) sind weiterhin mechanisch, kein Judge nötig.
+
+**`vague-request-drafts-with-marked-assumptions`:** `output_matches` auf
+`(?i)annahme:` prüfte die Agent-Ausgabe (stdout), während alle drei
+Judge-Claims über den Entwurf bestanden. Der Judge sieht die geänderten
+Dateien, `output_matches` nur stdout — der Entwurf landete korrekt als Datei
+mit markierten Annahmen, nur eben nicht auf stdout gespiegelt, was Spec 03
+nirgends verlangt. Behoben: `file_matches` auf die Entwurfsdatei statt
+`output_matches` auf stdout.
+
+Dafür musste der Ablageort des Entwurfs erstmals mechanisch vorhersagbar
+werden — vorher legte SKILL.md nur das Verzeichnis (`docs/specs/wip/`) fest,
+nicht den Dateinamen. Ergänzt: `<feature>` ist der slugifizierte
+Feature-Titel, dieselbe Regel wie `export_stubs.py:slugify()` — SKILL.md
+Schritt 3 und `references/spec-schema.md` (Abschnitt „Feature-Titel").
+Damit ist `docs/specs/wip/notifications.md` für den Prompt „Bau mir
+Notifications." kein Raten mehr, sondern folgt deterministisch aus der
+Doktrin: Der Prompt nennt „Notifications" als Feature-Titel wörtlich, die
+Slugify-Regel ist eindeutig.
+
+**Verifikation:**
+```
+187 passed (unverändert — diese Runde änderte nur evals.json und Doktrin-Text, keinen Code)
+evalkit.schema.load_evals('evals/feature-spec/evals.json') -> 4 Evals,
+  Klassen: contract, behavior, behavior, behavior (unverändert)
+prose-criteria-refuses-export: file_matches-Pattern manuell gegen eine
+  simulierte überführte und eine unveränderte Prosa-Fassung getestet —
+  trennt korrekt (True/False)
+```
+
+**Was weiterhin nicht verifiziert werden konnte:** Die beiden korrigierten
+Evals wurden seit dem Fix noch nicht erneut real gelaufen — die Korrektur
+stützt sich auf den vom Koordinator nachvollzogenen Befund, nicht auf einen
+bestätigenden Wiederholungslauf. Insbesondere ist ungeprüft, ob die neue
+`file_matches`-Regex für `prose-criteria-refuses-export` exakt das Format
+trifft, das ein echter Agent beim Überführen von Prosa nach Given/When/Then
+erzeugt (Einrückung, Leerzeile zwischen Überschrift und erster Bullet-Zeile
+o. Ä. könnten variieren) — das Pattern wurde nur gegen von Hand konstruierte
+Beispiele getestet, nicht gegen echten Modell-Output. Siehe
+`docs/known-limits.md`, Abschnitt `## feature-spec`.
+
+## Commits, Stand nach Fix-Runde 2 (feat/feature-spec, ab Basis 0831fb7)
+
+```
+07dcc25 docs(feature-spec): Implementierungsplan
+108d3e5 docs(feature-spec): Spec-Schema, Template und Entscheidungsgedächtnis-Guide
+1739714 feat(feature-spec): export_stubs.py parst Given/When/Then und exportiert pytest-/Vitest-Stubs
+371ce70 test(feature-spec): export_stubs.py — Contract-Verweigerung, Overwrite-Schutz, Re-Export
+ac08efa feat(feature-spec): SKILL.md — Draft-first-Doktrin, Contract, Abgrenzung
+02d07c9 feat(feature-spec): vier Eval-Fixtures — Prosa-Falle, vage Anfrage, Entscheidungs-Konflikt, Mandanten-Scope
+152542c feat(feature-spec): vier Evals — Prosa-Falle als Contract zuerst
+7021327 docs: feature-spec-Ausnahme in artifact-header.md, README-Routing aktualisiert
+f6f6cb6 docs: Abschlussbericht feature-spec
+f39de85 fix(feature-spec): Skip-/Todo-Marker als aktive Zeile prüfen, nicht als Substring
+5c0c847 fix(feature-spec): decisions-conflict-is-surfaced von contract auf behavior reklassifiziert
+bed9c57 fix(feature-spec): Dateiname des Spec-Entwurfs festgenagelt statt frei gewählt
+cc7cb6d fix(feature-spec): file_absent-Überstrenge und output_matches-Fehlort in zwei Evals behoben
+<diese Doku-Änderung selbst — siehe `git log --oneline 0831fb7..HEAD` für den vollständigen, aktuellen Stand>
+```

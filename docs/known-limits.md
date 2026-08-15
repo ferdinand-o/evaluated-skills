@@ -153,13 +153,30 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   `prose-criteria-refuses-export` mechanisch und ohne Judge-Kosten prüfbar
   — die übrigen drei brauchen einen echten Agentenlauf plus Judge, was den
   vollen Eval-Durchlauf dieser Skill teurer macht als ursprünglich geplant.
-- **Alle drei `behavior`-Evals sind bis zum ersten echten Agentenlauf
-  ungeprüft.** `run_evals.py` wurde für diese Skill noch nicht ausgeführt
-  (zentral koordiniert). Ob die Judge-Claims tatsächlich messen, was sie zu
-  messen behaupten — insbesondere der neu formulierte Claim für
-  `decisions-conflict-is-surfaced`, der explizit „benennt UND erkennt den
-  Widerspruch UND trifft eine Wahl" in einem Claim verlangt —, ist
-  unbestätigt.
+- **Erster echter Lauf: 2 von 4 Evals bestanden, 2 an Eval-Defekten
+  gescheitert — nicht an der Skill.** `run_evals.py` lief zentral koordiniert
+  gegen alle vier Evals. `decisions-conflict-is-surfaced` und
+  `hidden-scope-risk-lands-in-non-goals` bestanden unverändert. Die beiden
+  anderen fielen an zu strengen Assertionen, nicht an Skill-Verhalten
+  (Fix-Runde 2): `prose-criteria-refuses-export` verlangte mit zwei
+  `file_absent`-Assertionen fälschlich, dass der Lauf nach der Verweigerung
+  stehenbleibt, obwohl die Skill korrekt weiterarbeitete (Prosa-Kriterium
+  nach Given/When/Then überführt, dann erfolgreich exportiert) — Spec 03
+  verlangt nur die Verweigerung samt Given/When/Then-Forderung, keinen
+  Abbruch. `vague-request-drafts-with-marked-assumptions` prüfte
+  `output_matches` auf `(?i)annahme:` gegen die Agent-Ausgabe (stdout), der
+  Entwurf mit markierten Annahmen entstand aber korrekt als Datei, nur ohne
+  stdout-Spiegelung, die Spec 03 nirgends verlangt. Beide Assertionen sind
+  jetzt auf `file_matches` gegen das tatsächliche Artefakt umgestellt; dafür
+  musste der Ablageort des Entwurfs erstmals mechanisch vorhersagbar gemacht
+  werden (SKILL.md Schritt 3: Dateiname = slugifizierter Feature-Titel,
+  vorher frei). **Die beiden korrigierten Evals wurden seit dem Fix noch
+  nicht erneut real gelaufen** — die Korrektur ist durch Nachvollzug der
+  inspizierten Workspaces begründet, nicht durch einen bestätigenden
+  Wiederholungslauf. Der neu formulierte Dreifach-Judge-Claim für
+  `decisions-conflict-is-surfaced` („benennt UND erkennt den Widerspruch UND
+  trifft eine Wahl") bestand bereits im echten Lauf, ist also nicht mehr rein
+  hypothetisch.
 - **Kein Pflicht-Anti-Zeremonie-Eval.** Spec 00 §2 verlangt „mindestens ein
   Anti-Zeremonie-Eval" pro Skill; Spec 03 nennt aber vier feste, andere
   Evals. Keiner der vier deckt den trivialen Fall ab (eine Anfrage, die
