@@ -29,9 +29,13 @@ Fragen sind die Ausnahme (siehe Fallback in Schritt 2), nicht der Einstieg.
    zwei bis drei entscheidende Fragen. Sonst weiter zu Schritt 3. Interview
    ist die Ausnahme, nicht der Weg.
 3. **Entwurf schreiben** nach `assets/spec-template.md`, Feldregeln in
-   `references/spec-schema.md`, nach `docs/specs/wip/<feature>.md`. Kündige
-   die Erstanlage an (Spec 00 Bootstrap-Regel) und trag die Artefakt-
-   Kopfzeile ein.
+   `references/spec-schema.md`, nach `docs/specs/wip/<feature>.md` — `<feature>`
+   ist der slugifizierte Feature-Titel (kleingeschrieben, Umlaute
+   transliteriert, alles außer `a-z0-9` wird `-`, dieselbe Regel wie
+   `export_stubs.py:slugify()`), nicht frei gewählt. So stimmt der
+   Dateiname mit dem überein, was `export_stubs.py` ohne `--feature`-Flag
+   selbst herleiten würde. Kündige die Erstanlage an (Spec 00
+   Bootstrap-Regel) und trag die Artefakt-Kopfzeile ein.
 4. **Vorlegen.** Der Nutzer reagiert auf den Entwurf — widerspricht
    Annahmen, beantwortet offene Fragen. Kein „ist das ok?" ohne Inhalt.
 5. **Stubs exportieren**, sobald der Entwurf steht:

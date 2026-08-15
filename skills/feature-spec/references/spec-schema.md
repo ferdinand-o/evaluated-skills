@@ -38,6 +38,12 @@ Bindestriche enthalten). Fehlt die `# Feature:`-Zeile, versucht es die erste
 `# `-Überschrift, danach den Dateinamen der Spec — beides ohne
 Fehlermeldung, aber weniger lesbar. Explizit ist besser.
 
+Der Dateiname des Entwurfs selbst folgt derselben Regel: `docs/specs/wip/
+<feature>.md`, wobei `<feature>` der slugifizierte Feature-Titel ist (SKILL.md
+Schritt 3) — nicht frei gewählt. Damit stimmt der Ablageort mit dem überein,
+was `export_stubs.py` ohne `--feature`-Flag selbst aus der `# Feature:`-Zeile
+herleiten würde.
+
 ## Non-Goals
 
 Eine flache Liste. Mindestens eine Zeile — leer oder fehlend verweigert den
