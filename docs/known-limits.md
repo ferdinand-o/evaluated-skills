@@ -41,6 +41,25 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   Prozessspeicher (`Transcript.stdout`) und schreibt sie nirgends auf Platte. Ein
   Fehlschlag lässt sich nach dem Lauf nicht mehr nachvollziehen, nur mit
   `--keep-workspace` grob rekonstruieren.
+- **`Transcript.stdout` enthält nur die letzte Assistant-Nachricht, nicht den
+  Gesprächsverlauf.** Empirisch bestätigt (motion-landing-Diagnose, Fix-Runde 2):
+  `evalkit.dispatch.run_agent` startet `claude -p` ohne `--output-format`, also mit
+  dem Default `text`. Ein Kontrolllauf, der den Agenten explizit anwies, erst einen
+  Markertext zu schreiben, dann ein Tool zu benutzen, dann einen zweiten
+  Markertext zu schreiben, lieferte in `stdout` ausschließlich den zweiten Marker
+  — der erste, vor dem Tool-Aufruf geschriebene Text war spurlos verschwunden.
+  Jede `judge`-Assertion, die etwas über eine frühere Gesprächsrunde behauptet
+  („die Antwort enthält, *bevor* Code gebaut wird, X") ist damit strukturell
+  ungeprüft, unabhängig davon, wie gut Skill oder SKILL.md sind — der Judge sieht
+  nur, was in der letzten Nachricht steht, plus den Diff der geänderten Dateien
+  (`dump_changed_files`, ein Endzustand ohne Chronologie). Betraf real
+  `evals/motion-landing/evals.json::google-labs-prompt-yields-single-highlight-storyboard`:
+  Der Agent hatte ein korrektes Storyboard erzeugt, die Abschlussantwort verwies
+  nur darauf, statt es zu wiederholen — der Judge sah es nie und verneinte den
+  Claim. Fix dort: Der Claim prüft jetzt die Abschlussantwort selbst, und die
+  Skill wiederholt das Storyboard darin (siehe `## motion-landing` unten). Für den
+  Harness insgesamt bleibt es eine offene Lücke: `--output-format stream-json`
+  würde den vollen Verlauf liefern, ist hier aber nicht eingebaut.
 - **Kein Wiederaufnehmen eines abgebrochenen Batches.** Bricht `run_evals.py` bei
   Eval 40 von 60 ab (Absturz, Ctrl-C, Timeout der Umgebung), beginnt der nächste
   Lauf wieder bei Eval 1. Kein Checkpoint, kein `--resume`.
@@ -197,20 +216,45 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   ein Judge-Claim, der die Kaskade als Ganzes bewertet. Mechanisch
   nachgestellt (siehe Commit-Historie): Der defekte Fix erfüllt keines der
   vier `must_not`-Muster mehr — die Erkennung hängt jetzt vollständig vom
-  Judge-Urteil ab, das nie gegen einen echten Agentenlauf geprüft wurde
-  (siehe nächster Punkt).
-- **Eval 1 und Eval 3 laufen nie ohne `run_evals.py`.** Beide sind
-  `class: behavior` mit Judge-Claims
-  (`google-labs-prompt-yields-single-highlight-storyboard`:
-  Ein-Höhepunkt-Storyboard statt Effekt-Konfetti;
-  `reduced-motion-scene-shows-static-content-not-frozen-hidden`: Sichtbarkeit
-  des Panel-Inhalts unter der CSS-Kaskade). Keiner der Claims wurde gegen
-  einen echten Agentenlauf verifiziert — nur das Schema wurde mechanisch
-  geprüft (`evalkit.schema.load_evals`). Ob die Claims tatsächlich zwischen
-  einem korrekten und einem defekten Fix unterscheiden, zeigt sich erst
-  beim ersten echten Judge-Lauf — insbesondere für Eval 3, dessen
-  Judge-Claim genau den in dieser Fix-Runde gefundenen Defekt auffangen
-  soll und dessen Formulierung deshalb noch ungeprüft ist.
+  Judge-Urteil ab. Ein echter Voll-Lauf (siehe nächster Punkt) hat diesen
+  Judge-Claim inzwischen bestanden — ein einzelner Durchlauf, keine
+  Serienprüfung gegen mehrere Fix-Varianten.
+- **Alle vier Evals sind inzwischen mindestens einmal real gelaufen — mit einem
+  gefundenen und behobenen Defekt.** Ein Voll-Lauf durch den Koordinator ergab
+  zunächst 3 von 4 bestanden: `artifact-context-degrades-visibly`,
+  `cls-trap-hero-gets-fixed-to-transform` und
+  `reduced-motion-scene-shows-static-content-not-frozen-hidden` bestanden real
+  (auch mit der in dieser Fix-Runde neu geschriebenen Judge-Claim-Fassung des
+  letzteren, siehe oben). Gefallen war
+  `google-labs-prompt-yields-single-highlight-storyboard`, und zwar genau am
+  ersten Claim („Storyboard-Block vor jeder Implementierung"). Diagnose per
+  Wegwerf-Eval-Sammlung (`--evals-dir`, `--keep-workspace`, zwei reale Läufe)
+  ergab: Der Agent hatte ein korrektes, formvollständiges Storyboard erzeugt
+  (`scenes.json` mit fünf typisierten Szenen, exakt ein `highlight: true`,
+  HTML-Kommentare je Szene mit Typ und Status) — SKILL.md wurde also befolgt,
+  nicht umgangen. Die Ursache lag im Harness, nicht in der Skill: siehe
+  `## Betrieb` oben, `Transcript.stdout` enthält nur die letzte
+  Assistant-Nachricht, das Storyboard stand aber in einer früheren Runde. Fix:
+  SKILL.md verlangt jetzt (Ablauf, Schritt 6), dass die Abschlussmitteilung
+  die Szenenliste wiederholt statt nur zu referenzieren; der erste Claim
+  prüft entsprechend die Abschlussantwort. Ein erneuter realer Lauf desselben
+  Evals bestand danach. Das ist trotzdem keine Stabilitätsgarantie — ein
+  einzelner bestandener Lauf zeigt, dass die Formulierung in diesem einen Fall
+  trug, nicht dass sie es bei jeder möglichen Formulierung des Agenten tut;
+  LLM-Agentenläufe sind nicht deterministisch.
+- **Beiläufig geprüft: `~/.skills`-Schreibzugriffe.** Der Koordinator wies auf
+  den bei `visual-summary` gefundenen Fehler hin (Fixture ohne `"git": true` →
+  Skill schreibt regelkonform nach `~/.skills/<skill>/`, außerhalb jeder
+  Assertion). Nachgesehen: `~/.skills/` enthält nach den Diagnose-Läufen dieser
+  Fix-Runde nur `visual-summary/`, kein `motion-landing/`. Plausibler Grund:
+  `verify.py`s `DEFAULT_OUT` (`.skills/cache/motion-landing/`) ist ein relativer
+  Pfad zum Arbeitsverzeichnis (dem Workspace-Root, in dem `dispatch.run_agent`
+  den Agenten startet), keine Pfadauflösung, die bei fehlendem `.git` auf
+  `$HOME` ausweicht — anders als offenbar bei `visual-summary`. Die
+  `empty-dir`-Fixture (`"git": false`, von zwei meiner vier Evals genutzt) ist
+  davon also nicht betroffen; mangels einer zweiten, unabhängigen Codeprüfung
+  bleibt das eine Beobachtung aus einer Handvoll Läufen, kein Beweis für jeden
+  denkbaren Prompt.
 - **Die drei Szenen ohne Demo (`marquee`, `stagger-grid`, `closing-cta`) sind
   reine Prosa.** Ihre Rezepte beschreiben Technik und Fallstricke, aber ohne
   eine lauffähige Demo dahinter ist nichts davon gegen einen echten Browser

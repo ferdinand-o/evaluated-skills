@@ -25,14 +25,14 @@
       "fixture": "empty-dir",
       "prompt": "Mach die Seite wie Google Labs.",
       "must": [
-        {"type": "judge", "claim": "Die Antwort enthält, bevor irgendein Code oder eine Demo eingebaut wird, einen erkennbaren Storyboard-Block: eine Szenenliste mit Typ, Technik und einer Höhepunkt-Markierung je Szene."},
-        {"type": "judge", "claim": "In diesem Storyboard-Block ist genau eine Szene als Höhepunkt markiert — nicht null und nicht mehrere."},
+        {"type": "judge", "claim": "Die Abschlussantwort enthält eine erkennbare Szenenliste als Aufzählung — je Szene Name/Typ, Technik und ob sie der Höhepunkt ist —, nicht nur einen Verweis auf ein Storyboard ohne die Liste selbst (ein Satz wie 'nach dem Storyboard oben' ohne die Aufzählung reicht nicht)."},
+        {"type": "judge", "claim": "In dieser Szenenliste ist genau eine Szene als Höhepunkt markiert — nicht null und nicht mehrere."},
         {"type": "judge", "claim": "Die geplante Bewegung ist zurückhaltend: Es wird nicht versucht, möglichst viele verschiedene Szenen-Typen oder Animationstechniken gleichzeitig einzubauen ('Effekt-Konfetti'), sondern eine kleine, dramaturgisch begründete Auswahl."}
       ],
       "must_not": [
         {"type": "judge", "claim": "Der Storyboard-Block markiert mehr als eine Szene als Höhepunkt, oder es gibt gar keinen als Höhepunkt markiert."}
       ],
-      "notes": "Spec 06s erster Eval, bewusst als behavior: 'ein Höhepunkt statt Effekt-Konfetti' ist ein Urteil über Form und Zurückhaltung der Antwort, keine Datei-Assertion. Ohne weitere Nutzerangaben muss die Skill trotzdem den Storyboard-Contract aus SKILL.md einhalten."
+      "notes": "Spec 06s erster Eval, bewusst als behavior: 'ein Höhepunkt statt Effekt-Konfetti' ist ein Urteil über Form und Zurückhaltung der Antwort, keine Datei-Assertion. Fix-Runde 2 (echter Lauf): Der ursprüngliche erste Claim verlangte 'vor irgendein Code eingebaut wird' — eine Reihenfolge-Eigenschaft über mehrere Gesprächsrunden hinweg, die der Harness strukturell nicht beobachten kann. evalkit.dispatch.run_agent startet `claude -p` mit dem Default `--output-format text`; das liefert laut Test (siehe docs/known-limits.md, Abschnitt Betrieb) ausschließlich die LETZTE Assistant-Nachricht, keine früheren Turns. Der reale Lauf zeigte genau das: Der Agent hatte ein korrektes Storyboard erzeugt (scenes.json mit fünf typisierten Szenen, exakt ein 'highlight': true, HTML-Kommentare je Szene mit Typ und Status) und die Abschlussantwort verwies darauf ('Umgesetzt nach dem Storyboard oben') — aber die Liste selbst stand nur in einer früheren, nicht erfassten Runde, der Judge sah sie nie. Fix: SKILL.md verlangt jetzt (Ablauf, Schritt 6), dass die Abschlussmitteilung die Szenenliste wiederholt statt nur zu referenzieren; der Claim prüft entsprechend die Abschlussantwort statt einer unbeobachtbaren Reihenfolge über Turns hinweg."
     },
     {
       "id": "cls-trap-hero-gets-fixed-to-transform",

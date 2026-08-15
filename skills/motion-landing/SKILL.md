@@ -31,6 +31,11 @@ und niemand merkt mehr, welche Version gilt.
 5. **Befund-Review vor Auslieferung**: Screenshots an den Szenen-Grenzen
    selbst ansehen — Szene sichtbar? Layout-Sprung? Höhepunkt dort, wo
    geplant? „Ruckelt nicht" ist ein Befund, keine Behauptung.
+6. **Storyboard in der Abschlussmitteilung wiederholen** — als Liste, nicht
+   als Verweis („wie oben geplant" reicht nicht). Im nicht-interaktiven
+   Modus (`claude -p`, Skripte, dieser Eval-Harness) sieht der Aufrufer nur
+   die letzte Nachricht; ein Storyboard, das nur in einer früheren Runde
+   stand, kommt dort nie an.
 
 ## Szenen-Grammatik
 
