@@ -128,7 +128,80 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## motion-landing
+
+- **Der Erfolgspfad von `verify.py` ist komplett ungetestet.** Playwright und
+  Lighthouse sind in der Entwicklungsumgebung dieser Skill nicht installiert
+  und wurden absichtlich nicht installiert (Auftragsbeschränkung). Konkret
+  ungeprüft: `run_playwright_capture` (echtes Scrollen, echte Screenshots an
+  den Szenen-Grenzen, echte `prefers-reduced-motion`-Emulation über einen
+  Browser-Context, echte Video-Aufnahme mit `--video`), `run_lighthouse`
+  (echter Node/Lighthouse-CLI-Aufruf) und der Teil von `main()`, der beide
+  zusammenführt und daraus `all_budgets_pass` ableitet. Getestet ist nur die
+  *Struktur* dieses Pfads — über Doubles für beide Funktionen
+  (`tests/test_motion_landing_verify.py::test_main_success_path_*`), nie mit
+  echtem Browser. Real geprüft ist ausschließlich der Degradationszweig, weil
+  diese Umgebung die Toolchain tatsächlich nicht hat
+  (`test_main_degrades_visibly_when_toolchain_is_missing`).
+- **Die vier Vanilla-Demos wurden nie in einem Browser gerendert.** Kein
+  Playwright, kein manueller Browser-Test in dieser Umgebung möglich. Die CSS
+  Scroll-Driven Animations (`animation-timeline: scroll()`/`view()`) sind nach
+  Spezifikation geschrieben, aber ihr tatsächliches Laufzeitverhalten —
+  insbesondere `animation-range`-Werte, das Zusammenspiel von
+  `scroll(nearest)` mit verschachtelten Containern, und ob der
+  Feature-Detection-Umschlag (`CSS.supports(...)` → Klasse/Attribut) wirklich
+  greift, bevor der erste Repaint sichtbar wird — ist unverifiziert.
+- **Die vier React-Adapter wurden nie gebaut oder gerendert.** Dieses Repo hat
+  keine Node-/React-Toolchain (kein `npm`, kein installiertes React/JSX-
+  Tooling). Die `.jsx`-Dateien sind von Hand nach der Vanilla-Demo und dem in
+  `references/adapters.md` beschriebenen Mapping geschrieben, aber nie durch
+  einen Compiler, Linter oder Browser gelaufen — Syntaxfehler oder ein
+  gebrochener Hook (z. B. eine vergessene Dependency in `useEffect`) wären
+  hier nicht aufgefallen.
+- **INP wird ohne echte Interaktion nur über einen dokumentierten Näherungswert
+  geschätzt.** Lighthouse liefert in einem reinen Lab-Lauf ohne simulierte
+  Nutzerinteraktion kein belastbares `interaction-to-next-paint`-Audit.
+  `evaluate_budgets()` fällt in diesem Fall auf `total-blocking-time` zurück
+  und markiert das über `BudgetCheck.note` — aber ob `run_playwright_capture`
+  im Erfolgspfad überhaupt eine Interaktion simuliert, die ein echtes
+  INP-Audit auslösen würde, ist ungeklärt und ungetestet (siehe Punkt eins).
+- **Die `must_not`-Regexe in den zwei neuen Fixtures sind gegen Umformulierung
+  fragil**, dieselbe Klasse von Grenze wie bei dev-report oben.
+  `cls-trap-hero-gets-fixed-to-transform` prüft `@keyframes[\s\S]{0,300}?margin-top`
+  und `@keyframes[\s\S]{0,300}?\btop\s*:` gegen die Datei `styles.css` — ein
+  Fix, der die Animation in ein anderes File, ein `<style>`-Tag in
+  `index.html` oder einen CSS-in-JS-Ansatz verschiebt, entgeht der Assertion
+  vollständig, obwohl die Falle (Animation von `top`/`margin-top`) weiterhin
+  besteht. `reduced-motion-scene-shows-static-content-not-frozen-hidden` prüft
+  nur `display: none` und `visibility: hidden` innerhalb eines 300-Zeichen-
+  Fensters nach der Media Query — ein Fix, der stattdessen `height: 0`,
+  `clip-path`, `transform: scale(0)` oder `max-height: 0` einsetzt, um den
+  Inhalt ebenso unsichtbar zu machen, würde beide `must_not`-Muster
+  passieren, obwohl der Contract („statisch sichtbar, nicht versteckt")
+  weiterhin verletzt ist. Beide Regex-Paare wurden gegen einen simulierten
+  echten Fix und einen simulierten umformulierten-aber-weiterhin-
+  verstoßenden Fix durchprobiert (siehe Commit-Historie) — das zeigt, dass
+  sie die *geprüften* Umgehungen fangen, nicht dass sie erschöpfend sind.
+- **Eval 1 (`google-labs-prompt-yields-single-highlight-storyboard`) läuft nie
+  ohne `run_evals.py`.** Die drei Judge-Claims wurden nicht gegen einen
+  echten Agentenlauf verifiziert — nur das Schema wurde mechanisch geprüft
+  (`evalkit.schema.load_evals`). Ob die Claims tatsächlich zwischen einem
+  disziplinierten Ein-Höhepunkt-Storyboard und „Effekt-Konfetti"
+  unterscheiden, zeigt sich erst beim ersten echten Judge-Lauf.
+- **Die drei Szenen ohne Demo (`marquee`, `stagger-grid`, `closing-cta`) sind
+  reine Prosa.** Ihre Rezepte beschreiben Technik und Fallstricke, aber ohne
+  eine lauffähige Demo dahinter ist nichts davon gegen einen echten Browser
+  geprüft — anders als bei den vier Kern-Demos, wo zumindest der Code
+  existiert, auch wenn er ungerendert blieb (siehe oben).
+- **Der Storyboard-Contract ist nur teilweise mechanisch erzwungen.**
+  `verify.py` prüft `validate_single_highlight()` ausschließlich gegen eine
+  `scenes.json`, die *nach* der Storyboard-Entscheidung entsteht — der
+  Storyboard-*Text* in der Chat-Antwort selbst (das, was SKILL.md als
+  Pflicht-Output vor jeder Implementierung verlangt) hat keine mechanische
+  Prüfung, nur Eval 1s Judge-Claims.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
-[Plan](superpowers/plans/2026-08-14-eval-harness.md)
+[Plan](superpowers/plans/2026-08-14-eval-harness.md) ·
+[Plan motion-landing](superpowers/plans/2026-08-15-motion-landing.md)
