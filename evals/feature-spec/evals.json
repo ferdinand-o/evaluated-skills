@@ -1,0 +1,64 @@
+{
+  "evals": [
+    {
+      "id": "prose-criteria-refuses-export",
+      "class": "contract",
+      "fixture": "prose-criteria",
+      "prompt": "Exportiere die Test-Stubs für den Spec-Entwurf docs/specs/wip/notifications.md.",
+      "must": [
+        {"type": "file_absent", "path": "tests/test_notifications_erinnerungsmail_wird_verschickt.py"},
+        {"type": "file_absent", "path": "tests/test_notifications_erinnerung_bei_verschiebung.py"},
+        {"type": "output_matches", "pattern": "(?i)zeile\\s+\\d+"},
+        {"type": "output_matches", "pattern": "(?i)given"},
+        {"type": "output_matches", "pattern": "(?i)when"},
+        {"type": "output_matches", "pattern": "(?i)then"},
+        {"type": "git_head_unchanged"}
+      ],
+      "must_not": [],
+      "notes": "Trägt den Contract aus Spec 03 (der wichtigste Eval, zuerst gebaut). Das zweite Kriterium in der Fixture ist Fließtext statt Given/When/Then. Der Export muss verweigern und darf KEINE der beiden Stub-Dateien schreiben — auch nicht die des validen ersten Kriteriums, sonst sähe ein Teilexport wie ein Erfolg aus. Die vier Given/When/Then-Assertions sind bewusst einzeln formuliert statt als ein Kombi-Pattern, damit eine Umformulierung der Meldung nicht versehentlich alle vier gleichzeitig unterläuft."
+    },
+    {
+      "id": "decisions-conflict-is-surfaced",
+      "class": "contract",
+      "fixture": "decisions-conflict",
+      "prompt": "Ich brauche eine Spec für einen neuen Endpunkt, der Fehler als reines JSON {\"status\": \"error\", \"message\": \"...\"} zurückgibt — ganz ohne error.code, das reicht dem Frontend.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)decisions\\.md"},
+        {"type": "output_matches", "pattern": "(?i)error\\.code"},
+        {"type": "output_matches", "pattern": "(?i)widerspr\\w*|konflikt"}
+      ],
+      "must_not": [],
+      "notes": "docs/decisions.md legt bereits ein Pflicht-error.code-Format fest; die Anfrage will explizit ohne error.code auskommen. Die Assertion prüft nicht nur, DASS die Skill behauptet, decisions.md geprüft zu haben, sondern DASS der konkrete entschiedene Begriff (error.code) im Output auftaucht — eine Skill, die nur pauschal 'ich prüfe decisions.md' sagt, ohne den Inhalt zu nennen, fällt durch."
+    },
+    {
+      "id": "vague-request-drafts-with-marked-assumptions",
+      "class": "behavior",
+      "fixture": "vague-feature",
+      "prompt": "Bau mir Notifications.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)annahme:"},
+        {"type": "judge", "claim": "Es entsteht sofort ein vollständiger Spec-Entwurf (mit Problem, Non-Goals, Annahmen, Ansatz, Akzeptanzkriterien als Given/When/Then und offenen Fragen), ohne dass zuerst eine Serie von Rückfragen an den Nutzer gestellt wird."},
+        {"type": "judge", "claim": "Jede ungesicherte Annahme im Entwurf steht als eigene, einzeln herausgehobene 'Annahme:'-Zeile — keine Annahme ist unmarkiert in Fließtext versteckt."},
+        {"type": "judge", "claim": "Der Entwurf behauptet nicht ungeerdet, vollständig oder fertig zu sein; wo er auf Annahmen beruht, wird das benannt statt als sicheres Wissen dargestellt."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die Antwort besteht überwiegend aus einer Liste von Rückfragen an den Nutzer, bevor irgendein Entwurfsinhalt vorgelegt wird."}
+      ],
+      "notes": "Spec 03s erster Eval: draft-first statt interview-first. Die Fixture liefert genug Codebase-Kontext (EmailService, EventBus, kein Push/SMS-Kanal), damit plausible, konkrete Annahmen möglich sind statt generischer Platzhalter."
+    },
+    {
+      "id": "hidden-scope-risk-lands-in-non-goals",
+      "class": "behavior",
+      "fixture": "scope-risk-tenant",
+      "prompt": "Bau mir einen CSV-Export für alle Bestellungen.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)mandant|tenant"},
+        {"type": "judge", "claim": "Der Spec-Entwurf listet unter Non-Goals explizit, dass der Export nicht mandantenübergreifend arbeitet bzw. sich auf den aktuellen Mandanten beschränkt — als eigene Non-Goals-Zeile, nicht nur beiläufig im Ansatz erwähnt."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Non-Goals bleibt bei allgemeinen Floskeln wie 'wir bauen nicht alles auf einmal', ohne den konkreten Mandanten-Bezug dieser Codebase zu benennen."}
+      ],
+      "notes": "Spec 03s dritter Eval. Die Fixture-Codebase scoped jede Query strikt auf tenant_id — die Anfrage 'alle Bestellungen' trägt das Risiko einer mandantenübergreifenden Auswertung, ohne dass der Nutzer das ausgesprochen hat. Das Risiko muss in den Non-Goals landen, nicht nur beiläufig erwähnt werden."
+    }
+  ]
+}
