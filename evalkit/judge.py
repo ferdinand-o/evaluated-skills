@@ -9,9 +9,10 @@ from pathlib import Path
 from evalkit.dispatch import run_agent
 
 PROMPT_TEMPLATE = """Du bist Judge in einem Eval-Harness. Beurteile jede Behauptung
-ausschließlich anhand des Materials unten — der Schlussantwort des Agenten und dem
-Inhalt der Dateien, die er angelegt oder verändert hat. Du bewertest nicht die
-Qualität der Arbeit, nur ob die Behauptung beobachtbar zutrifft.
+ausschließlich anhand des Materials unten — allen Textausgaben des Agenten in
+zeitlicher Reihenfolge und dem Inhalt der Dateien, die er angelegt oder verändert
+hat. Du bewertest nicht die Qualität der Arbeit, nur ob die Behauptung beobachtbar
+zutrifft.
 
 Regeln:
 - Eine Behauptung gilt nur als erfüllt, wenn das Material sie belegt.
@@ -25,7 +26,7 @@ Format:
 Behauptungen:
 {claims}
 
---- SCHLUSSANTWORT DES AGENTEN ---
+--- TEXTAUSGABEN DES AGENTEN, IN REIHENFOLGE ---
 {transcript}
 --- ENDE SCHLUSSANTWORT ---
 
@@ -105,7 +106,10 @@ def judge(
     result = run_agent(build_prompt(claims, transcript, workspace_dump), cwd, cli=cli, timeout=timeout)
     if result.exit_code != 0:
         raise JudgeError(f"Judge-Prozess scheiterte (exit {result.exit_code}): {result.stderr.strip()[:200]}")
-    verdicts = parse_verdict(result.stdout)
+    # `text`, nicht `stdout`: Letzteres ist seit der Umstellung auf stream-json das
+    # rohe Ereignis-Transcript. `parse_verdict` fände darin kein 'verdicts' und der
+    # Eval verschwände als Harness-Fehler aus dem PASS/FAIL-Bild.
+    verdicts = parse_verdict(result.text)
     missing = [claim for claim in claims if claim not in verdicts]
     if missing:
         raise JudgeError(f"Judge hat {len(missing)} Behauptung(en) nicht beurteilt: {missing[0]!r}")
