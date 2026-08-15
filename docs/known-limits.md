@@ -199,6 +199,48 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   läuft jetzt mit einem Judge-Claim, der Vollständigkeit und Abwesenheit von
   Rauschen strukturell verlangt — kostet damit einen Judge-Aufruf mehr und läuft
   nicht mehr im billigen `--class contract`-Routine-Gate mit.
+- **Fünf Fixtures trugen `"git": false`, obwohl ihre Evals einen Repo-Pfad
+  prüften — der erste echte Lauf ging deshalb 0 von 6 bestanden durch.**
+  `SKILL.md` legt fest: Repo (`.git` im cwd oder Elternverzeichnis) →
+  `docs/summaries/…`, sonst `~/.skills/visual-summary/summaries/…`. Fünf der
+  sechs Fixtures (`buried-number-doc`, `chat-three-decisions`, `unbelegt-draft`,
+  `budget-trap-doc`, `trivial-note`) trugen `"git": false`, während ihre
+  Assertions durchweg Pfade unter `docs/summaries/` erwarteten. Die Skill hat
+  sich korrekt verhalten — ohne `.git` im Workspace griff der Nicht-Repo-Zweig,
+  und jede Zusammenfassung landete im echten Home-Verzeichnis des ausführenden
+  Nutzers, außerhalb jeder Workspace-Beobachtung (`evalkit.workspace.snapshot()`
+  sieht nur Dateien unter der Workspace-Wurzel, siehe oben). Kein einziger
+  `file_exists`/`file_matches`/`file_max_lines` konnte das je erreichen. Behoben
+  durch `"git": true` in allen fünf Fixture-Manifesten — `empty-dir` (für
+  `bare-request-triggers-triage`, das absichtlich keinen Repo-Pfad erwartet)
+  bleibt `false`.
+  **Die Lehre, allgemein für künftige Skills dieser Sammlung:** Eine
+  Fixture, die einen conditionalen Ablageort prüft (Repo vs. kein Repo, wie hier;
+  ebenso denkbar bei anderen Skills mit ähnlicher Verzweigung), muss die
+  **Vorbedingung** dieses Zweigs selbst herstellen. Assertions und Fixture
+  beschrieben hier zwei verschiedene Welten — der Eval-Autor sah beim Schreiben
+  der Assertions „wir sind im Repo-Fall" vor Augen und beim Schreiben der
+  Fixture „kein Grund für ein Repo, die Skill braucht ja nur eine Datei" —, und
+  weil jede Seite für sich gelesen plausibel wirkte, fiel die Lücke beim
+  Selbst-Review nicht auf. Erst der reale Agentenlauf zeigte es. Eine Prüfung,
+  die das mechanisch vorab abfangen würde (z. B. ein Schema-Lint, der bei
+  `file_exists`-Pfaden unter einem repo-typischen Präfix wie `docs/` ein
+  `"git": true` in der referenzierten Fixture verlangt), existiert im
+  Eval-Harness nicht — auch das eine Lücke für später.
+- **`bare-request-triggers-triage`s `output_matches`-Regex war zu eng an
+  Schlüsselwörter gebunden — ebenfalls erst im echten Lauf aufgefallen.** Die
+  ursprüngliche Regex verlangte beide Themen (Publikum, Zweck) über feste
+  Wortlisten (`wer\s+liest|leser|zielgruppe|adressat|publikum` bzw.
+  `entscheidung|handlung|zweck|wofür|folgen\s+soll`) plus ein Fragezeichen. Die
+  tatsächliche Formulierung der Skill traf keines der Publikums-Schlüsselwörter
+  (plausibel z. B. „Für wen ist das gedacht?"), obwohl inhaltlich beide Fragen
+  gestellt wurden — dieselbe „spröde Keyword-Regex"-Grenze von `output_matches`,
+  die weiter oben unter „Assertion-Vokabular" bereits als inhärent (nicht als
+  Implementierungsfehler) geführt wird, hier aber trotzdem produktiv zugeschlagen
+  hat. Fix-Runde 3: Eval auf class `behavior` umgestellt, die Regex durch einen
+  Judge-Claim ersetzt, der die beiden Themen inhaltlich statt wortwörtlich
+  prüft. Das `must_not` (`file_absent`) bleibt als mechanischer, wortunabhängiger
+  Riegel bestehen.
 
 ## Verweise
 

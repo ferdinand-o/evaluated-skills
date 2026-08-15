@@ -36,6 +36,43 @@ Validiert: `load_evals('evals/visual-summary/evals.json')` liefert weiterhin
 dort) — unter anderem die verbleibende Lücke, dass die Referenzmarken-Gegenprobe
 selbst noch kein Eval hat.
 
+## Fix-Runde 3 (erster echter Eval-Lauf: 0 von 6)
+
+Der erste reale Lauf zeigte **0 von 6 bestanden** — nicht wegen eines Fehlers
+in der Skill, sondern wegen eines Widerspruchs zwischen Fixtures und
+Assertions:
+
+1. **Fünf Fixtures trugen `"git": false`, ihre Evals prüften aber Pfade unter
+   `docs/summaries/`.** `SKILL.md` legt korrekt fest: Repo → `docs/summaries/…`,
+   sonst `~/.skills/visual-summary/summaries/…`. Ohne `.git` im Workspace griff
+   der Nicht-Repo-Zweig, und jede Zusammenfassung landete im echten
+   Home-Verzeichnis des ausführenden Nutzers — mit korrektem Inhalt und
+   korrekter Kopfzeile, nur außerhalb jeder Workspace-Beobachtung. Die Skill hat
+   sich also contract-treu verhalten; der Fehler lag in der Fixture, nicht in
+   `SKILL.md` (die wurde bewusst **nicht** angefasst). Behoben: `"git": true`
+   in `buried-number-doc`, `chat-three-decisions`, `unbelegt-draft`,
+   `budget-trap-doc`, `trivial-note`. `empty-dir` (für
+   `bare-request-triggers-triage`, das absichtlich keinen Repo-Pfad erwartet)
+   bleibt `false`.
+2. **`bare-request-triggers-triage` fiel zusätzlich an einer zweiten,
+   unabhängigen Stelle:** die `output_matches`-Regex für die beiden
+   Triage-Fragen war zu eng an feste Schlüsselwörter gebunden und traf die
+   tatsächliche Formulierung nicht. Eval auf `behavior` umgestellt, Regex durch
+   einen Judge-Claim ersetzt, der die beiden Themen (Publikum, Zweck) inhaltlich
+   statt wortwörtlich prüft; `must_not` (`file_absent`) bleibt als mechanischer
+   Riegel bestehen.
+
+**Die Lehre** (in `docs/known-limits.md` unter „visual-summary" festgehalten,
+allgemein für künftige Skills dieser Sammlung): Ein Eval, der einen
+Ablageort prüft, muss die *Vorbedingung* dieses Ablageorts in seiner Fixture
+selbst herstellen. Fixture und Assertions beschrieben hier zwei plausible, aber
+verschiedene Welten, und weil jede für sich beim Lesen überzeugend wirkte, fiel
+der Widerspruch erst beim echten Lauf auf, nicht beim Review.
+
+Validiert erneut: `load_evals(...)` liefert `6`, keine `EvalSchemaError`. Volle
+Testsuite weiterhin `146 passed`. Die Evals wurden von mir nicht erneut
+ausgeführt — das läuft zentral direkt nach diesem Commit.
+
 ## Was gebaut wurde
 
 ```
