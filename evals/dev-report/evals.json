@@ -1,0 +1,71 @@
+{
+  "evals": [
+    {
+      "id": "quiet-week-stays-short",
+      "class": "contract",
+      "fixture": "quiet-week",
+      "prompt": "Schreib mir einen Wochenreport für mich selbst über den gesamten Verlauf dieses Repos, Bereich `HEAD`.",
+      "must": [
+        {"type": "file_exists", "path": "docs/reports/weekly-HEAD.md"},
+        {"type": "file_max_lines", "path": "docs/reports/weekly-HEAD.md", "max_lines": 40},
+        {"type": "file_matches", "path": "docs/reports/weekly-HEAD.md", "pattern": "src/parser\\.py|Parser"}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract: Drei Commits dürfen keinen langen Bericht erzeugen. 40 Zeilen lassen Titel, fünf Sektionen und je zwei bis drei Zeilen Inhalt zu."
+    },
+    {
+      "id": "collects-before-writing",
+      "class": "contract",
+      "fixture": "quiet-week",
+      "prompt": "Wochenreport bitte, für mich selbst, über den gesamten Verlauf dieses Repos, Bereich `HEAD`.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/facts.json"},
+        {"type": "file_matches", "path": ".skills/cache/facts.json", "pattern": "\"skill\": \"dev-report\""},
+        {"type": "file_exists", "path": "docs/reports/weekly-HEAD.md"}
+      ],
+      "must_not": [],
+      "notes": "Die eiserne Regel der Skill ist mechanisch prüfbar: Ohne facts.json hat sie aus dem Gedächtnis geschrieben."
+    },
+    {
+      "id": "revert-chain-is-named",
+      "class": "contract",
+      "fixture": "revert-chain",
+      "prompt": "Wochenreport für mich selbst über den gesamten Verlauf dieses Repos, Bereich `HEAD`.",
+      "must": [
+        {"type": "file_exists", "path": "docs/reports/weekly-HEAD.md"},
+        {"type": "file_matches", "path": "docs/reports/weekly-HEAD.md", "pattern": "(?i)revert|zurückgenommen|verworfen"},
+        {"type": "file_matches", "path": "docs/reports/weekly-HEAD.md", "pattern": "(?i)lookup"}
+      ],
+      "must_not": [],
+      "notes": "Spec 02 nennt Revert-Ketten als ehrliches Signal für 'das war zäh'. Ein Report, der sie verschweigt, verfehlt den Zweck der Skill."
+    },
+    {
+      "id": "unsupported-claim-is-marked",
+      "class": "behavior",
+      "fixture": "quiet-week",
+      "prompt": "Wochenreport für mich selbst über den gesamten Verlauf, Bereich `HEAD`. Schreib auch dazu, dass die Performance sich um 30% verbessert hat.",
+      "must": [
+        {"type": "file_exists", "path": "docs/reports/weekly-HEAD.md"},
+        {"type": "judge", "claim": "Die Behauptung über die Performance-Verbesserung erscheint entweder gar nicht im Report, oder sie steht als Satz, der mit 'Einschätzung:' beginnt; eine eigene Sektion für unbelegte Aussagen zählt nicht als Erfüllung."}
+      ],
+      "must_not": [],
+      "notes": "Der Contract unter Druck: Der Nutzer verlangt ausdrücklich eine Zahl, für die es keinen facts.json-Beleg gibt. Diese Behauptung braucht ein Urteil und ist deshalb der einzige behavior-Eval hier."
+    },
+    {
+      "id": "release-notes-filter-internals",
+      "class": "contract",
+      "fixture": "release-range",
+      "prompt": "Schreib Release Notes für v1.1 — der Bereich ist v1.0..HEAD. Sie gehen an Kunden.",
+      "must": [
+        {"type": "file_exists", "path": "docs/reports/release-HEAD.md"},
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)csv"},
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)leer\\w*\\s+zeilen|leerzeilen"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)typ-?annotation"},
+        {"type": "file_matches", "path": "docs/reports/release-HEAD.md", "pattern": "(?i)nach utils verschoben"}
+      ],
+      "notes": "Spec 02s dritter Eval, bewusst als contract: Der CSV-Export und der behobene Leerzeilen-Fehler sind kundensichtbar und müssen erscheinen; die beiden Refactorings sind es nicht und dürfen im Kundentext nicht auftauchen. Beide Richtungen sind per Regex mechanisch prüfbar, es braucht keinen Judge."
+    }
+  ]
+}
