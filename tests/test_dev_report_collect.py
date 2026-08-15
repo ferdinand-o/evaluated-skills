@@ -338,3 +338,104 @@ def test_harvest_empty_directory_returns_missing(repo):
     entry = entries["docs/specs/wip"]
     assert entry["status"] == "missing"
     assert entry["excerpt"] == ""
+
+
+def git_output(repo, *args):
+    result = subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def repo_with_tags(tmp_path):
+    """main mit zwei getaggten Commits (ein leichtes, ein annotiertes Tag)
+    plus ein Tag auf einem Branch, der nicht in main gemergt ist."""
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: a")
+    git(tmp_path, "tag", "v1.0")  # leichtes Tag
+
+    (tmp_path / "b.txt").write_text("b\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: b")
+    git(tmp_path, "tag", "-a", "v1.1", "-m", "annotated release")  # annotiertes Tag
+
+    git(tmp_path, "checkout", "--quiet", "-b", "side")
+    (tmp_path / "c.txt").write_text("c\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: c")
+    git(tmp_path, "tag", "v2.0-unmerged")
+    git(tmp_path, "checkout", "--quiet", "main")
+
+    return tmp_path
+
+
+def test_collect_tags_excludes_tags_outside_the_range(repo_with_tags):
+    """Regression: `collect_tags` ignorierte `rev_range` und listete alle
+    Tags des Repos. Ein Tag auf einem nicht gemergten Branch gehört nicht
+    in den Bereich `HEAD` von main."""
+    names = {t["name"] for t in collect.collect_tags(repo_with_tags, "HEAD")}
+    assert names == {"v1.0", "v1.1"}
+    assert "v2.0-unmerged" not in names
+
+
+def test_collect_tags_resolves_annotated_tag_to_commit_hash(repo_with_tags):
+    """Regression: `%(objectname:short)` liefert bei annotierten Tags den
+    Hash des Tag-Objekts, nicht des Commits — ein Beleg, der auf keinen
+    Commit in facts.commits zeigt. Muss dereferenziert werden."""
+    commit_hash = git_output(repo_with_tags, "rev-parse", "--short", "v1.1^{commit}")
+    tags = {t["name"]: t for t in collect.collect_tags(repo_with_tags, "HEAD")}
+    assert tags["v1.1"]["hash"] == commit_hash
+
+
+def test_collect_tags_lightweight_tag_keeps_direct_hash(repo_with_tags):
+    commit_hash = git_output(repo_with_tags, "rev-parse", "--short", "v1.0^{commit}")
+    tags = {t["name"]: t for t in collect.collect_tags(repo_with_tags, "HEAD")}
+    assert tags["v1.0"]["hash"] == commit_hash
+
+
+@pytest.mark.parametrize("rev_range,expected", [
+    ("--since=2026-08-01", "HEAD"),
+    ("v1.0..HEAD", "HEAD"),
+    ("main..feature/x", "feature/x"),
+    ("HEAD", "HEAD"),
+])
+def test_tag_end_ref_parses_range_forms(rev_range, expected):
+    assert collect._tag_end_ref(rev_range) == expected
+
+
+@pytest.fixture
+def repo_with_merge(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: base")
+
+    git(tmp_path, "checkout", "--quiet", "-b", "feature/x")
+    (tmp_path / "b.txt").write_text("b\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: x")
+
+    git(tmp_path, "checkout", "--quiet", "main")
+    (tmp_path / "c.txt").write_text("c\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: c on main")
+
+    git(tmp_path, "merge", "--quiet", "--no-ff", "-m", "Merge feature/x into main", "feature/x")
+    return tmp_path
+
+
+def test_collect_merges_finds_merge_commit(repo_with_merge):
+    merges = collect.collect_merges(repo_with_merge, "HEAD")
+    assert len(merges) == 1
+    assert merges[0]["subject"] == "Merge feature/x into main"
+    assert len(merges[0]["hash"]) >= 7
+
+
+def test_collect_merges_empty_without_merge_commits(repo):
+    assert collect.collect_merges(repo, "HEAD") == []

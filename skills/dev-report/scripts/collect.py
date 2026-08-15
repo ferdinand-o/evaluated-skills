@@ -222,13 +222,41 @@ def harvest(repo: Path) -> list[dict]:
     return [_harvest_one(repo, relpath, schema) for relpath, schema in HARVEST_SOURCES]
 
 
+def _tag_end_ref(rev_range: str) -> str:
+    """Endpunkt für `git tag --merged`, aus dem Range-Ausdruck abgeleitet.
+
+    `--since=X` kennt keinen expliziten Endpunkt außer HEAD; `a..b`-Formen
+    (explizite Range oder `main..feature/x`) liefern `b`.
+    """
+    if rev_range.startswith("--since"):
+        return "HEAD"
+    if ".." in rev_range:
+        return rev_range.rsplit("..", 1)[-1] or "HEAD"
+    return rev_range or "HEAD"
+
+
 def collect_tags(repo: Path, rev_range: str) -> list[dict]:
-    raw = _git(repo, "tag", f"--format=%(refname:short){FIELD_SEP}%(objectname:short)")
+    """Tags im Bereich — nicht alle Tags des Repos.
+
+    `--merged <endref>` schränkt auf Tags ein, die im Verlauf des
+    Bereichsendes liegen; ohne das listet `git tag` jeden Tag der gesamten
+    Projekthistorie, ungeachtet von `rev_range`.
+
+    Bei annotierten Tags zeigt `%(objectname)` auf das Tag-Objekt, nicht auf
+    den Commit — ein Beleg, der auf keinen Eintrag in `facts.commits` zeigt.
+    `%(*objectname)` dereferenziert; bei leichten Tags ist das Feld leer,
+    dort gilt `%(objectname)` bereits direkt der Commit.
+    """
+    end_ref = _tag_end_ref(rev_range)
+    fmt = FIELD_SEP.join(["%(refname:short)", "%(objectname:short)", "%(*objectname:short)"])
+    raw = _git(repo, "tag", "--merged", end_ref, f"--format={fmt}")
     tags = []
     for line in raw.splitlines():
         parts = line.split(FIELD_SEP)
-        if len(parts) == 2 and parts[0]:
-            tags.append({"name": parts[0], "hash": parts[1]})
+        if len(parts) != 3 or not parts[0]:
+            continue
+        name, direct_hash, dereferenced_hash = parts
+        tags.append({"name": name, "hash": dereferenced_hash or direct_hash})
     return tags
 
 
