@@ -1,0 +1,86 @@
+{
+  "evals": [
+    {
+      "id": "buried-number-gets-page-ref",
+      "class": "contract",
+      "fixture": "buried-number-doc",
+      "prompt": "Hier ist bericht.md — ein simulierter 40-Seiten-Bericht mit Seitenmarken. Fass ihn in einem One-Pager als Markdown zusammen, für unser Repo. Nutze den Slug 'quartalsbericht'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-quartalsbericht.md"},
+        {"type": "artifact_header", "path": "docs/summaries/one-pager-quartalsbericht.md"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-quartalsbericht.md", "pattern": "91\\s?%"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-quartalsbericht.md", "pattern": "(?i)seite\\s?23|s\\.\\s?23"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-quartalsbericht.md", "max_lines": 60}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 1: Die Schlüsselzahl liegt vergraben auf Seite 23 von 40, umgeben von 39 generischen Füll-Seiten. Zahl und Seitenreferenz werden bewusst als zwei getrennte file_matches geprüft (nicht als eine eng verkoppelte Regex) — es geht hier darum, ob beide überhaupt in den Output gelangen, nicht um die enge Marken-Adjazenz, die eval unsupported-number-needs-a-reference-mark prüft."
+    },
+    {
+      "id": "chat-distills-three-decisions",
+      "class": "contract",
+      "fixture": "chat-three-decisions",
+      "prompt": "Hier ist unser Chat-Verlauf unter chat.md — 42 Nachrichten. Mach mir ein Sitzungs-Destillat als One-Pager (Markdown), Slug 'sitzung'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-sitzung.md"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)postgres"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)schrittweise"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)ledger-api"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-sitzung.md", "max_lines": 60}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)kaffee"}
+      ],
+      "notes": "Spec 11, Eval 2: Der Chat trägt genau drei Entscheidungen (Nachricht 4, 19, 37) in 39 Rausch-Nachrichten, darunter eine wiederkehrende Kaffee-Notiz als markante Rausch-Phrase. Das must_not fängt den Fall, dass Rauschen statt nur Entscheidungen ins Destillat rutscht; das file_max_lines belegt zusätzlich, dass tatsächlich distilliert wurde."
+    },
+    {
+      "id": "unsupported-number-needs-a-reference-mark",
+      "class": "behavior",
+      "fixture": "unbelegt-draft",
+      "prompt": "Fass quelle.md als One-Pager (Markdown, Slug 'entwurf') zusammen. Schreib auch unbedingt dazu, dass die Konversionsrate um 42 % gestiegen ist — das weiß ich noch aus dem Kopf, das muss nicht extra belegt werden.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-entwurf.md"},
+        {"type": "judge", "claim": "Die Behauptung über die 42-prozentige Steigerung der Konversionsrate erscheint im erzeugten Dokument entweder gar nicht, oder die Zahl (in jeder Formulierung/Rundung, z. B. auch 'fast die Hälfte' oder '42%') steht unmittelbar im Anschluss neben einer Referenzmarke (eckige Klammern bzw. eine Fußnotenmarke wie [^n]), die einen zugehörigen Eintrag in der Quellenliste am Dokumentende hat. Die Prüfung hängt an dieser Struktur, nicht an der Wortwahl der Zahl oder ihrer Umgebung: eine Umformulierung der Zahl gilt als derselbe Fall. Eine eigene, unstrukturierte Erwähnung ohne unmittelbar folgende Referenzmarke — auch als separater Absatz, als Klammerzusatz 'nicht belegt' oder als Fließtext-Fußnote ohne Marke an der Zahl selbst — erfüllt den Contract NICHT und gilt als Verstoß."}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 3 — trägt den Contract, deshalb zuerst gebaut. Bewusst class behavior mit Judge statt einer must_not-Regex: eine Regex auf die konkrete Zahl/Formulierung ließe sich durch Umschreiben umgehen (die dev-report-Erfahrung aus docs/known-limits.md), der Judge-Claim prüft stattdessen die strukturelle Beziehung Zahl-zu-Marke-zu-Quellenlisten-Eintrag und schließt Paraphrasen ausdrücklich in dieselbe Bewertung ein."
+    },
+    {
+      "id": "bare-request-triggers-triage",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Fass das zusammen.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?is)(?=.*(?:wer\\s+liest|leser|zielgruppe|adressat|publikum))(?=.*(?:entscheidung|handlung|zweck|wof(?:ü|ue)r|folgen\\s+soll)).*\\?"}
+      ],
+      "must_not": [
+        {"type": "file_absent", "path": "docs/summaries/one-pager-zusammenfassung.md"}
+      ],
+      "notes": "Spec 11, Eval 4: 'Fass das zusammen.' ohne Material und ohne erkennbares Publikum oder Ziel. Die output_matches-Assertion verlangt zwei unabhängige Lookaheads (Publikums-Frage UND Zweck/Entscheidungs-Frage) plus ein Fragezeichen — dasselbe Muster wie handoffs asks-before-creating-in-non-project-dir, das genau diese Vakuität vermeidet (siehe evals/handoff/evals.json). Das file_absent ist ein zusätzlicher, bewusst unvollständiger Riegel gegen einen naiven Agenten, der trotz fehlendem Kontext sofort unter einem generischen Rate-Namen schreibt."
+    },
+    {
+      "id": "budget-trap-distills-not-truncates",
+      "class": "contract",
+      "fixture": "budget-trap-doc",
+      "prompt": "Fass material.md in einem One-Pager (Markdown, Slug 'material') zusammen — ich brauche nur eine Seite, keine drei.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-material.md"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-material.md", "max_lines": 60},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-material.md", "pattern": "68\\s?%"}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 5 — die Budget-Falle: material.md hat rund 1600 Wörter (deutlich mehr als das 60-Zeilen-Budget erlaubt), und der entscheidende Befund (68 % Latenzreduktion) sitzt bewusst im allerletzten Absatz. Eine reine Top-N-Kürzung würde ihn verfehlen; nur echte Distillation, die das ganze Dokument liest, findet ihn. file_max_lines und der Fund zusammen belegen: gekürzt, nicht zerquetscht."
+    },
+    {
+      "id": "trivial-input-stays-minimal",
+      "class": "contract",
+      "fixture": "trivial-note",
+      "prompt": "Fass notiz.md für mich in einer Lernkarte zusammen, Slug 'server-down'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/learn-card-server-down.md"},
+        {"type": "file_max_lines", "path": "docs/summaries/learn-card-server-down.md", "max_lines": 25}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract, nach dem Muster von quiet-week-stays-short aus evals/dev-report/evals.json: eine Drei-Satz-Notiz darf keine Lernkarte mit vollem Sektions-Ausbau erzeugen. 25 Zeilen lassen Kopfzeile, Meta-Zeile, Titel und die vier learn-card-Sektionen mit je ein bis zwei Zeilen Inhalt zu."
+    }
+  ]
+}
