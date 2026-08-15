@@ -96,6 +96,38 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   PASS/FAIL-Bild in die Harness-Fehler-Spalte — bei mehreren Claims pro Eval ein
   stiller Totalausfall für alle, nicht nur den einen betroffenen Claim.
 
+## dev-report
+
+- **`must_not`-Muster auf konkrete Formulierungen lassen sich durch Umschreiben
+  umgehen.** `release-notes-filter-internals` prüft mit `(?i)nach utils
+  verschoben` und `(?i)typ-?annotation`, dass die beiden internen Refactorings
+  aus der `release-range`-Fixture nicht im Kundentext auftauchen. Beide Muster
+  fangen nur die Formulierungen, die sie kennen — ein Report, der dasselbe
+  Refactoring mit anderen Worten ausplaudert („interne Aufräumarbeiten im
+  Hilfsmodul" statt „nach utils verschoben"), rutscht am `must_not` vorbei und
+  der Eval bleibt fälschlich grün. Keine Regex-Erweiterung behebt das
+  grundsätzlich; nur ein Judge-Claim könnte den Inhalt statt den Wortlaut
+  prüfen, und der bräuchte dieselbe Sorgfalt, die die beiden jetzigen Muster
+  schon an ihrer Grenze zeigen (siehe nächster Punkt).
+- **`(?i)typ-?annotation` ist umgekehrt zu breit für erweiterte Fixtures.** Das
+  Muster wurde in Fix-Runde 3 von `(?i)typannotation` auf `(?i)typ-?annotation`
+  erweitert, um die Bindestrich-Schreibweise „Typ-Annotation(en)" zu fangen.
+  Träfe eine künftige, breitere `release-range`-Fixture eine legitime,
+  kundensichtbare Formulierung wie „Typsichere Annotation für die neue API",
+  würde dasselbe Muster fälschlich einen Verstoß gegen das `must_not` melden —
+  der Eval würde aus dem falschen Grund rot. Aktuell folgenlos, weil die
+  bestehende Fixture keine solche Formulierung enthält, aber eine Falle für
+  jede Erweiterung der Fixture-Commits.
+- **Die Zielgruppen-Dimension ist ungetestet.** Alle fünf Prompts in
+  `evals/dev-report/evals.json` sagen „für mich selbst" (mit Ausnahme von
+  `release-notes-filter-internals`, das explizit „an Kunden" adressiert).
+  `skills/dev-report/references/audience-guide.md` unterscheidet drei
+  Zielgruppen mit eigenen Tabu-Regeln — insbesondere, was gegenüber
+  Vorgesetzten und Team anders formuliert oder weggelassen wird als im
+  Eigenreport. Kein Eval ruft den Modus mit Zielgruppe „Team" oder
+  „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
+  Eval-Deckung und könnten unbemerkt verletzt werden.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
