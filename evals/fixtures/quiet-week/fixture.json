@@ -1,0 +1,9 @@
+{
+  "git": true,
+  "description": "Ruhige Woche: drei kleine Commits in einem Modul. Der Anti-Zeremonie-Fall.",
+  "commits": [
+    {"message": "feat: Parser akzeptiert Leerzeilen", "touch": {"src/parser.py": "def parse(line):\n    if not line.strip():\n        return None\n    return line.split(':', 1)\n"}},
+    {"message": "test: Leerzeilen-Fall abgedeckt", "touch": {"tests/test_parser.py": "from src.parser import parse\n\n\ndef test_leerzeile():\n    assert parse('  ') is None\n"}},
+    {"message": "docs: Parser-Verhalten notiert", "touch": {"docs/parser.md": "Leerzeilen liefern None.\n"}}
+  ]
+}
