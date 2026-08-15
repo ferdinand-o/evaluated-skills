@@ -128,7 +128,57 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## verified-research
+
+- **Die Quellenauswahl im echten Web bleibt ungeprüft.** Spec 12s Eval 1 verlangt eine
+  Frage, „deren Top-Suchtreffer ein SEO-Aggregator mit veralteter Zahl ist" — das hängt
+  an lebenden Suchergebnissen und wäre je nach Tagesform grün oder rot, ohne dass sich
+  an der Skill etwas geändert hat. `evals/verified-research/evals.json` prüft deshalb
+  ausschließlich den *Prozess* mit lokalen Fixtures (Register vor Suche, Tier am Claim,
+  Wissensdatei-Update, Delta-Trennung, Registereintrag, spotcheck-Fang) — nie, ob die
+  Skill in einer echten Websuche die richtige Quelle unter vielen findet. Das ist eine
+  bewusste, aber echte Lücke: Ob `verified-research` in der Praxis tatsächlich
+  Primärquellen vor SEO-Aggregatoren bevorzugt, wenn frei gesucht werden muss, ist mit
+  diesem Eval-Set nicht belegt.
+- **Verzeichnis- statt Datei-Ebene für den Projekt-Override (Abweichung von Spec 00 §1).**
+  `registry.py resolve_base_dir()` prüft, ob `.skills/verified-research/` im Projekt
+  existiert — nicht, ob eine gleichnamige Datei existiert, wie Spec 00 §1 wörtlich sagt.
+  Grund: Eine neue `research/<thema>.md` hat bei ihrer ersten Recherche naturgemäß noch
+  keine gleichnamige Vorgänger-Datei; wörtlich genommen würde der Override nie greifen
+  und der erste Schreibzugriff ginge nach `~/.skills/verified-research/` — im
+  Eval-Harness das echte Home-Verzeichnis des Aufrufers (siehe „Isolation" oben). Alle
+  sieben Fixtures legen deshalb `.skills/verified-research/registry.json` im Workspace
+  an, damit dieser Fall im Eval-Set nicht auftritt. Läuft die Skill jedoch in einem
+  Projekt, das weder `.skills/verified-research/` noch eine bestehende Wissensdatei hat,
+  entscheidet dieselbe Abweichung, ob der allererste Lauf projektlokal oder global
+  landet — das ist keine Spec-00-Konformität, sondern eine dokumentierte,
+  begründete Ausnahme, die ein künftiger Review absegnen oder verwerfen sollte.
+- **Script-Pfad-Konvention ungeprüft gegen die tatsächliche Eval-Installation.**
+  `evalkit.workspace.prepare()` installiert eine Skill nach
+  `<workspace>/.claude/skills/<name>/`, aber SKILL.md (wie auch bei `dev-report`)
+  instruiert Kommandos mit dem repo-root-relativen Pfad
+  `skills/verified-research/scripts/registry.py`. Ob der Agent im echten Eval-Lauf
+  diesen Pfad findet (z. B. weil er nach einem Fehlschlag selbst nach der Datei sucht)
+  oder die Skill deshalb an allen sieben Evals scheitert, wurde nicht getestet — dieser
+  Auftrag durfte `run_evals.py` nicht ausführen. Das betrifft nicht nur diese Skill,
+  sondern denselben Pfad-Kontrakt, den `dev-report` bereits verwendet.
+- **Beschreibungs-basiertes Routing gegen `deep-research` ist unbelegt.** Die
+  Description in `SKILL.md` grenzt inhaltlich gegen `deep-research` ab (Register,
+  Tiers, Gedächtnis über frühere Läufe), aber ob das reicht, damit Claude Code bei einer
+  realistischen Nutzeranfrage tatsächlich `verified-research` statt der global
+  installierten `deep-research` wählt, ist ungetestet — kein Eval prüft
+  Skill-*Auswahl*, nur das Verhalten, nachdem eine Skill bereits aktiv ist (und die
+  Prompts benutzen absichtlich Vokabular wie „Quellenregister"/„Tier-Bewertung", das
+  die Auswahl in Richtung `verified-research` lenken soll, ohne dass das mechanisch
+  erzwungen wäre).
+- **`unknown-source-gets-registry-entry`s zweite Assertion ist positionsabhängig.**
+  Die Regex verlangt `"pattern"` vor `"notiz"` mit maximal 400 Zeichen dazwischen. Das
+  gilt für jeden Eintrag, den `registry.py add_entry()` erzeugt (Schlüsselreihenfolge
+  ist durch den Code fixiert), bricht aber, falls ein künftiger Agent das Register von
+  Hand statt über `registry.py` bearbeitet und dabei die Feldreihenfolge ändert.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
-[Plan](superpowers/plans/2026-08-14-eval-harness.md)
+[Plan](superpowers/plans/2026-08-14-eval-harness.md) ·
+[Plan verified-research](superpowers/plans/2026-08-15-verified-research.md)
