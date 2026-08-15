@@ -37,7 +37,35 @@ def _git(repo: Path, *args: str) -> str:
     return done.stdout
 
 
-def resolve_range(mode: str, since: str | None, rev_range: str | None, branch: str | None) -> tuple[str, str]:
+def _detect_trunk(repo: Path) -> str:
+    """Trunk-Branch ermitteln statt raten — Repos heißen nicht alle `main`.
+
+    Erst `origin/HEAD`, falls ein Remote das gesetzt hat; sonst der Reihe
+    nach `main` und `master`, geprüft statt angenommen.
+    """
+    try:
+        symbolic = _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD").strip()
+    except CollectError:
+        symbolic = ""
+    if symbolic:
+        return symbolic.rsplit("/", 1)[-1]
+
+    for candidate in ("main", "master"):
+        check = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", candidate],
+            cwd=repo, capture_output=True, text=True, timeout=120, check=False,
+        )
+        if check.returncode == 0:
+            return candidate
+
+    raise CollectError(
+        "kein Trunk-Branch gefunden (weder refs/remotes/origin/HEAD noch main noch master)"
+    )
+
+
+def resolve_range(
+    repo: Path, mode: str, since: str | None, rev_range: str | None, branch: str | None
+) -> tuple[str, str]:
     """Genau ein Selektor bestimmt das Zeitfenster; er liefert auch das Enddatum-Label."""
     chosen = [x for x in (since, rev_range, branch) if x]
     if len(chosen) != 1:
@@ -46,7 +74,8 @@ def resolve_range(mode: str, since: str | None, rev_range: str | None, branch: s
         return f"--since={since}", since
     if rev_range:
         return rev_range, rev_range.split("..")[-1] or "HEAD"
-    return f"main..{branch}", branch.replace("/", "-")
+    trunk = _detect_trunk(repo)
+    return f"{trunk}..{branch}", branch.replace("/", "-")
 
 
 def report_path(mode: str, end_label: str) -> str:
@@ -127,7 +156,11 @@ def aggregate_modules(commits: list[dict]) -> list[dict]:
 
 
 QUIET_THRESHOLD = 5
-FIX_PREFIXES = ("fix:", "fix(", "hotfix", "bugfix")
+# Conventional Commits ("fix:", "fix(scope):") UND die gängigen
+# nicht-konventionellen Formen ("Fix bug in parser", "Fixed the login flow",
+# "hotfix"/"bugfix"). `\b` nach dem Stamm verhindert Treffer wie "prefix:"
+# oder "Fixture angelegt" — siehe die Prüftabelle in den Tests.
+FIX_RE = re.compile(r"^(fix|fixed|fixes|hotfix|bugfix)\b")
 
 
 def detect_patterns(commits: list[dict]) -> dict:
@@ -146,7 +179,7 @@ def detect_patterns(commits: list[dict]) -> dict:
     fix_commits_count = 0
     for commit in commits:
         subject = commit["subject"].lower()
-        if not any(subject.startswith(p) for p in FIX_PREFIXES):
+        if not FIX_RE.match(subject):
             continue
         fix_commits_count += 1
         for path in commit["files"]:
@@ -272,7 +305,7 @@ def collect_merges(repo: Path, rev_range: str) -> list[dict]:
 
 
 def build_facts(repo: Path, *, mode: str, since: str | None, rev_range: str | None, branch: str | None) -> dict:
-    git_range, end_label = resolve_range(mode, since, rev_range, branch)
+    git_range, end_label = resolve_range(repo, mode, since, rev_range, branch)
     selector = f"--since {since}" if since else (f"--range {rev_range}" if rev_range else f"--branch {branch}")
     commits = collect_commits(repo, git_range)
     return {

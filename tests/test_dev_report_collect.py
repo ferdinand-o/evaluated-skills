@@ -54,20 +54,81 @@ def test_aggregate_modules_groups_by_top_level_prefix(repo):
 
 
 def test_resolve_range_since(repo):
-    git_range, end_label = collect.resolve_range("weekly", "2026-08-01", None, None)
+    git_range, end_label = collect.resolve_range(repo, "weekly", "2026-08-01", None, None)
     assert "--since=2026-08-01" in git_range
     assert end_label == "2026-08-01"
 
 
 def test_resolve_range_explicit_range(repo):
-    git_range, end_label = collect.resolve_range("release", None, "v1.0..HEAD", None)
+    git_range, end_label = collect.resolve_range(repo, "release", None, "v1.0..HEAD", None)
     assert git_range == "v1.0..HEAD"
     assert end_label == "HEAD"
 
 
 def test_resolve_range_rejects_two_selectors(repo):
     with pytest.raises(collect.CollectError, match="genau eine"):
-        collect.resolve_range("weekly", "2026-08-01", "v1.0..HEAD", None)
+        collect.resolve_range(repo, "weekly", "2026-08-01", "v1.0..HEAD", None)
+
+
+def test_resolve_range_branch_detects_main_trunk(repo):
+    """`repo`-Fixture nutzt main als Default-Branch."""
+    git(repo, "checkout", "--quiet", "-b", "feature/y")
+    (repo / "y.txt").write_text("y\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "-m", "feat: y")
+
+    git_range, end_label = collect.resolve_range(repo, "feature", None, None, "feature/y")
+    assert git_range == "main..feature/y"
+    assert end_label == "feature-y"
+
+
+def test_resolve_range_branch_detects_master_trunk(tmp_path):
+    """Regression: der `--branch`-Zweig nahm `main..<branch>` fest an und
+    scheiterte in Repos mit `master` als Trunk mit `ambiguous argument`."""
+    git(tmp_path, "init", "--quiet", "--initial-branch=master")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: base")
+    git(tmp_path, "checkout", "--quiet", "-b", "feature/x")
+    (tmp_path / "b.txt").write_text("b\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: x")
+
+    git_range, end_label = collect.resolve_range(tmp_path, "feature", None, None, "feature/x")
+    assert git_range == "master..feature/x"
+    assert end_label == "feature-x"
+
+
+def test_detect_trunk_prefers_origin_head(repo):
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+    assert collect._detect_trunk(repo) == "develop"
+
+
+def test_detect_trunk_falls_back_to_main(repo):
+    assert collect._detect_trunk(repo) == "main"
+
+
+def test_detect_trunk_falls_back_to_master(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=master")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: base")
+    assert collect._detect_trunk(tmp_path) == "master"
+
+
+def test_detect_trunk_raises_without_any_known_name(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=trunk")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "a.txt").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "feat: a")
+    with pytest.raises(collect.CollectError, match="Trunk"):
+        collect._detect_trunk(tmp_path)
 
 
 def test_report_path_is_deterministic():
@@ -246,6 +307,29 @@ def test_fix_commits_counts_and_chains_disambiguate():
         assert chain["count"] == 2
     # Beide Commits sind Fix-Commits
     assert patterns["fix_commits"] == 2
+
+
+@pytest.mark.parametrize("subject,expected", [
+    # Conventional Commits
+    ("fix: parser crash", True),
+    ("fix(scope): parser crash", True),
+    # Nicht-konventionelle, aber klar erkennbare Formen
+    ("Fix bug in parser", True),
+    ("Fixed the login flow", True),
+    ("hotfix: urgent", True),
+    ("bugfix login", True),
+    # Gegenproben: sollen NICHT als Fix-Commit zählen
+    ("prefix: rename module", False),
+    ("Fixture angelegt fuer Tests", False),
+    ("feat: unrelated change", False),
+    ("refix the thing", False),
+])
+def test_fix_detection_matches_conventional_and_plain_forms(subject, expected):
+    """Prüftabelle für die Fix-Erkennung: Conventional Commits und die
+    gängigen nicht-konventionellen Formen treffen; `prefix:`/`Fixture` und
+    ein Fix-Stamm mitten im Wort ("refix") treffen nicht."""
+    patterns = collect.detect_patterns([commit_stub(subject)])
+    assert (patterns["fix_commits"] == 1) is expected
 
 
 def test_fix_commits_counts_only_fix_commits():
