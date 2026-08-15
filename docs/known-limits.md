@@ -6,6 +6,31 @@ Was nicht in Code floss, steht hier — sonst verschwindet es mit dem
 gitignoreten `.superpowers/`-Ledger, sobald der Branch gemerged ist. Jede
 Grenze nennt den konkreten Fall, in dem sie beißt.
 
+## Stand der Verifikation (2026-08-15)
+
+Bis zu diesem Datum war der Harness nie gegen echte Agentenläufe gefahren
+worden — alles darunter Stehende beruhte auf Unit-Tests und Codelektüre. Das
+ist inzwischen nachgeholt, und zwar in beide Richtungen, weil ein Harness, der
+nur bestehen kann, nichts beweist:
+
+- Die vier `contract`-Evals von dev-report laufen durch (4 bestanden), ebenso
+  der eine `behavior`-Eval (1 bestanden). Damit sind Dispatch, Workspace-Aufbau,
+  Fixture-Anwendung, mechanische Assertions, Judge-Pfad und Report einmal
+  vollständig durchlaufen.
+- **Gegenprobe mechanisch:** Ein Eval, der eine Datei fordert, die der Lauf
+  nachweislich nicht anlegt, wird korrekt als FAIL gemeldet, mit benannter
+  Ursache („… existiert nicht").
+- **Gegenprobe Judge:** Ein Judge-Claim, der etwas nachweislich nicht
+  Geschehenes behauptet, wird korrekt verneint und der Eval fällt.
+
+Beide Gegenproben liefen über eine Wegwerf-Eval-Sammlung via `--evals-dir` und
+sind nicht im Repo — sie sind Nachweis, nicht Regressionsschutz. Wer dem
+Harness nach einer Änderung wieder trauen will, wiederholt sie.
+
+Was das **nicht** zeigt: dass die Assertions der einzelnen Skills scharf genug
+sind. Die Abschnitte weiter unten nennen mehrere, die es nachweislich nicht
+sind.
+
 ## Isolation
 
 - **Die Prozessumgebung des Agenten ist nicht isoliert.** `evalkit.dispatch.run_agent`
