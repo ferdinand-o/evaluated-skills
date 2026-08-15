@@ -173,3 +173,40 @@ def test_main_exits_2_when_skill_filter_matches_nothing(tmp_path, capsys):
 
     assert code == 2
     assert "Keine Evals" in capsys.readouterr().out
+
+
+def test_home_skills_state_ignores_missing_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner_module, "HOME_SKILLS", tmp_path / "gibt-es-nicht")
+    assert runner_module._home_skills_state() == {}
+
+
+def test_escapes_outside_the_workspace_are_reported(tmp_path, monkeypatch, capsys):
+    """Ein Lauf, der unter ~/.skills schreibt, muss das melden.
+
+    Spec 00 schickt Artefakte ohne Repo-Kontext nach ~/.skills/<skill>/, und der
+    Harness isoliert HOME nicht. Eine Skill, deren Fixture kein .git mitbringt,
+    schreibt deshalb regelkonform außerhalb jeder Assertion -- real geschehen und
+    nur zufällig aufgefallen, weil sechs Evals mit "Datei existiert nicht"
+    fielen, während die Dateien tadellos erzeugt worden waren, nur woanders.
+    """
+    home = tmp_path / "skills-home"
+    (home / "visual-summary" / "summaries").mkdir(parents=True)
+    monkeypatch.setattr(runner_module, "HOME_SKILLS", home)
+
+    before = runner_module._home_skills_state()
+    (home / "visual-summary" / "summaries" / "one-pager-x.md").write_text("neu", encoding="utf-8")
+    runner_module._report_escapes(before, runner_module._home_skills_state(), "irgendein-eval")
+
+    out = capsys.readouterr().out
+    assert "WARNUNG [irgendein-eval]" in out
+    assert "one-pager-x.md" in out
+    assert '"git": true' in out
+
+
+def test_untouched_home_reports_nothing(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "skills-home"
+    home.mkdir()
+    monkeypatch.setattr(runner_module, "HOME_SKILLS", home)
+    state = runner_module._home_skills_state()
+    runner_module._report_escapes(state, state, "irgendein-eval")
+    assert capsys.readouterr().out == ""

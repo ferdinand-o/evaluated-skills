@@ -54,6 +54,46 @@ def _claims(ev: Eval) -> list[str]:
     return [a.claim for a in (*ev.must, *ev.must_not) if a.type == JUDGE_TYPE]
 
 
+# Spec 00 verlangt für Artefakte außerhalb eines Repos die Ablage unter
+# ~/.skills/<skill>/. Der Harness isoliert HOME nicht (siehe docs/known-limits.md),
+# also schreibt eine Skill, deren Fixture kein .git mitbringt, regelkonform ins
+# echte Home-Verzeichnis des Aufrufers — außerhalb jeder Assertion. Genau das ist
+# real passiert und fiel nur zufällig auf: sechs Evals fielen mit "Datei existiert
+# nicht" durch, während die Dateien einwandfrei erzeugt worden waren, nur woanders.
+HOME_SKILLS = Path.home() / ".skills"
+
+
+def _home_skills_state() -> dict[str, tuple[int, int]]:
+    """relpath -> (Größe, mtime_ns) für alles unter ~/.skills. Leer, wenn es fehlt."""
+    state: dict[str, tuple[int, int]] = {}
+    if not HOME_SKILLS.is_dir():
+        return state
+    for path in HOME_SKILLS.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        state[str(path.relative_to(HOME_SKILLS))] = (info.st_size, info.st_mtime_ns)
+    return state
+
+
+def _report_escapes(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]], eval_id: str) -> None:
+    touched = sorted(rel for rel, meta in after.items() if before.get(rel) != meta)
+    if not touched:
+        return
+    print(
+        f"  WARNUNG [{eval_id}]: der Lauf hat {len(touched)} Datei(en) außerhalb des "
+        f"Workspace geschrieben, unter {HOME_SKILLS}:"
+    )
+    for rel in touched[:10]:
+        print(f"    {rel}")
+    if len(touched) > 10:
+        print(f"    … und {len(touched) - 10} weitere")
+    print("    Diese Dateien sieht keine Assertion. Braucht die Fixture ein \"git\": true?")
+
+
 def run_one(
     ev: Eval,
     *,
@@ -65,9 +105,11 @@ def run_one(
 ) -> EvalResult:
     fixture_dir = fixtures_dir / ev.fixture if ev.fixture else None
     workdir = Path(tempfile.mkdtemp(prefix=f"eval-{ev.id}-"))
+    home_before = _home_skills_state()
     try:
         workspace = prepare(workdir / "ws", skill_dir, fixture_dir)
         transcript = run_agent(ev.prompt, workspace.root, cli=cli, timeout=timeout)
+        _report_escapes(home_before, _home_skills_state(), ev.id)
         if transcript.exit_code != 0:
             note = "Timeout" if transcript.timed_out else f"Agent exit {transcript.exit_code}"
             return EvalResult(ev.id, False, (f"harness: {note}: {transcript.stderr.strip()[:200]}",), True, note)
