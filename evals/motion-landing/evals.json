@@ -1,0 +1,67 @@
+{
+  "evals": [
+    {
+      "id": "artifact-context-degrades-visibly",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Wir bauen das direkt als claude.ai-Artifact — keine lokale Toolchain, kein Playwright, kein Lighthouse installiert. Baue mit motion-landing eine kleine Landing Page mit einer Szene und verifiziere sie mit scripts/verify.py.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/motion-landing/verify-report.json"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"status\":\\s*\"ungeprüft\""},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "(?i)playwright"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "(?i)lighthouse"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"budgets_checklist\""},
+        {"type": "output_matches", "pattern": "(?i)ungeprüft"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"status\":\\s*\"geprüft\""},
+        {"type": "output_matches", "pattern": "(?i)(erfolgreich (geprüft|verifiziert)|alle budgets (eingehalten|bestanden)|budgets? (sind|wurden) eingehalten)"}
+      ],
+      "notes": "Der wichtigste Eval, weil er das Gate-Ehrlichkeits-Gebot aus Spec 00 §4 trägt, und der einzige, dessen Mechanik in dieser Entwicklungsumgebung real geprüft wurde (Playwright/Lighthouse fehlen hier tatsächlich — main() nimmt echt den Degradationszweig, siehe tests/test_motion_landing_verify.py::test_main_degrades_visibly_when_toolchain_is_missing). Bewusst als contract: file_exists/file_matches/output_matches reichen, kein Judge nötig. Deckt Spec 06s vierten Eval und Spec 00 §3 (Sichtbarkeits-Regel: ein übersprungenes Gate wird nie stillschweigend übersprungen)."
+    },
+    {
+      "id": "google-labs-prompt-yields-single-highlight-storyboard",
+      "class": "behavior",
+      "fixture": "empty-dir",
+      "prompt": "Mach die Seite wie Google Labs.",
+      "must": [
+        {"type": "judge", "claim": "Die Antwort enthält, bevor irgendein Code oder eine Demo eingebaut wird, einen erkennbaren Storyboard-Block: eine Szenenliste mit Typ, Technik und einer Höhepunkt-Markierung je Szene."},
+        {"type": "judge", "claim": "In diesem Storyboard-Block ist genau eine Szene als Höhepunkt markiert — nicht null und nicht mehrere."},
+        {"type": "judge", "claim": "Die geplante Bewegung ist zurückhaltend: Es wird nicht versucht, möglichst viele verschiedene Szenen-Typen oder Animationstechniken gleichzeitig einzubauen ('Effekt-Konfetti'), sondern eine kleine, dramaturgisch begründete Auswahl."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Der Storyboard-Block markiert mehr als eine Szene als Höhepunkt, oder es gibt gar keinen als Höhepunkt markiert."}
+      ],
+      "notes": "Spec 06s erster Eval, bewusst als behavior: 'ein Höhepunkt statt Effekt-Konfetti' ist ein Urteil über Form und Zurückhaltung der Antwort, keine Datei-Assertion. Ohne weitere Nutzerangaben muss die Skill trotzdem den Storyboard-Contract aus SKILL.md einhalten."
+    },
+    {
+      "id": "cls-trap-hero-gets-fixed-to-transform",
+      "class": "contract",
+      "fixture": "cls-trap-hero",
+      "prompt": "Diese Landing Page hat einen Layout-Sprung beim Laden — der Hero fliegt sichtbar ruckelnd ein und schiebt den Text darunter herum. Prüf und behebe das mit motion-landing.",
+      "must": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "transform:\\s*translateY"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "@keyframes[\\s\\S]{0,300}?margin-top"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "@keyframes[\\s\\S]{0,300}?\\btop\\s*:"}
+      ],
+      "notes": "Spec 06s zweiter Eval, mechanisch statt mit Judge, weil die NEVER-Liste ('nur transform/opacity animieren') eine falsifizierbare Datei-Eigenschaft ist. Bekannte Grenze (siehe docs/known-limits.md): Die must_not-Muster prüfen die Keyframes der Datei styles.css — verschiebt der Fix die Animation in ein anderes File oder inline in index.html, greift die Assertion nicht mehr. Gleiche Fragilitätsklasse wie dev-reports release-notes-filter-internals."
+    },
+    {
+      "id": "reduced-motion-scene-shows-static-content-not-frozen-hidden",
+      "class": "contract",
+      "fixture": "frozen-reduced-motion",
+      "prompt": "Diese Szene wirkt komplett leer, wenn ich im Betriebssystem 'Bewegung reduzieren' aktiviere. Der Inhalt darf dabei nicht verschwinden, nur die Animation soll wegfallen. Behebe das mit motion-landing.",
+      "must": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?(opacity:\\s*1|animation:\\s*none)"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?display:\\s*none"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?visibility:\\s*hidden"}
+      ],
+      "notes": "Spec 06s dritter Eval. Das Budget-Gate 'jede Szene hat einen definierten reduced-motion-Zustand' ist Pflicht, kein Feature — 'nicht animiert, nicht kaputt, nicht leer' (SKILL.md). Mechanisch statt Judge: [\\s\\S]{0,300}? hält das Suchfenster nach 'prefers-reduced-motion: reduce)' eng genug, um nicht versehentlich eine andere Media Query zu treffen, aber weit genug für mehrzeiliges CSS. Bekannte Grenze: ein Fix, der den Inhalt stattdessen z. B. mit 'height: 0' oder 'clip-path' unsichtbar macht, entgeht diesen beiden must_not-Mustern."
+    }
+  ]
+}
