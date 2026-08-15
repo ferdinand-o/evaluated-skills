@@ -73,6 +73,65 @@ Validiert erneut: `load_evals(...)` liefert `6`, keine `EvalSchemaError`. Volle
 Testsuite weiterhin `146 passed`. Die Evals wurden von mir nicht erneut
 ausgeführt — das läuft zentral direkt nach diesem Commit.
 
+## Fix-Runde 4 (5 von 6 bestanden; letzter Eval: zwei Fehler übereinander, dritter Punkt selbst diagnostiziert)
+
+Die `git: true`-Umstellung aus Runde 3 brachte 5 von 6 real bestandene Evals.
+Übrig: `bare-request-triggers-triage`, mit zwei verifizierten Fehlern plus
+einem dritten Punkt, den ich selbst diagnostizieren musste.
+
+1. **Vorzeichen-Fehler.** `must_not: [{"type": "file_absent", ...}]` heißt „die
+   Datei darf nicht fehlen" — also *muss* sie existieren. Der Eval soll aber
+   belegen, dass die Skill bei „Fass das zusammen." erst fragt statt zu
+   schreiben, und verlangte damit exakt sein eigenes Gegenteil. `evalkit/
+   runner.py` warnt im Kommentar zu `grade()` ausdrücklich vor dieser
+   Polungsfalle. Behoben: `file_absent` jetzt in `must`.
+2. **Auch korrigiert bewachte die Assertion nichts**, weil die Fixture
+   `empty-dir` `"git": false` trägt — ohne `.git` ist `docs/summaries/…`
+   unabhängig vom Skill-Verhalten immer abwesend, dieselbe Fehlerklasse ein
+   drittes Mal an diesem Eval. Neue eigene Fixture `bare-request-repo`
+   (`git: true`, ohne jedes Material) gebaut; `empty-dir` unangetastet
+   gelassen, weil es laut eigener Beschreibung `handoff` gehört.
+3. **Die eigene Diagnose — mit Erlaubnis einmalig selbst gefahren
+   (`--evals-dir` Wegwerf-Sammlung, `--keep-workspace`, nur dieser eine
+   Eval):** Nach den ersten beiden Fixes fiel der Eval immer noch, und zwar
+   am Judge-Claim zur Triage-Frage. Zwei Runden Textänderungen an `SKILL.md`s
+   Ablauf-Abschnitt (kombinierte Rückfrage statt „erst Material, dann
+   Triage", inklusive wörtlichem Beispieltext) blieben wirkungslos. Der
+   direkte Agentenaufruf im behaltenen Workspace mit `--output-format
+   stream-json --verbose` zeigte die eigentliche Ursache: **kein einziger
+   `Skill`-Tool-Aufruf im Transcript.** Der Agent ging direkt zu `Bash`/`Read`
+   (Verzeichnis auflisten, README lesen) und lieferte eine generische
+   Rückfrage nach dem Material — die `visual-summary`-Skill wurde nie
+   geladen, also konnte kein Body-Text etwas bewirken. Ursache war ein
+   **Routing-Defekt in der Frontmatter-`description`**, nicht ein
+   Ablauf-Defekt im Body: Die Description nannte zwar „fass das zusammen"
+   als Trigger-Phrase, aber nicht explizit den Fall „kein Material sichtbar,
+   kein Grund zur Verzeichnis-Exploration, trotzdem diese Skill". Ergänzung
+   der Description um genau diesen Fall brachte den Agenten dazu, den
+   `Skill`-Tool-Aufruf zu machen — danach griff der bereits korrigierte
+   Ablauf-Text sofort (beide Fragen in einer Antwort, mit Format-Tabelle),
+   und der Eval bestand.
+
+   **Antwort auf die gestellte Frage:** Es war *kein* Fall von „nur eine der
+   beiden Fragen gestellt" oder „mit Annahmen weitergearbeitet" — die Skill
+   wurde in den fehlschlagenden Läufen gar nicht erst aufgerufen. Trotzdem
+   ein Skill-Defekt im geforderten Sinn (Fix gehört in SKILL.md, nicht in den
+   Eval) — nur eine Ebene höher als vermutet: in der Routing-`description`,
+   nicht im Ablauf-Body.
+
+`SKILL.md` ist dadurch auf 141 Zeilen gewachsen (weiterhin unter dem
+150-Zeilen-Budget). `docs/known-limits.md` um vier weitere Punkte ergänzt,
+darunter die allgemeine Lehre „Body-Fix ohne Wirkung im echten Lauf beweist
+nicht, dass der Body falsch war — er könnte nie gelesen worden sein" und ein
+bestätigter Fund zur Prozessisolation (das `system.init`-Event listete auch
+persönliche, global installierte Skills trotz `--setting-sources project`).
+
+Validiert erneut: `load_evals(...)` liefert `6`, keine `EvalSchemaError`.
+Volle Testsuite weiterhin `146 passed`. Ich habe genau den einen erlaubten
+Eval mehrfach zur Diagnose gefahren (Wegwerf-Sammlung, `--keep-workspace`),
+nicht die Gesamt-Sammlung — der reguläre Lauf über alle sechs Evals bleibt
+beim Koordinator.
+
 ## Was gebaut wurde
 
 ```

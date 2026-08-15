@@ -241,6 +241,61 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   Judge-Claim ersetzt, der die beiden Themen inhaltlich statt wortwörtlich
   prüft. Das `must_not` (`file_absent`) bleibt als mechanischer, wortunabhängiger
   Riegel bestehen.
+- **`bare-request-triggers-triage`s `must_not: file_absent` hatte die Polung
+  verkehrt herum — der Eval verlangte damit sein eigenes Gegenteil.**
+  `must_not` + `file_absent` heißt „es darf nicht sein, dass die Datei fehlt",
+  also *muss* sie existieren. Der Eval soll aber belegen, dass die Skill bei
+  „Fass das zusammen." erst fragt statt zu schreiben — er verlangte also exakt
+  das Gegenteil seines eigenen Zwecks, und ein korrektes Nicht-Schreiben wurde
+  als Verstoß gemeldet. `evalkit/runner.py` warnt im Code-Kommentar zu `grade()`
+  ausdrücklich vor genau dieser Polungsfalle bei Judge-Claims in `must_not` —
+  dieselbe Logik gilt unverändert für mechanische Typen wie `file_absent`.
+  Behoben: `file_absent` jetzt in `must`. Zusätzlich, auch am echten Lauf
+  verifiziert: selbst mit korrigierter Polung hätte die Assertion nichts
+  bewacht, weil die verwendete Fixture `empty-dir` `"git": false` trägt — ohne
+  `.git` ist `docs/summaries/…` unabhängig vom Skill-Verhalten immer abwesend
+  (siehe Repo-Vorbedingungs-Lehre oben), dieselbe Fehlerklasse ein drittes Mal.
+  Neue eigene Fixture `bare-request-repo` (`git: true`, ohne jedes Material)
+  macht das Nicht-Vorhandensein wieder aussagekräftig. `empty-dir` blieb
+  unangetastet — die Fixture gehört laut ihrer eigenen Beschreibung `handoff`
+  und wird von dessen Evals mitbenutzt.
+- **Der dritte, tiefste Fund: Die Skill wurde für den bare „Fass das
+  zusammen."-Prompt anfangs gar nicht erst aufgerufen — kein Body-Text-Problem,
+  sondern ein Routing-Problem.** Diagnose per `--evals-dir` mit einer
+  Wegwerf-Sammlung und `--keep-workspace`, dann der Agent erneut direkt mit
+  `--output-format stream-json --verbose` im selben Workspace gestartet, um
+  Tool-Aufrufe statt nur der Endantwort zu sehen: Der Judge verneinte den
+  Triage-Claim, weil im Transcript **kein einziger `Skill`-Tool-Aufruf**
+  vorkam — der Agent ging direkt zu `Bash`/`Read` (Verzeichnis auflisten,
+  README lesen) und lieferte eine generische Rückfrage nach dem Material,
+  ohne je `visual-summary`s SKILL.md zu laden. Zwei Runden Textänderungen an
+  `SKILL.md`s Ablauf-Abschnitt (kombinierte Rückfrage statt „erst Material,
+  dann Triage", inklusive wörtlichem Beispieltext) hatten dadurch **keine**
+  Wirkung — der Body wird nie gelesen, wenn die Skill nicht aufgerufen wird.
+  Erst eine Ergänzung der Frontmatter-`description` (expliziter Hinweis, dass
+  auch ein material-loser „fass das zusammen" ohne offensichtlichen Inhalt im
+  Arbeitsverzeichnis in diese Skill routet, statt in generische
+  Verzeichnis-Exploration) brachte den Agenten dazu, den `Skill`-Tool-Aufruf
+  zu machen — danach griff der bereits korrigierte Ablauf-Text sofort und
+  fehlerfrei (beide Fragen in einer Antwort, mit Format-Tabelle). **Lehre:**
+  Ein Verhaltensdefekt bei Skills mit natürlichsprachlichem Routing kann in
+  der `description` sitzen, nicht im SKILL.md-Body — und ein Body-Fix, der im
+  echten Lauf wirkungslos bleibt, ist kein Beweis, dass der Body falsch war;
+  es kann heißen, dass er nie gelesen wurde. `--output-format stream-json
+  --verbose` (statt nur `text`) macht diesen Unterschied sichtbar, indem es
+  Tool-Aufrufe statt nur die Endantwort zeigt.
+- **Der Diagnose-Lauf zeigte zusätzlich, dass die Prozessisolation lückenhafter
+  ist als der bestehende Isolation-Abschnitt oben vermuten lässt.** Das
+  `system.init`-Event des CLI-Laufs listete unter `skills` nicht nur
+  `visual-summary` aus dem Projekt-Workspace, sondern auch gut ein Dutzend
+  offensichtlich persönliche, global installierte Skills (`deep-research`,
+  `dataviz`, `update-config`, `code-review`, `schedule`, `run-skill-generator`
+  u. a.), obwohl der Runner `--setting-sources project` setzt. Konsistent mit
+  der bereits dokumentierten Grenze „Die Prozessumgebung des Agenten ist nicht
+  isoliert" (siehe oben, `$HOME` wird nicht umgebogen) — hier aber am
+  `skills`-Feld eines echten Laufs sichtbar bestätigt, nicht nur vermutet:
+  Ein Eval kann in einer Umgebung mit vielen konkurrierenden, dem Skill fremden
+  Skills laufen, was Routing-Entscheidungen zusätzlich beeinflusst.
 
 ## Verweise
 

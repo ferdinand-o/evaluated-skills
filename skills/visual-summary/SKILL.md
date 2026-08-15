@@ -1,6 +1,6 @@
 ---
 name: visual-summary
-description: Use for ad-hoc "fass das zusammen"/"mach mir eine Zusammenfassung" requests over documents, articles, chat/work history, research results, or code/project state — picks one of four structured formats (one-pager, decision-memo, timeline-brief, learn-card) and renders styled HTML and/or plain Markdown from a single, source-bound content model. Not for periodic project/status reports (use dev-report) and not for end-of-session handover (use handoff).
+description: Use for ad-hoc "fass das zusammen"/"mach mir eine Zusammenfassung" requests over documents, articles, chat/work history, research results, or code/project state — picks one of four structured formats (one-pager, decision-memo, timeline-brief, learn-card) and renders styled HTML and/or plain Markdown from a single, source-bound content model. Also use for a bare "fass das zusammen" with no material attached and nothing obvious in the working directory to summarize — do not fall back to generic directory exploration or a generic clarifying question first; this skill's own first step is asking what to summarize and for whom/why. Not for periodic project/status reports (use dev-report) and not for end-of-session handover (use handoff).
 ---
 
 # visual-summary — Format-Familie für Zusammenfassungen
@@ -56,8 +56,12 @@ KEINE ZAHL UND KEIN CHART OHNE QUELLENREFERENZ IM MODELL.
 Medium: Bildschirm/Teilen → HTML, Repo/Notizen → Markdown, auf Wunsch beides aus
 demselben Modell. Nennt der Nutzer weder Publikum noch Zweck, und lässt sich
 beides auch nicht aus der Anfrage ableiten, werden genau diese zwei Fragen
-gestellt — nie ein Format geraten. Details je Format (Aufbau, Budget, Leerfälle)
-stehen in `references/formats.md`, Chart-Entscheidungen in `references/charts.md`.
+gestellt — nie ein Format geraten. Fehlt zusätzlich auch jedes Material (der
+bare „Fass das zusammen." ohne Anhang, ohne Pfad, ohne eingefügten Text — der
+Musterfall dieser Skill), werden Material- und Triage-Fragen **zusammen in
+einer** Rückfrage gestellt, nicht nacheinander (siehe Ablauf, Schritt 1). Details
+je Format (Aufbau, Budget, Leerfälle) stehen in `references/formats.md`,
+Chart-Entscheidungen in `references/charts.md`.
 
 **Die Format-Wahl wird begründet ausgegeben** — eine Zeile wie „Format:
 decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
@@ -65,26 +69,44 @@ decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
 
 ## Ablauf
 
-1. **Material sichern.** Dokument/Artikel: Pfad oder Text. Chat-/Arbeitsverlauf:
-   **wird übergeben, nie erraten** — fehlt er, sag das und frag nach Pfad oder
-   Einfügung, statt aus der laufenden Session zu rekonstruieren (die könnte die
-   falsche sein, ohne dass es auffällt). Code-/Projektstand: Repo-Pfad oder Diff.
-2. **Triage** (siehe oben), falls nicht eindeutig aus der Anfrage ablesbar.
-3. **Modell bauen**: Kernthese (ein Satz), Belege (Aussage + Locator + Konfidenz),
+1. **Material und Kontext klären — in einer Rückfrage, nicht nacheinander.**
+   Zwei Dinge können fehlen: das Material selbst, und der Kontext (Publikum,
+   Zweck) aus der Triage. Fehlt nur eines der beiden, wird nur danach gefragt.
+   **Fehlen beide — der bare „Fass das zusammen." ohne Anhang, ohne Pfad, ohne
+   eingefügten Text und ohne erkennbares Publikum oder Ziel —, werden Material
+   *und* die zwei Triage-Fragen in derselben Antwort gestellt, wortwörtlich
+   beide, nicht nur sinngemäß angedeutet.** Das gilt auch dann, wenn „wer liest
+   es" noch keinen Sinn zu ergeben scheint, solange unklar ist, worum es
+   überhaupt geht — genau dieser Reflex („erst das Material, die Triage kommt
+   später") ist der Fehler: Sobald der Nutzer irgendein Material nachliefert,
+   wird direkt gerendert, und die Triage bleibt für immer ungestellt. Beispiel
+   für eine korrekte, kombinierte Rückfrage:
+   > „Ich brauche noch zwei Dinge: (1) Was soll ich zusammenfassen — Datei,
+   > Text, Chat-Verlauf oder Code-Stand? (2) Wer liest das Ergebnis, und welche
+   > Entscheidung oder Handlung soll daraus folgen?"
+   Diese Fragen dürfen anders formuliert sein, aber beide Themen — Material
+   UND Publikum/Zweck — müssen in derselben Antwort auftauchen.
+   - Dokument/Artikel: Pfad oder Text.
+   - Chat-/Arbeitsverlauf: **wird übergeben, nie erraten** — fehlt er, sag das
+     und frag nach Pfad oder Einfügung, statt aus der laufenden Session zu
+     rekonstruieren (die könnte die falsche sein, ohne dass es auffällt).
+   - Code-/Projektstand: Repo-Pfad oder Diff.
+   - Triage (siehe oben): wer liest es, welche Entscheidung/Handlung folgt.
+2. **Modell bauen**: Kernthese (ein Satz), Belege (Aussage + Locator + Konfidenz),
    Datenpunkte (für Charts, mit Locator), offene Punkte. Erst danach rendern.
-4. **Slug festlegen.** Nennt der Nutzer einen Slug, gilt er. Sonst ein
+3. **Slug festlegen.** Nennt der Nutzer einen Slug, gilt er. Sonst ein
    kebab-case-Slug aus der Kernthese ableiten (≤ 4 Wörter).
-5. **Rendern**: Template aus `assets/<format>.html` bzw. `assets/md/<format>.md`.
+4. **Rendern**: Template aus `assets/<format>.html` bzw. `assets/md/<format>.md`.
    Slots (`{{PLATZHALTER}}`) füllen, Wiederholblöcke (`<!-- REPEAT: x -->` …
    `<!-- /REPEAT -->`) je Beleg/Datenpunkt/Zeitstrahl-Eintrag duplizieren. Kein
    eigenes Layout erfinden — die Templates sind fertig.
-6. **Ablegen**: Repo (`.git` im cwd oder einem Elternverzeichnis vorhanden) →
+5. **Ablegen**: Repo (`.git` im cwd oder einem Elternverzeichnis vorhanden) →
    `docs/summaries/<format>-<slug>.md|html`; sonst
    `~/.skills/visual-summary/summaries/<format>-<slug>.*`. Bootstrap-Regel: Der
    erste Lauf kündigt die Anlage von `docs/summaries/` an und nennt den Pfad.
    Jede Datei trägt die Artefakt-Kopfzeile aus `docs/artifact-header.md` als
    erste Zeile.
-7. **Selbst-Audit vor Lieferung:**
+6. **Selbst-Audit vor Lieferung:**
    - Überlebt die Kernaussage, wenn der Leser nur Headline und Chart sieht?
    - Ist jeder Beleg klickbar/auffindbar (Referenzmarke → Quellenlisten-Eintrag)?
    - Ist das Budget eingehalten?
@@ -107,6 +129,7 @@ decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
 | „Format mische ich passend" | Ein Format pro Output. Mischbedarf heißt: falsches Format gewählt. |
 | „Ich weiß es noch aus dem Gespräch" | Der Chat-Verlauf wird übergeben, nie erraten — Erinnerung ist der falsche Verlauf, ohne dass es auffällt. |
 | „Drei Belege muss ich voll machen" | Trägt das Material nur zwei, bleiben es zwei. Ein erfundener dritter ist schlimmer. |
+| „Ohne Material ergibt die Publikums-Frage noch keinen Sinn, erst mal nachfragen was" | Genau der Reflex, der die Triage nie stellt. Beide Fragen gehören in dieselbe Rückfrage — auch wenn „wer liest es" noch abstrakt wirkt. |
 
 ## Abgrenzung
 

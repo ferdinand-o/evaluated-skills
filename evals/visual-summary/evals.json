@@ -46,15 +46,14 @@
     {
       "id": "bare-request-triggers-triage",
       "class": "behavior",
-      "fixture": "empty-dir",
+      "fixture": "bare-request-repo",
       "prompt": "Fass das zusammen.",
       "must": [
+        {"type": "file_absent", "path": "docs/summaries/one-pager-zusammenfassung.md"},
         {"type": "judge", "claim": "Die Antwort des Agenten stellt dem Nutzer erkennbar zwei Fragen, bevor sie irgendein Format wählt oder ein Dokument erzeugt: (1) wer die Zusammenfassung lesen wird bzw. für wen sie ist, und (2) welche Entscheidung oder Handlung darauf folgen soll bzw. wozu sie gebraucht wird. Beliebige Formulierung zählt — als zwei Fragesätze mit Fragezeichen, als eine kombinierte Frage, als nummerierte Aufzählung ohne Fragezeichen, oder als Aufforderung ('Nenn mir noch ...'). Entscheidend ist nur, dass beide Themen (Publikum UND Zweck/Entscheidung) erkennbar erfragt werden, nicht die genaue Wortwahl oder Interpunktion. Eine Antwort, die nur eines der beiden Themen anspricht, die Fragen nur implizit andeutet, oder direkt ein Format/Dokument ohne vorherige Rückfrage liefert, erfüllt den Claim NICHT."}
       ],
-      "must_not": [
-        {"type": "file_absent", "path": "docs/summaries/one-pager-zusammenfassung.md"}
-      ],
-      "notes": "Spec 11, Eval 4: 'Fass das zusammen.' ohne Material und ohne erkennbares Publikum oder Ziel. Fix-Runde 3: Der ursprüngliche output_matches mit zwei Lookaheads (Publikums-Frage UND Zweck-Frage) plus Fragezeichen scheiterte im echten Lauf — die tatsächliche Formulierung der Skill traf keines der gelisteten Schlüsselwörter (z. B. 'für wen' statt 'wer liest/leser/zielgruppe/adressat/publikum'), dieselbe inhärente Grenze von output_matches, die docs/known-limits.md schon als 'spröde Keyword-Regex' führt. Statt die Keyword-Liste weiter aufzublähen (jede Erweiterung fängt nur mehr bekannte Formulierungen, nie alle) jetzt class behavior mit einem Judge-Claim, der die beiden Themen inhaltlich statt wortwörtlich prüft. Das file_absent bleibt als mechanischer, wortunabhängiger Riegel gegen einen naiven Agenten, der trotz fehlendem Kontext sofort unter einem generischen Rate-Namen schreibt."
+      "must_not": [],
+      "notes": "Spec 11, Eval 4: 'Fass das zusammen.' ohne Material und ohne erkennbares Publikum oder Ziel. Fix-Runde 4 (zwei Fehler, beide am echten Lauf verifiziert): (1) Vorzeichen-Fehler — file_absent stand in must_not, was 'die Datei darf nicht fehlen' bedeutet, also ihre Existenz verlangt; genau das Gegenteil des Eval-Zwecks (belegen, dass NICHT geschrieben wird). Jetzt korrekt als must: file_absent. (2) Die Fixture empty-dir trägt git:false — ohne .git schreibt die Skill regelkonform nach ~/.skills/visual-summary/summaries/, docs/summaries/... wäre also so oder so immer abwesend und die Assertion hätte nichts bewacht. Neue eigene Fixture bare-request-repo (git:true, ohne jedes Material) macht das Nicht-Vorhandensein wieder aussagekräftig; empty-dir bleibt unverändert, weil es handoff gehört. Fix-Runde 3s output_matches-zu-Judge-Umstellung bleibt bestehen."
     },
     {
       "id": "budget-trap-distills-not-truncates",
