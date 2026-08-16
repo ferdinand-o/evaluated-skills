@@ -24,8 +24,19 @@ CACHE_PATH = Path(".skills") / "cache" / "review-context.json"
 MAX_FILE_CHARS = 4000
 MAX_PATCH_CHARS = 4000
 MAX_CALLERS = 20
-MIN_COMMITS_FOR_MESSAGE_SOLL = 2
 MAX_SIBLING_FILES = 15
+
+# Minimalbar für "zählt als Soll" (Fix-Runde, s. docs/known-limits.md und
+# docs/superpowers/reports/review-context-report.md): reine Existenz reicht
+# nicht. Eine Feature-Spec-Datei ohne Given/When/Then braucht mindestens so
+# viel Prosa jenseits von Überschriften und Leerzeilen; eine Commit-Message
+# zählt inhaltlich, nicht nach Anzahl der Commits im Range.
+MIN_SPEC_CONTENT_CHARS = 40
+MIN_SUBJECT_CHARS = 20
+GENERIC_COMMIT_SUBJECTS = frozenset({
+    "wip", "fix", "tmp", "temp", "misc", "update", "updates",
+    "changes", "stuff", "asdf", "test", "wip commit", "fixup",
+})
 
 NO_SOLL_MESSAGE = "Änderung ohne benanntes Soll ist nicht reviewbar."
 EMPTY_DIFF_MESSAGE = "Diff ist leer — kein Review-Gegenstand."
@@ -314,14 +325,43 @@ def parse_given_when_then(text: str) -> list[dict]:
     return criteria
 
 
-def find_feature_spec(repo: Path) -> list[dict] | None:
-    """Feature-Spezifikationen unter `docs/specs/wip/` (Spec 03), falls vorhanden.
+def _spec_body_without_headings(text: str) -> str:
+    """Text ohne Überschriftenzeilen und ohne Leerzeilen — die Prosa, die zählt.
 
-    Fehlt der Ordner oder enthält er keine Markdown-Datei: `None` — kein
-    Fehler, nur „hier gibt es keine". Eine gefundene Spec zählt als Soll,
-    auch ohne geparste Given/When/Then-Blöcke (dann trägt sie einen Excerpt
-    statt struktierter Kriterien — R13 verlangt nur „gar nichts" als Trigger
-    für den Befund, nicht „nicht ideal formatiert").
+    Eine Datei, die nur aus `# Titel` besteht, hat hier eine leere Ausbeute —
+    genau der Fall, den die Fix-Runde als „zählt fälschlich als Soll" gemeldet
+    hat (docs/known-limits.md).
+    """
+    return "\n".join(
+        line.strip() for line in text.splitlines()
+        if line.strip() and not _HEADING_RE.match(line)
+    )
+
+
+def _has_meaningful_spec_content(text: str, criteria: list[dict]) -> bool:
+    """Minimalbar für „zählt als Soll": ein vollständiges Given/When/Then-
+    Kriterium reicht immer. Sonst muss genug Prosa jenseits von Überschriften
+    und Leerraum übrig bleiben — eine leere Datei, eine mit nur Leerraum oder
+    eine mit nur einer Überschrift zählt nicht (Fix-Runde: vorher prüfte
+    `find_feature_spec` nur Existenz, nicht Inhalt, und unterdrückte damit den
+    `no_soll`-Befund fälschlich).
+    """
+    if criteria:
+        return True
+    return len(_spec_body_without_headings(text)) >= MIN_SPEC_CONTENT_CHARS
+
+
+def find_feature_spec(repo: Path) -> list[dict] | None:
+    """Feature-Spezifikationen unter `docs/specs/wip/` (Spec 03), falls vorhanden
+    **und inhaltlich tragfähig**.
+
+    Fehlt der Ordner, enthält er keine Markdown-Datei, oder ist keine der
+    gefundenen Dateien inhaltlich tragfähig (`_has_meaningful_spec_content`):
+    `None` — kein Fehler, nur „hier gibt es kein benanntes Soll". Eine
+    gefundene, inhaltlich tragfähige Spec zählt als Soll auch ohne geparste
+    Given/When/Then-Blöcke (dann trägt sie einen Excerpt statt struktierter
+    Kriterien — R13 verlangt nur „gar nichts" als Trigger für den Befund,
+    nicht „nicht ideal formatiert").
     """
     spec_dir = repo / "docs" / "specs" / "wip"
     if not spec_dir.is_dir():
@@ -334,12 +374,14 @@ def find_feature_spec(repo: Path) -> list[dict] | None:
     for path in md_files:
         text = path.read_text(encoding="utf-8", errors="replace")
         criteria = parse_given_when_then(text)
+        if not _has_meaningful_spec_content(text, criteria):
+            continue
         entry: dict = {"path": path.relative_to(repo).as_posix(), "criteria": criteria}
         if not criteria:
             excerpt, _ = _truncate(text, MAX_FILE_CHARS)
             entry["excerpt"] = excerpt
         specs.append(entry)
-    return specs
+    return specs or None
 
 
 def find_pr_description(
@@ -364,28 +406,55 @@ def find_pr_description(
     return None
 
 
-def find_commit_message_soll(repo: Path, mode: str, base: str, head: str | None) -> dict | None:
-    """Commit-Messages des Bereichs als letzte, schwache Soll-Quelle.
+_CONVENTIONAL_PREFIX_RE = re.compile(r"^[a-z]+(\([^)]*\))?!?:\s*", re.IGNORECASE)
 
-    Gilt nur ab zwei Commits im Range: Ein Range mit genau einem Commit
-    reviewt gerade diesen einen Commit — seine eigene Subject-Zeile
-    beschreibt den Diff, nicht das Ziel dahinter (Tautologie). Uncommitted-
-    Diffs haben keine zugehörige Commit-Message und liefern deshalb immer
-    `None`.
+
+def _is_meaningful_commit_message(subject: str, body: str) -> bool:
+    """Zählt eine einzelne Commit-Message inhaltlich als Soll?
+
+    Fix-Runde: Die Anzahl der Commits im Range sagt nichts über die
+    Aussagekraft ihrer Messages — eine ausführliche, klar zielbeschreibende
+    Message, die allein steht, ist ein gültiges Soll. Gemessen wird stattdessen
+    am Inhalt: Ein Body jenseits der Betreffzeile zählt immer. Ohne Body muss
+    die Betreffzeile (nach Abzug eines Conventional-Commit-Präfixes wie
+    "fix: "/"feat(x): ") hinreichend lang sein und darf kein reiner Platzhalter
+    ("wip", "fix", "tmp", …) sein.
+    """
+    if body.strip():
+        return True
+    normalized = _CONVENTIONAL_PREFIX_RE.sub("", subject.strip()).strip().lower()
+    if not normalized or normalized in GENERIC_COMMIT_SUBJECTS:
+        return False
+    return len(normalized) >= MIN_SUBJECT_CHARS
+
+
+def find_commit_message_soll(repo: Path, mode: str, base: str, head: str | None) -> dict | None:
+    """Commit-Messages des Bereichs als letzte, schwache Soll-Quelle (R13).
+
+    Zählt, sobald mindestens eine Message im Bereich inhaltlich trägt
+    (`_is_meaningful_commit_message`) — unabhängig davon, wie viele Commits im
+    Range liegen. Uncommitted-Diffs haben keine zugehörige Commit-Message und
+    liefern deshalb immer `None`; ein Range ohne Commits ebenso.
     """
     if mode != "range":
         return None
     raw = _git(repo, "log", f"{base}..{head}", "--format=%s%x1f%b%x1e")
     blocks = [b for b in raw.split("\x1e") if b.strip("\n")]
-    if len(blocks) < MIN_COMMITS_FOR_MESSAGE_SOLL:
+    if not blocks:
         return None
-    messages = []
+
+    messages: list[str] = []
+    any_meaningful = False
     for block in blocks:
         subject, _, body = block.strip("\n").partition("\x1f")
-        text = subject.strip()
-        if body.strip():
-            text += "\n" + body.strip()
+        subject, body = subject.strip(), body.strip()
+        if _is_meaningful_commit_message(subject, body):
+            any_meaningful = True
+        text = subject + (f"\n{body}" if body else "")
         messages.append(text)
+
+    if not any_meaningful:
+        return None
     return {"text": "\n\n".join(messages), "count": len(messages)}
 
 

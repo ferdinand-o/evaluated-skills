@@ -22,7 +22,12 @@ def write(repo, path, text):
 
 def commit_all(repo, message):
     git(repo, "add", "-A")
-    git(repo, "commit", "--quiet", "-m", message)
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", message)
+
+
+def commit_with_body(repo, subject, body):
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", f"{subject}\n\n{body}")
 
 
 @pytest.fixture
@@ -34,7 +39,7 @@ def repo(tmp_path):
     write(tmp_path, "src/calc.py", "def add(a, b):\n    return a + b\n")
     commit_all(tmp_path, "feat: add")
     write(tmp_path, "src/calc.py", "def add(a, b):\n    return a + b + 0\n")
-    commit_all(tmp_path, "fix: add ist jetzt expliziter")
+    commit_all(tmp_path, "wip")  # bewusst generisch: kein inhaltliches Soll (Fix-Runde)
     return tmp_path
 
 
@@ -224,10 +229,37 @@ def test_find_feature_spec_parses_criteria(repo):
 
 
 def test_find_feature_spec_without_gwt_still_counts_with_excerpt(repo):
-    write(repo, "docs/specs/wip/feature-y.md", "# Feature Y\n\nNur Prosa, keine Kriterien.\n")
+    write(
+        repo, "docs/specs/wip/feature-y.md",
+        "# Feature Y\n\n"
+        "Diese Spec beschreibt das Feature in Prosa, ohne Given/When/Then-Struktur, "
+        "aber mit ausreichend Substanz, um als Soll zu gelten.\n",
+    )
     specs = cc.find_feature_spec(repo)
     assert specs[0]["criteria"] == []
     assert "Prosa" in specs[0]["excerpt"]
+
+
+def test_find_feature_spec_empty_file_does_not_count(repo):
+    write(repo, "docs/specs/wip/feature-empty.md", "")
+    assert cc.find_feature_spec(repo) is None
+
+
+def test_find_feature_spec_whitespace_only_file_does_not_count(repo):
+    write(repo, "docs/specs/wip/feature-blank.md", "   \n\n\t\n   \n")
+    assert cc.find_feature_spec(repo) is None
+
+
+def test_find_feature_spec_heading_only_file_does_not_count(repo):
+    write(repo, "docs/specs/wip/feature-heading.md", "# Feature Z\n\n## Noch ein Titel\n")
+    assert cc.find_feature_spec(repo) is None
+
+
+def test_find_feature_spec_mixes_meaningful_and_empty_files(repo):
+    write(repo, "docs/specs/wip/feature-empty.md", "# Nur Titel\n")
+    write(repo, "docs/specs/wip/feature-x.md", GWT_SAMPLE)
+    specs = cc.find_feature_spec(repo)
+    assert [s["path"] for s in specs] == ["docs/specs/wip/feature-x.md"]
 
 
 # --- find_pr_description -----------------------------------------------------
@@ -258,22 +290,63 @@ def test_find_pr_description_file_missing_raises(repo):
 
 
 # --- find_commit_message_soll -------------------------------------------------
+#
+# Fix-Runde: Nicht mehr die Anzahl der Commits im Range entscheidet, sondern
+# der Inhalt jeder einzelnen Message (Body vorhanden, oder Betreffzeile
+# hinreichend lang und kein reiner Platzhalter wie "wip"/"fix").
 
 def test_find_commit_message_soll_none_for_uncommitted_mode(repo):
     assert cc.find_commit_message_soll(repo, "uncommitted", "HEAD", None) is None
 
 
-def test_find_commit_message_soll_none_for_single_commit_range(repo):
+def test_find_commit_message_soll_none_for_zero_commits_in_range(repo):
+    assert cc.find_commit_message_soll(repo, "range", "HEAD", "HEAD") is None
+
+
+def test_find_commit_message_soll_none_for_generic_single_commit(repo):
+    """Der letzte Commit der `repo`-Fixture heißt bewusst 'wip'."""
     assert cc.find_commit_message_soll(repo, "range", "HEAD~1", "HEAD") is None
 
 
-def test_find_commit_message_soll_present_for_two_commits(repo):
+def test_find_commit_message_soll_true_for_descriptive_single_commit(repo):
+    commit_all(repo, "feat: CSV-Export für den Monatsabschluss ergänzt")
+    result = cc.find_commit_message_soll(repo, "range", "HEAD~1", "HEAD")
+    assert result is not None
+    assert result["count"] == 1
+
+
+def test_find_commit_message_soll_true_when_body_present(repo):
+    commit_with_body(repo, "fix", "Behebt den KeyError bei leerem Dict im Cache-Layer.")
+    result = cc.find_commit_message_soll(repo, "range", "HEAD~1", "HEAD")
+    assert result is not None
+    assert "KeyError" in result["text"]
+
+
+def test_find_commit_message_soll_generic_subject_without_body_is_none(repo):
+    commit_all(repo, "fix")
+    assert cc.find_commit_message_soll(repo, "range", "HEAD~1", "HEAD") is None
+
+
+def test_find_commit_message_soll_short_subject_without_body_is_none(repo):
+    commit_all(repo, "fix: typo")
+    assert cc.find_commit_message_soll(repo, "range", "HEAD~1", "HEAD") is None
+
+
+def test_find_commit_message_soll_present_for_two_commits_if_one_is_meaningful(repo):
     write(repo, "src/extra.py", "y = 2\n")
-    commit_all(repo, "feat: extra Modul")
+    commit_all(repo, "feat: CSV-Export für den Monatsabschluss ergänzt")
     result = cc.find_commit_message_soll(repo, "range", "HEAD~2", "HEAD")
     assert result is not None
     assert result["count"] == 2
-    assert "extra Modul" in result["text"]
+    assert "CSV-Export" in result["text"]
+    assert "wip" in result["text"]  # die schwache Message bleibt Teil des Texts
+
+
+def test_find_commit_message_soll_none_when_no_commit_is_meaningful(repo):
+    """Zwei generische Commits hintereinander bleiben trotzdem kein Soll."""
+    commit_all(repo, "fix")
+    result = cc.find_commit_message_soll(repo, "range", "HEAD~2", "HEAD")
+    assert result is None
 
 
 # --- resolve_soll --------------------------------------------------------------
@@ -287,7 +360,7 @@ def test_resolve_soll_prefers_spec_over_pr_and_commits(repo):
 
 def test_resolve_soll_prefers_pr_over_commits(repo):
     write(repo, "src/extra.py", "y = 2\n")
-    commit_all(repo, "feat: extra Modul")
+    commit_all(repo, "feat: CSV-Export für den Monatsabschluss ergänzt")
     soll = cc.resolve_soll(repo, "range", "HEAD~2", "HEAD", "PR-Text", None)
     assert soll["source"] == "pr_description"
     assert soll["weak"] is True
@@ -295,7 +368,7 @@ def test_resolve_soll_prefers_pr_over_commits(repo):
 
 def test_resolve_soll_falls_back_to_commit_messages(repo):
     write(repo, "src/extra.py", "y = 2\n")
-    commit_all(repo, "feat: extra Modul")
+    commit_all(repo, "feat: CSV-Export für den Monatsabschluss ergänzt")
     soll = cc.resolve_soll(repo, "range", "HEAD~2", "HEAD", None, None)
     assert soll["source"] == "commit_messages"
     assert soll["weak"] is True
