@@ -1,0 +1,12 @@
+{
+  "git": true,
+  "description": "Release-Range über zwei Tags, mit sichtbaren Änderungen und internen Refactorings gemischt.",
+  "commits": [
+    {"message": "chore: Stand v1.0", "touch": {"src/app.py": "VERSION = '1.0'\n"}, "tag": "v1.0"},
+    {"message": "feat: CSV-Export für Berichte", "touch": {"src/export.py": "def to_csv(rows):\n    return '\\n'.join(','.join(r) for r in rows)\n"}},
+    {"message": "refactor: Hilfsfunktionen nach utils verschoben", "touch": {"src/utils.py": "def noop():\n    pass\n"}},
+    {"message": "fix: Export brach bei leeren Zeilen ab", "touch": {"src/export.py": "def to_csv(rows):\n    return '\\n'.join(','.join(r) for r in rows if r)\n"}},
+    {"message": "refactor: interne Typannotationen ergänzt", "touch": {"src/utils.py": "def noop() -> None:\n    pass\n"}},
+    {"message": "chore: Stand v1.1", "touch": {"src/app.py": "VERSION = '1.1'\n"}, "tag": "v1.1"}
+  ]
+}

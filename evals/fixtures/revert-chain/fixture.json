@@ -1,0 +1,11 @@
+{
+  "git": true,
+  "description": "Zähe Woche: ein Ansatz wird revertiert, danach zweimal am selben Modul nachgebessert.",
+  "commits": [
+    {"message": "feat: Cache für Lookups", "touch": {"src/cache.py": "STORE = {}\n\n\ndef get(key):\n    return STORE.get(key)\n"}},
+    {"message": "Revert \"feat: Cache für Lookups\"", "delete": ["src/cache.py"]},
+    {"message": "feat: Lookups ohne Cache", "touch": {"src/lookup.py": "def get(key):\n    return DB[key]\n"}},
+    {"message": "fix: KeyError bei unbekanntem Key", "touch": {"src/lookup.py": "def get(key):\n    return DB.get(key)\n"}},
+    {"message": "fix: None-Rückgabe brach den Aufrufer", "touch": {"src/lookup.py": "def get(key):\n    return DB.get(key, EMPTY)\n"}}
+  ]
+}
