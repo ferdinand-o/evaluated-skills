@@ -1,0 +1,71 @@
+{
+  "evals": [
+    {
+      "id": "legacy-trap-characterization-not-invented-behavior",
+      "class": "contract",
+      "fixture": "legacy-monolith",
+      "prompt": "Ich will `src/orders.py` in diesem Repo refactoren, damit sich Stornierungen leichter erweitern lassen. Was ist der Testplan, bevor ich anfange?",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
+        {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"suspected\":\\s*true"},
+        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*legacy\\b"},
+        {"type": "output_matches", "pattern": "(?i)characterization|golden.?master"},
+        {"type": "output_matches", "pattern": "(?i)orders\\.py"}
+      ],
+      "must_not": [],
+      "notes": "Legacy-Trap aus dem Auftrag: Die Fixture hat elf Commits und keine einzige Testdatei — detect_stack.py muss das mechanisch als legacy.suspected melden (Score-Schwelle 3 durch 'keine Tests' + 'Commit-Zahl', ohne Alterssignal, siehe docs/known-limits.md). Die Antwort muss laut SKILL.md-Contract mit 'Repo-Typ: legacy' beginnen und Characterization/Golden-Master nennen statt eine erfundene Soll-Spezifikation zu testen. Der Verweis auf orders.py verhindert eine generische, vom Prompt losgelöste Antwort."
+    },
+    {
+      "id": "extension-trap-sw-termination-named",
+      "class": "contract",
+      "fixture": "chrome-extension",
+      "prompt": "Ich habe in background.js einen neuen Message-Handler HANDLE_SYNC ergänzt, zusätzlich zum bestehenden PING. Wie teste ich das?",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
+        {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"primary\":\\s*\"chrome-extension\""},
+        {"type": "output_matches", "pattern": "(?i)SW-Termination"},
+        {"type": "output_matches", "pattern": "(?i)HANDLE_SYNC"}
+      ],
+      "must_not": [
+        {"type": "output_matches", "pattern": "(?i)playwright[^\\n]{0,80}(getestet|erprobt|verifiziert)"},
+        {"type": "output_matches", "pattern": "(?i)(getestet|erprobt|verifiziert)[^\\n]{0,80}playwright"}
+      ],
+      "notes": "Extension-Trap aus dem Auftrag: detect_stack.json muss die Extension eindeutig erkennen (nur ein Kandidat mit Score 3 durch manifest_version). Der Plan muss laut SKILL.md-Contract die Schicht 'SW-Termination' explizit mit dem betroffenen Route-Namen HANDLE_SYNC nennen, nicht generisch von 'Tests' sprechen. must_not erzwingt R6 mechanisch: Die Playwright-Fixture aus chrome-extension.md darf nirgends als getestet/erprobt bezeichnet werden, in beiden Wortstellungen."
+    },
+    {
+      "id": "routing-trap-asks-instead-of-guessing",
+      "class": "contract",
+      "fixture": "ambiguous-extension-api",
+      "prompt": "Ich will für dieses Repo eine Teststrategie aufsetzen. Was ist der Plan?",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
+        {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"ambiguous\":\\s*true"},
+        {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"chrome-extension\""},
+        {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"rest-api\""},
+        {"type": "output_matches", "pattern": "(?i)chrome-extension"},
+        {"type": "output_matches", "pattern": "(?i)rest-api"},
+        {"type": "output_matches", "pattern": "\\?"}
+      ],
+      "must_not": [
+        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*chrome-extension"},
+        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*rest-api"}
+      ],
+      "notes": "Routing-Trap aus dem Auftrag, mechanisch am saubersten: Die Fixture hat manifest.json und openapi.yaml mit exakt gleicher Punktzahl (je 3), detect_stack.py meldet ambiguous:true mit beiden Kandidaten statt eines Urteils. Die Antwort muss laut SKILL.md-Routing-Tabelle ('ambiguous: true -> keine Referenz, erst fragen') beide Kandidaten benennen und fragen, statt sich per vollem Test-Plan-Block auf einen Typ festzulegen — genau das verbieten die must_not-Muster, ohne die Formulierung der Rückfrage selbst vorzuschreiben."
+    },
+    {
+      "id": "anti-ceremony-single-test-stays-short",
+      "class": "contract",
+      "fixture": "well-tested-repo",
+      "prompt": "Ich hab in src/textkit/case.py eine kleine neue Funktion strip_punct() ergänzt, brauche dafür einen Test.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
+        {"type": "output_matches", "pattern": "(?i)pytest"}
+      ],
+      "must_not": [
+        {"type": "output_matches", "pattern": "Ausgelassen:"},
+        {"type": "output_matches", "pattern": "(?m)^##\\s"}
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. textkit ist laut Fixture durchgehend getestet (tests_found:true, legacy.suspected:false, ambiguous:false) — die SKILL.md-Ausnahme greift: kein Test-Plan-Block, drei Zeilen Fließtext. must_not prüft genau das Block-Feld 'Ausgelassen:' und jede Markdown-Überschrift der Ebene 2 — beide sind laut SKILL.md nur im vollen Block erlaubt, nicht im Drei-Zeilen-Fall. detect_stack.py läuft laut R5 trotzdem immer, deshalb bleibt file_exists ein must."
+    }
+  ]
+}

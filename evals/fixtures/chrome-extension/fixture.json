@@ -1,0 +1,12 @@
+{
+  "git": true,
+  "description": "MV3-Extension mit einem bestehenden Message-Handler — der Extension-Trap-Eval.",
+  "commits": [
+    {"message": "feat: Extension-Grundgeruest mit PING-Handler", "touch": {
+      "manifest.json": "{\n  \"manifest_version\": 3,\n  \"name\": \"Sync Helper\",\n  \"version\": \"1.0.0\",\n  \"background\": {\"service_worker\": \"background.js\"},\n  \"content_scripts\": [{\"matches\": [\"https://*/*\"], \"js\": [\"content.js\"]}],\n  \"action\": {\"default_popup\": \"popup.html\"},\n  \"permissions\": [\"storage\"]\n}\n",
+      "background.js": "chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {\n  if (message.type === 'PING') {\n    sendResponse({ ok: true });\n    return true;\n  }\n  return false;\n});\n",
+      "content.js": "// Content-Script: reagiert auf Nachrichten vom Background-Worker.\n",
+      "package.json": "{\n  \"name\": \"sync-helper\",\n  \"devDependencies\": {\"vitest\": \"^1.0.0\", \"@playwright/test\": \"^1.40.0\"}\n}\n"
+    }}
+  ]
+}
