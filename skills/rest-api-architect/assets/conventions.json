@@ -1,0 +1,54 @@
+{
+  "errors": {
+    "format": "rfc9457",
+    "media_type": "application/problem+json",
+    "required_fields": ["type", "title", "status", "detail", "code"],
+    "registry": {
+      "warn_threshold": 50,
+      "warn_message": "Registry hat {count} Codes (Schwelle {threshold}) — eine Gliederung wäre fällig. Die Skill gliedert nicht selbst.",
+      "codes": [
+        {"code": "validation_failed", "status": 422, "description": "Eingabe verletzt ein Schema- oder Geschäftsregel-Constraint."},
+        {"code": "not_found", "status": 404, "description": "Ressource existiert nicht oder ist für den Aufrufer nicht sichtbar."},
+        {"code": "unauthorized", "status": 401, "description": "Keine oder ungültige Authentifizierung."},
+        {"code": "forbidden", "status": 403, "description": "Authentifiziert, aber ohne Berechtigung für diese Aktion."},
+        {"code": "conflict", "status": 409, "description": "Zustandskonflikt, z. B. doppelter eindeutiger Wert."},
+        {"code": "idempotency_key_reused", "status": 409, "description": "Idempotency-Key wurde bereits mit anderem Payload verwendet."},
+        {"code": "rate_limited", "status": 429, "description": "Rate-Limit überschritten."},
+        {"code": "internal_error", "status": 500, "description": "Unerwarteter Serverfehler, kein Nutzerfehler."}
+      ]
+    }
+  },
+  "pagination": {
+    "style": "cursor",
+    "request_params": ["cursor", "limit"],
+    "response_fields": ["next_cursor"],
+    "default_limit": 50,
+    "max_limit": 200
+  },
+  "versioning": {
+    "style": "path",
+    "prefix_pattern": "^/v[0-9]+/",
+    "deprecation_headers": ["Deprecation", "Sunset", "Link"],
+    "no_breaking_without_deprecation": true
+  },
+  "idempotency": {
+    "required_for_methods": ["POST"],
+    "unsafe_only": true,
+    "header": "Idempotency-Key"
+  },
+  "naming": {
+    "field_case": "snake_case",
+    "resource_plural": true,
+    "no_verbs_in_paths": true,
+    "verb_exceptions": ["search", "batch", "export", "import"],
+    "note": "verb_exceptions gilt für echte Aktionen auf einer Ressource, z. B. POST /orders/{id}/cancel — keine allgemeine Verb-Freigabe."
+  },
+  "timestamps": {
+    "format": "rfc3339",
+    "timezone": "utc"
+  },
+  "breaking_changes": {
+    "definitions": ["field_removed", "field_renamed", "required_field_added", "status_code_changed"],
+    "fix": "dokumentierte Migration über references/evolution.md, nie stiller Bruch"
+  }
+}
