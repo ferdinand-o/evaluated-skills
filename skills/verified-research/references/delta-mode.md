@@ -23,10 +23,13 @@ Erste nicht-leere Zeile, nach der allgemeinen Artefakt-Konvention:
 
 ## Sektionen
 
-```
-# <Thema>
+Die Kopfzeile bleibt die erste nicht-leere Zeile, auch wenn ein Titel folgt (siehe
+„Kopfzeile" oben) — der Titel steht danach, nie davor:
 
+```
 <!-- skill: verified-research | schema: 1 | generated: ... -->
+
+# <Thema>
 
 ## Bekannt
 
@@ -69,10 +72,15 @@ Bericht sagt das kurz und explizit statt eine leere Sektion zu erzeugen.
 
 ## Ohne Neuigkeiten
 
-Bestätigt die Differenz-Recherche nichts Neues, bleibt `## Neu` weg und der Bericht ist
-ein Satz: „Keine Neuigkeiten seit <Datum> — <Kernfakt kurz wiederholt>." Das ist der
-Erfolgsfall dieser Skill, kein unvollständiges Ergebnis, und rechtfertigt keine
-Zeremonie.
+Bestätigt die Differenz-Recherche nichts Neues, bleibt `## Neu` weg und der Bericht
+bleibt auf ein bis zwei Sätze beschränkt, die zwei Dinge unmissverständlich sagen:
+dass sich nichts geändert hat, und was der (unveränderte) Kernfakt ist. Die genaue
+Formulierung ist frei — „Keine Neuigkeiten seit <Datum>", „Keine Änderung gegenüber
+dem Stand vom <Datum>" und vergleichbare Sätze sind alle richtig, solange „nichts
+Neues" unmissverständlich dasteht statt nur implizit aus fehlender Ausarbeitung zu
+folgen. Das ist der Erfolgsfall dieser Skill, kein unvollständiges Ergebnis, und
+rechtfertigt keine Zeremonie — insbesondere keine erneute Recherche, nur um doch etwas
+zu berichten.
 
 ## 30-Themen-Warnung
 

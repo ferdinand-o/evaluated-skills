@@ -1,6 +1,6 @@
-# Produkt X Preismodell
-
 <!-- skill: verified-research | schema: 1 | generated: python skills/verified-research/scripts/registry.py --repo . topics -->
+
+# Produkt X Preismodell
 
 ## Bekannt
 
