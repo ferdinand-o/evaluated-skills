@@ -1,8 +1,103 @@
 # Bericht: Skill `sql-schema-architect` (Spec 08)
 
-Branch `feat/sql-schema-architect`, Basis `0831fb7`. Zehn Commits, `6d0e8d9`
-(Plan) bis `f9795f1` (letzter Fix). Volle Testsuite: 260/260 grün
-(146 bestehende + 114 neue). `run_evals.py` nicht ausgeführt (Auftrag).
+Branch `feat/sql-schema-architect`, Basis `0831fb7`. Erstfassung: zehn
+Commits, `6d0e8d9` (Plan) bis `f9795f1` (letzter Fix vor Review), 260/260
+Tests grün. Fix-Runde nach unabhängigem Review: vier weitere Commits,
+`ac78a02` bis `dcfb22a`, 281/281 Tests grün. `run_evals.py` nicht
+ausgeführt (Auftrag) — siehe „Fix-Runde" ganz unten für den Nachtrag.
+
+## Fix-Runde nach Review (Commits `ac78a02`..`dcfb22a`)
+
+Ein unabhängiges Review fand drei Defekte und drei Lücken, die schwersten
+gegen echten Skript-Output verifiziert. **Alle drei Defekte führten dazu,
+dass eine gefährliche Migration als unbedenklich durchging** — bei dieser
+Skill die einzige Fehlerrichtung, die wirklich zählt. Alle drei sind
+behoben, mit Regressionstests, die genau den vom Review verifizierten Fall
+nachbauen:
+
+1. **Mehrschritt-Plan-Marker prüfte nur Textlänge.** `# Mehrschritt-Plan:
+   siehe unten unten` (19 hohle Zeichen) ließ eine rote Migration als
+   `pass` durch — verifiziert reproduzierbar, kein theoretisches Risiko.
+   Behoben: der Marker braucht jetzt mindestens zwei unterschiedliche
+   Begriffe aus einem Vokabular (`nullable`, `backfill`, `batch`,
+   `constraint`, `valid`, `concurrently`, `revision`). Wichtiger: selbst
+   mit erfüllter Struktur wird eine rote Migration **nie mehr automatisch
+   `pass`** — sie wird `review_required` mit der Begründung „roter Plan mit
+   erkennbarer Schrittstruktur, Inhalt statisch nicht vollständig prüfbar,
+   manuelle Freigabe nötig". Restrisiko dokumentiert in
+   `docs/known-limits.md`: die Struktur-Prüfung erkennt nur die richtigen
+   Wörter, nicht ob der Plan zu den Operationen passt — dafür verlangt sie
+   jetzt aber mindestens ein menschliches Signoff statt eines stillen
+   Durchwinkens.
+2. **`op.*`-Aufrufe in Hilfsfunktionen waren komplett unsichtbar — nicht
+   mal „unknown".** `upgrade(): _apply()` mit `op.execute(...)` in `_apply()`
+   ergab „0 Operationen gefunden, pass", Exit 0 — verifiziert, ohne dass
+   ein Agent etwas Böswilliges tun musste, nur eine im Alembic-Ökosystem
+   übliche Extraktion einer Hilfsfunktion. Behoben in zwei Teilen, wie
+   im Auftrag verlangt: **(a)** `_op_calls_in` folgt jetzt Aufrufen an
+   modulweite Funktionen im selben File, rekursiv mit Zyklenschutz —
+   getestet bis zwei Ebenen tief und gegen Rekursion. **(b)** Wichtiger:
+   „upgrade() enthält Code, aber 0 Operationen gefunden" ist jetzt selbst
+   ein Kontraktverstoß (`violation`), nicht mehr `pass` — das fängt auch
+   Umgehungswege ab, die der Scanner (noch) nicht kennt, solange sie zu
+   null erkannten Operationen führen. **Wo die neue Grenze liegt** (explizit
+   angefragt): gefolgt wird ausschließlich direkten Aufrufen an
+   Funktionsnamen im selben Modul (`_apply()`). Nicht gefolgt — bewusst,
+   nicht versehentlich: `self.methode()`/`modul.funktion()`
+   (Attribut-Aufrufe), Aufrufe über eine Variable, Methoden auf Klassen,
+   importierte Funktionen, dynamisch aufgelöste Aufrufe (`getattr(...)`).
+   Ein Restrisiko bleibt bewusst ungelöst: `upgrade()` mit einer sichtbaren
+   grünen Operation *und* einem nicht verfolgten Aufruf, der intern eine
+   gefährliche Operation versteckt, bleibt grün — ein generisches
+   „unresolved calls"-Signal hätte auch harmlose Aufrufe wie `print(...)`
+   getroffen und wurde deshalb bewusst nicht gebaut (dokumentiert in
+   `docs/known-limits.md`, nicht stillschweigend in Kauf genommen).
+3. **`add_column` mit vorab konstruierter Spalte wurde fälschlich grün.**
+   `col = sa.Column(..., nullable=False); op.add_column(t, col)` verlor das
+   `nullable=False`, weil es nur im inneren, nicht direkt inline
+   übergebenen Call stand — verifiziert am selben `production-trap`-Muster,
+   nur als Variable statt Inline geschrieben. Behoben: einfache lokale
+   Zuweisungen direkt im Funktionsrumpf werden jetzt aufgelöst
+   (`_local_column_vars`/`_add_column_target`). Was nicht auflösbar ist
+   (Rückgabewert eines Funktionsaufrufs, Zuweisung in einem verschachtelten
+   `if`/`for`-Block) ist jetzt `unknown`, nicht grün — getestet für beide
+   Fälle.
+
+Dazu die drei Lücken aus dem Review:
+
+- **`gen_erd.py`/`lint_schema.py` waren für SQLAlchemy-2.0-`Mapped[T]`-Stil
+  blind, ohne das zu melden.** Anders als die sqlfluff-Degradation (R4) gab
+  es keine sichtbare Zeile, dass die Typ-Kernprüfungen für solche Spalten
+  wirkungslos waren. Behoben: `ColumnInfo.type_unresolved` +
+  `python_annotation` (Diagnose-Hinweis, kein SQL-Typ), ein
+  Klassen-Warning in `gen_erd`s `ScanResult.warnings`, und ein eigener
+  Lint-Befund (`rule: type_coverage`) pro betroffener Spalte statt eines
+  stillen Nicht-Ergebnisses. Bewusst **nicht** gebaut: eine echte
+  Typ-Herleitung aus `type_annotation_map`-Konventionen — das wäre Raten,
+  kein Lesen.
+- **`--hook-check`-Regex.** Meine ursprüngliche Selbstauskunft, dass
+  `poetry run alembic` und `python -m alembic` den Hook umgingen, war
+  falsch (das Review hat das per Regex-Test widerlegt — Substring-Suche
+  fängt beide). Was real und unbehoben blieb: Makefile-/CI-Indirektion
+  (`make migrate`), deren Bash-Aufruf den Text „alembic upgrade" nicht
+  enthält. Zusätzlich behoben: die Regex hatte kein `re.IGNORECASE`,
+  `ALEMBIC UPGRADE HEAD` wurde nicht erkannt — jetzt schon. Beides in
+  `docs/known-limits.md` und im Code-Kommentar dokumentiert.
+- **`docs/known-limits.md` war nicht ergänzt**, obwohl ich selbst vier
+  Punkte benannt hatte, die dort hingehören. Der Reviewer hat zu Recht
+  darauf hingewiesen, dass „keine andere Skill anfassen" auf eine rein
+  additive Ergänzung der gemeinsamen Grenzen-Doku (Muster: `## dev-report`)
+  nicht wirklich anwendbar ist. Nachgeholt: neuer Abschnitt
+  `## sql-schema-architect` mit allen fünf oben genannten Punkten in der
+  nach dem Fix verbleibenden, präziseren Form.
+
+**Verifikation der Fix-Runde:** 20 neue/geänderte Tests (61→76 in
+`migration_gate`, +4 in `gen_erd`, +2 in `lint_schema`), volle Suite
+281/281 grün, `load_evals()` weiterhin 5/5 valide, alle drei
+eval-relevanten Fixtures (`production-trap`, `missing-downgrade`,
+`convention-violations`) erneut gegen den tatsächlichen Skript-Output
+laufen lassen — die für die mechanischen `must`-Assertions genutzten
+Report-Inhalte sind unverändert exakt wie vor der Fix-Runde.
 
 ## Was gebaut wurde
 
