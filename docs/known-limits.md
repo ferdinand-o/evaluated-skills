@@ -31,6 +31,32 @@ Was das **nicht** zeigt: dass die Assertions der einzelnen Skills scharf genug
 sind. Die Abschnitte weiter unten nennen mehrere, die es nachweislich nicht
 sind.
 
+## Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis
+
+**Ob eine Skill überhaupt geladen wird, ist nicht deterministisch.** Gemessen am
+Eval `anti-ceremony-single-test-stays-short` von testing-strategy (2026-08-16):
+Zwei aufeinanderfolgende Läufe über denselben Commit, dieselbe Fixture und
+denselben Prompt lieferten **einmal FAIL und einmal PASS**. Im roten Lauf fehlte
+`.skills/cache/detect_stack.json`, die Skill wurde also gar nicht aufgerufen; im
+grünen lief sie durch.
+
+Das ist keine Eigenheit dieser einen Skill, sondern der Auswahl: Der Agent
+entscheidet anhand der Descriptions, und diese Entscheidung schwankt — verschärft
+dadurch, dass 16 fremde Skills mitkonkurrieren (siehe „Isolation" unten).
+
+Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
+
+- **Ein grüner Lauf beweist nicht, dass die Skill zuverlässig triggert.** Alle in
+  den Berichten genannten Zahlen sind Einzelstichproben, sofern nicht ausdrücklich
+  anders vermerkt.
+- **Ein roter Lauf beweist keinen Defekt.** Vor jeder Fix-Runde gehört ein zweiter
+  Lauf — sonst repariert man eine Skill, die funktioniert. Bei testing-strategy ist
+  genau das um Haaresbreite passiert.
+- **Ein Diagnoselauf, der besteht, belegt eine Description-Korrektur nicht.** Er
+  zeigt, dass Triggern *möglich* ist, nicht dass es verlässlich geschieht.
+- Wer Verlässlichkeit wirklich messen will, braucht denselben Eval mehrfach und
+  eine Quote statt eines Urteils. Der Runner kennt dafür heute kein Primitiv.
+
 ## Isolation
 
 - **Fremde Skills sind im Eval-Agenten sichtbar — `--setting-sources project` hält sie
