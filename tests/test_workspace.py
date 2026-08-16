@@ -250,3 +250,22 @@ def test_commits_field_without_git_is_rejected(tmp_path):
     )
     with pytest.raises(WorkspaceError, match="git"):
         prepare(tmp_path / "ws", make_skill(tmp_path), fixture)
+
+
+def test_dump_omits_binary_content_but_names_the_file(tmp_path):
+    """Ein Nullbyte im Dump toetet den Judge-Aufruf.
+
+    Nullbytes sind gueltiges UTF-8 und ueberleben errors="replace", aber subprocess
+    verbietet sie in Argumenten -- und der Dump geht als Argument in den Judge-Aufruf.
+    Real aufgetreten: ein vom Agenten hinterlassenes __pycache__/*.pyc liess eine
+    behavior-Eval mit "ValueError: embedded null byte" als Harness-Fehler ausfallen.
+    """
+    (tmp_path / "gut.md").write_text("lesbarer Inhalt", encoding="utf-8")
+    (tmp_path / "modul.pyc").write_bytes(b"\x00\x01binaer\x00")
+
+    dump = dump_changed_files(tmp_path, {})
+
+    assert "\x00" not in dump
+    assert "modul.pyc" in dump
+    assert "binär" in dump
+    assert "lesbarer Inhalt" in dump
