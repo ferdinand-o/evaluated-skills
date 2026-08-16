@@ -8,12 +8,12 @@
       "must": [
         {"type": "file_exists", "path": ".skills/verified-research/research/testkonstante.md"},
         {"type": "file_max_lines", "path": ".skills/verified-research/research/testkonstante.md", "max_lines": 20},
-        {"type": "output_matches", "pattern": "(?i)keine Neuigkeiten seit"}
+        {"type": "output_matches", "pattern": "(?i)keine (neuigkeiten|änderung(en)?)|kein delta|unveränder"}
       ],
       "must_not": [
         {"type": "file_matches", "path": ".skills/verified-research/research/testkonstante.md", "pattern": "(?m)^## Neu"}
       ],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract. Könnte deep-research das auch erzeugen? Nein: deep-research kennt weder die Wissensdatei-Konvention noch die 'Keine Neuigkeiten seit'-Formulierung aus delta-mode.md — das ist verified-research-eigenes Vokabular, keine allgemeine Recherchequalität."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract. Fix-Runde: delta-mode.md mandatierte ursprünglich den einen Satz 'Keine Neuigkeiten seit <Datum>' wörtlich, während die Skill inhaltlich richtig, aber mit anderer Formulierung antwortete ('Keine Änderung ... unverändert'). Die Formulierung war das Problem, nicht die Skill: delta-mode.md verlangt jetzt nur noch, dass 'nichts Neues' unmissverständlich gesagt wird, mit mehreren Beispielformulierungen; die Assertion prüft dieselbe Wortfamilie statt eines einzelnen Satzes. Könnte deep-research das auch erzeugen? Nein: deep-research kennt weder die Wissensdatei-Konvention noch einen Delta-Modus, der explizit 'nichts Neues' feststellt statt einfach zu schweigen."
     },
     {
       "id": "registry-consulted-before-free-search",
@@ -24,10 +24,10 @@
         {"type": "output_matches", "pattern": "Fixture-Primärdokumentation Internes Tool"},
         {"type": "output_matches", "pattern": "\\[Tier\\s*1"},
         {"type": "file_exists", "path": ".skills/verified-research/research/internes-tool-config.md"},
-        {"type": "file_matches", "path": ".skills/verified-research/research/internes-tool-config.md", "pattern": "Fixture-Primärdokumentation Internes Tool"}
+        {"type": "file_matches", "path": ".skills/verified-research/research/internes-tool-config.md", "pattern": "\\[Tier\\s*1"}
       ],
       "must_not": [],
-      "notes": "Der Registereintragsname ist frei erfunden und nicht erratbar — er kann nur aus .skills/verified-research/registry.json stammen. Könnte deep-research das auch erzeugen? Nein: deep-research hat kein Register, aus dem dieser exakte Name kommen könnte, und keine Tier-Tag-Syntax."
+      "notes": "Fix-Runde: Die vierte Assertion verlangte ursprünglich den Registereintragsnamen wörtlich in der Wissensdatei — das schreibt SKILL.md nirgends vor. SKILL.md sagt 'in der Antwort an den Nutzer (der Prosa-Bericht ...) wird er als (laut Register: <name>) zitiert' und meint damit ausdrücklich die Chat-Antwort, nicht die Wissensdatei; delta-mode.mds Claim-Schema kennt nur Tier+Quelle, keinen Registernamen. Die Chat-seitige Assertion (output_matches) prüfte das bereits korrekt und bestand auch im echten Lauf. Die Datei-Assertion prüft jetzt strukturell, dass die Wissensdatei den vom Register gelieferten Tier (1) tatsächlich übernommen hat, statt eine Formulierung zu verlangen, die nie versprochen war. Der Registereintragsname ist frei erfunden und nicht erratbar — er kann nur aus .skills/verified-research/registry.json stammen. Könnte deep-research das auch erzeugen? Nein: deep-research hat kein Register, aus dem dieser exakte Name kommen könnte, und keine Tier-Tag-Syntax."
     },
     {
       "id": "critical-claim-tier3-only-flagged",
