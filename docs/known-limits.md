@@ -146,13 +146,20 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   `spectral-ruleset.json` trägt ihn entsprechend der Konvention. Ob Spectrals
   Ruleset-Schema-Validierung einen unbekannten Top-Level-Schlüssel klaglos akzeptiert oder
   den Ladevorgang verweigert, konnte hier nicht getestet werden (kein Spectral installiert).
-- **Der YAML-Dumper in `extract_openapi.py` ist nur mit golden-string-Tests verifiziert, nie
-  mit einem echten YAML-Parser gegengeprüft.** PyYAML ist in keiner der geprüften
-  Python-Installationen verfügbar (Projekt-venv, System-`python3`, Miniconda-`python3`). Der
-  Dumper quotet jeden String immer doppelt (statt Sonderfälle zu erkennen) und ist bewusst
-  nur für die selbst erzeugten, kontrollierten Strukturen gedacht (dict/list/str/bool/int/
-  float/None). Die Tests bestätigen, dass die Ausgabe dem erwarteten String entspricht —
-  nicht, dass ein echter YAML-Loader sie für jeden denkbaren Fall akzeptiert.
+- **Der YAML-Dumper in `extract_openapi.py` wurde extern gegen echtes PyYAML geprüft und ist
+  für seinen Einsatzbereich tragfähig — mit einer Lücke, die jetzt geschlossen ist.** Ein
+  unabhängiger Reviewer hat ihn mit installiertem PyYAML 6.0.3 gegen Doppelpunkte in Werten,
+  führende/folgende Leerzeichen, `yes`/`no`/`on`/`1.0`/`null`-artige Strings, mehrzeilige
+  Beschreibungen (via `\n`-Escape), Sonderzeichen (`: [ ] { } # & * | > % @` Backtick), sehr
+  lange Zeilen, Tabs und Unicode geprüft — alle liefen korrekt durch. Eine reale Lücke wurde
+  gefunden und behoben: ein rohes Carriage-Return (`\r`) wurde nicht escaped und wäre von
+  echten YAML-Loadern gemäß Flow-Scalar-Regeln still zu einem Leerzeichen gefaltet worden
+  (kein Parse-Fehler, eine stille Verfälschung) — `_yaml_quote` escaped `\r` jetzt wie `\\`,
+  `"` und `\n`, mit Test. **Restliche Grenze:** PyYAML ist in keiner der Python-Installationen
+  dieses Repos verfügbar (Projekt-venv, System-`python3`, Miniconda-`python3`); die Prüfung
+  gegen echtes PyYAML war ein einmaliger externer Check des Reviewers, kein Teil dieser
+  Test-Suite oder CI. Künftige Änderungen am Dumper laufen hier weiterhin nur gegen
+  golden-string-Tests, nicht automatisch gegen einen echten YAML-Loader.
 - **Cross-File-Router-Komposition wird von `extract_openapi.py` nicht aufgelöst.**
   `app.include_router(sub_router, prefix="/v1")`, wenn `sub_router` in einer anderen Datei
   definiert ist, wird nicht verfolgt — Pfade aus einem so gemounteten Sub-Router erscheinen
@@ -163,11 +170,34 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   aber auch: Eine vollständig saubere Express-Codebasis bekommt von diesem Skript nie ein
   `x-verified: true` — echtes AST-Parsing für JS/TS wäre eine neue Abhängigkeit und ist
   out of scope.
+- **Express-Routen-Erkennung akzeptiert seit dem Fix-Review jeden Variablennamen vor
+  `.get()`/`.post()`/... (vorher nur `app`/`router`), um drei per Ausführung nachgewiesene
+  Fälle stillen Routen-Verlusts zu schließen — das erhöht das False-Positive-Risiko bei
+  generischen `.get()`-Aufrufen auf Nicht-Router-Objekten** (z. B. Cache-/Map-Zugriffe wie
+  `cache.get('key')`). Hingenommen, weil jeder Treffer ohnehin `x-verified: false` trägt und
+  nie stillschweigend als geprüft gilt — mehr sichtbare, niedrig-vertrauenswürdige Treffer
+  sind hier der bewusst gewählte Fehler, nicht stille Vollständigkeitslücken.
+- **`.route(path).method(handler)`-Chaining (Express-Idiom) wird von `extract_express()` nicht
+  erkannt.** Neu identifiziert beim Fix-Review, nicht behoben (außerhalb der drei konkret
+  nachgewiesenen Defekte dieser Runde) — die Regex verlangt Pfad und Methode im selben
+  `.method('/pfad', ...)`-Aufruf; ein vorangestelltes `.route('/pfad')` mit separat
+  angehängtem `.get(handler)` liefert keinen Treffer, keine Warnung.
+- **`extract_openapi.py`s Auffangnetz für FastAPI-Registrierungs-„Lookalikes" ist selbst eine
+  Heuristik, kein Beweis von Vollständigkeit.** Der Abgleich „wie viele Decorator-/
+  `add_api_route`/`add_route`-artige Zeilen im Rohtext" gegen „wie viele davon hat der
+  AST-Walk tatsächlich zugeordnet" (`extract_fastapi()`) deckt aliasierte Decorator-Funktionen
+  ab (`get = app.get`, `@get(...)`), aber nicht jedes denkbare Registrierungsmuster — z. B.
+  Router, die mehrfach über Fabrikfunktionen weitergereicht werden, oder Decorators, die über
+  `functools.partial`/`functools.wraps`-Konstrukte gebaut werden. Der fehlende Treffer wäre in
+  diesen Restfällen wieder ein stilles Verschwinden, keine sichtbare Markierung.
 - **Die fünf rest-api-architect-Evals sind nicht gelaufen.** `load_evals()` bestätigt nur
   Schema-Gültigkeit und dass die Fixtures einen Workspace aufbauen (per
   `evalkit.workspace.prepare()` geprüft). Ob die Prompts die beschriebenen Verhaltensweisen
   tatsächlich provozieren (Umbenennungs-Versuchung, Massen-Refactoring-Versuchung, stille
-  Spec-Drift), zeigt erst ein echter `run_evals.py`-Lauf.
+  Spec-Drift), zeigt erst ein echter `run_evals.py`-Lauf. `rename-triggers-deprecation-path`
+  wurde beim Fix-Review von `contract` auf `behavior` umklassifiziert (Judge-Assertion nötig,
+  um an skill-eigenes Vokabular statt an generisches REST-Wissen zu binden) — die allgemeinen
+  Judge-Grenzen aus dem Abschnitt „Judge" oben gelten damit jetzt auch für diesen Eval.
 
 ## Verweise
 
