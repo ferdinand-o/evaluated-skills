@@ -218,3 +218,57 @@ falsch attribuiert.
 
 Alle Tests grün (199, siehe unten), `evalkit.schema.load_evals` validiert die 7 Evals
 weiterhin fehlerfrei. `run_evals.py` wurde weiterhin nicht ausgeführt.
+
+## Fix-Runde 2: erster echter `run_evals.py`-Lauf, drei Fehlschläge diagnostiziert
+
+Der Koordinator hat alle 7 Evals real gefahren: 4 bestanden (`critical-claim-tier3-only-flagged`,
+`unknown-source-gets-registry-entry`, `delta-mode-separates-known-and-new`,
+`spotcheck-catches-numeric-trap`), 3 fielen. Für die Diagnose habe ich `evalkit/dispatch.py`,
+`evalkit/runner.py` und `evalkit/judge.py` temporär (uncommitted) aus `feat/dev-report`
+kopiert, die drei Evals einzeln mit `--keep-workspace` gefahren, den vollen
+Agent-Transcript (nicht nur PASS/FAIL) über ein eigenes Diagnose-Skript ausgelesen und
+danach die Kopien wieder auf den committeten Stand zurückgesetzt (`git checkout --`) —
+`evalkit/` gehört nicht zum Auftrag dieser Skill.
+
+**anti-ceremony-delta-no-news → Eval-Defekt (mit Doktrin-Klarstellung).** Die Skill hat
+inhaltlich alles richtig gemacht: Quelle gelesen, Wissensdatei gelesen, festgestellt
+„42 Einheiten, keine Änderung", die Datei unverändert gelassen (11 Zeilen, `## Neu`
+korrekt weggelassen) und in zwei kurzen Sätzen geantwortet: „Keine Änderung — die
+Wissensdatei bleibt unverändert. ... Es gibt also kein Delta zu übernehmen." Der Eval
+verlangte aber wörtlich `(?i)keine Neuigkeiten seit` — genau die eine Formulierung, die
+`delta-mode.md` als Pflichtsatz vorschrieb. Die Skill tat das Richtige mit einer anderen,
+gleichwertigen Formulierung. Fix: `delta-mode.md` verlangt jetzt nur noch, dass „nichts
+Neues" unmissverständlich gesagt wird (mit Beispielformulierungen, keine einzige
+Pflichtphrase mehr), die Assertion prüft dieselbe Wortfamilie
+(`keine (Neuigkeiten|Änderung)|kein Delta|unveränder`) statt eines Satzes.
+
+**registry-consulted-before-free-search → Eval-Defekt.** Drei von vier `must`-Assertions
+bestanden bereits im fehlgeschlagenen Lauf, auch die, die den Registereintragsnamen in
+der *Chat-Antwort* verlangte. Nur die vierte — derselbe Name, aber in der *Wissensdatei*
+— schlug fehl: Die Datei enthielt den Claim korrekt mit `[Tier 1, ...]` und
+`Quelle: sources/internal-tool-docs.example.md`, aber nicht den Registernamen selbst.
+SKILL.md verspricht das für die Wissensdatei auch nirgends — der Satz „im Bericht wird
+er als (laut Register: <name>) zitiert" bezieht sich auf die Prosa-Antwort, und
+`delta-mode.md`s Claim-Schema kennt nur `Tier`+`Quelle`, keinen Registernamen. Fix: die
+Assertion prüft jetzt strukturell, dass die Wissensdatei den vom Register gelieferten
+Tier (1) übernommen hat, statt eine nie versprochene Formulierung zu verlangen;
+SKILL.md wurde zusätzlich präzisiert („die Antwort an den Nutzer — nicht die
+Wissensdatei"), damit diese Verwechslung nicht wieder passiert.
+
+**fresh-topic-updates-knowledge-file → Skill-Defekt.** Der Agent schrieb die
+Wissensdatei mit `# Policenlaufzeit` als allererster Zeile, dann eine Leerzeile, dann
+erst die Kopfzeile `<!-- skill: ... -->` — exakt das Layout aus `delta-mode.md`s eigenem
+„## Sektionen"-Beispiel. Zwei Abschnitte weiter oben sagte dieselbe Datei aber korrekt:
+„Kopfzeile: Erste nicht-leere Zeile". Meine eigene Doktrin widersprach sich selbst, und
+der Agent folgte dem ausführlicheren (falschen) Beispiel. Das verletzt Spec 00 §1s
+Kopf-Regel, die für jedes erzeugte Wissens-Artefakt gilt. Fix: `delta-mode.md`s
+Sektionen-Beispiel hat die Kopfzeile jetzt vor dem Titel; die beiden Fixtures
+(`vr-anti-ceremony/testkonstante.md`, `vr-delta-known-topic/produkt-x-preismodell.md`),
+die ich selbst nach dem alten, falschen Muster geschrieben hatte, sind auf dasselbe
+korrekte Layout umgestellt.
+
+Alle drei Fixes wurden gegen echte Agent-Läufe verifiziert (nicht nur gegen die
+Test-Suite): Nach den Änderungen bestehen alle drei Evals real, mit `--keep-workspace`
+kontrolliert. Kein Fix bestand nur aus einer breiteren Regex ohne inhaltliche Prüfung —
+`registry-consulted` und `fresh-topic` wurden an Struktur (Tier-Tag, Kopfzeilen-Position)
+statt an Wortlaut gebunden, `anti-ceremony` an eine Wortfamilie statt an einen Satz.
