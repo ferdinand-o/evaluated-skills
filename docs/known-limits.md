@@ -128,6 +128,85 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## sql-schema-architect
+
+Ein unabhängiges Review nach dem ersten Merge-Kandidaten fand drei Defekte,
+die dazu führten, dass eine gefährliche Migration als unbedenklich
+durchging — bei dieser Skill die einzige Fehlerrichtung, die zählt. Alle
+drei sind in einer Fix-Runde behoben (Commits ab dem Review); was danach
+bleibt, steht hier.
+
+- **Der Mehrschritt-Plan-Marker prüft Struktur, nicht Wahrheitsgehalt.**
+  Behoben wurde der konkrete Bypass — ein Marker wie
+  `# Mehrschritt-Plan: siehe unten unten` erfüllte vorher nur eine
+  Längenschwelle (>10 Zeichen) und ließ eine tatsächlich rote Migration als
+  `pass` durch. Die Prüfung verlangt jetzt mindestens zwei unterschiedliche
+  Begriffe aus einem Vokabular (`nullable`, `backfill`, `batch`,
+  `constraint`, `valid`, `concurrently`, `revision`) — und selbst mit
+  erfüllter Struktur wird eine rote Migration nie mehr automatisch `pass`,
+  sondern `review_required` mit expliziter Begründung. Was bleibt: die
+  Struktur-Prüfung erkennt nur, dass die *richtigen Wörter* vorkommen, nicht
+  ob der beschriebene Plan zu den tatsächlichen Operationen der Revision
+  passt oder ob die genannten Revisionen existieren. Ein Marker, der zwei
+  Vokabeln nennt, ohne dass ein echter Mehrschritt-Plan dahintersteht,
+  besteht die mechanische Prüfung weiterhin — er verlangt aber jetzt
+  mindestens eine menschliche Freigabe statt eines stillen `pass`, was das
+  Risiko deutlich, aber nicht auf null senkt.
+- **`op.*`-Aufrufe werden nur bis zu einer bestimmten Grenze verfolgt.**
+  Behoben wurde der konkrete Fall: `upgrade()` ruft eine andere,
+  modulweite Funktion auf (`def upgrade(): _apply()`), die ihrerseits
+  `op.execute(...)` enthält — vorher unsichtbar für den Scanner, jetzt
+  rekursiv verfolgt (mit Zyklenschutz). Nicht verfolgt, bewusst: Aufrufe
+  über `self.`/Modul-Attribute, Variablen, Klassenmethoden, importierte
+  Funktionen, dynamisch aufgelöste Aufrufe (`getattr(...)`). Als
+  Sicherheitsnetz für genau diese Grenze meldet `migration_gate.py` jetzt
+  „upgrade() enthält Code, aber keine Operation erkennbar" als eigenen
+  Kontraktverstoß, sobald `upgrade()` nicht-trivial ist und der Scanner
+  null Operationen findet — das fängt auch unbekannte künftige
+  Umgehungswege ab, solange sie zu null erkannten Operationen führen.
+  Ein Fall, den das **nicht** abfängt: `upgrade()` enthält eine sichtbare,
+  grün klassifizierte Operation *und* einen nicht verfolgten Aufruf, der
+  intern eine gefährliche Operation versteckt — dann bleibt der
+  Gesamtbefund grün/gelb, weil mindestens eine Operation gefunden wurde.
+  Dieser Teilsichtbarkeits-Fall wurde bewusst nicht zusätzlich als
+  generisches „unresolved calls"-Signal behandelt, weil ein solches Signal
+  auf jeden nicht aufgelösten Aufruf anschlagen würde (auch `print(...)`,
+  `logging.info(...)`) und harmlose Revisionen unnötig auf
+  `review_required` degradieren würde.
+- **`add_column` löst nur einfache lokale Variablen auf.** Behoben:
+  `col = sa.Column(..., nullable=False); op.add_column(t, col)` wird jetzt
+  wie die Inline-Form `op.add_column(t, sa.Column(..., nullable=False))`
+  behandelt — vorher fiel die Variablen-Form fälschlich auf „additive
+  Spalte, grün". Aufgelöst werden nur Zuweisungen direkt im Funktionsrumpf,
+  nicht in `if`/`for`-Blöcken, nicht über mehrere Funktionen hinweg. Ein
+  nicht auflösbarer Fall (Rückgabewert eines Funktionsaufrufs, Zuweisung in
+  einem verschachtelten Block) wird korrekt `unknown`, nie grün — aber auch
+  hier gilt: nur die Spalten-Zuweisung selbst wird verfolgt, nicht beliebig
+  komplexer umgebender Kontrollfluss.
+- **SQLAlchemy-2.0-Stil (`Mapped[T]`) bleibt für die Typ-Prüfung blind —
+  jetzt aber gemeldet statt stillschweigend übergangen.** `id: Mapped[int]
+  = mapped_column(primary_key=True)` liefert keinen SQL-Typ-Ausdruck aus
+  `Column(...)`/`mapped_column(...)`, weil der reale SQL-Typ oft erst aus
+  einer projektspezifischen `type_annotation_map` folgt, die die Skill
+  nicht kennt und nicht raten darf. `lint_schema.py` meldet das jetzt als
+  eigenen Befund (`type_coverage`) pro betroffener Spalte, statt die
+  varchar-/timestamptz-Regeln einfach nichts finden zu lassen; `gen_erd.py`
+  zeigt zusätzlich die Python-Annotation als Diagnose-Hinweis
+  (`? (Mapped_int)`). Was weiterhin fehlt: eine echte Typ-Herleitung aus
+  gängigen `type_annotation_map`-Konventionen (z. B. `str` → `String` vs.
+  `Text`) — das wäre Raten, kein Lesen, und bleibt deshalb bewusst
+  ungebaut.
+- **`--hook-check`s Bash-Muster ist gegen Befehls-Indirektion verwundbar.**
+  Die Regex erkennt `alembic upgrade` als Substring, jetzt case-insensitiv
+  und dadurch tatsächlich robust gegen `poetry run alembic upgrade head`,
+  `python -m alembic upgrade head` und `ALEMBIC UPGRADE HEAD` (verifiziert;
+  frühere Selbstauskunft, dass die ersten beiden Formen den Hook umgingen,
+  war falsch). Real und unbehoben: ein Makefile-Target (`make migrate`)
+  oder ein CI-Skript, dessen Bash-Aufruf den Text „alembic upgrade" nicht
+  enthält, weil er woanders in einem separaten Prozess läuft — der Hook
+  sieht nur den Bash-Befehl, den der Agent aufruft, nicht was ein Target
+  intern tut.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
