@@ -1,5 +1,7 @@
+import argparse
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -431,3 +433,99 @@ def test_find_callers_caps_with_named_limit(repo):
     assert result["total"] == 25
     assert len(result["shown"]) == 20
     assert "5 weitere" in result["note"]
+
+
+# --- gather_conventions ---------------------------------------------------------
+
+def test_gather_conventions_lists_siblings_excluding_changed_file(repo):
+    write(repo, "src/other.py", "z = 1\n")
+    commit_all(repo, "feat: other")
+    conventions = cc.gather_conventions(repo, ["src/calc.py"])
+    assert "other.py" in conventions["sibling_files"]["src"]["files"]
+    assert "calc.py" not in conventions["sibling_files"]["src"]["files"]
+
+
+def test_gather_conventions_caps_siblings_with_named_limit(repo, monkeypatch):
+    monkeypatch.setattr(cc, "MAX_SIBLING_FILES", 2)
+    for i in range(5):
+        write(repo, f"src/sibling_{i}.py", "x = 1\n")
+    commit_all(repo, "feat: viele Geschwisterdateien")
+    conventions = cc.gather_conventions(repo, ["src/calc.py"])
+    entry = conventions["sibling_files"]["src"]
+    assert len(entry["files"]) == 2
+    assert "weitere" in entry["note"]
+
+
+def test_gather_conventions_detects_marker_files(repo):
+    write(repo, "pyproject.toml", "[tool.ruff]\n")
+    commit_all(repo, "chore: pyproject")
+    conventions = cc.gather_conventions(repo, ["src/calc.py"])
+    assert "pyproject.toml" in conventions["convention_markers"]
+
+
+def test_gather_conventions_no_marker_files(repo):
+    conventions = cc.gather_conventions(repo, ["src/calc.py"])
+    assert conventions["convention_markers"] == []
+
+
+# --- build_context / main -------------------------------------------------------
+
+def make_args(range_=None, pr_description=None, pr_description_file=None, repo=None):
+    return argparse.Namespace(
+        range=range_, pr_description=pr_description, pr_description_file=pr_description_file,
+        repo=repo or Path("."),
+    )
+
+
+def test_build_context_meta_and_schema(repo):
+    context = cc.build_context(repo, make_args(range_="HEAD~1..HEAD", repo=repo))
+    assert context["_meta"]["skill"] == "review-context"
+    assert context["_meta"]["schema"] == 1
+    assert context["_meta"]["generated"].startswith("python skills/review-context/scripts/collect_context.py")
+
+
+def test_build_context_empty_diff_has_exactly_one_finding(repo):
+    context = cc.build_context(repo, make_args(range_="HEAD..HEAD", repo=repo))
+    assert context["diff"]["empty"] is True
+    assert [f["id"] for f in context["findings"]] == ["empty_diff"]
+
+
+def test_build_context_no_soll_finding_has_exact_wording(repo):
+    context = cc.build_context(repo, make_args(range_="HEAD~1..HEAD", repo=repo))
+    assert context["packages"]["spec_compliance"]["soll"]["source"] == "none"
+    assert {"id": "no_soll", "message": cc.NO_SOLL_MESSAGE} in context["findings"]
+
+
+def test_build_context_with_spec_has_no_no_soll_finding(repo):
+    write(repo, "docs/specs/wip/feature-x.md", GWT_SAMPLE)
+    context = cc.build_context(repo, make_args(range_="HEAD~1..HEAD", repo=repo))
+    assert all(f["id"] != "no_soll" for f in context["findings"])
+    assert context["packages"]["spec_compliance"]["soll"]["source"] == "feature_spec"
+
+
+def test_build_context_correctness_package_carries_caller_signature(repo):
+    write(repo, "src/calc.py", "def add(a, b):\n    return a + b\n")
+    write(repo, "src/user.py", "def use_add(x, y):\n    return add(x, y)\n")
+    commit_all(repo, "feat: user von add")
+    write(repo, "src/calc.py", "def add(a, b):\n    return a + b + 0\n")
+    commit_all(repo, "fix: add expliziter")
+
+    context = cc.build_context(repo, make_args(range_="HEAD~1..HEAD", repo=repo))
+    symbols = context["packages"]["correctness"]["symbols"]
+    assert symbols[0]["name"] == "add"
+    caller = symbols[0]["callers"]["shown"][0]
+    assert caller["caller_signature"] == "def use_add(x, y):"
+
+
+def test_main_writes_cache_file(repo, monkeypatch):
+    monkeypatch.chdir(repo)
+    rc = cc.main(["--range", "HEAD~1..HEAD"])
+    assert rc == 0
+    written = json.loads((repo / ".skills" / "cache" / "review-context.json").read_text(encoding="utf-8"))
+    assert written["_meta"]["skill"] == "review-context"
+
+
+def test_main_returns_1_on_collect_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rc = cc.main(["--range", "HEAD~1..HEAD"])
+    assert rc == 1

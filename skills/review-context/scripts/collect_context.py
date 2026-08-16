@@ -16,7 +16,7 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 SCHEMA_VERSION = 1
 CACHE_PATH = Path(".skills") / "cache" / "review-context.json"
@@ -611,3 +611,164 @@ def find_callers(
 
     note = f"{total - cap} weitere Aufrufer nicht gezeigt (Obergrenze {cap})." if total > cap else None
     return {"total": total, "shown": shown, "note": note}
+
+
+# --- Vereinfachungslinse: Projekt-Konventionen und Umgebungscode -----------
+
+CONVENTION_MARKER_FILES = (
+    "pyproject.toml", "ruff.toml", ".ruff.toml", "setup.cfg",
+    "tsconfig.json", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs",
+)
+
+
+def gather_conventions(repo: Path, changed_paths: list[str]) -> dict:
+    """Umgebungscode als Zeiger (Dateinamen, nicht Inhalt) plus vorhandene
+    Konventions-Marker — womit sich die Änderung messen lassen muss.
+    """
+    changed_set = set(changed_paths)
+    sibling_files: dict[str, dict] = {}
+    seen_dirs: set[str] = set()
+    for rel in changed_paths:
+        dir_rel = str(PurePosixPath(rel).parent)
+        if dir_rel in seen_dirs:
+            continue
+        seen_dirs.add(dir_rel)
+        dir_path = repo if dir_rel == "." else repo / dir_rel
+        if not dir_path.is_dir():
+            continue
+        names = sorted(
+            p.name for p in dir_path.iterdir()
+            if p.is_file() and (p.name if dir_rel == "." else f"{dir_rel}/{p.name}") not in changed_set
+        )
+        capped = names[:MAX_SIBLING_FILES]
+        note = None
+        if len(names) > MAX_SIBLING_FILES:
+            note = f"{len(names) - MAX_SIBLING_FILES} weitere Dateien nicht gezeigt (Obergrenze {MAX_SIBLING_FILES})."
+        sibling_files[dir_rel] = {"files": capped, "note": note}
+
+    markers = [name for name in CONVENTION_MARKER_FILES if (repo / name).is_file()]
+    return {"sibling_files": sibling_files, "convention_markers": markers}
+
+
+# --- Paket-Zusammenbau -------------------------------------------------------
+
+def _full_after_content(repo: Path, mode: str, head: str | None, path: str) -> str | None:
+    """Ungekürzter Nachher-Inhalt für die Symbolerkennung — nicht der ggf.
+    gekappte `after`-Wert aus `list_changed_files`, sonst würde `ast.parse`
+    auf abgeschnittenem Quelltext scheitern oder Symbole jenseits der
+    Kappungsgrenze übersehen."""
+    if mode == "uncommitted":
+        return _content_in_worktree(repo, path)
+    return _content_at_ref(repo, head, path)  # type: ignore[arg-type]
+
+
+def build_context(repo: Path, args: argparse.Namespace) -> dict:
+    _require_git_repo(repo)
+    mode, base, head, raw_range = resolve_range(args.range)
+    files = list_changed_files(repo, mode, base, head)
+
+    diff_files = [
+        {
+            "path": f["path"], "old_path": f["old_path"], "status": f["status"],
+            "insertions": f["insertions"], "deletions": f["deletions"],
+        }
+        for f in files
+    ]
+    diff_summary = {
+        "files": diff_files,
+        "total_files": len(files),
+        "total_insertions": sum(f["insertions"] for f in files),
+        "total_deletions": sum(f["deletions"] for f in files),
+        "empty": len(files) == 0,
+    }
+
+    findings: list[dict] = []
+    if diff_summary["empty"]:
+        findings.append({"id": "empty_diff", "message": EMPTY_DIFF_MESSAGE})
+
+    soll = resolve_soll(repo, mode, base, head, args.pr_description, args.pr_description_file)
+    if not diff_summary["empty"] and soll["source"] == "none":
+        findings.append({"id": "no_soll", "message": NO_SOLL_MESSAGE})
+
+    decisions = read_decisions(repo)
+
+    correctness_files = []
+    symbols: list[dict] = []
+    for f in files:
+        correctness_files.append({
+            "path": f["path"], "status": f["status"],
+            "before": f["before"], "before_truncated": f["before_truncated"], "before_note": f["before_note"],
+            "after": f["after"], "after_truncated": f["after_truncated"], "after_note": f["after_note"],
+            "patch": f["patch"], "patch_truncated": f["patch_truncated"],
+        })
+        if f["status"] in ("deleted", "binary"):
+            # Kein Nachher-Zustand, aus dem sich Symbolgrenzen ableiten
+            # ließen — bekannte Grenze, siehe docs/known-limits.md.
+            continue
+        full_after = _full_after_content(repo, mode, head, f["path"])
+        touched = detect_symbols(f["path"], full_after, f["changed_ranges_after"])
+        for sym in touched:
+            callers = find_callers(repo, sym["name"], f["path"], definition_lineno=sym["lineno"])
+            symbols.append({**sym, "file": f["path"], "callers": callers})
+
+    conventions = gather_conventions(repo, [f["path"] for f in files])
+
+    packages = {
+        "spec_compliance": {
+            "soll": soll,
+            "decisions": decisions,
+            "diff_files": [f["path"] for f in files],
+        },
+        "correctness": {
+            "files": correctness_files,
+            "symbols": symbols,
+        },
+        "simplification": {
+            "conventions": conventions,
+            "diff_files": [f["path"] for f in files],
+        },
+    }
+
+    generated_cmd = "python skills/review-context/scripts/collect_context.py"
+    if raw_range:
+        generated_cmd += f" --range {raw_range}"
+
+    return {
+        "_meta": {"skill": "review-context", "schema": SCHEMA_VERSION, "generated": generated_cmd},
+        "range": {"mode": mode, "base": base, "head": head, "raw": raw_range},
+        "diff": diff_summary,
+        "findings": findings,
+        "packages": packages,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Kontextpaket für /code-review sammeln")
+    parser.add_argument(
+        "--range",
+        help="Git-Range BASIS..ZIEL (z. B. HEAD~1..HEAD, main..feature/x). "
+             "Ohne Angabe: Arbeitsverzeichnis gegen HEAD (uncommitted).",
+    )
+    parser.add_argument("--pr-description", help="PR-Beschreibung als Text — Soll-Quelle im Fremd-Modus")
+    parser.add_argument("--pr-description-file", help="Datei mit der PR-Beschreibung")
+    parser.add_argument("--repo", type=Path, default=Path("."))
+    args = parser.parse_args(argv)
+
+    try:
+        context = build_context(args.repo, args)
+    except CollectError as exc:
+        print(f"Sammeln gescheitert: {exc}", file=sys.stderr)
+        return 1
+
+    target = args.repo / CACHE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(context, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"Kontextpaket für {context['diff']['total_files']} Datei(en) -> {CACHE_PATH}")
+    for finding in context["findings"]:
+        print(f"Befund: {finding['message']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
