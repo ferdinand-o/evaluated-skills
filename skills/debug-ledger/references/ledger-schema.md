@@ -23,16 +23,30 @@ Hand geleert hat.
 | Feld | Inhalt |
 | --- | --- |
 | `## Evidenz-Log` | Instrumentierungs-Outputs und Bisect-Ergebnisse, mit Kommando und Zeitstempel. |
-| `## Hypothesen` | Tabelle `Hypothese \| Test \| Ergebnis \| Verdict` — eine Zeile pro getesteter Hypothese. |
+| `## Hypothesen` | Tabelle `Hypothese \| Test \| Ergebnis \| Verdict` — eine Zeile pro getesteter Hypothese. Verdict ist `Bestätigt` oder `Verworfen`, nie Freitext. |
 | `## Root Cause` | Die tatsächliche Ursache, nicht das Symptom. |
 | `## Fix` | Die vorgeschlagene Änderung. |
 | `## Verifikation` | Failing Test vor dem Fix (Kommando + Fehlschlag), grüner Lauf danach (Kommando + Erfolg). |
 | `## Prävention` | Was eine Wiederholung verhindert: Test, Assertion, Doku, Guard. |
 
 **Contract:** `check_ledger.py` meldet einen Verstoß, wenn `## Fix` gefüllt ist,
-aber keine Zeile der Hypothesen-Tabelle vollständig ausgefüllt ist (alle vier
-Spalten ohne Platzhalter). Ein Fix ohne getestete Hypothese ist geraten, kein
-Ergebnis einer Untersuchung.
+aber keine Zeile der Hypothesen-Tabelle als *getestet* zählt. Eine Zeile zählt
+nur als getestet, wenn alle drei Bedingungen gelten:
+
+1. **Test und Ergebnis tragen echten Inhalt** — mindestens 8 Zeichen, keine
+   Füllwörter (`-`, `n/a`, `TBD`, `unklar`, `unbekannt`, `offen`, `unsicher`,
+   `vielleicht`, …) und mindestens ein Buchstabe (kein reiner Satzzeichen-Text
+   wie `-` oder `?`).
+2. **Verdict stammt aus der geschlossenen Menge `Bestätigt` / `Verworfen`**
+   (Groß-/Kleinschreibung egal). Freitext wie „Unklar", „vielleicht", „passt
+   schon" zählt nicht — ein Verdict ist ein Ergebnis, keine Einschätzung.
+3. Hypothese selbst darf frei formuliert sein (das ist die Vermutung, die
+   getestet wird) — nur Test/Ergebnis/Verdict müssen die Kriterien oben erfüllen.
+
+Eine Zeile wie `Vermutlich ein Cache-Problem | - | - | Unklar` zählt **nicht**
+als getestet — weder Test noch Ergebnis tragen Inhalt, und „Unklar" ist kein
+gültiges Verdict. Ein Fix ohne getestete Hypothese ist geraten, kein Ergebnis
+einer Untersuchung.
 
 ## Ausgefülltes Beispiel
 

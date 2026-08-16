@@ -69,6 +69,34 @@ def is_unfilled(body: str) -> bool:
 
 _SEPARATOR_CELL_RE = re.compile(r"^-+$")
 
+# Reviewer-Fund: "nicht leer, nicht der exakte Platzhalter" laesst Fuellwoerter
+# wie "-" oder "Unklar" als Testevidenz durchgehen. Eine Zeile zaehlt nur als
+# getestet, wenn Test/Ergebnis echten Inhalt tragen (kein reiner Fuellwort- oder
+# Satzzeichen-Text, Mindestlaenge) UND Verdict aus der geschlossenen Menge
+# {Bestaetigt, Verworfen} stammt -- Freitext wie "Unklar" zaehlt nicht. Dieselbe
+# Anforderung steht in references/ledger-schema.md, damit Vorschrift und
+# Pruefung uebereinstimmen.
+_FILLER_WORDS = frozenset({
+    "-", "--", "?", "n/a", "na", "k.a.", "ka", "tbd", "unklar", "unbekannt",
+    "offen", "unsicher", "vielleicht", "keine ahnung", "weiss nicht", "weiß nicht",
+})
+_MIN_EVIDENCE_LEN = 8
+_VALID_VERDICTS = frozenset({"bestätigt", "bestaetigt", "verworfen"})
+
+
+def _is_filler(cell: str) -> bool:
+    """Zelle traegt keine belastbare Testevidenz."""
+    stripped = cell.strip()
+    if not stripped or stripped == PLACEHOLDER:
+        return True
+    if stripped.lower() in _FILLER_WORDS:
+        return True
+    if len(stripped) < _MIN_EVIDENCE_LEN:
+        return True
+    if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", stripped):  # nur Satzzeichen/Symbole
+        return True
+    return False
+
 
 def parse_hypothesis_rows(body: str) -> list[list[str]]:
     """Datenzeilen der Hypothesen-Tabelle, ohne Kopf- und Trennzeile."""
@@ -86,15 +114,27 @@ def parse_hypothesis_rows(body: str) -> list[list[str]]:
     return rows
 
 
+def is_tested_row(cells: list[str]) -> bool:
+    """Eine Zeile zaehlt nur als getestet, wenn sie echte Testevidenz traegt.
+
+    Hypothese darf frei formuliert sein (das ist die Vermutung selbst) -- Test
+    und Ergebnis muessen aber konkreten Inhalt haben, und Verdict muss aus der
+    geschlossenen Menge {Bestaetigt, Verworfen} stammen.
+    """
+    if len(cells) < 4:
+        return False
+    hypothese, test, ergebnis, verdict = (c.strip() for c in cells[:4])
+    if not hypothese or hypothese == PLACEHOLDER:
+        return False
+    if _is_filler(test) or _is_filler(ergebnis):
+        return False
+    if verdict.lower() not in _VALID_VERDICTS:
+        return False
+    return True
+
+
 def count_tested_hypotheses(body: str) -> int:
-    """Zeilen, deren vier Spalten alle gefüllt und ohne Platzhalter sind."""
-    count = 0
-    for cells in parse_hypothesis_rows(body):
-        if len(cells) < 4:
-            continue
-        if all(cell and cell != PLACEHOLDER for cell in cells[:4]):
-            count += 1
-    return count
+    return sum(1 for cells in parse_hypothesis_rows(body) if is_tested_row(cells))
 
 
 def check(path: Path) -> list[str]:
