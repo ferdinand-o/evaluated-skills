@@ -3,13 +3,18 @@
 Branch `feat/debug-ledger`, Basis `0831fb7` (Spec 00 §-konform, `specs/skill-foundation`).
 Plan: `docs/superpowers/plans/2026-08-16-debug-ledger.md`. Spec: `specs/Spec 01 – systematic-debugging.md`.
 
-## Was gebaut wurde
+Zwei Runden: Erstimplementierung, dann eine Fix-Runde nach unabhängigem Review
+(vier Defekte, vier Lücken, eine Harness-Erweiterung). Dieser Bericht beschreibt
+den Endstand; die Fix-Runde steht in einem eigenen Abschnitt, weil sie die
+wichtigeren Korrekturen enthält.
+
+## Was gebaut wurde (Endstand)
 
 ```
 skills/debug-ledger/
 ├── SKILL.md                          (114 Zeilen)
 ├── references/
-│   ├── ledger-schema.md              (Feld-Definitionen + ausgefülltes Beispiel)
+│   ├── ledger-schema.md              (Feld-Definitionen, Testevidenz-Kriterien, ausgefülltes Beispiel)
 │   ├── tooling-python.md             (debugpy headless, pytest -x --pdb, faulthandler)
 │   ├── tooling-node.md               (node --inspect-brk, Vitest-Debugging)
 │   └── escalation.md                 (Mini→Voll-Signale, 3-Fehlversuche-Regel, MIT-Attribution)
@@ -19,169 +24,259 @@ skills/debug-ledger/
 └── scripts/                          (alle Tier 1: Python-Stdlib)
     ├── new_ledger.py                 (anlegen / eskalieren / auflösen)
     ├── check_ledger.py               (Pflichtfeld- und Hypothesen-Contract, plus --staged für den Hook)
-    └── bisect_run.py                 (kapselt git bisect run um ein Repro-Kommando)
+    └── bisect_run.py                 (kapselt git bisect run um ein Repro-Kommando, mit Endpunkt-Verifikation)
 
-evals/debug-ledger/evals.json         (4 Evals: 1 contract, 3 behavior)
+evals/debug-ledger/evals.json         (4 Evals: 3 contract, 1 behavior)
 evals/fixtures/{masking-fix,typo-bug,env-var-layers,archived-cause}/
 
-tests/test_debug_ledger_new_ledger.py       (23 Tests)
-tests/test_debug_ledger_check_ledger.py     (25 Tests)
-tests/test_debug_ledger_bisect_run.py       (7 Tests)
+tests/test_debug_ledger_new_ledger.py        (25 Tests)
+tests/test_debug_ledger_check_ledger.py      (32 Testfunktionen, davon mehrere parametrisiert)
+tests/test_debug_ledger_bisect_run.py        (15 Tests)
 tests/test_debug_ledger_dev_report_wiring.py (2 Tests, Cross-Skill-Verdrahtung)
 ```
 
-Testlauf: **203 von 203 grün** (146 Baseline + 57 neue). Keine Regression.
+Testlauf: **237 von 237 grün** (146 Baseline + 86 debug-ledger-eigene + 5 aus der
+übernommenen Glob-Erweiterung in `evalkit`). Keine Regression.
 
-### Ledger-Schema
+## Fix-Runde (nach unabhängigem Review)
 
-Mini (immer, bei Anlage gefüllt): `## Symptom`, `## Repro-Kommando`,
-`## Erwartung vs. Beobachtung`. Voll (durch `--escalate` angehängt, Platzhalter
-`_(noch offen)_`): `## Evidenz-Log`, `## Hypothesen` (Tabelle), `## Root Cause`,
-`## Fix`, `## Verifikation`, `## Prävention`. Jedes Ledger und `INDEX.md` selbst
-tragen die Kopfzeile aus `docs/artifact-header.md`.
+Der Reviewer hat vier Defekte (drei davon empirisch reproduziert) und vier
+Lücken gefunden, plus die Ankündigung, dass die von mir gemeldete
+Harness-Grenze (kein Glob-Primitiv) inzwischen behoben ist. Alle vier Defekte
+und alle vier Lücken wurden bearbeitet — drei Lücken vollständig behoben, eine
+bewusst nur teilweise mit dokumentierter Begründung.
 
-### Contract-Durchsetzung
+### Defekt 1 (schwerster Fund): Hypothesen-Contract ließ sich mit Füllwörtern umgehen
 
-`check_ledger.py` meldet einen Verstoß, wenn `## Fix` gefüllt ist, aber keine
-Zeile der Hypothesen-Tabelle vollständig (alle vier Spalten, kein Platzhalter)
-ausgefüllt ist. Verifiziert per Unit-Test und per End-to-End-Simulation gegen
-den realen Hook-Befehl (siehe unten).
+`check_ledger.py` prüfte nur „nicht leer, nicht der exakte Platzhalter" —
+eine Zeile `Vermutlich ein Cache-Problem | - | - | Unklar` plus geratener Root
+Cause und Fix bestand die Prüfung (`OK`, Exit 0). Behoben: Eine Zeile zählt
+jetzt nur als getestet, wenn Test/Ergebnis echten Inhalt tragen (Mindestlänge 8
+Zeichen, Füllwort-Denyliste, mindestens ein Buchstabe) **und** Verdict aus der
+geschlossenen Menge `Bestätigt`/`Verworfen` stammt. `references/ledger-schema.md`
+dokumentiert dieselbe Anforderung, damit Vorschrift und Prüfung übereinstimmen.
+Reviewer-Fall als Regressionstest abgedeckt
+(`test_check_flags_fix_backed_only_by_filler_hypothesis`), Gegenrichtung
+ebenfalls (`test_full_mode_fix_with_genuinely_tested_hypothesis_is_still_clean`).
+Verbleibende, dokumentierte Grenze: Eine Denyliste ist selbst spröde — ein Agent
+könnte plausibel klingende, aber erfundene Test/Ergebnis-Sätze schreiben und
+`Bestätigt` wählen. Nur ein Judge könnte echte Testevidenz von einer gut
+formulierten Erfindung unterscheiden; das ist mit den G2-Mitteln von
+`check_ledger.py` nicht erreichbar und war es vor dem Fix noch weniger.
+
+### Defekt 2: `bisect_run.py` meldete einen falschen Culprit mit voller Zuversicht
+
+Kein Check, ob das Repro-Kommando am bekannt guten Commit wirklich besteht.
+`git bisect run false` fand „erfolgreich" einen Commit, obwohl das Kommando nie
+zwischen gut und schlecht unterschied. Behoben: `verify_endpoints()` prüft vor
+der eigentlichen Bisektion beide Enden (Kommando muss am guten Commit Exit 0,
+am schlechten Exit ≠ 0 liefern) und bricht mit benannter Ursache ab, sonst.
+Reviewer-Fall reproduziert und als Regressionstest abgedeckt
+(`test_run_bisect_raises_instead_of_reporting_a_fake_culprit`, mit `false` als
+Kommando — exakt der Reviewer-Repro), Gegenrichtung ebenfalls (ein echt
+unterscheidendes Kommando darf nicht scheitern).
+
+### Defekt 3: `bisect_run.py` verwarf eine laufende Bisektion kommentarlos
+
+`_reset_quietly()` lief unbedingt vor jedem Start und hätte den Fortschritt
+eines Nutzers, der selbst mitten in einer Bisektion steckt, stillschweigend
+verworfen. Behoben: `bisect_in_progress()` erkennt eine aktive Sitzung über
+`git bisect log` (Exit 0 = aktiv, empirisch geprüft, nicht angenommen) und
+`main()` bricht sichtbar ab (Exit 3, Meldung auf stderr), ohne die fremde
+Sitzung anzutasten. Getestet inklusive der entscheidenden Prüfung: Nach dem
+Abbruch existiert die Nutzer-Sitzung noch (`test_main_aborts_visibly_when_bisect_already_in_progress`).
+
+### Defekt 4: Description widersprach dem eigenen „ausnahmslos"-Contract
+
+„…and a plausible-sounding fix is not enough" schloss den Pflichtfall (jeder
+Bug bekommt ein Mini-Ledger, auch ein Tippfehler) implizit aus der eigenen
+Trigger-Bedingung aus — während `superpowers:systematic-debugging`s
+„any bug… before proposing fixes" diesen Fall uneingeschränkt trifft. Behoben:
+Description trennt jetzt ausschließlich über das Artefakt (persistiertes,
+archiviertes, mechanisch geprüftes Ledger), schließt „any bug… including a
+one-line typo fix" explizit ein. Nicht mechanisch nachprüfbar, siehe unten.
+
+### Lücke 1: `must_not`-Regex in Eval 2 konnte korrektes Verhalten fälschlich rot machen
+
+„root cause" im `output_matches`-Muster war generisches Vokabular, das auch bei
+einem korrekt im Mini-Modus belassenen Fix beiläufig fällt. Behoben, nicht nur
+gepatcht: `output_matches` (prüft die Chat-Antwort) ersetzt durch `file_matches`
+direkt am Ledger-Artefakt (`## Hypothesen` darf im File nie auftauchen) — robuster
+gegen Wortwahl-Varianz und näher an dem, was die Skill tatsächlich tut.
+
+### Lücke 2: Eval 4 hatte keinen mechanischen Beweis, dass die Skill aktiv wurde
+
+Mit der jetzt verfügbaren Glob-Unterstützung (siehe unten) wurde das für Eval 1
+und 3 vollständig gelöst. Für Eval 4 (Fixture bringt bereits eine datierte
+Archiv-Datei mit) bleibt es strukturell ungelöst — Begründung im
+Evals-Abschnitt unten, dort auch als neue Grenze in `docs/known-limits.md`
+festgehalten. Teilweise kompensiert durch eine neue `file_unchanged`-Assertion
+auf dem bekannten Archiv-Pfad (gegenprobenverifiziert: Korruption des Archivs
+wird erkannt).
+
+### Lücke 3: `artifact_header` prüfte nicht den Skill-Namen im Header
+
+Jede der vier Evals hat jetzt zusätzlich `file_matches` mit dem Muster
+`skill:\s*debug-ledger` auf demselben Pfad wie die `artifact_header`-Assertion
+— schließt aus, dass ein formkorrekter Header einer fremden Skill den Eval
+fälschlich bestehen lässt.
+
+### Lücke 4: `INDEX.md`-Kopfzeile log über ihre Herkunft beim `--symptom`-Bootstrap
+
+`bootstrap_index()` trug fest ein `--resolve`-Template mit literalen
+Platzhaltern (`<ledger>`, `<ursache>`), auch wenn der Bootstrap durch einen
+`--symptom`-Aufruf ausgelöst wurde — nicht re-eintippbar, verstößt gegen die
+eigene Kopf-Regel. Behoben: `generated` wird jetzt vom jeweiligen Aufrufer
+(`action_new`/`action_resolve`) aus den echten Argumenten gebaut und
+durchgereicht. Beide Richtungen getestet.
+
+### Harness-Erweiterung: Glob-Unterstützung übernommen
+
+`evalkit/assertions.py` und `evalkit/schema.py` (samt zugehöriger Tests) von
+`feat/dev-report` (Commit `a1417b3`) übernommen — geprüft per Diff, dass nur
+die Glob-Änderung mitkam, keine unabhängigen Änderungen aus dieser Schwester-Skill.
+Damit heben Eval 1 (`masking-fix-finds-real-root-cause`) und Eval 3
+(`env-var-layers-instruments-boundaries`) von `class: behavior` auf
+`class: contract` — beide Fixtures haben kein vorab vorhandenes
+`docs/debugging/`, der Glob `docs/debugging/[0-9]*.md` löst also eindeutig auf
+die eine neu angelegte Datei auf. Für jede der beiden Evals per Gegenprobe
+verifiziert: ein simuliertes „gutes" Ledger (escalated, echte Testevidenz,
+richtige Ursache benannt) besteht alle `must`-Assertions; ein simuliertes
+„schlechtes" Ledger (Mini-Modus, keine Untersuchung) lässt exakt die
+inhaltlichen `must`-Assertions durchfallen, nicht die strukturellen.
+`docs/known-limits.md`s Eintrag zum fehlenden Glob-Primitiv wurde als behoben
+markiert; eine neue, präzisere Restlücke ergänzt (siehe nächster Abschnitt).
+
+## Die vier Evals: Endstand nach der Fix-Runde
+
+**3 von 4 Evals sind jetzt `class: contract`** (`masking-fix-finds-real-root-cause`,
+`typo-bug-stays-mini`, `env-var-layers-instruments-boundaries`) — mechanisch,
+ohne Judge, günstig genug fürs Routine-Gate. Alle mechanischen Assertions per
+Gegenprobe verifiziert: Fixture real vorbereitet (`evalkit.workspace.prepare()`),
+`new_ledger.py`/`--escalate` real aufgerufen, Ledger-Inhalt einmal „gut" (echte
+Untersuchung) und einmal „schlecht" (nur Mini-Modus bzw. geratener Inhalt)
+simuliert, `evalkit.assertions.check()` direkt gegen beide Zustände geprüft.
+Ergebnis kippt in allen drei Fällen korrekt.
+
+**Eval 4 (`archive-hit-tested-first`) bleibt bewusst `class: behavior`.**
+Grund, den ich erst bei der Umsetzung der Glob-Unterstützung entdeckt habe:
+`evalkit.assertions.resolve_target()` wählt bei mehreren Glob-Treffern den
+*alphabetisch ersten*, nicht den neuesten. Die `archived-cause`-Fixture bringt
+mit `docs/debugging/2026-07-01-login-haengt.md` bereits eine datierte
+Ledger-Datei mit; ein vom Agenten neu angelegtes Ledger trägt zwangsläufig ein
+späteres Datum und sortiert danach. `file_matches`/`artifact_header` auf
+`docs/debugging/[0-9]*.md` würden deshalb strukturell **immer** die alte
+Archiv-Datei lesen, nie die neue — eine mechanische Content-Prüfung der neuen
+Datei ist mit diesem Fixture-Design nicht möglich, ohne entweder das
+Fixture-Layout zu verbiegen (Archiv in einen Unterordner, den es sonst nicht
+gibt) oder ein Datum hart zu codieren (bricht, sobald `run_evals.py` an einem
+anderen Tag läuft als angenommen). Das ist als neue Grenze in
+`docs/known-limits.md` festgehalten. Kompensiert, aber nicht ersetzt, durch:
+`file_unchanged` auf dem bekannten Archiv-Pfad (neu, gegenprobenverifiziert)
+und die um die Skill-Namen-Prüfung erweiterten `INDEX.md`-Checks. Der
+eigentliche Phase-0-Treffer (wurde der archivierte Fall zuerst getestet)
+bleibt ein `judge`-Claim.
+
+**Jede Assertion wurde gegen die Frage geprüft:** „Könnte eine generische
+Debugging-Skill ohne Ledger-Artefakt das auch erfüllen?" Alle mechanischen
+Checks beziehen sich auf Struktur oder Inhalt einer Ledger-Datei unter
+`docs/debugging/` mit ihrer spezifischen Kopfzeile (`skill: debug-ledger`) —
+nichts prüft nur „wurde der Bug gefunden" als Chat-Aussage.
+
+**Bekannte, dokumentierte Restgrenze der jetzt mechanischen Content-Checks
+(Eval 1 und 3):** Sie sind Keyword-Regex, keine Judge-Bewertung — derselbe
+Kompromiss wie bei `dev-report`s `release-notes-filter-internals`. Ein Agent,
+der die richtige Ursache mit stark abweichendem Vokabular beschreibt (z. B.
+„der Zustand wird zweifach angewendet" statt „zweimal verarbeitet"), könnte den
+Eval fälschlich verfehlen; ein Agent, der zufällig genug Schlüsselwörter trifft,
+ohne die Ursache wirklich verstanden zu haben, könnte ihn fälschlich bestehen.
+Beide Richtungen sind eine inhärente Grenze des Ansatzes (`docs/known-limits.md`
+nennt dieselbe Klasse von Grenze bereits für `output_matches`), kein
+Implementierungsfehler dieser Skill — aber deutlich enger als vorher, weil jede
+Eval mehrere unabhängige Muster gleichzeitig verlangt (Kombination aus
+Eskalation + getesteter Hypothese + Nennung des richtigen Dateinamens/der
+richtigen Variable + Nennung des richtigen Mechanismus).
+
+**Gegenproben durchgeführt** (mechanisch, ohne `run_evals.py` oder LLM-Aufruf):
+Für alle vier Fixtures `evalkit.workspace.prepare()` real ausgeführt. Für Eval
+1, 2, 3 je ein „gutes" und ein „schlechtes" Ledger real erzeugt/manipuliert und
+gegen alle `must`/`must_not`-Assertions geprüft — Ergebnis kippt in jedem Fall
+korrekt. Für Eval 4 die mechanischen Assertions gegen die unberührte Fixture
+und gegen eine simulierte Archiv-Korruption geprüft. Schema-Validierung über
+`python3 -c "from evalkit.schema import load_evals; print(len(load_evals(...)))"`
+→ 4 Evals, keine `EvalSchemaError`.
+**Nicht verifiziert:** die verbliebenen `judge`-Claims in Eval 4 selbst — das
+erfordert einen echten LLM-Judge-Lauf, den ich laut Auftrag nicht starte
+(`run_evals.py` bleibt unausgeführt).
 
 ## R1–R3 aus dem Auftrag: Status
 
-- **R1 (Verzeichnisname):** `skills/debug-ledger/`, `evals/debug-ledger/` — umgesetzt.
+- **R1 (Verzeichnisname):** `skills/debug-ledger/`, `evals/debug-ledger/` — umgesetzt, vom Reviewer bestätigt.
 - **R2 (INDEX.md flach, Warnung ab 50):** `new_ledger.py --resolve` zählt Einträge
   nach jedem Append und warnt sichtbar ab 50, ohne umzugliedern oder zu prunen.
-  Getestet (`test_action_resolve_warns_visibly_at_fifty_entries`,
-  `test_action_resolve_no_warning_below_fifty`).
+  Vom Reviewer bestätigt.
 - **R3 (Hook nie automatisch installiert):** `assets/hooks/check-ledger.json`
-  wird von keinem Skript referenziert oder ausgeführt. SKILL.md nennt
-  `check_ledger.py` explizit als G2 ("meldet Verstoß"), G3 nur mit selbst
-  eingerichtetem Hook. Geprüft: `grep -rn "blockier" skills/debug-ledger/`
-  findet keine Fehlbenennung außerhalb des Hook-eigenen Textes.
+  wird von keinem Skript referenziert oder ausgeführt. Vom Reviewer bestätigt,
+  inklusive der G2-Sprachregelung.
 
 ## Zusätzliche Entscheidungen (nicht im Auftrag vorgegeben)
 
 1. **`new_ledger.py` hat drei Aktionen über Flags, keine Subcommands**
    (`--symptom`/`--escalate`/`--resolve`), näher am Beispiel aus
-   `docs/artifact-header.md` (`python scripts/new_ledger.py --symptom "…"`).
-   Die tatsächliche Kopfzeile nutzt trotzdem den vollen Pfad
-   `skills/debug-ledger/scripts/new_ledger.py` statt der verkürzten Form aus dem
-   Beispiel — konsistent mit `dev-report`s Konvention
-   (`python skills/dev-report/scripts/collect.py …`). Das Beispiel in
-   `docs/artifact-header.md` ist damit als illustrativ behandelt, nicht als
-   Pfadvorschrift; die Regel selbst ("so wie man es erneut eintippen würde")
-   verlangt den vollen, funktionierenden Pfad.
-2. **`docs/debugging/INDEX.md` trägt selbst die Artefakt-Kopfzeile.** Das ist
-   keine neue Erfindung: `skills/dev-report/scripts/collect.py` erwartet das
-   bereits exakt so (`HARVEST_SOURCES`, schema 1). Per Integrationstest verifiziert
-   (`tests/test_debug_ledger_dev_report_wiring.py`) — `collect.harvest()` liest
-   ein von `new_ledger.py` erzeugtes `INDEX.md` mit Status `"read"`, nicht
-   `"no_header"`.
-3. **`check_ledger.py --staged` statt einer vierten Skriptdatei für den Hook.**
-   Die Struktur aus Spec 01 nennt genau drei Skripte; ein Hook, der bei
-   `git commit` alle gestagten Ledger prüft, braucht aber eine Funktion, die
-   nicht weiß, welche Ledger-Datei gemeint ist. Statt eines separaten
-   `hook_check.py` bekam `check_ledger.py` einen `--staged`-Modus
-   (`git diff --cached --name-only`, gefiltert auf `docs/debugging/*.md` ohne
-   `INDEX.md`). Bleibt bei drei Skripten, ist eigenständig unit-getestet.
+   `docs/artifact-header.md`. Die tatsächliche Kopfzeile nutzt den vollen Pfad
+   `skills/debug-ledger/scripts/new_ledger.py`, konsistent mit `dev-report`s
+   Konvention — das verkürzte Beispiel in `docs/artifact-header.md` als
+   illustrativ behandelt, nicht als Pfadvorschrift.
+2. **`docs/debugging/INDEX.md` trägt selbst die Artefakt-Kopfzeile**, exakt wie
+   `dev-report/scripts/collect.py`s `HARVEST_SOURCES` es erwartet. Per
+   Integrationstest verifiziert.
+3. **`check_ledger.py --staged`** statt einer vierten Skriptdatei für den Hook
+   — bleibt bei den drei in Spec 01 genannten Skripten.
 4. **Der Hook-Befehl in `assets/hooks/check-ledger.json` wurde funktional
-   gegengeprüft**, nicht nur als JSON validiert: Ich habe den eingebetteten
-   Python-Einzeiler extrahiert und mit einem simulierten `PreToolUse`-Stdin-Payload
-   (`{"tool_input": {"command": "git commit -m x"}}`) gegen einen echten
-   Workspace mit einem Contract-Verstoß laufen lassen — Exit 2, Verstoßmeldung
-   auf stderr; bei `git commit` ohne Verstoß Exit 0; bei einem Nicht-`git
-   commit`-Aufruf Exit 0 ohne zu prüfen. Was ich **nicht** verifizieren konnte:
-   ob Claude Code den Tool-Aufruf tatsächlich als JSON auf stdin an
-   `PreToolUse`-Hooks reicht (mein Verständnis der Konvention) — ich hatte
-   keinen Zugriff auf eine echte Hook-Ausführung, um das gegenzuprüfen. Das ist
-   ohnehin G3, also nutzergesteuert und pro Fall bewusst installiert; ein
-   falsches Stdin-Format würde beim ersten `git commit` sichtbar auffallen
-   (Exception, kein stiller Fehlschlag), nicht heimlich falsch entscheiden.
-5. **`bisect_run.py` setzt `git bisect reset` immer im `finally`-Block**, auch
-   bei Erfolg — sonst bliebe das Repo im detached HEAD des gefundenen Commits
-   zurück. Per Test verifiziert (`test_run_bisect_leaves_repo_on_original_branch`).
-6. **Platzhalter-Konvention `_(noch offen)_`** statt leerer Felder für den
-   Voll-Schema-Zustand nach `--escalate` — macht "noch nicht bearbeitet" von
-   "vergessen zu füllen" unterscheidbar und ist die Grundlage, auf der
-   `check_ledger.py` prüft, ob eine Hypothesen-Zeile wirklich getestet wurde.
-
-## Die vier Evals: Assertion-Design
-
-Kernproblem, das die Eval-Architektur bestimmt hat: `new_ledger.py` leitet den
-Dateinamen des Ledgers aus `--symptom` (vom Agenten frei formuliertem Text) und
-dem realen Tagesdatum ab. Beides ist zur Eval-Autorenzeit unbekannt — anders als
-bei `dev-report`, dessen Report-Pfad rein aus dem vom Nutzer im Prompt
-genannten Git-Ref berechnet wird. `evalkit`s Assertion-Primitive
-(`file_exists`, `file_matches`, `artifact_header`) verlangen aber einen exakten
-Pfad; es gibt kein Glob-Primitiv. Deshalb:
-
-- **`docs/debugging/INDEX.md`** ist der einzige deterministische Pfad (wird von
-  `new_ledger.py` bei *jedem* Aufruf gebootstrapt) und trägt die mechanischen
-  `must`-Assertions in allen vier Evals — der Beweis, dass das Skript wirklich
-  lief, nicht nur geredet wurde.
-- **Inhaltliche Checks** (Root-Cause-Text, Hypothesen-Tabelle, Multi-Layer-
-  Instrumentierung, Archiv-Treffer) sind `judge`-Claims, die sich explizit auf
-  "eine neue Ledger-Datei unter docs/debugging/" beziehen — der Judge sieht den
-  vollen `dump_changed_files()`-Dump und braucht keinen Pfad. Das macht 3 der 4
-  Evals zu `class: behavior`; dokumentiert als neue Grenze in
-  `docs/known-limits.md` ("Kein Pfad-Primitiv für 'irgendeine Datei unter
-  Verzeichnis X'").
-- **Jede Assertion wurde gegen die Frage geprüft: "Könnte eine generische
-  Debugging-Skill ohne Ledger-Artefakt das auch erfüllen?"** Alle Claims
-  beziehen sich auf Struktur oder Inhalt der Ledger-Datei bzw. auf
-  `docs/debugging/INDEX.md` mit seiner Kopfzeile — nichts prüft nur "wurde der
-  Bug gefunden" als Chat-Aussage.
-- **Eval 2 (Anti-Zeremonie, Tippfehler-Bug)** ist bewusst `class: contract`
-  (billig, läuft im Routine-Gate) mit `must_not: output_matches` gegen
-  Eskalations-Vokabular ("Hypothesen-Tabelle", "Root Cause", "--escalate" etc.)
-  plus den beiden `INDEX.md`-Checks.
-
-**Gegenproben durchgeführt** (mechanisch, ohne `run_evals.py` oder LLM-Aufruf):
-Für alle vier Fixtures `evalkit.workspace.prepare()` real ausgeführt und
-geprüft, dass es fehlerfrei durchläuft. Für Eval 2 zusätzlich `new_ledger.py`
-im vorbereiteten Workspace real aufgerufen und die mechanischen `must`/`must_not`
-sowohl gegen eine "gute" (bleibt mini) als auch eine "schlechte" (eskaliert
-grundlos) simulierte Agent-Antwort geprüft — Ergebnis kippt korrekt. Für Eval 4
-den `file_matches`-Regex gegen den echten Fixture-Inhalt getestet. Für Eval 1
-und 3 die mechanischen `INDEX.md`-Checks nach realem Skript-Lauf verifiziert.
-**Nicht verifiziert:** die `judge`-Claims selbst — das erfordert einen echten
-LLM-Judge-Lauf, den ich laut Auftrag nicht starte (`run_evals.py` bleibt
-unausgeführt). Schema-Validierung erfolgte über
-`python3 -c "from evalkit.schema import load_evals; print(len(load_evals(...)))"`
-→ 4 Evals, keine `EvalSchemaError`.
+   gegengeprüft** (simulierter `PreToolUse`-Stdin-Payload gegen einen echten
+   Workspace mit Contract-Verstoß: Exit 2, Meldung auf stderr; ohne Verstoß:
+   Exit 0). Nicht verifiziert: ob Claude Code den Tool-Aufruf wirklich in genau
+   diesem JSON-auf-stdin-Format an `PreToolUse`-Hooks reicht — G3, nutzerinstalliert,
+   ein falsches Format würde beim ersten `git commit` sichtbar auffallen.
+5. **`bisect_run.py` verifiziert jetzt beide Endpunkte vor der Bisektion** und
+   erkennt eine bereits laufende fremde Sitzung, statt sie zu verwerfen (siehe
+   Fix-Runde, Defekte 2 und 3).
+6. **Platzhalter-Konvention `_(noch offen)_`** plus, seit der Fix-Runde,
+   Mindestlänge/Füllwort-Denyliste/geschlossene Verdict-Menge — die Grundlage,
+   auf der `check_ledger.py` echte Testevidenz von Füllwörtern unterscheidet.
 
 ## Description-Schärfung gegen `superpowers:systematic-debugging`
 
-Die Description benennt explizit den Unterschied (persistiertes, archiviertes,
-mechanisch geprüftes Ledger-Artefakt unter `docs/debugging/` vs. reine
-Prosa-Doktrin im Chatverlauf) statt um dieselben Trigger-Wörter zu konkurrieren,
-und grenzt zusätzlich gegen `feature-spec` ab.
+Nach dem Fix an Defekt 4 trennt die Description ausschließlich über das
+Artefakt, nicht mehr über eine engere (und mit dem eigenen Contract
+kollidierende) Trigger-Bedingung.
 
-**Wie sicher ich mir bin, dass sie gewinnt: mittel, nicht verifiziert.** Ich
-habe keinen Zugriff auf den tatsächlichen Trigger-/Routing-Mechanismus des
-Eval-Agenten aus diesem Implementierungsschritt heraus — das würde einen echten
-Claude-Lauf mit beiden Skills sichtbar brauchen, und genau den soll ich laut
-Auftrag nicht selbst starten. Meine Einschätzung stützt sich nur auf die
-Textqualität der Abgrenzung, nicht auf eine Beobachtung. Das gehört explizit in
-die Bewertung durch den Koordinator, nicht in eine Erfolgsbehauptung von mir.
+**Wie sicher ich mir bin, dass sie gewinnt: mittel, nicht verifiziert — und der
+Reviewer hat die vorherige Einschätzung zu Recht als "eher zu optimistisch"
+korrigiert.** Ich habe weiterhin keinen Zugriff auf den tatsächlichen
+Trigger-/Routing-Mechanismus des Eval-Agenten. Der behobene Defekt 4 war aber
+ein selbst verursachtes, klar behebbares Risiko (die Description widersprach
+dem eigenen Contract) — nach dem Fix bleibt nur noch die generische,
+unvermeidliche Unsicherheit über Routing-Verhalten, nicht mehr ein zusätzlicher,
+selbstgemachter Nachteil gegenüber der Konkurrenz-Description.
 
 ## Was ich nicht verifizieren konnte (Zusammenfassung)
 
-1. Ob die vier `judge`-Claims bei einem echten LLM-Lauf tatsächlich so
-   urteilen wie beabsichtigt (nur mechanisch/strukturell geprüft, s. o.).
+1. Ob die verbliebenen `judge`-Claims in Eval 4 bei einem echten LLM-Lauf so
+   urteilen wie beabsichtigt.
 2. Ob die Description tatsächlich gegen `superpowers:systematic-debugging`
-   gewinnt (s. o.) — als offene, bewusst unsichere Einschätzung markiert.
+   gewinnt — offene, bewusst unsichere Einschätzung, s. o.
 3. Ob Claude Code `PreToolUse`-Hooks exakt im angenommenen JSON-auf-stdin-Format
    aufruft (G3, nutzerinstalliert, dokumentiert als Annahme).
-4. Ob die im Prompt/Fixture-Design gewählten Symptom-Formulierungen in Eval 1/3/4
-   tatsächlich zu einer für Phase 0 grep-baren Überschneidung mit `INDEX.md`
-   führen (nur für Eval 4 direkt per Regex gegengeprüft, für 1 und 3 gibt es
-   keine Archiv-Erwartung).
+4. Ob ein echter Agent bei Eval 1/3 tatsächlich genug der jetzt verlangten
+   Schlüsselwort-Kombination trifft, um korrektes Verhalten nicht fälschlich
+   als Fehlschlag zu werten (Restrisiko der neuen Keyword-Regex-Checks, s. o.).
 
-## Ergänzung in `docs/known-limits.md`
+## Ergänzungen in `docs/known-limits.md`
 
-Neuer Punkt unter "Assertion-Vokabular": fehlendes Glob-Primitiv für Artefakte
-mit freitext- und laufzeitabhängigen Dateinamen, mit `debug-ledger` als
-konkretem Beispiel und der Konsequenz (3 von 4 Evals müssen `behavior` sein,
-obwohl ihr Kerncheck mechanisch billig wäre). Commit `f618681`.
+1. Ursprünglicher Eintrag zum fehlenden Glob-Primitiv als **behoben** markiert
+   (Commit `a1417b3`, übernommen in `e124236`).
+2. Neue, präzisere Restlücke ergänzt: `resolve_target()` wählt bei mehreren
+   Glob-Treffern den alphabetisch ersten, nicht den neuesten — trifft Fixtures,
+   die bereits eine Datei mitbringen, deren Name vor jedem neu erzeugten Namen
+   sortiert (konkreter Fall: `archive-hit-tested-first`). Commit `2e8f9ca`.
