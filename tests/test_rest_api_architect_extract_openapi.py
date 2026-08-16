@@ -31,6 +31,17 @@ def test_dump_yaml_escapes_quotes_and_newlines():
     assert result == '"a": "He said \\"hi\\"\\nbye"\n'
 
 
+def test_dump_yaml_escapes_carriage_return():
+    """Review-Fund (Lücke): ein rohes CR wurde nicht escaped. Gegen echtes PyYAML 6.0.3
+    nachgewiesen: `yaml.safe_load('"foo\\rbar"')` faltet ein unescaptes CR still zu einem
+    Leerzeichen (Flow-Scalar-Zeilenumbruch-Regel) — kein Parse-Fehler, eine stille
+    Verfälschung. Dieser Test prüft nur die Escape-Ausgabe (PyYAML ist hier nicht
+    installiert, siehe docs/known-limits.md); die Faltung selbst wurde extern verifiziert."""
+    result = extract.dump_yaml({"a": "foo\rbar"})
+    assert result == '"a": "foo\\rbar"\n'
+    assert "\r" not in result
+
+
 # --- FastAPI: ast-basiert -----------------------------------------------------
 
 
@@ -91,10 +102,17 @@ def test_extract_fastapi_marks_conditional_route_unverified(tmp_path):
 
 
 def test_extract_fastapi_marks_dynamic_path_as_unresolved(tmp_path):
+    """Review-Fund (Defekt 4): die ursprüngliche Assertion `"dynamic_route" in str(entry) or
+    entry["reason"]` ist wegen Operatorpriorität für praktisch jeden nichtleeren
+    unresolved-Eintrag wahr (`entry["reason"]` ist ein truthy String) — sie bewacht nichts.
+    Diese Fassung prüft den konkreten Eintrag (Funktion + exakter Grund) statt nur, dass
+    irgendein Eintrag mit einem truthy `reason`-Feld existiert."""
     _write(tmp_path, "main.py", FASTAPI_SOURCE)
     result = extract.extract_fastapi(tmp_path)
-    assert any("dynamic_route" in str(entry) or entry["reason"] for entry in result.unresolved)
-    assert not any(True for path in result.paths if "dynamic_route" in path)
+    dynamic_entries = [e for e in result.unresolved if e.get("function") == "dynamic_route"]
+    assert len(dynamic_entries) == 1
+    assert dynamic_entries[0]["reason"] == extract.FASTAPI_UNRESOLVED_REASON
+    assert not any("dynamic_route" in path for path in result.paths)
 
 
 def test_extract_fastapi_finds_post_without_path_params(tmp_path):
@@ -110,6 +128,129 @@ def test_extract_fastapi_ignores_non_route_dot_get(tmp_path):
     result = extract.extract_fastapi(tmp_path)
     assert result.paths == {}
     assert result.unresolved == []
+
+
+# --- Review-Fund Defekt 1: path=-Keyword-Argument -----------------------------
+
+
+def test_extract_fastapi_finds_path_keyword_argument(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+        "@app.get(path=\"/v1/widgets\")\ndef list_widgets():\n    return []\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert "/v1/widgets" in result.paths
+    op = result.paths["/v1/widgets"]["get"]
+    assert op["operationId"] == "list_widgets"
+    assert op["x-verified"] is True
+    assert result.unresolved == []
+
+
+def test_extract_fastapi_path_keyword_with_non_literal_is_unresolved(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\nPATH = compute()\n\n\n"
+        "@app.get(path=PATH)\ndef handler():\n    return []\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert result.paths == {}
+    assert any(e["function"] == "handler" for e in result.unresolved)
+
+
+# --- Review-Fund Defekt 2: add_api_route()/add_route() ------------------------
+
+
+def test_extract_fastapi_finds_add_api_route_registration(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+        "def list_widgets():\n    return []\n\n\n"
+        "app.add_api_route(\"/v1/widgets\", list_widgets, methods=[\"GET\"])\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert "/v1/widgets" in result.paths
+    op = result.paths["/v1/widgets"]["get"]
+    assert op["operationId"] == "list_widgets"
+    assert op["x-verified"] is True
+
+
+def test_extract_fastapi_add_route_defaults_to_get_without_methods(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from starlette.applications import Starlette\n\napp = Starlette()\n\n\n"
+        "def handler():\n    return []\n\n\n"
+        "app.add_route(\"/v1/health\", handler)\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert "get" in result.paths["/v1/health"]
+
+
+def test_extract_fastapi_registration_call_alongside_decorators_all_survive(tmp_path):
+    """Der im Review konkret nachgewiesene Fall: drei Registrierungen in einer Datei, zwei
+    davon zuvor spurlos verschwunden, nur weil eine dritte (Decorator-)Route gefunden wurde
+    und die globale 'keine Routen gefunden'-Warnung deshalb nicht griff."""
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+        "@app.get(path=\"/v1/widgets\")\ndef list_widgets():\n    return []\n\n\n"
+        "app.add_api_route(\"/v1/orders\", list_widgets, methods=[\"GET\"])\n\n\n"
+        "@app.get(\"/v1/items\")\ndef list_items():\n    return []\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert set(result.paths) == {"/v1/widgets", "/v1/orders", "/v1/items"}
+
+
+def test_extract_fastapi_registration_call_with_non_literal_path_is_unresolved(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\nPATH = compute()\n\n\n"
+        "def handler():\n    return []\n\n\n"
+        "app.add_api_route(PATH, handler, methods=[\"GET\"])\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert result.paths == {}
+    assert any(e["reason"] == extract.FASTAPI_UNRESOLVED_REASON for e in result.unresolved)
+
+
+def test_extract_fastapi_registration_call_without_any_path_argument_is_unresolved(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+        "def handler():\n    return []\n\n\n"
+        "app.add_api_route(endpoint=handler, methods=[\"GET\"])\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert result.paths == {}
+    assert any("add_api_route" in e["reason"] for e in result.unresolved)
+
+
+# --- Review-Fund Auffangnetz: Lookalikes, die auch die Erweiterungen nicht fassen ---
+
+
+def test_extract_fastapi_aliased_decorator_is_caught_by_fallback(tmp_path):
+    """`get = app.get` gefolgt von `@get(...)` ist kein `<name>.<methode>(...)`-Dekorator mehr
+    (der Funktionsname ist ein bloßer ast.Name, kein ast.Attribute) und bleibt daher auch nach
+    den Erweiterungen für den AST-Walk unsichtbar. Das Text-Auffangnetz muss diese Lücke
+    trotzdem sichtbar machen, statt sie stillschweigend zu verlieren."""
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\nget = app.get\n\n\n"
+        "@get(\"/v1/mystery\")\ndef handler():\n    return []\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert result.paths == {}
+    assert any(e["file"] == "main.py" and "manuell prüfen" in e["reason"] for e in result.unresolved)
+
+
+def test_extract_fastapi_no_fallback_noise_when_everything_is_attributed(tmp_path):
+    _write(tmp_path, "main.py", FASTAPI_SOURCE)
+    result = extract.extract_fastapi(tmp_path)
+    assert not any("manuell prüfen" in e.get("reason", "") for e in result.unresolved)
+
+
+def test_extract_fastapi_routes_in_for_loop_are_conditional_not_invisible(tmp_path):
+    _write(tmp_path, "main.py", (
+        "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+        "for _ in range(1):\n"
+        "    @app.get(\"/v1/loop\")\n"
+        "    def handler():\n"
+        "        return []\n"
+    ))
+    result = extract.extract_fastapi(tmp_path)
+    assert result.paths["/v1/loop"]["get"]["x-verified"] is False
 
 
 # --- Express/Hono: Textsuche --------------------------------------------------
@@ -145,6 +286,23 @@ def test_extract_express_converts_colon_params_to_openapi_style(tmp_path):
     result = extract.extract_express(tmp_path)
     op = result.paths["/v1/items/{id}/cancel"]["post"]
     assert {p["name"] for p in op["parameters"]} == {"id"}
+
+
+def test_extract_express_finds_routes_on_arbitrary_router_variable_name(tmp_path):
+    """Review-Fund (Defekt 3): auf `app`/`router` beschränkt, verlor jede Route auf anders
+    benannten Router-Objekten spurlos. Der Reviewer-Fall: zwei Router, einer heißt
+    `usersRouter` — vorher fehlte dessen Route komplett, ohne jede Spur."""
+    source = (
+        "const usersRouter = require('express').Router();\n"
+        "usersRouter.get('/v1/users', (req, res) => {});\n"
+        "const router = require('express').Router();\n"
+        "router.get('/v1/orders', (req, res) => {});\n"
+    )
+    _write(tmp_path, "routes.js", source)
+    result = extract.extract_express(tmp_path)
+    assert "/v1/users" in result.paths
+    assert "/v1/orders" in result.paths
+    assert result.paths["/v1/users"]["get"]["x-verified"] is False
 
 
 # --- Dokument-Aufbau und main() -----------------------------------------------

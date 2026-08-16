@@ -10,13 +10,19 @@ Express/Hono über Textsuche.
 Was statisch nicht sicher auflösbar ist, wird als das markiert, was es ist:
 - Ein Pfad, der kein String-Literal ist (f-String, Variable) -> `x-extraction.unresolved`,
   keine Pfad-Erfindung.
-- Eine Route hinter einer Bedingung (`if ...: @app.get(...)`) -> `x-verified: false`.
+- Eine Route hinter einer Bedingung (`if`/`for`/`while`/`try`, ...) -> `x-verified: false`.
 - Jede über Textsuche gefundene Express/Hono-Route -> `x-verified: false`, immer — Textsuche
   ohne Kontrollfluss ist strukturell unsicherer als AST.
+- Was wie ein Routen-Dekorator oder `add_api_route()`/`add_route()`-Aufruf *aussieht*, aber
+  vom AST-Walk nicht zugeordnet werden konnte (z. B. eine aliasierte Decorator-Funktion),
+  landet als dateiweiter `unresolved`-Eintrag statt spurlos zu verschwinden — Ergebnis eines
+  Reviews, der drei Fälle nachwies, in denen Routen zuvor ganz ohne Spur verloren gingen:
+  `path=`-Keyword-Argumente, programmatische `add_api_route()`-Registrierung, und
+  Express-Router mit anderem Variablennamen als `app`/`router`.
 
-Bekannte Grenze (siehe docs/known-limits.md): Router-Präfixe aus
-`app.include_router(sub_router, prefix="/v1")` in einer anderen Datei werden nicht aufgelöst.
-Pfade aus einem so gemounteten Sub-Router erscheinen ohne das Präfix.
+Bekannte Grenzen (siehe docs/known-limits.md): Router-Präfixe aus
+`app.include_router(sub_router, prefix="/v1")` in einer anderen Datei werden nicht aufgelöst;
+Express-Chaining (`router.route(path).get(handler)`) wird nicht erkannt.
 """
 
 from __future__ import annotations
@@ -54,7 +60,15 @@ class ExtractionResult:
 
 
 def _yaml_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    # \r fehlte hier (Review-Fund): ein rohes CR innerhalb doppelter Anführungszeichen wird
+    # von YAML-Loadern gemäß Flow-Scalar-Zeilenumbruch-Regeln still zu einem Leerzeichen
+    # gefaltet — kein Parse-Fehler, sondern eine unbemerkte Verfälschung des Werts.
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
     return f'"{escaped}"'
 
 
@@ -138,6 +152,20 @@ def _params_block(names: list[str]) -> list[dict]:
 # --- FastAPI: ast-basiert ---------------------------------------------------
 
 
+_REGISTRATION_METHODS = frozenset({"add_api_route", "add_route"})
+
+# Review-Fund: eine Text-Heuristik als Auffangnetz. Was wie ein Routen-Dekorator oder ein
+# add_api_route()/add_route()-Aufruf *aussieht*, aber vom AST-Walk unten nicht zugeordnet
+# werden konnte (z. B. eine aliasierte Decorator-Funktion `get = app.get`, `@get(...)`),
+# fällt sonst spurlos durch. Diese beiden Muster zählen Vorkommen im Rohtext, unabhängig vom
+# AST — der Vergleich "Lookalikes gefunden" vs. "tatsächlich zugeordnet" in extract_fastapi()
+# entscheidet, ob ein dateiweiter unresolved-Hinweis nötig ist.
+_DECORATOR_LOOKALIKE_RE = re.compile(
+    r"^[ \t]*@[\w.]*\b(?:get|post|put|patch|delete|options|head)\s*\(", re.MULTILINE
+)
+_REGISTRATION_LOOKALIKE_RE = re.compile(r"\.(?:add_api_route|add_route)\s*\(")
+
+
 def _route_call(decorator: ast.expr) -> tuple[str, ast.Call] | None:
     """Ist der Dekorator ein `<name>.<http-methode>(...)`-Aufruf? Liefert (methode, call)."""
     if not isinstance(decorator, ast.Call):
@@ -150,27 +178,105 @@ def _route_call(decorator: ast.expr) -> tuple[str, ast.Call] | None:
     return func.attr, decorator
 
 
+def _path_argument(call: ast.Call, *, keyword: str = "path") -> ast.expr | None:
+    """Erstes positionales Argument, sonst das benannte Keyword — Review-Fund: ein Pfad, der
+    nur als `path=`-Keyword übergeben wird (`@app.get(path="/x")`), hatte `call.args == []`
+    und wurde davor komplett übersprungen, ohne jede Spur."""
+    if call.args:
+        return call.args[0]
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    return None
+
+
+def _literal_path_or_unresolved(path_arg: ast.expr | None, *, call: ast.Call, node_lineno: int, relpath: str, function: str | None, reason_no_arg: str, result: ExtractionResult) -> str | None:
+    """Liefert den Pfad-String, oder None nach Eintrag in `unresolved` — nie stilles Verwerfen."""
+    line = getattr(call, "lineno", node_lineno)
+    if path_arg is None:
+        result.unresolved.append({"file": relpath, "line": line, "reason": reason_no_arg, "function": function})
+        return None
+    if not (isinstance(path_arg, ast.Constant) and isinstance(path_arg.value, str)):
+        result.unresolved.append({"file": relpath, "line": line, "reason": FASTAPI_UNRESOLVED_REASON, "function": function})
+        return None
+    return path_arg.value
+
+
+def _build_operation(*, operation_id: str, path: str, conditional: bool, relpath: str, line: int) -> dict:
+    operation: dict = {
+        "operationId": operation_id,
+        "x-verified": not conditional,
+        "parameters": _params_block(_path_params_openapi_style(path)),
+        "responses": {"200": {"description": "TODO: aus Code ergänzen"}},
+        "x-source": f"{relpath}:{line}",
+    }
+    if conditional:
+        operation["x-verified-reason"] = CONDITIONAL_REASON
+    return operation
+
+
 def _extract_functiondef(node: ast.FunctionDef | ast.AsyncFunctionDef, *, conditional: bool, relpath: str, result: ExtractionResult) -> None:
     for decorator in node.decorator_list:
         route = _route_call(decorator)
         if route is None:
             continue
         method, call = route
-        if not call.args:
+        path_arg = _path_argument(call)
+        path = _literal_path_or_unresolved(
+            path_arg, call=call, node_lineno=node.lineno, relpath=relpath, function=node.name,
+            reason_no_arg="Kein Pfad-Argument gefunden (weder positional noch als path=Keyword)",
+            result=result,
+        )
+        if path is None:
             continue
-        path_arg = call.args[0]
-        if not (isinstance(path_arg, ast.Constant) and isinstance(path_arg.value, str)):
-            result.unresolved.append({"file": relpath, "line": getattr(call, "lineno", node.lineno), "reason": FASTAPI_UNRESOLVED_REASON, "function": node.name})
-            continue
-        path = path_arg.value
-        operation: dict = {
-            "operationId": node.name,
-            "x-verified": not conditional,
-            "parameters": _params_block(_path_params_openapi_style(path)),
-            "responses": {"200": {"description": "TODO: aus Code ergänzen"}},
-        }
-        if conditional:
-            operation["x-verified-reason"] = CONDITIONAL_REASON
+        operation = _build_operation(operation_id=node.name, path=path, conditional=conditional, relpath=relpath, line=getattr(call, "lineno", node.lineno))
+        result.paths.setdefault(path, {})[method] = operation
+
+
+def _registration_methods(call: ast.Call) -> list[str]:
+    for kw in call.keywords:
+        if kw.arg == "methods" and isinstance(kw.value, ast.List):
+            methods = [
+                elt.value.lower()
+                for elt in kw.value.elts
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.lower() in HTTP_METHODS
+            ]
+            if methods:
+                return methods
+    # Starlette/FastAPI-Default, wenn `methods` fehlt: GET. Dokumentierte Annahme, keine Norm.
+    return ["get"]
+
+
+def _registration_endpoint_name(call: ast.Call) -> str:
+    target = call.args[1] if len(call.args) >= 2 else None
+    if target is None:
+        for kw in call.keywords:
+            if kw.arg == "endpoint":
+                target = kw.value
+                break
+    return target.id if isinstance(target, ast.Name) else "unbekannt"
+
+
+def _handle_registration_call(call: ast.Call, *, conditional: bool, relpath: str, result: ExtractionResult) -> None:
+    """`app.add_api_route(...)`/`app.add_route(...)` — programmatische Registrierung ohne
+    Dekorator. Review-Fund: wurde vom Walk unten überhaupt nicht besucht (kein `ast.Expr`-
+    Zweig), Routen verschwanden komplett. `.value` wird bewusst nicht auf `ast.Name`
+    eingeschränkt (anders als bei Dekoratoren) — die Methodennamen sind spezifisch genug,
+    dass eine engere Prüfung nur weitere Fälle stumm verlieren würde."""
+    func = call.func
+    if not isinstance(func, ast.Attribute) or func.attr not in _REGISTRATION_METHODS:
+        return
+    path_arg = _path_argument(call)
+    path = _literal_path_or_unresolved(
+        path_arg, call=call, node_lineno=call.lineno, relpath=relpath, function=None,
+        reason_no_arg=f"{func.attr}(): kein Pfad-Argument gefunden (weder positional noch als path=Keyword)",
+        result=result,
+    )
+    if path is None:
+        return
+    endpoint_name = _registration_endpoint_name(call)
+    for method in _registration_methods(call):
+        operation = _build_operation(operation_id=endpoint_name, path=path, conditional=conditional, relpath=relpath, line=call.lineno)
         result.paths.setdefault(path, {})[method] = operation
 
 
@@ -183,25 +289,78 @@ def _walk_fastapi_body(body: list[ast.stmt], *, conditional: bool, relpath: str,
             _walk_fastapi_body(node.orelse, conditional=True, relpath=relpath, result=result)
         elif isinstance(node, ast.ClassDef):
             _walk_fastapi_body(node.body, conditional=conditional, relpath=relpath, result=result)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            # Nicht garantiert einmalig/unbedingt wie ein Top-Level-Statement — konservativ
+            # als conditional behandelt (x-verified: false), statt Sicherheit vorzutäuschen.
+            _walk_fastapi_body(node.body, conditional=True, relpath=relpath, result=result)
+            _walk_fastapi_body(node.orelse, conditional=True, relpath=relpath, result=result)
+        elif isinstance(node, ast.Try):
+            _walk_fastapi_body(node.body, conditional=True, relpath=relpath, result=result)
+            for handler in node.handlers:
+                _walk_fastapi_body(handler.body, conditional=True, relpath=relpath, result=result)
+            _walk_fastapi_body(node.orelse, conditional=True, relpath=relpath, result=result)
+            _walk_fastapi_body(node.finalbody, conditional=True, relpath=relpath, result=result)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            _walk_fastapi_body(node.body, conditional=conditional, relpath=relpath, result=result)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            _handle_registration_call(node.value, conditional=conditional, relpath=relpath, result=result)
+
+
+def _count_entries_for_file(result: ExtractionResult, relpath: str) -> int:
+    prefix = relpath + ":"
+    count = sum(
+        1
+        for methods in result.paths.values()
+        for op in methods.values()
+        if op.get("x-source", "").startswith(prefix)
+    )
+    count += sum(1 for entry in result.unresolved if entry.get("file") == relpath)
+    return count
 
 
 def extract_fastapi(src: Path) -> ExtractionResult:
     result = ExtractionResult()
     for path in sorted(src.rglob("*.py")):
         relpath = path.relative_to(src).as_posix()
+        text = path.read_text(encoding="utf-8", errors="replace")
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=relpath)
+            tree = ast.parse(text, filename=relpath)
         except SyntaxError as exc:
             result.unresolved.append({"file": relpath, "line": exc.lineno or 0, "reason": f"Datei nicht parsbar: {exc.msg}"})
             continue
+
+        before = _count_entries_for_file(result, relpath)
         _walk_fastapi_body(tree.body, conditional=False, relpath=relpath, result=result)
+        attributed = _count_entries_for_file(result, relpath) - before
+
+        lookalikes = len(_DECORATOR_LOOKALIKE_RE.findall(text)) + len(_REGISTRATION_LOOKALIKE_RE.findall(text))
+        gap = lookalikes - attributed
+        if gap > 0:
+            result.unresolved.append({
+                "file": relpath,
+                "line": 0,
+                "reason": (
+                    f"{gap} routenartige Aufruf(e) im Text gefunden, aber von der AST-Analyse "
+                    f"nicht zugeordnet (z. B. aliasierte Decorator-Funktion oder unbekanntes "
+                    f"Registrierungsmuster) — Datei manuell prüfen"
+                ),
+                "function": None,
+            })
     return result
 
 
 # --- Express/Hono: Textsuche ------------------------------------------------
 
+
+# Review-Fund (Defekt 3): auf Variablennamen `app`/`router` beschränkt, verlor jede Route
+# auf anders benannten Router-Objekten (`usersRouter`, `ordersRouter`, ...) spurlos — in
+# Express sehr üblich. Jetzt: beliebiger gültiger JS-Bezeichner vor dem Methodennamen.
+# Kosten: höheres False-Positive-Risiko bei generischen `.get()`-Aufrufen auf Nicht-Router-
+# Objekten (Cache/Map-Zugriffe wie `cache.get('key')`) — hingenommen, weil jeder Treffer
+# ohnehin x-verified: false trägt und nie stillschweigend als geprüft gilt (siehe
+# docs/known-limits.md).
 _EXPRESS_ROUTE_RE = re.compile(
-    r"\b(?:app|router)\.(get|post|put|patch|delete|options|head)\s*\(\s*['\"`]([^'\"`]+)['\"`]"
+    r"\b[A-Za-z_$][A-Za-z0-9_$]*\.(get|post|put|patch|delete|options|head)\s*\(\s*['\"`]([^'\"`]+)['\"`]"
 )
 
 
