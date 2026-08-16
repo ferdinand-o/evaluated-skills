@@ -128,6 +128,61 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## review-context
+
+- **Der Uncommitted-Modus ist im Eval-Harness nicht prüfbar.** `collect_context.py` kann ohne
+  `--range` das Arbeitsverzeichnis gegen HEAD reviewen (der realistischste Fall: „review meine
+  gerade gemachte, noch nicht committete Änderung"), aber `evalkit.workspace.prepare()`
+  hinterlässt nach jedem Fixture-Aufbau einen sauberen Baum — dieselbe Grenze, die oben bei
+  `dirty-worktree` schon steht. Alle vier Evals in `evals/review-context/evals.json` nutzen
+  deshalb `--range HEAD~1..HEAD`; der Uncommitted-Pfad ist nur durch Unit-Tests
+  (`test_uncommitted_mode_reads_worktree`, `test_main_writes_cache_file`-Nachbarn) abgedeckt,
+  nicht durch einen echten Agenten-Lauf.
+- **Die „ab zwei Commits zählt die Commit-Message als Soll"-Regel ist eine eigene Entscheidung,
+  nicht aus Spec 04 oder dem Auftrag zwingend ableitbar.** R13 nennt „Commit-Messages des
+  Bereichs" als dritte Soll-Quelle, ohne eine Mindestanzahl zu nennen. Ohne diese Schwelle wäre
+  „Diff ohne jedes Soll" (der wichtigste Eval, R13) nicht deterministisch erzeugbar, weil ein
+  Range mit genau einem Commit sonst immer dessen eigene Subject-Zeile als Soll zählen würde
+  (Tautologie: die Message beschreibt den Diff, nicht das Ziel dahinter). Wer stattdessen jede
+  Commit-Message zählen lassen will, muss `MIN_COMMITS_FOR_MESSAGE_SOLL` in
+  `skills/review-context/scripts/collect_context.py` auf `1` setzen und Eval 1 neu bauen.
+- **Aufrufer-Suche ist namensbasiert, ohne Scope- oder Import-Analyse.** `find_callers()` grept
+  `\bname\s*\(` über den ganzen Baum. Zwei unabhängige Funktionen mit demselben Namen in
+  verschiedenen Modulen werden nicht unterschieden (falsch-positiv), und ein Aufruf über
+  `self.name(...)`, eine Methode gleichen Namens auf einem anderen Objekt, oder ein Import-Alias
+  (`from x import name as anders`) wird nicht erkannt (falsch-negativ). Dokumentierte Grenze,
+  keine stille.
+- **`_extract_signature()` zählt Klammertiefe zeilenweise, ohne Strings zu berücksichtigen.**
+  Ein Default-Wert wie `sep: str = "("` würde die Tiefenzählung verfälschen und die Signatur zu
+  früh oder zu spät abschneiden. In der Praxis selten, aber eine Heuristik, kein Parser für
+  diesen einen Aspekt — `ast.parse()` selbst ist exakt, nur die Rückübersetzung in Quelltext
+  nicht.
+- **Symbol- und Aufrufer-Erkennung entfällt für gelöschte Dateien.** Eine gelöschte Datei hat
+  keinen „Nachher"-Zustand, aus dem `ast` oder die TS-Regex Symbolgrenzen ableiten könnten. Wer
+  wissen will, wer ein jetzt entferntes Symbol noch aufruft, bekommt das aus diesem Paket nicht
+  — eine bewusste Lücke (siehe SKILL.md-Referenz), keine überprüfte.
+- **TS/JS-Symbolerkennung sieht nur die Deklarationszeile, keine Body-Änderungen.** Anders als
+  bei Python (Zeilenbereich-Überlappung über den ganzen Funktionskörper) zählt eine TS/JS-
+  Funktion nur als „berührt", wenn sich ihre eigene Signaturzeile im geänderten Bereich
+  befindet. Eine reine Body-Änderung ohne Signaturänderung wird für TS/JS nicht erkannt — R16
+  erlaubt die grep-basierte TS-Suche ausdrücklich, diese konkrete Asymmetrie zu Python ist aber
+  ungetestet gegen eine echte TS-Fixture (alle vier Evals nutzen Python).
+- **`docs/decisions.md` hat noch keine reale Instanz zum Testen.** `read_decisions()` folgt der
+  Konsumenten-Regel aus Spec 00 §1 (Header fehlt oder Schema passt nicht → sichtbar
+  übersprungen), aber die Skill, die diese Datei mit Kopfzeile erzeugt (feature-spec, Spec 03),
+  ist noch nicht gebaut. Der Regelfall in jedem echten Repo dieser Sammlung ist aktuell
+  `missing`; `no_header`/`schema_mismatch`/`read` sind nur durch Unit-Tests mit synthetischem
+  Inhalt geprüft, nicht gegen ein reales `docs/decisions.md`.
+- **`gather_conventions()` prüft nur Existenz, nie Inhalt.** Konventions-Marker
+  (`pyproject.toml`, `tsconfig.json`, …) werden nur als vorhanden/fehlend gemeldet; ob ein
+  `ruff.toml` z. B. Line-Length-Regeln enthält, die für die Vereinfachungslinse relevant wären,
+  bleibt ungelesen. Absichtlich Tier-1-minimal, aber eine Grenze der Simplification-Paket-Tiefe.
+- **Die Aufrufer-Deckelung (20, benannte Grenze) ist nur unit-getestet, nicht eval-getestet.**
+  `test_find_callers_caps_with_named_limit` deckt den Fall mechanisch ab; ein echter
+  Agenten-Lauf gegen eine Fixture mit > 20 Aufrufern existiert nicht — der Eval-Umfang war laut
+  Auftrag auf vier Evals begrenzt, und die anderen drei Ränder (kein Soll, Spec-Kriterien,
+  Anti-Zeremonie) wogen dafür schwerer.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
