@@ -1,0 +1,7 @@
+{
+  "git": true,
+  "description": "add() hat einen Aufrufer in einer anderen Datei. Ein Commit ändert den Body von add() (Signatur bleibt gleich) — das Korrektheits-Paket muss die Signatur der aufrufenden Funktion tragen.",
+  "commits": [
+    {"message": "fix: add rundet jetzt", "touch": {"src/calc.py": "def add(a, b):\n    return round(a + b, 2)\n"}}
+  ]
+}

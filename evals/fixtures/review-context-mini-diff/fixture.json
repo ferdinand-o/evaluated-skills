@@ -1,0 +1,7 @@
+{
+  "git": true,
+  "description": "Ein Ein-Zeilen-Tippfehler-Fix, ein Commit, eine Datei. Der Anti-Zeremonie-Fall für review-context: Das Kontextpaket muss klein bleiben.",
+  "commits": [
+    {"message": "fix: Tippfehler in der Konstante", "touch": {"src/config.py": "TIMEOUT_SECONDS = 30\n"}}
+  ]
+}
