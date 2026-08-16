@@ -26,16 +26,22 @@ das Delta vor der Wiederholung."
   ebenso hätte erzeugen können (Register-Pfad, `notiz`-Feld, Tier-Tag-Syntax,
   spotcheck-Ausgabe, Wissensdatei-Kopfzeile).
 
-## Eine Abweichung, die dieser Plan gegenüber Spec 00 §1 explizit trifft
+## Eine eigene Entscheidung, die dieser Plan trifft (keine Spec-00-Vorgabe)
 
-Spec 00 §1 sagt für nicht projektgebundene Artefakte: „mit optionalem Projekt-Override,
-falls eine **gleichnamige Datei** im Repo liegt". Wörtlich genommen bricht das bei
-`research/<thema>.md`: Die erste Recherche zu einem neuen Thema hat naturgemäß noch
-keine gleichnamige Datei im Projekt — der Override würde nie greifen, der Schreibzugriff
-ginge auf `~/.skills/verified-research/research/<thema>.md` im echten Home-Verzeichnis
-des Aufrufers. Das ist exakt die Falle, die `docs/known-limits.md` unter „Isolation" für
-den Eval-Harness dokumentiert (HOME wird nicht isoliert) und die laut Auftrag bei
-`visual-summary` bereits sechs Evals fälschlich rot gemacht hat.
+Spec 00 §1 sagt für nicht projektgebundene Artefakte nur: Standard ist `~/.skills/`, mit
+optionalem Projekt-Override — „dasselbe Muster wie persönliche vs. Projekt-Skills". Sie
+nennt **keine** Bedingung dafür, wann genau der Override greift; die Formulierung „falls
+eine gleichnamige Datei im Repo liegt" stammt aus Spec 12s Paraphrase für das Register,
+nicht aus dem Wortlaut von Spec 00 §1.
+
+Trotzdem: Ein Override auf Datei-Ebene (nur falls eine gleichnamige Datei im Projekt
+schon existiert) bricht bei `research/<thema>.md`: Die erste Recherche zu einem neuen
+Thema hat naturgemäß noch keine gleichnamige Datei im Projekt — der Override würde nie
+greifen, der Schreibzugriff ginge auf `~/.skills/verified-research/research/<thema>.md`
+im echten Home-Verzeichnis des Aufrufers. Das ist exakt die Falle, die
+`docs/known-limits.md` unter „Isolation" für den Eval-Harness dokumentiert (HOME wird
+nicht isoliert) und die laut Auftrag bei `visual-summary` bereits sechs Evals fälschlich
+rot gemacht hat.
 
 **Auflösung:** Der Override wird auf Verzeichnis-Ebene geprüft, nicht auf Datei-Ebene:
 Existiert `.skills/verified-research/` bereits im Projekt (egal mit welchem Inhalt), gilt

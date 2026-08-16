@@ -22,8 +22,8 @@ evals/fixtures/vr-*/                (7 lokale Fixtures, keine Websuche nötig)
 tests/test_verified_research_registry.py, tests/test_verified_research_spotcheck.py
 ```
 
-45 neue Unit-Tests, alle grün. Gesamtsuite: 191 von 191 bestanden
-(146 bestehende + 45 neue), inklusive der 146 bestehenden aus dem Auftrag.
+53 neue Unit-Tests, alle grün (45 aus der Erstimplementierung, 8 aus der Fix-Runde für
+die Register-Grenzprüfung). Gesamtsuite: 199 von 199 bestanden (146 bestehende + 53 neue).
 
 ## R7 — Register als registry.json (Tier 1)
 
@@ -102,12 +102,19 @@ macht das aber unwahrscheinlich, weil sie `deep-research` nirgends bekannt ist.
 ## Zusätzliche Entscheidungen, die ich treffen musste
 
 1. **Verzeichnis- statt Datei-Ebene für den Projekt-Override** (dokumentiert in
-   `docs/known-limits.md`, Abschnitt „verified-research"). Spec 00 §1 sagt wörtlich
-   „gleichnamige Datei" — das würde für `research/<thema>.md` beim allerersten Lauf zu
-   jedem neuen Thema nie greifen und ins echte Home-Verzeichnis des Aufrufers schreiben.
-   `resolve_base_dir()` prüft stattdessen, ob `.skills/verified-research/` als
-   Verzeichnis existiert. Das ist eine Abweichung vom Wortlaut, die ich für notwendig
-   halte, aber nicht selbst als „richtig" absegnen kann — ein Review sollte das bestätigen.
+   `docs/known-limits.md`, Abschnitt „verified-research"). **Korrektur nach Review:**
+   Ich hatte das ursprünglich als wörtliches Zitat aus Spec 00 §1 dargestellt
+   („falls eine gleichnamige Datei im Repo liegt"). Das steht dort nicht — Spec 00 §1
+   sagt nur „mit optionalem Projekt-Override — dasselbe Muster wie persönliche vs.
+   Projekt-Skills" und nennt keine Bedingung dafür, wann der Override greift. Die
+   Formulierung stammt aus dem Auftrag/aus Spec 12s Paraphrase, nicht aus Spec 00
+   selbst; ich habe die Paraphrase für den Wortlaut gehalten, statt es an der Quelle
+   zu prüfen. `resolve_base_dir()` prüft, ob `.skills/verified-research/` als
+   Verzeichnis existiert — das ist **meine eigene Entscheidung**, keine Spec-00-Regel:
+   Ein Override auf Datei-Ebene würde für `research/<thema>.md` beim allerersten Lauf
+   zu jedem neuen Thema nie greifen und ins echte Home-Verzeichnis des Aufrufers
+   schreiben. Die Verzeichnis-Prüfung selbst halte ich weiterhin für richtig, nur trug
+   die ursprüngliche Begründung sie fälschlich als Zitat statt als eigene Ableitung.
 2. **Claim-Tag-Format als eigene Konvention erfunden.** Spec 12 beschreibt den
    Tier-Contract, aber kein konkretes Textformat für „jeder Claim trägt ein Tier". Ich
    habe `[Tier <1-3>{, kritisch}?, Quelle: <adresse>]` als Zeilenende-Tag festgelegt,
@@ -162,3 +169,52 @@ Evals/Fixtures aus Task 4/5, weil beide `git add`-Aufrufe vor dem Commit ausgef�
 wurden. Die Commit-Message beschreibt nur die Pfad-Korrektur — inhaltlich ist nichts
 verloren gegangen (alle Dateien sind im Diff sichtbar), aber die Historie ist an dieser
 Stelle ungenauer als beabsichtigt.
+
+## Fix-Runde (nach unabhängigem Review)
+
+Ein unabhängiger Reviewer hat drei Defekte gefunden, zwei davon mechanisch nachprüfbar,
+einer war eine Zitat-Verfälschung; alle drei sind behoben.
+
+**1. `lookup()` matchte reinen Teilstring statt Host-/Pfad-Grenzen.** Das Muster `"ir."`
+(gedacht als Präfix für Investor-Relations-Subdomains) klassifizierte `elixir.example.com`
+und `kefir.example.blog` als Tier-1-Primärquellen — die Buchstabenfolge kam zufällig vor,
+ohne dass jemand die Domain bewertet hätte. `registry.py` hat jetzt `_boundary_pattern()`:
+ein alphanumerisches Randzeichen des Musters darf nicht mitten in einem längeren
+alphanumerischen Lauf der Zielzeichenkette stecken; ein Muster, dessen Rand schon ein
+Trennzeichen ist (`-vergleich.de`), bekommt an der Seite keine zusätzliche Grenze, weil
+die Absicht (Suffix-Wildcard innerhalb eines Labels) sonst kaputtginge.
+
+Ich habe das **ganze Register** (36 Muster in `assets/registry.json`) programmatisch
+gegen adversariale Nachbarschaft geprüft (jedes Muster mit einem alphanumerischen Zeichen
+direkt davor bzw. danach verklebt) — 68 der so erzeugten Fälle waren unter dem alten
+Teilstring-Vergleich falsch-positiv und sind jetzt korrekt abgelehnt, ohne einen der
+beabsichtigten Treffer zu verlieren (`arxiv.org` exakt, `-vergleich.de` als
+Label-Suffix, `github.com`/`docs.python.org` mit Pfad, `ir.` am String-Anfang und nach
+Schema-Präfix bleiben alle erhalten). Zwei zusätzliche reale Fälle über den gemeldeten
+hinaus: `dev.to` matchte als Teilstring in `avdev.today`, und — der bemerkenswertere
+Fund — `arxiv.org` matchte als Teilstring in `chemarxiv.org`, einem eigenständigen,
+anderen Preprint-Server (ChemRxiv), der dadurch fälschlich arXivs Tier-1-Bewertung geerbt
+hätte. Acht neue Tests in `tests/test_verified_research_registry.py` decken die
+Grenzfälle ab, darunter `elixir.example.com` als expliziter Negativfall wie vom Reviewer
+verlangt, sowie `chemarxiv.org` als zweiter dokumentierter Fund.
+
+**2. Eval-Regex strenger als der Parser, den sie prüft.** `critical-claim-tier3-only-flagged`
+verlangte exakt ein Leerzeichen nach dem Komma vor „kritisch", während `spotcheck.py`
+mit `,\s*kritisch` parst (`evals/verified-research/evals.json`, `must`/`must_not`). Beide
+Assertions sind jetzt auf `\s*` statt festem Leerzeichen umgestellt, ebenso die drei
+übrigen Stellen, die `[Tier N`/`[Tier [1-3]` ohne diese Toleranz prüften — dieselbe
+Bugklasse hätte dort baugleich zuschlagen können, auch wenn nur eine Stelle konkret
+gemeldet wurde.
+
+**3. Falsches Spec-00-Zitat an vier Stellen.** `registry.py`, `docs/known-limits.md`,
+der Plan und dieser Bericht behaupteten, Spec 00 §1 sage wörtlich „falls eine
+gleichnamige Datei im Repo liegt". Das steht dort nicht — Spec 00 §1 sagt nur „mit
+optionalem Projekt-Override — dasselbe Muster wie persönliche vs. Projekt-Skills" und
+trifft keine Aussage darüber, wann der Override greift. Alle vier Stellen sind
+umformuliert: Sie sagen jetzt, was Spec 00 tatsächlich vorgibt, und dass die
+Verzeichnis-Ebene meine eigene, begründete Entscheidung ist — nicht aus Spec 00
+zitiert. Die Verzeichnis-Prüfung selbst bleibt unverändert; nur ihre Begründung war
+falsch attribuiert.
+
+Alle Tests grün (199, siehe unten), `evalkit.schema.load_evals` validiert die 7 Evals
+weiterhin fehlerfrei. `run_evals.py` wurde weiterhin nicht ausgeführt.

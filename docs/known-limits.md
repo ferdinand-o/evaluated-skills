@@ -140,19 +140,24 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   bewusste, aber echte Lücke: Ob `verified-research` in der Praxis tatsächlich
   Primärquellen vor SEO-Aggregatoren bevorzugt, wenn frei gesucht werden muss, ist mit
   diesem Eval-Set nicht belegt.
-- **Verzeichnis- statt Datei-Ebene für den Projekt-Override (Abweichung von Spec 00 §1).**
+- **Verzeichnis- statt Datei-Ebene für den Projekt-Override (eigene Entscheidung, keine
+  Spec-00-Vorgabe).** Spec 00 §1 sagt für nicht projektgebundene Artefakte nur: Standard
+  ist `~/.skills/`, mit optionalem Projekt-Override — „dasselbe Muster wie persönliche
+  vs. Projekt-Skills". Sie nennt keine Bedingung dafür, *wann* der Override greift.
   `registry.py resolve_base_dir()` prüft, ob `.skills/verified-research/` im Projekt
-  existiert — nicht, ob eine gleichnamige Datei existiert, wie Spec 00 §1 wörtlich sagt.
-  Grund: Eine neue `research/<thema>.md` hat bei ihrer ersten Recherche naturgemäß noch
-  keine gleichnamige Vorgänger-Datei; wörtlich genommen würde der Override nie greifen
-  und der erste Schreibzugriff ginge nach `~/.skills/verified-research/` — im
-  Eval-Harness das echte Home-Verzeichnis des Aufrufers (siehe „Isolation" oben). Alle
-  sieben Fixtures legen deshalb `.skills/verified-research/registry.json` im Workspace
-  an, damit dieser Fall im Eval-Set nicht auftritt. Läuft die Skill jedoch in einem
-  Projekt, das weder `.skills/verified-research/` noch eine bestehende Wissensdatei hat,
-  entscheidet dieselbe Abweichung, ob der allererste Lauf projektlokal oder global
-  landet — das ist keine Spec-00-Konformität, sondern eine dokumentierte,
-  begründete Ausnahme, die ein künftiger Review absegnen oder verwerfen sollte.
+  existiert (Verzeichnis-Ebene) — das ist eine eigene Entscheidung dieser
+  Implementierung, nicht Spec 00. Begründung: Ein Override auf Datei-Ebene (nur falls
+  eine gleichnamige Datei im Projekt schon existiert, wie Spec 12 es für das Register
+  nahelegt) würde bei `research/<thema>.md` nie greifen — eine neue Wissensdatei hat bei
+  ihrer ersten Recherche naturgemäß noch keine gleichnamige Vorgänger-Datei, der erste
+  Schreibzugriff ginge also immer nach `~/.skills/verified-research/` — im Eval-Harness
+  das echte Home-Verzeichnis des Aufrufers (siehe „Isolation" oben). Alle sieben
+  Fixtures legen deshalb `.skills/verified-research/registry.json` im Workspace an,
+  damit dieser Fall im Eval-Set nicht auftritt. Läuft die Skill jedoch in einem Projekt,
+  das weder `.skills/verified-research/` noch eine bestehende Wissensdatei hat,
+  entscheidet dieselbe Entscheidung, ob der allererste Lauf projektlokal oder global
+  landet — das ist eine begründete, aber selbst getroffene Auslegungsentscheidung, die
+  ein künftiger Review absegnen oder verwerfen sollte, keine aus Spec 00 zitierte Regel.
 - **Script-Pfad-Konvention ungeprüft gegen die tatsächliche Eval-Installation.**
   `evalkit.workspace.prepare()` installiert eine Skill nach
   `<workspace>/.claude/skills/<name>/`, aber SKILL.md (wie auch bei `dev-report`)
