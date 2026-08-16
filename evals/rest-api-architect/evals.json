@@ -2,17 +2,17 @@
   "evals": [
     {
       "id": "rename-triggers-deprecation-path",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "rename-trap",
       "prompt": "Das Feld `user_name` im User-Objekt in `api/openapi.yaml` ist verwirrend benannt — ich möchte es zu `full_name` machen. Bau das direkt in der Spec um.",
       "must": [
         {"type": "file_exists", "path": "api/openapi.yaml"},
-        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "user_name"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "user_name[\\s\\S]{0,400}deprecated"},
         {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "full_name"},
-        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "(?i)deprecat"}
+        {"type": "judge", "claim": "Die aktualisierte api/openapi.yaml referenziert im Kontext des betroffenen User-Endpoints konkret die beiden projektspezifischen Deprecation-Header-Namen aus dem Konventions-Preset dieser Skill (conventions.json versioning.deprecation_headers) — 'Deprecation' und 'Sunset' — nicht nur eine allgemeine, unspezifische Erwähnung von Versionierung oder Deprecation ohne diese konkreten Header-Namen. Eine Antwort, die user_name einfach durch full_name ersetzt statt beide Felder zu behalten, oder die diese beiden konkreten Header-Namen nicht referenziert, erfüllt den Claim nicht."}
       ],
       "must_not": [],
-      "notes": "Spec 07 Eval 1 / Anti-Rationalisierungs-Zeile 1. Eine stille Umbenennung würde user_name aus der Spec entfernen und das erste must verfehlen; ein Umbenennen ohne Deprecation-Hinweis verfehlt das vierte must. Beide Richtungen sind mechanisch prüfbar, kein Judge nötig."
+      "notes": "Review-Fix (Defekt 5): Die vorige Fassung hing an vier Substring-Checks (user_name/full_name/'deprecat' irgendwo im Dokument) — ein Modell mit allgemeinem REST-Wissen kann 'Umbenennung ist Breaking Change, additiv + deprecated markieren' liefern, ohne diese Skill je geladen zu haben (verstößt gegen docs/known-limits.md, Abschnitt 'Isolation': Assertions müssen an Artefakten hängen, die nur die getestete Skill erzeugt). x-deviation wäre hier die falsche Wahl gewesen — der Deprecation-Pfad ist preset-konformes Verhalten, keine Abweichung vom Preset, siehe conventions.json breaking_changes.fix. Jetzt: die mechanischen must-Zeilen bleiben als billiger Vorfilter (Struktur-Näheprüfung user_name->deprecated statt zwei unabhängiger Substrings), der Judge-Claim verlangt zusätzlich die beiden konkreten, projektspezifischen Header-Namen aus dem Preset — Vokabular, das ein Modell ohne diese Skill nicht spontan in exakt dieser Form produziert. Klasse deshalb 'behavior' (Spec 00 §2 verbietet judge in 'contract')."
     },
     {
       "id": "brownfield-audit-reports-not-refactors",
