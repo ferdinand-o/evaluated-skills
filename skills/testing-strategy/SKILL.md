@@ -73,7 +73,11 @@ Vor dem ersten geschriebenen Test, wörtlich mit diesen vier Feldern:
 
 Ein Test-PR ohne diesen Block ist ein sichtbarer Regelverstoß; ein Block, der
 der Klassifikation widerspricht (z. B. `Repo-Typ: rest-api` bei
-`primary: "chrome-extension"`), ebenso. Bei jeder neuen oder geänderten
+`primary: "chrome-extension"`), ebenso. Ist `legacy.suspected: true`, beginnt
+`Repo-Typ:` mit dem Wort **legacy** — mit `primary` in Klammern, falls
+`detect_stack.json` zusätzlich einen Typ erkannt hat (`legacy (rest-api)`),
+sonst ohne Zusatz (`legacy`). Legacy geht dem Typ immer voran, weil das
+Sicherheitsnetz vor dem Typ-Adapter kommt. Bei jeder neuen oder geänderten
 Message-Route in einer Chrome-Extension nennt `Schichten:` explizit
 **SW-Termination** mit dem betroffenen Route-Namen — das ist das Kernrisiko
 jeder MV3-Extension und darf nie stillschweigend fehlen.

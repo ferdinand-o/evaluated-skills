@@ -128,6 +128,43 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## testing-strategy
+
+- **Die Playwright-Fixture in `chrome-extension.md` ist geschrieben, aber nicht
+  real ausgeführt.** Playwright ist in dieser Umgebung nicht installiert und
+  wurde für diese Arbeit nicht installiert (bewusste Vorgabe, siehe R6 des
+  Implementierungsauftrags). Die Persistent-Context-Fixture, die
+  SW-Termination-Chaostest-Vorlage und das Content-Script-Beispiel gegen
+  Fixture-Seiten sind vollständig ausgeschrieben, aber kein einziges davon
+  hat je in einem echten Browser gelaufen. Insbesondere die
+  `ServiceWorker.stopWorker`-CDP-Sequenz im Chaostest ist ein Muster, keine
+  verifizierte Implementierung — die `versionId`-Ermittlung ist im Kommentar
+  als offen markiert. Wer diese Fixture zum ersten Mal einsetzt, sollte mit
+  einem einzigen trivialen Message-Handler beginnen, bevor echte Routen
+  darauf aufbauen, und mit dem Auftreten realer Fehler rechnen, die erst der
+  erste echte Einsatz zeigt.
+- **Das Legacy-Alterssignal (`erster Commit vor N Jahren`) ist über
+  Eval-Fixtures nicht auslösbar.** `detect_stack.py`s Legacy-Score hat eine
+  Komponente für das Alter des ersten Commits (≥3 Jahre). Der bestehende
+  Punkt „Fixture-Historie ist deklarativ, nicht aufgezeichnet" weiter oben
+  beschreibt die Ursache bereits allgemein: `evalkit/workspace.py` erzeugt
+  jeden deklarierten Fixture-Commit zum Zeitpunkt des Eval-Laufs, nicht mit
+  einem frei wählbaren Datum. Für `testing-strategy` heißt das konkret: Der
+  Legacy-Trap-Eval (`legacy-trap-characterization-not-invented-behavior`)
+  kann `legacy.suspected: true` nur über die Kombination
+  „keine Testdateien" + „Commit-Zahl über der Schwelle" erreichen, nie über
+  das Alterssignal — dieser Codepfad in `_legacy_score()` ist unit-getestet,
+  aber nie unter Eval-Bedingungen durchlaufen worden.
+- **Der Router-Muster-Scan ist ein bewusst enger Textabgleich, keine
+  Code-Analyse.** `detect_stack.py` durchsucht nur eine feste Liste bekannter
+  Entry-Point-Dateinamen (`app.py`, `main.py`, `server.js`, …) nach wenigen
+  Regex-Mustern (`@app.get(`, `@RestController`, …), nicht das ganze Repo und
+  nicht mit echtem Parsing. Ein REST-Backend mit unüblichem Einstiegsdateinamen
+  oder einem Framework außerhalb der bekannten Muster liefert dann `primary:
+  null` statt `rest-api` — durch Unit-Tests wie
+  `test_router_pattern_in_entry_file_signals_rest_api` nur für die bekannten
+  Fälle abgesichert, nicht als Vollständigkeitsgarantie.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
