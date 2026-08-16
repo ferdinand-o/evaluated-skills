@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "skill": "sql-schema-architect",
+    "schema": 1,
+    "generated": "handgeschrieben (Preset), siehe references/conventions.md"
+  },
+  "naming": {
+    "table_case": "snake_case",
+    "column_case": "snake_case",
+    "table_plurality_preference": "plural",
+    "note": "Plurality ist eine dokumentierte Präferenz, keine mechanische Lint-Regel — grammatische Singular/Plural-Erkennung ist ohne Wörterbuch nicht zuverlässig automatisierbar."
+  },
+  "types": {
+    "primary_key_style": "bigint_identity",
+    "uuid_primary_key_allowed_with_reason": true,
+    "timestamp_type": "timestamptz",
+    "reject_datetime_without_timezone": true,
+    "string_type_default": "text",
+    "reject_varchar_without_reason": true,
+    "varchar_reason_marker": "# grund:"
+  },
+  "required_columns": ["created_at", "updated_at"],
+  "soft_delete": {
+    "mode": "explicit_per_table",
+    "note": "Keine globale Vorgabe — jede Tabelle entscheidet bewusst im Steckbrief, nicht als Reflex."
+  },
+  "foreign_keys": {
+    "ondelete_required": true
+  },
+  "table_steckbrief": {
+    "required_sections": ["Zweck", "Owner", "Erwartetes Wachstum", "Hauptzugriffsmuster"],
+    "path_template": "docs/schema/{table}.md"
+  }
+}
