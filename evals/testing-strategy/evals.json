@@ -2,35 +2,46 @@
   "evals": [
     {
       "id": "legacy-trap-characterization-not-invented-behavior",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "legacy-monolith",
       "prompt": "Ich will `src/orders.py` in diesem Repo refactoren, damit sich Stornierungen leichter erweitern lassen. Was ist der Testplan, bevor ich anfange?",
       "must": [
         {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
         {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"suspected\":\\s*true"},
-        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*legacy\\b"},
+        {"type": "output_matches", "pattern": "(?im)^##\\s*Test-Plan\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Repo-Typ:\\s*legacy\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Runner:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Schichten:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Ausgelassen:"},
         {"type": "output_matches", "pattern": "(?i)characterization|golden.?master"},
-        {"type": "output_matches", "pattern": "(?i)orders\\.py"}
+        {"type": "output_matches", "pattern": "(?i)orders\\.py"},
+        {"type": "judge", "claim": "Das Feld 'Schichten:' im Test-Plan-Block nennt für jede aufgeführte Testschicht eine eigene inhaltliche Begründung, nicht nur eine Aufzählung von Schichtnamen ohne Warum — insbesondere wird Characterization/Golden-Master mit dem Grund begründet, dass unbekanntes Verhalten von orders.py vor dem geplanten Refactoring erst festgehalten werden muss, nicht nur als Stichwort genannt."}
       ],
       "must_not": [],
-      "notes": "Legacy-Trap aus dem Auftrag: Die Fixture hat elf Commits und keine einzige Testdatei — detect_stack.py muss das mechanisch als legacy.suspected melden (Score-Schwelle 3 durch 'keine Tests' + 'Commit-Zahl', ohne Alterssignal, siehe docs/known-limits.md). Die Antwort muss laut SKILL.md-Contract mit 'Repo-Typ: legacy' beginnen und Characterization/Golden-Master nennen statt eine erfundene Soll-Spezifikation zu testen. Der Verweis auf orders.py verhindert eine generische, vom Prompt losgelöste Antwort."
+      "notes": "Legacy-Trap aus dem Auftrag, nach Review-Fund geschärft: Die vorige Fassung prüfte nur Stichworte, sodass eine Antwort ganz ohne Test-Plan-Block bestand. Jetzt verlangen die must-Assertions die volle Blockstruktur aus dem SKILL.md-Contract ('## Test-Plan' plus alle vier Feldmarken als eigene Bullet-Zeilen) mechanisch als class:contract-taugliche Form — nur die inhaltliche Prüfung 'mit Begründung je Schicht' braucht ein Urteil, deshalb judge und class:behavior. Die Fixture hat 24 Commits/Module und keine einzige Testdatei — detect_stack.py muss das mechanisch als legacy.suspected melden (Umfangsschwellen für Datei- und Commit-Zahl, ohne Alterssignal, siehe docs/known-limits.md). Der Verweis auf orders.py verhindert eine generische, vom Prompt losgelöste Antwort."
     },
     {
       "id": "extension-trap-sw-termination-named",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "chrome-extension",
       "prompt": "Ich habe in background.js einen neuen Message-Handler HANDLE_SYNC ergänzt, zusätzlich zum bestehenden PING. Wie teste ich das?",
       "must": [
         {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
         {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"primary\":\\s*\"chrome-extension\""},
+        {"type": "output_matches", "pattern": "(?im)^##\\s*Test-Plan\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Repo-Typ:\\s*chrome-extension\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Runner:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Schichten:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*Ausgelassen:"},
         {"type": "output_matches", "pattern": "(?i)SW-Termination"},
-        {"type": "output_matches", "pattern": "(?i)HANDLE_SYNC"}
+        {"type": "output_matches", "pattern": "(?i)HANDLE_SYNC"},
+        {"type": "judge", "claim": "Das Feld 'Schichten:' begründet für jede genannte Schicht, warum sie nötig ist — insbesondere wird die SW-Termination-Schicht mit dem Risiko eines Service-Worker-Neustarts für die neue Route HANDLE_SYNC begründet, nicht nur als Stichwort aufgelistet."}
       ],
       "must_not": [
         {"type": "output_matches", "pattern": "(?i)playwright[^\\n]{0,80}(getestet|erprobt|verifiziert)"},
         {"type": "output_matches", "pattern": "(?i)(getestet|erprobt|verifiziert)[^\\n]{0,80}playwright"}
       ],
-      "notes": "Extension-Trap aus dem Auftrag: detect_stack.json muss die Extension eindeutig erkennen (nur ein Kandidat mit Score 3 durch manifest_version). Der Plan muss laut SKILL.md-Contract die Schicht 'SW-Termination' explizit mit dem betroffenen Route-Namen HANDLE_SYNC nennen, nicht generisch von 'Tests' sprechen. must_not erzwingt R6 mechanisch: Die Playwright-Fixture aus chrome-extension.md darf nirgends als getestet/erprobt bezeichnet werden, in beiden Wortstellungen."
+      "notes": "Extension-Trap aus dem Auftrag, nach Review-Fund geschärft (gleiche Lücke wie beim Legacy-Trap: eine Antwort ohne Block bestand vorher). must verlangt jetzt die volle Blockstruktur ('## Test-Plan' plus alle vier Feldmarken) und zusätzlich per Judge die inhaltliche Begründung der SW-Termination-Schicht — deshalb class:behavior. detect_stack.json muss die Extension eindeutig erkennen (nur ein Kandidat mit Score 3 durch manifest_version). must_not erzwingt R6 weiterhin mechanisch: Die Playwright-Fixture aus chrome-extension.md darf nirgends als getestet/erprobt bezeichnet werden, in beiden Wortstellungen."
     },
     {
       "id": "routing-trap-asks-instead-of-guessing",
