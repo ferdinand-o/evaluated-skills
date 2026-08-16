@@ -303,3 +303,131 @@ def test_resolve_soll_none_when_nothing_found(repo):
     soll = cc.resolve_soll(repo, "range", "HEAD~1", "HEAD", None, None)
     assert soll["source"] == "none"
     assert soll["weak"] is None
+
+
+# --- read_decisions ------------------------------------------------------------
+
+def test_read_decisions_missing_file(repo):
+    assert cc.read_decisions(repo) == {"status": "missing", "entries": []}
+
+
+def test_read_decisions_without_header_is_skipped_visibly(repo):
+    write(repo, "docs/decisions.md", "- 2026-08-01: Fehlerformat ist JSON (Spec-Anlass: X)\n")
+    result = cc.read_decisions(repo)
+    assert result["status"] == "no_header"
+    assert result["entries"] == []
+
+
+def test_read_decisions_schema_mismatch_is_skipped_visibly(repo):
+    write(repo, "docs/decisions.md",
+          "<!-- skill: feature-spec | schema: 99 | generated: x -->\n- Entscheidung\n")
+    result = cc.read_decisions(repo)
+    assert result["status"] == "schema_mismatch"
+    assert result["schema"] == 99
+
+
+def test_read_decisions_reads_matching_schema(repo):
+    write(repo, "docs/decisions.md",
+          "<!-- skill: feature-spec | schema: 1 | generated: x -->\n"
+          "- 2026-08-01: Fehlerformat ist JSON (Spec-Anlass: 03)\n")
+    result = cc.read_decisions(repo)
+    assert result["status"] == "read"
+    assert result["entries"] == ["- 2026-08-01: Fehlerformat ist JSON (Spec-Anlass: 03)"]
+
+
+# --- Symbol-Erkennung ------------------------------------------------------------
+
+PY_SOURCE = (
+    "def helper():\n"
+    "    return 1\n"
+    "\n"
+    "\n"
+    "def add(a, b):\n"
+    "    total = a + b\n"
+    "    return total + 0\n"
+)
+
+
+def test_detect_python_symbols_finds_touched_function():
+    symbols = cc.detect_python_symbols(PY_SOURCE, [(6, 6)])
+    assert len(symbols) == 1
+    assert symbols[0]["name"] == "add"
+    assert symbols[0]["signature"] == "def add(a, b):"
+
+
+def test_detect_python_symbols_ignores_untouched_function():
+    symbols = cc.detect_python_symbols(PY_SOURCE, [(1, 2)])
+    assert symbols[0]["name"] == "helper"
+
+
+def test_detect_python_symbols_multiline_signature():
+    source = "def add(\n    a,\n    b,\n):\n    return a + b\n"
+    symbols = cc.detect_python_symbols(source, [(5, 5)])
+    assert symbols[0]["signature"] == "def add(\n    a,\n    b,\n):"
+
+
+def test_detect_python_symbols_no_ranges_is_empty():
+    assert cc.detect_python_symbols(PY_SOURCE, []) == []
+
+
+def test_detect_python_symbols_syntax_error_is_empty():
+    assert cc.detect_python_symbols("def broken(:\n", [(1, 1)]) == []
+
+
+TS_SOURCE = (
+    "export function add(a: number, b: number): number {\n"
+    "  return a + b;\n"
+    "}\n"
+)
+
+
+def test_detect_ts_symbols_finds_declaration_line():
+    symbols = cc.detect_ts_symbols(TS_SOURCE, [(1, 1)])
+    assert symbols[0]["name"] == "add"
+    assert symbols[0]["kind"] == "function"
+
+
+def test_detect_ts_symbols_ignores_body_only_change():
+    """Benannte Grenze: TS-Erkennung sieht nur die Deklarationszeile, nicht den Body."""
+    symbols = cc.detect_ts_symbols(TS_SOURCE, [(2, 2)])
+    assert symbols == []
+
+
+def test_detect_symbols_dispatches_by_suffix():
+    assert cc.detect_symbols("src/add.py", PY_SOURCE, [(6, 6)])[0]["name"] == "add"
+    assert cc.detect_symbols("src/add.ts", TS_SOURCE, [(1, 1)])[0]["name"] == "add"
+    assert cc.detect_symbols("assets/logo.png", None, [(1, 1)]) == []
+    assert cc.detect_symbols("README.md", "egal", [(1, 1)]) == []
+
+
+# --- find_callers ------------------------------------------------------------
+
+def test_find_callers_finds_caller_with_enclosing_signature(repo):
+    write(repo, "src/calc.py", "def add(a, b):\n    return a + b\n")
+    write(repo, "src/user.py", "from src.calc import add\n\n\ndef use_add(x, y):\n    return add(x, y) + 1\n")
+    commit_all(repo, "feat: Nutzer von add")
+
+    result = cc.find_callers(repo, "add", "src/calc.py", definition_lineno=1)
+    assert result["total"] == 1
+    entry = result["shown"][0]
+    assert entry["file"] == "src/user.py"
+    assert entry["caller_signature"] == "def use_add(x, y):"
+
+
+def test_find_callers_excludes_the_definition_line(repo):
+    write(repo, "src/calc.py", "def add(a, b):\n    return a + b\n")
+    commit_all(repo, "feat: add")
+    result = cc.find_callers(repo, "add", "src/calc.py", definition_lineno=1)
+    assert result["total"] == 0
+
+
+def test_find_callers_caps_with_named_limit(repo):
+    for i in range(25):
+        write(repo, f"src/caller_{i}.py", f"from src.calc import add\nresult_{i} = add({i}, {i})\n")
+    write(repo, "src/calc.py", "def add(a, b):\n    return a + b\n")
+    commit_all(repo, "feat: viele Aufrufer")
+
+    result = cc.find_callers(repo, "add", "src/calc.py", definition_lineno=1, cap=20)
+    assert result["total"] == 25
+    assert len(result["shown"]) == 20
+    assert "5 weitere" in result["note"]

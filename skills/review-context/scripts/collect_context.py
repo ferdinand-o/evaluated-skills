@@ -404,3 +404,210 @@ def resolve_soll(
     if commit_soll:
         return {"source": "commit_messages", "weak": True, **commit_soll}
     return {"source": "none", "weak": None}
+
+
+# --- docs/decisions.md — Konsumenten-Regel wie dev-report's Harvest --------
+
+_DECISIONS_HEADER_RE = re.compile(
+    r"^(?:<!--|#)\s*skill:\s*(?P<skill>[a-z0-9][a-z0-9-]*)\s*\|"
+    r"\s*schema:\s*(?P<schema>\d+)\s*\|"
+    r"\s*generated:\s*(?P<cmd>.+?)\s*(?:-->)?\s*$"
+)
+DECISIONS_SCHEMA_EXPECTED = 1
+
+
+def read_decisions(repo: Path) -> dict:
+    """`docs/decisions.md` nach der Konsumenten-Regel lesen (Spec 00 §1).
+
+    Dieselbe Regel, die `dev-report`s Harvest schon anwendet: Kopfzeile fehlt
+    oder Schema passt nicht → sichtbar überspringen, nie raten. Die Skill,
+    die diese Datei erzeugt (feature-spec, Spec 03), ist noch nicht gebaut —
+    der Regelfall ist deshalb aktuell `missing` oder `no_header`.
+    """
+    path = repo / "docs" / "decisions.md"
+    if not path.is_file():
+        return {"status": "missing", "entries": []}
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    header = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = _DECISIONS_HEADER_RE.match(line.strip())
+        header = {"schema": int(match.group("schema"))} if match else None
+        break
+
+    if header is None:
+        return {"status": "no_header", "entries": []}
+    if header["schema"] != DECISIONS_SCHEMA_EXPECTED:
+        return {"status": "schema_mismatch", "schema": header["schema"], "entries": []}
+
+    entries = [line.strip() for line in text.splitlines() if line.strip().startswith("- ")]
+    return {"status": "read", "entries": entries}
+
+
+# --- Symbol-Erkennung -------------------------------------------------------
+#
+# Python: exakt über `ast` (Signaturen, Zeilenbereiche). TypeScript/JS: eine
+# ehrliche grep-Regex ohne Scope-Analyse (R16) — sie erkennt ein Symbol nur,
+# wenn seine Deklarationszeile selbst im geänderten Bereich liegt, verfolgt
+# also anders als die Python-Variante keine reinen Body-Änderungen. Benannte
+# Grenze, kein stiller Kompromiss.
+
+_TS_FUNC_RE = re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)\s*\(")
+_TS_CONST_ARROW_RE = re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*)?\(")
+_TS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?(?:default\s+)?class\s+(\w+)")
+
+
+def _extract_signature(source_lines: list[str], node: ast.AST) -> str:
+    """Signatur eines `ast`-Knotens als Quelltext, auch bei mehrzeiligen Headern.
+
+    Zählt Klammertiefe zeilenweise und stoppt an der ersten Zeile, die wieder
+    auf Tiefe 0 ist und einen Doppelpunkt enthält — eine Heuristik, die an
+    Default-Strings mit Klammern scheitern kann (dokumentierte Grenze), für
+    normale Funktions- und Klassenköpfe aber zuverlässig ist.
+    """
+    start = node.lineno
+    depth = 0
+    header_lines: list[str] = []
+    for i in range(start - 1, len(source_lines)):
+        line = source_lines[i]
+        header_lines.append(line)
+        code_part = line.split("#", 1)[0]
+        depth += code_part.count("(") - code_part.count(")")
+        if depth <= 0 and ":" in code_part:
+            break
+    return "\n".join(header_lines).rstrip()
+
+
+def detect_python_symbols(after_text: str, changed_ranges: list[tuple[int, int]]) -> list[dict]:
+    """Funktionen/Klassen, deren Zeilenbereich einen geänderten Bereich überlappt."""
+    if not changed_ranges or not after_text:
+        return []
+    try:
+        tree = ast.parse(after_text)
+    except SyntaxError:
+        return []
+    lines = after_text.splitlines()
+    symbols: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        node_end = getattr(node, "end_lineno", node.lineno)
+        overlaps = any(not (node_end < start or node.lineno > end) for start, end in changed_ranges)
+        if not overlaps:
+            continue
+        kind = "class" if isinstance(node, ast.ClassDef) else "function"
+        symbols.append({
+            "name": node.name, "kind": kind,
+            "signature": _extract_signature(lines, node), "lineno": node.lineno,
+        })
+    return symbols
+
+
+def detect_ts_symbols(after_text: str, changed_ranges: list[tuple[int, int]]) -> list[dict]:
+    """Grep-basierte Symbolsuche für TS/JS — nur Deklarationszeilen, keine Scope-Analyse."""
+    if not changed_ranges or not after_text:
+        return []
+    lines = after_text.splitlines()
+    symbols: list[dict] = []
+    for lineno, line in enumerate(lines, start=1):
+        if not any(start <= lineno <= end for start, end in changed_ranges):
+            continue
+        for regex, kind in ((_TS_FUNC_RE, "function"), (_TS_CONST_ARROW_RE, "function"), (_TS_CLASS_RE, "class")):
+            match = regex.match(line)
+            if match:
+                symbols.append({"name": match.group(1), "kind": kind, "signature": line.strip(), "lineno": lineno})
+                break
+    return symbols
+
+
+def detect_symbols(path: str, after_text: str | None, changed_ranges: list[tuple[int, int]]) -> list[dict]:
+    if after_text is None:
+        return []
+    if path.endswith(".py"):
+        return detect_python_symbols(after_text, changed_ranges)
+    if path.endswith((".ts", ".tsx", ".js", ".jsx")):
+        return detect_ts_symbols(after_text, changed_ranges)
+    return []
+
+
+# --- Aufrufer-Suche ----------------------------------------------------------
+
+def _call_regex(name: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(name)}\s*\(")
+
+
+def _iter_code_files(repo: Path):
+    for path in sorted(repo.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix not in CODE_SUFFIXES:
+            continue
+        rel_parts = path.relative_to(repo).parts[:-1]
+        if any(part in EXCLUDED_DIR_NAMES for part in rel_parts):
+            continue
+        yield path
+
+
+def _resolve_caller_signature(repo: Path, rel_path: str, lineno: int) -> str | None:
+    """Signatur der Funktion, die eine Aufrufstelle umschließt — bestmöglich."""
+    path = repo / rel_path
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    if rel_path.endswith(".py"):
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return None
+        lines = text.splitlines()
+        best: ast.AST | None = None
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= lineno <= end and (best is None or node.lineno > best.lineno):
+                best = node
+        return _extract_signature(lines, best) if best is not None else None
+
+    if rel_path.endswith((".ts", ".tsx", ".js", ".jsx")):
+        lines = text.splitlines()
+        for i in range(min(lineno, len(lines)) - 1, -1, -1):
+            for regex in (_TS_FUNC_RE, _TS_CONST_ARROW_RE):
+                if regex.match(lines[i]):
+                    return lines[i].strip()
+        return None
+    return None
+
+
+def find_callers(
+    repo: Path, symbol_name: str, definition_path: str,
+    definition_lineno: int | None = None, cap: int = MAX_CALLERS,
+) -> dict:
+    """Aufrufer eines Symbols repoweit finden — grep-basiert für beide Sprachen
+    (R16), gedeckelt mit einer benannten Grenze statt stillem Abschneiden.
+    """
+    pattern = _call_regex(symbol_name)
+    matches: list[dict] = []
+    for path in _iter_code_files(repo):
+        rel = path.relative_to(repo).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if rel == definition_path and definition_lineno is not None and lineno == definition_lineno:
+                continue  # die Definition selbst ist kein Aufrufer
+            if pattern.search(line):
+                matches.append({"file": rel, "line": lineno, "text": line.strip()})
+
+    total = len(matches)
+    shown = matches[:cap]
+    for entry in shown:
+        entry["caller_signature"] = _resolve_caller_signature(repo, entry["file"], entry["line"])
+
+    note = f"{total - cap} weitere Aufrufer nicht gezeigt (Obergrenze {cap})." if total > cap else None
+    return {"total": total, "shown": shown, "note": note}
