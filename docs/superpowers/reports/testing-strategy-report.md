@@ -198,14 +198,85 @@ zwei der vier Evals jetzt eine Judge-Assertion für die inhaltliche
 „mit Begründung"-Prüfung brauchen, die `class: contract` laut Spec 00 §2
 nicht erlaubt.
 
+## Fix-Runde 2 (echter Agentenlauf — Diagnose, keine Vermutung)
+
+Vor dieser Runde galt: „Die vier Evals sind nie mit einem echten Agenten
+gelaufen." Sie sind es jetzt. Erstes reales Ergebnis: **1 von 4 bestanden**
+(nur `routing-trap-asks-instead-of-guessing`). Die drei Fehlschläge sahen aus
+wie „die Skill wurde nie geladen" — genau dieser Verdacht wurde geprüft,
+nicht übernommen (Präzedenzfall in dieser Sammlung: `visual-summary`, wo zwei
+Runden Textänderungen wirkungslos blieben, weil die Ursache in der
+Frontmatter-`description` lag, nicht im Ablauftext).
+
+**Diagnosemethode:** Harness-Dateien (`evalkit/dispatch.py`, `runner.py`,
+`judge.py`, `assertions.py`, `schema.py`) von `feat/dev-report` übernommen
+(Commit `d250b5f`) — die vorige Kopie sah nur den letzten Assistant-Zug, nicht
+alle. Danach je einen fehlschlagenden Eval isoliert über eine
+Wegwerf-`--evals-dir` mit `--keep-workspace` gefahren, und den Agenten
+zusätzlich direkt im aufbewahrten Workspace mit
+`--output-format stream-json --verbose` aufgerufen, um den Ereignisstrom auf
+einen `Skill`-Tool-Aufruf zu prüfen.
+
+**Befund: kein Routing-Defekt.** Sowohl für `legacy-trap` als auch für
+`extension-trap` zeigte der Ereignisstrom einen echten
+`Skill {"skill": "testing-strategy", ...}`-Aufruf, gefolgt von einem echten
+Lauf von `detect_stack.py` und dem Lesen der passenden Referenz. Die Skill
+wurde zuverlässig geladen — die Frontmatter-`description` brauchte keine
+Änderung.
+
+**Zwei echte, unterschiedliche Ursachen gefunden:**
+
+1. **Formatdefekt (Assertions, nicht SKILL.md).** Der reale Output trug einen
+   vollständigen, inhaltlich korrekten Test-Plan-Block — aber mit den vier
+   Feldmarken teils als Markdown-Fettschrift (`- **Repo-Typ:** legacy` statt
+   `- Repo-Typ: legacy`). Meine `output_matches`-Muster verlangten die Marke
+   direkt nach `-\s*`, ohne Markdown-Dekoration zu erlauben. Fix: alle vier
+   Feldmarken-Muster (must, und die entsprechenden must_not in
+   `routing-trap`/`anti-ceremony`) tolerieren jetzt `[*_`]*` um Label und
+   Doppelpunkt. Gegen die beiden echten Transcripts verifiziert (einmal mit,
+   einmal ohne Bold-Formatierung — beide bestehen jetzt), und gegen den
+   „gegamten", blocklosen Text aus Fix-Runde 1 (fällt weiterhin durch).
+2. **Fixture/Prompt-Inkonsistenz (Eval-Design, nicht Skill).** Drei Prompts
+   behaupten eine bereits vorgenommene Änderung, die nie in der zugehörigen
+   Fixture existierte: `anti-ceremony` behauptet `strip_punct()` sei ergänzt
+   (war es nie), `extension-trap` behauptet `HANDLE_SYNC` sei ergänzt (war es
+   nie), `legacy-trap` verlangt, Stornierungen zu „erweitern" (es gab keine
+   Stornierungslogik). Für `anti-ceremony` erklärt das den kompletten
+   Ausfall: Der Agent untersuchte per `grep`/`git log -S`/Rückfrage erst die
+   falsche Prämisse und rief die Skill nie auf — der eigentliche Trap-Fall
+   (ein Test in einem gut getesteten Repo) kam nie zum Tragen. Fix: alle drei
+   Fixtures um die im Prompt behauptete Änderung ergänzt.
+
+**Zusätzlich, unabhängig vom Befund:** SKILL.md trug bisher keine explizite
+R6-Regel — nur `docs/known-limits.md` und eine Randnotiz in
+`chrome-extension.md` wussten, dass die Playwright-Fixture ungeprüft ist. Der
+reale `extension-trap`-Lauf zeigte genau die vorhergesagte Folge: ein
+gefeuertes `must_not`, weil die Playwright-Fixture als „real ausgeführt"
+dargestellt wurde. SKILL.md hat jetzt einen eigenen, unmissverständlichen
+Abschnitt „Die Playwright-Fixture ist ungeprüft" im immer geladenen Body.
+
+**Bestätigungslauf, teilweise:** Ein erneuter Lauf aller vier Evals mit den
+Fixes wurde durch ein Session-Limit mitten in der Ausführung unterbrochen.
+Sichtbares Zwischenergebnis: `extension-trap` und `routing-trap` **PASS**;
+`legacy-trap` und `anti-ceremony` **SKIP** mit Harness-Fehlern
+(„embedded null byte" bzw. „Agent exit 1", leere stderr) — beides sieht nach
+einer abgeschnittenen Subprocess-Ausgabe durch die Unterbrechung selbst aus,
+nicht nach einem Fehler in Fixture oder Skill, aber das ist eine Vermutung,
+keine verifizierte Ursache. Der volle, saubere Bestätigungslauf ist laut
+Koordinator zentral vorgesehen und wurde hier bewusst nicht wiederholt
+(„sei sparsam" — keine wiederholten Vierer-Läufe).
+
 ## Offene Sorgen
 
-1. Die vier Evals sind bisher nur mechanisch (Schema + Datei-Assertionen)
-   geprüft, nie mit einem echten Agentenlauf. Die `output_matches`-Muster
-   (SW-Termination, HANDLE_SYNC, Repo-Typ-Feld, `##`-Verbot,
-   `Ausgelassen:`-Verbot) sind bewusst eng an Formulierungen gebunden, die in
-   der SKILL.md selbst als Contract stehen — aber ob ein echtes Modell diese
-   Formulierungen tatsächlich so trifft, ist ungeprüft.
+0. **(Fix-Runde 2)** Der finale, ununterbrochene Bestätigungslauf aller vier
+   Evals mit den aktuellen Fixes steht noch aus — die beiden SKIP-Ergebnisse
+   oben sind nicht als „Fixtures kaputt" bestätigt, nur als plausibel auf die
+   Unterbrechung zurückgeführt. `legacy-trap` und `anti-ceremony` sollten im
+   zentralen Lauf besonders beobachtet werden.
+1. Vor Fix-Runde 2 waren die vier Evals nur mechanisch (Schema +
+   Datei-Assertionen) geprüft, nie mit einem echten Agentenlauf — das ist
+   jetzt nachgeholt (siehe oben), aber nur mit zwei von vier vollständig
+   grünen Einzelläufen, nicht mit einem sauberen Viererlauf am Stück.
 2. Die Legacy-Umfangsschwellen (20 Dateien, 25 Commits) sind nach der
    Fix-Runde meine eigene, zweite Kalibrierung — plausibler begründet als die
    erste (notwendig-und-hinreichend statt Summe), aber immer noch ohne

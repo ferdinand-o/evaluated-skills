@@ -130,6 +130,37 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## testing-strategy
 
+- **Fix-Runde 2 (echter Agentenlauf): Der erste reale Lauf bestand 1 von 4 —
+  Ursache war ein Format- und ein Fixture-Defekt, keine Routing-Lücke.** Ein
+  direkter Aufruf mit `--output-format stream-json --verbose` gegen
+  `legacy-trap` und `extension-trap` zeigte für beide einen echten
+  `Skill`-Tool-Aufruf für `testing-strategy`, einen echten Lauf von
+  `detect_stack.py` und einen inhaltlich korrekten, vollständigen
+  Test-Plan-Block — die Skill wurde also zuverlässig geladen. Der Fehlschlag
+  lag an der Assertion: Das Modell formatiert die vier Feldmarken teils mit
+  Markdown-Fettschrift (`- **Repo-Typ:** legacy`), das die ursprüngliche
+  Regex (`^-\s*Repo-Typ:`) nicht zuließ. Behoben durch eine Zeichenklasse
+  `[*_`]*` um Label und Doppelpunkt, in allen vier Feldmarken-Mustern sowie
+  den entsprechenden `must_not`-Mustern in `routing-trap` und
+  `anti-ceremony`. Für `anti-ceremony` zeigte derselbe direkte Aufruf einen
+  echten zweiten Defekt: Der Prompt behauptete, `strip_punct()` sei bereits
+  ergänzt worden, aber die Fixture enthielt die Funktion nie — der Agent
+  untersuchte first die falsche Prämisse (`grep`, `git log -S`, Rückfrage ans
+  Nutzer) und rief die Skill nie auf. Dieselbe Inkonsistenz steckte auch in
+  `extension-trap` (HANDLE_SYNC nie im Fixture-`background.js`) und
+  `legacy-trap` (der Prompt verlangt, „Stornierungen zu erweitern", aber
+  `orders.py` hatte keine Stornierungslogik). Alle drei Fixtures wurden
+  erweitert, damit ihr Inhalt die Prämisse des jeweiligen Prompts stützt.
+  **Zusätzlich verstärkt:** SKILL.md trug bisher keine explizite R6-Regel —
+  nur `known-limits.md` und die Randnotiz in `chrome-extension.md` wussten,
+  dass die Playwright-Fixture ungeprüft ist. Ein Agent, der den Body lädt,
+  aber die Referenz nicht liest, kannte die Regel nicht — genau das erklärte
+  den gefeuerten `must_not` in `extension-trap`s erstem echten Lauf. SKILL.md
+  hat jetzt einen eigenen Abschnitt „Die Playwright-Fixture ist ungeprüft".
+  Ein erneuter Teil-Lauf (2 von 4, unterbrochen durch ein Session-Limit) ist
+  im Bericht (`docs/superpowers/reports/testing-strategy-report.md`)
+  festgehalten; der volle Bestätigungslauf war zum Zeitpunkt dieses Commits
+  noch nicht abgeschlossen.
 - **Die Playwright-Fixture in `chrome-extension.md` ist geschrieben, aber nicht
   real ausgeführt.** Playwright ist in dieser Umgebung nicht installiert und
   wurde für diese Arbeit nicht installiert (bewusste Vorgabe, siehe R6 des
