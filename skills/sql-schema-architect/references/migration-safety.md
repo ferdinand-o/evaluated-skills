@@ -47,11 +47,54 @@ mindestens `review_required`, selbst wenn jede bekannte Operation grün ist.
 ## Der review_required-Zustand ist kein Fehler des Gates
 
 Ein Gate, das Unbekanntes für harmlos hält, ist schlimmer als keines. Trifft
-`migration_gate.py` auf `op.execute()` oder eine unbekannte Methode, meldet
-es **nicht bewertbar, manuell prüfen** — unabhängig davon, wie harmlos das
-SQL tatsächlich aussieht. Exit-Code `2` (nicht `0`) macht das mechanisch
-sichtbar. Das ist Fleiß, kein Bug: eine Revision mit `op.execute()` gilt nie
-als automatisch bestanden.
+`migration_gate.py` auf `op.execute()`, eine unbekannte Methode, eine
+Spaltendefinition, die es nicht auflösen kann (siehe unten), oder einen
+roten Plan, dessen Inhalt es nicht verifizieren kann, meldet es **nicht
+bewertbar, manuell prüfen** — unabhängig davon, wie harmlos die Sache
+tatsächlich aussieht. Exit-Code `2` (nicht `0`) macht das mechanisch
+sichtbar. Das ist Fleiß, kein Bug: keiner dieser Fälle gilt automatisch als
+bestanden.
+
+## Sichtbarkeitsgrenzen des Scanners — wo „nicht gesehen" beginnt
+
+Ein internes Review (Runde 2) fand drei Wege, auf denen eine gefährliche
+Operation am Scanner vorbeikam, ohne dass er das meldete — die schwerste
+Fehlerrichtung bei dieser Skill. Alle drei sind behoben; die verbleibenden
+Grenzen stehen hier, damit niemand mehr raten muss, was der Scanner sieht.
+
+**Hilfsfunktionen im selben Modul werden verfolgt, alles andere nicht.**
+Ruft `upgrade()` eine andere, im selben File definierte Funktion auf
+(`def upgrade(): _apply()`), folgt der Scanner ihr rekursiv, mit
+Zyklenschutz. Was er **nicht** verfolgt: `self.methode()`,
+`modul.funktion()`, Aufrufe über eine Variable, Methoden auf Klassen,
+importierte Funktionen, dynamisch aufgelöste Aufrufe (`getattr(...)`).
+Solche Fälle bleiben für den Scanner unsichtbar — die Operationen darin
+tauchen nirgends auf, weder grün noch `unknown`.
+
+**Deshalb ist „0 gefundene Operationen" bei einem nicht-leeren `upgrade()`
+ein eigener Befund, kein `pass`.** Enthält `upgrade()` erkennbar Code
+(mehr als nur `pass` oder einen Docstring), liefert der Scanner aber keine
+einzige `op.*`-Operation, wird die Revision **abgelehnt** — mit der
+Begründung „nicht analysiert, keine automatische Freigabe möglich". Eine
+Revision, die ausschließlich über nicht verfolgte Wege operiert, sieht
+sonst wie eine leere, harmlose Revision aus; das ist sie nicht.
+
+**`add_column` löst einfache lokale Variablen auf, mehr nicht.**
+`op.add_column("orders", sa.Column("status", sa.Text(), nullable=False))`
+und
+
+```python
+col = sa.Column("status", sa.Text(), nullable=False)
+op.add_column("orders", col)
+```
+
+werden identisch klassifiziert — die zweite Form wurde vor der Fix-Runde
+fälschlich grün, weil `nullable=False` nur im inneren `Column(...)`-Aufruf
+stand. Aufgelöst werden nur Zuweisungen **direkt im Funktionsrumpf**, nicht
+in `if`/`for`-Blöcken und nicht über mehrere Funktionen hinweg. Was nicht
+aufgelöst werden kann (Rückgabewert eines Funktionsaufrufs, Zuweisung in
+einem verschachtelten Block, Import), ist `unknown` — nie grün, weil
+`nullable`/`server_default` dann nicht einsehbar sind.
 
 ## Kontrakt: downgrade() und der Mehrschritt-Plan-Marker
 
@@ -66,9 +109,16 @@ def downgrade():
 Der Grund-Text muss mehr als fünf Zeichen tragen — ein bloßes
 `raise NotImplementedError` ohne Begründung zählt weiterhin als leer.
 
-**Rote Migrationen brauchen einen Mehrschritt-Plan-Marker.** Eine Zeile
-irgendwo in der Revisionsdatei (Kommentar oder Docstring), die
-`Mehrschritt-Plan:` enthält, gefolgt von mehr als zehn Zeichen Beschreibung:
+**Rote Migrationen brauchen einen Mehrschritt-Plan-Marker mit erkennbarer
+Struktur, nicht bloß Länge.** Eine Zeile irgendwo in der Revisionsdatei
+(Kommentar oder Docstring), die `Mehrschritt-Plan:` enthält, gefolgt von
+mindestens zwei unterschiedlichen Begriffen aus diesem Vokabular:
+`nullable`, `backfill`, `batch`, `constraint`, `valid`, `concurrently`,
+`revision`. Eine erste Fassung dieser Prüfung verlangte nur mehr als zehn
+beliebige Zeichen — ein interner Review zeigte, dass der Kommentar
+`# Mehrschritt-Plan: siehe unten unten` (19 hohle Zeichen) dieselbe rote
+Migration ohne jeden echten Plan durchließ. Die Struktur-Prüfung schließt
+diese Lücke, ohne mehr Genauigkeit zu behaupten, als sie hat:
 
 ```python
 # Mehrschritt-Plan: Spalte nullable ergänzt (Revision abc123), Backfill in
@@ -77,9 +127,15 @@ def upgrade():
     op.alter_column("orders", "customer_id", nullable=False)
 ```
 
-Ohne diesen Marker wird eine rote Migration **abgelehnt** — das ist die
-mechanische Seite von „eine rote Migration ohne Mehrschritt-Plan wird
-abgelehnt".
+Ohne Marker wird eine rote Migration **abgelehnt** (`violation`). Mit
+Marker, aber ohne die geforderte Struktur, ebenfalls **abgelehnt** — die
+Form allein reicht nicht. Mit Marker **und** erkennbarer Struktur wird sie
+**nicht** automatisch „pass": Ob der beschriebene Plan tatsächlich zu den
+vorliegenden Operationen passt, ob die genannten Revisionen existieren, ob
+das Backfill wirklich in Batches läuft — das kann statische Analyse nicht
+prüfen. Die ehrliche Ausgabe ist `review_required`: „roter Plan mit
+erkennbarer Schrittstruktur vorhanden — Inhalt ist mit statischer Analyse
+nicht vollständig prüfbar, manuelle Freigabe nötig". Die Klasse bleibt rot.
 
 ## Sichere Mehrschritt-Muster
 

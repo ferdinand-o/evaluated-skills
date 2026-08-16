@@ -37,6 +37,9 @@ mit `ast`.
 5. `python skills/sql-schema-architect/scripts/lint_schema.py <models-pfad>`
    — Naming, Typen, Pflichtspalten, FK-Verhalten, Steckbrief-Vollständigkeit.
    Meldet sqlfluff-Verfügbarkeit **immer sichtbar**, auch wenn es fehlt.
+   Spalten im SQLAlchemy-2.0-`Mapped[T]`-Stil ohne explizites Typ-Argument
+   sind für die Typ-Prüfung ebenfalls sichtbar unauflösbar (Befund
+   `type_coverage`) statt stillschweigend als geprüft zu gelten.
 
 ## Ablauf Migration
 
@@ -47,17 +50,29 @@ mit `ast`.
    klassifiziert jede Operation: **grün** (additiv, locksicher), **gelb**
    (kurzer Lock — `lock_timeout` setzen, Off-Peak-Hinweis), **rot**
    (Tabellen-Rewrite/Langzeit-Lock).
-3. **Rot ohne Mehrschritt-Plan-Marker wird abgelehnt.** Marker-Zeile
-   `# Mehrschritt-Plan: <Beschreibung>` (> 10 Zeichen) im Revisionstext,
-   Muster in `references/migration-safety.md`.
-4. `op.execute()` mit rohem SQL und jede unbekannte `op.*`-Methode sind
-   **nicht bewertbar** — die Ausgabe meldet `review_required`, niemals
-   `pass`. Das gilt auch, wenn alle übrigen Operationen grün sind.
+3. **Rot ohne Mehrschritt-Plan-Marker wird abgelehnt**, ebenso ein Marker
+   ohne erkennbare Struktur (mindestens zwei Begriffe aus
+   nullable/backfill/batch/constraint/valid/concurrently/revision — reine
+   Länge reicht nicht mehr, siehe `references/migration-safety.md`). Auch
+   mit einem strukturierten Plan wird eine rote Migration nicht
+   automatisch `pass`: der Inhalt ist statisch nicht vollständig prüfbar,
+   die Ausgabe meldet `review_required`, manuelle Freigabe nötig.
+4. `op.execute()` mit rohem SQL, jede unbekannte `op.*`-Methode und jede
+   Spaltendefinition, die der Scanner nicht auflösen kann (z. B. eine
+   `add_column`-Spalte aus einem Funktionsaufruf statt Inline-Call oder
+   lokaler Variable), sind **nicht bewertbar** — die Ausgabe meldet
+   `review_required`, niemals `pass`. Ebenso: enthält `upgrade()`
+   erkennbaren Code, aus dem der Scanner aber keine einzige Operation
+   lesen konnte (Aufrufe über `self.`/Modul-Attribute, Variablen oder
+   Imports werden nicht verfolgt — siehe `references/migration-safety.md`),
+   wird das als eigener Verstoß gemeldet, nie als „0 Operationen, pass".
 5. Die Ausgabe von `migration_gate.py` nennt in jedem Lauf die geltende
    Härte: **G2** ohne installierten Hook (meldet, blockiert nicht) oder
    **G3** mit installiertem Hook aus `assets/hooks/migration-gate.json`
    (blockiert `alembic upgrade` tatsächlich). Dieser Hook wird nie
-   automatisch installiert — der Nutzer übernimmt ihn bewusst.
+   automatisch installiert — der Nutzer übernimmt ihn bewusst. Bekannte
+   Grenze: Indirektion über ein Makefile-Target oder CI-Skript, dessen
+   Bash-Aufruf den Text „alembic upgrade" nicht enthält, umgeht den Hook.
 
 ## Contract
 
@@ -66,7 +81,8 @@ mit `ast`.
 - Kein Index ohne benanntes Zugriffsmuster — `lint_schema.py` prüft das an
   der Hauptzugriffsmuster-Sektion, nicht am Wortlaut.
 - Jede Migration braucht `downgrade()`, begründet oder nicht.
-- Jede rote Migration braucht den Mehrschritt-Plan-Marker.
+- Jede rote Migration braucht den strukturierten Mehrschritt-Plan-Marker;
+  auch damit bleibt sie `review_required`, nie automatisch `pass`.
 - Jeder Fremdschlüssel braucht ein explizites `ondelete`.
 - `op.execute()` ist niemals automatisch grün — manuelle Prüfung ist
   Pflicht, keine Kür.
