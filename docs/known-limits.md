@@ -130,6 +130,34 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## testing-strategy
 
+- **Fix-Runde 3 (zentraler Bestätigungslauf, 3/4): `legacy-trap` war ein
+  echter Harness-Bug, `anti-ceremony` ein echter Description-Defekt.** Der
+  „embedded null byte"-Fehler bei `legacy-trap`, den ich in Fix-Runde 2 als
+  vermutliches Session-Limit-Artefakt eingestuft hatte, war tatsächlich ein
+  Bug in `evalkit/workspace.py`: `dump_changed_files` liest jede geänderte
+  Datei als Text, ein `__pycache__/*.pyc` im Workspace enthält aber Nullbytes,
+  die `errors="replace"` durchlässt und die `subprocess` im Judge-Argument
+  verbietet. Behoben in `evalkit/workspace.py` (Commit `e186556` auf
+  `feat/dev-report`, hier übernommen) — kein Fund dieser Skill, aber die
+  Nullbyte-Sackgasse hätte jede Skill mit Judge-Assertion getroffen, sobald
+  Python im Workspace lief. `anti-ceremony-single-test-stays-short` blieb
+  offen: Diagnose zeigte, dass der Prompt „ich hab eine Funktion ergänzt,
+  brauche einen Test" fast wörtlich auf die eigene SKILL.md-Abgrenzung gegen
+  `test-driven-development` passte („implementing a single already-planned
+  test") — die Description schloss sich damit selbst vom
+  Pflicht-Anti-Zeremonie-Fall aus Spec 00 §2 aus, obwohl der Body (einmal
+  geladen) den Fall korrekt behandelt hätte. Behoben durch schärfere
+  Formulierung: TDD ist der *Zyklus* aus fehlschlagendem Test und Code
+  während aktiver Implementierung, testing-strategy deckt auch das
+  *Zumessen* eines einzelnen neuen Tests für bereits existierenden Code ab.
+  **Diagnose-Lehre:** Ein `--keep-workspace`-Verzeichnis, das `run_evals.py`
+  bereits einmal bespielt hat, darf für einen zweiten, direkten
+  Diagnose-Aufruf nicht wiederverwendet werden, sobald der Prompt
+  Schreibzugriffe auslösen kann — der erste Diagnoseversuch für
+  `anti-ceremony` lief versehentlich im bereits vom echten Lauf veränderten
+  Workspace und bestätigte nur dessen (bereits geschriebene) Testdatei, ohne
+  eigenständige Aussagekraft. Ein frischer `evalkit.workspace.prepare()`-Aufruf
+  behob das.
 - **Fix-Runde 2 (echter Agentenlauf): Der erste reale Lauf bestand 1 von 4 —
   Ursache war ein Format- und ein Fixture-Defekt, keine Routing-Lücke.** Ein
   direkter Aufruf mit `--output-format stream-json --verbose` gegen
