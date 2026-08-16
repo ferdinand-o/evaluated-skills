@@ -66,6 +66,101 @@ def upgrade():
     assert info.created_tables == {"widgets", "gadgets"}
 
 
+# --- Review-Fund 2: op.*-Aufrufe in Hilfsfunktionen -----------------------------------
+
+def test_op_calls_follow_helper_function_in_same_module(tmp_path):
+    """Der konkrete Bypass aus dem Review: op.execute() versteckt in _apply()."""
+    rev = write(tmp_path / "r.py", '''
+def upgrade():
+    _apply()
+
+def _apply():
+    op.execute("ALTER TABLE orders ALTER COLUMN status SET NOT NULL")
+
+def downgrade():
+    raise NotImplementedError("kein Rueckweg fuer rohes SQL definiert")
+''')
+    info = gate.parse_revision(rev)
+    assert [op.method for op in info.ops] == ["execute"]
+    verdict = gate.classify_revision(info)
+    assert verdict.status == "review_required"
+    assert len(verdict.unknown_ops) == 1
+
+
+def test_op_calls_follow_helper_two_levels_deep(tmp_path):
+    rev = write(tmp_path / "r.py", '''
+def upgrade():
+    _step_one()
+
+def _step_one():
+    _step_two()
+
+def _step_two():
+    op.create_table("widgets")
+''')
+    info = gate.parse_revision(rev)
+    assert [op.method for op in info.ops] == ["create_table"]
+
+
+def test_op_calls_do_not_infinite_loop_on_recursive_helpers(tmp_path):
+    rev = write(tmp_path / "r.py", '''
+def upgrade():
+    _apply()
+
+def _apply():
+    op.create_table("widgets")
+    _apply()
+''')
+    info = gate.parse_revision(rev)
+    assert [op.method for op in info.ops] == ["create_table"]
+
+
+def test_op_calls_do_not_follow_attribute_calls():
+    """Bewusste Grenze: self.x()/modul.x() wird nicht verfolgt (kein AST-Name-Call)."""
+    op, created = op_of('''
+def upgrade():
+    self._apply()
+    op.create_table("widgets")
+
+def _apply():
+    op.drop_table("widgets")
+''')
+    # Nur die direkt sichtbare Operation zaehlt; self._apply() wird nicht verfolgt.
+    assert op.method == "create_table"
+
+
+def test_upgrade_nontrivial_without_ops_is_flagged(tmp_path):
+    """Review-Fund 2, das Kernstueck: 0 gefundene Operationen ist ein eigener Befund,
+    nicht 'pass', wenn upgrade() erkennbar Code enthaelt, der aber nicht verfolgbar ist."""
+    rev = write(tmp_path / "r.py", '''
+def upgrade():
+    self._apply()
+
+def downgrade():
+    raise NotImplementedError("unklar")
+''')
+    info = gate.parse_revision(rev)
+    assert info.ops == []
+    assert info.upgrade_nontrivial_without_ops is True
+    verdict = gate.classify_revision(info)
+    assert verdict.status == "violation"
+    assert verdict.overall_class is None
+    assert any("nicht analysiert" in v for v in verdict.violations)
+
+
+def test_upgrade_with_pass_body_is_not_flagged_as_unanalyzed(tmp_path):
+    """Eine bewusst leere Revision bleibt weiterhin ein legitimer Leerfall, kein Befund."""
+    rev = write(tmp_path / "r.py", "def upgrade():\n    pass\n\ndef downgrade():\n    pass\n")
+    info = gate.parse_revision(rev)
+    assert info.upgrade_nontrivial_without_ops is False
+
+
+def test_upgrade_with_visible_ops_is_not_flagged_as_unanalyzed(tmp_path):
+    rev = write(tmp_path / "r.py", "def upgrade():\n    op.create_table('t')\n\ndef downgrade():\n    op.drop_table('t')\n")
+    info = gate.parse_revision(rev)
+    assert info.upgrade_nontrivial_without_ops is False
+
+
 # --- downgrade()-Leerfall-Erkennung ---------------------------------------------------
 
 def test_downgrade_missing_function_counts_as_empty(tmp_path):
@@ -186,6 +281,68 @@ def test_add_column_not_null_without_default_on_new_table_is_green():
     op, created = op_of(src, index=1)
     c = gate.classify_op(op, created)
     assert c.verdict == gate.GREEN
+
+
+# --- Review-Fund 3: add_column mit vorab konstruierter Spalte ------------------------
+
+def test_add_column_resolves_simple_local_variable():
+    """Der konkrete Bypass aus dem Review: die Spalte wird vorher einer Variable
+    zugewiesen statt inline uebergeben — muss trotzdem als rot erkannt werden."""
+    src = (
+        "def upgrade():\n"
+        "    col = sa.Column('status', sa.Text(), nullable=False)\n"
+        "    op.add_column('orders', col)\n"
+    )
+    op, created = op_of(src, index=0)
+    c = gate.classify_op(op, created)
+    assert c.verdict == gate.RED
+
+
+def test_add_column_resolves_local_variable_with_default_to_yellow():
+    src = (
+        "def upgrade():\n"
+        "    col = sa.Column('status', sa.Text(), nullable=False, server_default='x')\n"
+        "    op.add_column('orders', col)\n"
+    )
+    op, created = op_of(src, index=0)
+    c = gate.classify_op(op, created)
+    assert c.verdict == gate.YELLOW
+
+
+def test_add_column_with_unresolvable_column_expression_is_unknown():
+    """Weder Inline-Call noch lokale Variable — nullable ist nicht einsehbar, also
+    unbestimmt statt grün."""
+    src = (
+        "def upgrade():\n"
+        "    op.add_column('orders', make_status_column())\n"
+    )
+    op, created = op_of(src, index=0)
+    c = gate.classify_op(op, created)
+    assert c.verdict == gate.UNKNOWN
+
+
+def test_add_column_with_variable_from_nested_block_is_unknown():
+    """Bewusste Grenze: nur Zuweisungen direkt im Funktionsrumpf werden aufgeloest,
+    nicht innerhalb von if/for. Bleibt unbestimmt statt still gruen."""
+    src = (
+        "def upgrade():\n"
+        "    if True:\n"
+        "        col = sa.Column('status', sa.Text(), nullable=False)\n"
+        "    op.add_column('orders', col)\n"
+    )
+    op, created = op_of(src, index=0)
+    c = gate.classify_op(op, created)
+    assert c.verdict == gate.UNKNOWN
+
+
+def test_add_column_inline_call_still_works_after_fix():
+    """Regressionsschutz: der ursprüngliche Inline-Fall darf durch die Variable-
+    Aufloesung nicht kaputtgehen."""
+    op, created = op_of(
+        "def upgrade():\n    op.add_column('t', sa.Column('a', sa.Text(), nullable=False))\n"
+    )
+    c = gate.classify_op(op, created)
+    assert c.verdict == gate.RED
 
 
 def test_create_index_concurrently_on_existing_table_is_green():
@@ -378,9 +535,11 @@ def downgrade():
     assert any("Mehrschritt-Plan" in v for v in verdict.violations)
 
 
-def test_verdict_red_with_multistep_marker_passes(tmp_path):
+def test_verdict_red_with_structured_multistep_marker_is_review_required_not_pass(tmp_path):
+    """Regression (Review-Fund 1): ein roter Plan mit Struktur wird nie automatisch 'pass' —
+    der Inhalt ist statisch nicht vollständig prüfbar, also bleibt manuelle Freigabe Pflicht."""
     info = revision_from(tmp_path, '''
-# Mehrschritt-Plan: Spalte nullable ergaenzen, Backfill in Batches, dann NOT NULL
+# Mehrschritt-Plan: Spalte nullable ergaenzen, Backfill in Batches, dann NOT NULL via Constraint
 def upgrade():
     op.alter_column('t', 'a', nullable=False)
 
@@ -388,8 +547,10 @@ def downgrade():
     op.alter_column('t', 'a', nullable=True)
 ''')
     verdict = gate.classify_revision(info)
-    assert verdict.status == "pass"
+    assert verdict.status == "review_required"
     assert verdict.overall_class == gate.RED
+    assert verdict.violations == []
+    assert any("manuelle" in n.lower() for n in verdict.notes)
 
 
 def test_verdict_multistep_marker_too_short_is_still_rejected(tmp_path):
@@ -403,6 +564,29 @@ def downgrade():
 ''')
     verdict = gate.classify_revision(info)
     assert verdict.status == "violation"
+
+
+def test_verdict_multistep_marker_hollow_text_is_rejected(tmp_path):
+    """Review-Fund 1, der konkrete Bypass: lange, aber inhaltsleere Marker-Phrase."""
+    info = revision_from(tmp_path, '''
+# Mehrschritt-Plan: siehe unten unten
+def upgrade():
+    op.alter_column('orders', 'status', nullable=False)
+
+def downgrade():
+    raise NotImplementedError("irreversibel")
+''')
+    verdict = gate.classify_revision(info)
+    assert verdict.status == "violation"
+    assert any("Schrittstruktur" in v for v in verdict.violations)
+
+
+def test_multistep_structure_ok_requires_two_distinct_keywords():
+    assert gate._multistep_structure_ok("siehe unten unten") is False
+    assert gate._multistep_structure_ok("nullable ergaenzen") is False  # nur ein Treffer
+    assert gate._multistep_structure_ok("nullable ergaenzen, dann Backfill in Batches") is True
+    assert gate._multistep_structure_ok("siehe Revision abc123 und Revision def456") is False  # nur "revision"
+    assert gate._multistep_structure_ok("Constraint erst NOT VALID, dann validiert") is True
 
 
 def test_verdict_execute_alone_is_review_required_not_pass(tmp_path):
@@ -579,6 +763,18 @@ def test_hook_check_ignores_unrelated_bash_command(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", _stdin(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls -la"}})))
     rc = gate.main(["--hook-check"])
     assert rc == 0
+
+
+def test_hook_check_recognizes_command_indirection_and_case(tmp_path, monkeypatch):
+    """poetry run/python -m/Grossschreibung wurden im Review als falsche Bypass-Beispiele
+    genannt (die Substring-Suche fing sie bereits) — hier als Regressionsschutz fixiert,
+    inklusive der Grossschreibung, die vorher tatsaechlich fehlte (kein re.IGNORECASE)."""
+    rev_dir = tmp_path / "alembic" / "versions"
+    write(rev_dir / "0001.py", "def upgrade():\n    op.drop_table('t')\n\ndef downgrade():\n    raise NotImplementedError('x')\n")
+    monkeypatch.chdir(tmp_path)
+    for command in ["poetry run alembic upgrade head", "python -m alembic upgrade head", "ALEMBIC UPGRADE HEAD"]:
+        monkeypatch.setattr("sys.stdin", _stdin(json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})))
+        assert gate.main(["--hook-check"]) == 2, command
 
 
 def test_hook_check_blocks_alembic_upgrade_with_red_revision(tmp_path, monkeypatch):
