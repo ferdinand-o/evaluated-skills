@@ -138,20 +138,43 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   deshalb `--range HEAD~1..HEAD`; der Uncommitted-Pfad ist nur durch Unit-Tests
   (`test_uncommitted_mode_reads_worktree`, `test_main_writes_cache_file`-Nachbarn) abgedeckt,
   nicht durch einen echten Agenten-Lauf.
-- **Die „ab zwei Commits zählt die Commit-Message als Soll"-Regel ist eine eigene Entscheidung,
-  nicht aus Spec 04 oder dem Auftrag zwingend ableitbar.** R13 nennt „Commit-Messages des
-  Bereichs" als dritte Soll-Quelle, ohne eine Mindestanzahl zu nennen. Ohne diese Schwelle wäre
-  „Diff ohne jedes Soll" (der wichtigste Eval, R13) nicht deterministisch erzeugbar, weil ein
-  Range mit genau einem Commit sonst immer dessen eigene Subject-Zeile als Soll zählen würde
-  (Tautologie: die Message beschreibt den Diff, nicht das Ziel dahinter). Wer stattdessen jede
-  Commit-Message zählen lassen will, muss `MIN_COMMITS_FOR_MESSAGE_SOLL` in
-  `skills/review-context/scripts/collect_context.py` auf `1` setzen und Eval 1 neu bauen.
-- **Aufrufer-Suche ist namensbasiert, ohne Scope- oder Import-Analyse.** `find_callers()` grept
-  `\bname\s*\(` über den ganzen Baum. Zwei unabhängige Funktionen mit demselben Namen in
-  verschiedenen Modulen werden nicht unterschieden (falsch-positiv), und ein Aufruf über
-  `self.name(...)`, eine Methode gleichen Namens auf einem anderen Objekt, oder ein Import-Alias
-  (`from x import name as anders`) wird nicht erkannt (falsch-negativ). Dokumentierte Grenze,
-  keine stille.
+- **Ob eine Commit-Message als Soll zählt, wird am Inhalt gemessen, nicht an der Anzahl der
+  Commits im Range — eine eigene Entscheidung, nicht aus Spec 04 oder R13 zwingend ableitbar.**
+  (Fix-Runde: Die erste Fassung nutzte eine Mindestanzahl von zwei Commits als Proxy und wurde
+  live widerlegt — eine ausführliche, klar zielbeschreibende Message wurde als „nicht reviewbar"
+  gemeldet, nur weil sie allein stand. Die Anzahl der Commits sagt nichts über die Aussagekraft
+  ihrer Messages.) Die jetzige Regel (`_is_meaningful_commit_message()`): eine Message zählt,
+  wenn sie einen Body jenseits der Betreffzeile hat, oder wenn ihre um ein Conventional-Commit-
+  Präfix bereinigte Betreffzeile mindestens `MIN_SUBJECT_CHARS` (20) Zeichen hat und kein reiner
+  Platzhalter ist (`GENERIC_COMMIT_SUBJECTS`: `wip`, `fix`, `tmp`, `misc`, …). Diese Schwellen
+  sind selbst wieder eine Heuristik — eine 19 Zeichen lange, aber inhaltsreiche Betreffzeile
+  zählt nicht, ein 20 Zeichen langes Füllwort ohne Aussage schon, solange es nicht im
+  Platzhalter-Set steht.
+- **Aufrufer-Suche ist namensbasiert, ohne Scope- oder Import-Analyse — und übersieht deshalb
+  nicht zu wenige, sondern zu viele Treffer.** (Fix-Runde: Der ursprüngliche Text hier behauptete
+  das Gegenteil — `self.name(...)`-Aufrufe seien falsch-negativ, würden also übersehen. Live
+  widerlegt: `find_callers()` grept `\bname\s*\(` über den ganzen Baum, und der Wortgrenzen-Test
+  `\b` steht bereits zwischen einem `.` und dem folgenden Namen — `self.add(x)` **matcht**, wird
+  also mitgezählt. Reproduziert am eigenen Skript: Ein Review von `add()` zählt
+  `seen_dirs.add(dir_rel)` aus `gather_conventions()` als Treffer mit, obwohl es `set.add()` ist,
+  nicht die berührte Funktion.) Echte falsch-negative Fälle bleiben ein Import-Alias
+  (`from x import name as anders`) und ein Aufruf, dessen öffnende Klammer durch einen
+  Zeilenumbruch vom Funktionsnamen getrennt ist. Die Deckelung auf 20 Treffer wirkt bei
+  falsch-positiven Treffern schädlicher als bei falsch-negativen: Füllt Rauschen (fremde
+  `.add()`-artige Aufrufe) die ersten 20 Plätze, verdrängt es echte Aufrufer aus der gezeigten
+  Liste, statt nur zu fehlen — der Reviewer sieht eine volle, aber irreführende Liste statt einer
+  ehrlich unvollständigen.
+- **`_has_meaningful_spec_content()` prüft jetzt Inhalt statt Existenz, aber mit einer eigenen
+  Magic-Number-Grenze.** (Fix-Runde: Die erste Fassung von `find_feature_spec()` prüfte nur, ob
+  überhaupt eine `.md`-Datei unter `docs/specs/wip/` lag — eine leere Datei genügte, um
+  `resolve_soll()` `source == "feature_spec"` melden zu lassen und damit den Kernbefund
+  „nicht reviewbar" fälschlich zu unterdrücken. Live reproduziert, jetzt behoben.) Die Behebung
+  selbst bringt eine neue, kleinere Grenze mit: `MIN_SPEC_CONTENT_CHARS = 40` ist eine
+  Schätzung, keine gemessene Größe. Eine legitime, aber knapp und präzise formulierte Spec unter
+  40 Zeichen Prosa (ohne Given/When/Then) würde fälschlich als „nicht tragfähig" verworfen; eine
+  40 Zeichen lange, aber inhaltsleere Platzhalter-Zeile („TODO: Diese Spec noch ausfüllen, bitte
+  nicht vergessen") zählt umgekehrt fälschlich als Soll. Wortzahl ist kein Aussagekraft-Maß,
+  nur ein billiger Proxy dafür.
 - **`_extract_signature()` zählt Klammertiefe zeilenweise, ohne Strings zu berücksichtigen.**
   Ein Default-Wert wie `sep: str = "("` würde die Tiefenzählung verfälschen und die Signatur zu
   früh oder zu spät abschneiden. In der Praxis selten, aber eine Heuristik, kein Parser für

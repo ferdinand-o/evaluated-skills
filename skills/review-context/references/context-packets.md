@@ -40,9 +40,22 @@ packages.spec_compliance = {
 **Soll-Priorität** (R13): Feature-Spec unter `docs/specs/wip/*.md` zuerst — ihr ideales Format
 sind Given/When/Then-Blöcke (Spec 03). Fehlt sie, zählt eine explizit übergebene PR-Beschreibung
 (`--pr-description`/`--pr-description-file`), markiert `"weak": true`. Fehlt auch die, zählen
-Commit-Messages des Bereichs — aber nur ab **zwei** Commits im Range; ein einzelner Commit
-beschreibt mit seiner Subject-Zeile den Diff, nicht das Ziel dahinter (Tautologie-Vermeidung).
-Ist nichts davon da, ist `source == "none"` und der Top-Level-Befund `no_soll` erscheint.
+Commit-Messages des Bereichs, ebenfalls `"weak": true`. Ist nichts davon da, ist
+`source == "none"` und der Top-Level-Befund `no_soll` erscheint.
+
+**Existenz reicht bei keiner Quelle — es zählt der Inhalt** (Fix-Runde, siehe
+`docs/known-limits.md`). Eine Feature-Spec-Datei zählt nur, wenn `_has_meaningful_spec_content()`
+sie als tragfähig einstuft: ein vollständiges Given/When/Then-Kriterium reicht immer, sonst
+müssen mindestens `MIN_SPEC_CONTENT_CHARS` (40) Zeichen Prosa jenseits von Überschriften und
+Leerzeilen übrig bleiben. Eine leere Datei, eine mit nur Leerraum oder eine mit nur einer
+Überschrift zählt nicht — die frühere Fassung prüfte nur, ob überhaupt eine `.md`-Datei im
+Ordner lag, und unterdrückte damit den `no_soll`-Befund fälschlich. Eine Commit-Message zählt
+über `_is_meaningful_commit_message()`: ein Body jenseits der Betreffzeile zählt immer; ohne
+Body muss die (um ein Conventional-Commit-Präfix bereinigte) Betreffzeile mindestens
+`MIN_SUBJECT_CHARS` (20) Zeichen haben und darf kein reiner Platzhalter sein
+(`GENERIC_COMMIT_SUBJECTS`: `wip`, `fix`, `tmp`, `misc`, …). Die **Anzahl** der Commits im Range
+ist dabei irrelevant — auch ein einzelner, ausführlicher Commit zählt als Soll; umgekehrt bleiben
+mehrere durchweg generische Commits ("wip", "fix", "fix") weiterhin kein Soll.
 
 **Given/When/Then-Format**, das `parse_given_when_then()` erkennt:
 
@@ -88,6 +101,11 @@ stiller Kompromiss.
 auch für Python-Aufrufer-*Fundstellen* wird nicht projektweit mit `ast` gearbeitet, nur die
 Signatur der umschließenden Funktion wird bei Python-Dateien per `ast` aufgelöst. Gedeckelt auf
 20 Treffer; darüber steht die Zahl der nicht gezeigten im `note`-Feld, nie stilles Abschneiden.
+Die Suche ist namensbasiert ohne Scope-Analyse und zählt deshalb eher zu viel als zu wenig:
+`self.name(...)` oder eine gleichnamige Methode auf einem völlig anderen Objekt (z. B. ein
+`set.add()`-Aufruf, wenn das berührte Symbol `add` heißt) wird mitgezählt. Bei viel Rauschen
+füllt das die gedeckelten 20 Plätze mit falsch-positiven Treffern und verdrängt echte Aufrufer
+aus der gezeigten Liste — siehe `docs/known-limits.md` für das reproduzierte Beispiel.
 
 ## Vereinfachung — Projekt-Konventionen und Umgebungscode
 
@@ -115,6 +133,8 @@ Verzeichnis. Dazu die Existenz bekannter Konventions-Marker (`pyproject.toml`, `
 | Datei ist gelöscht | `after == null`, `after_note == "gelöscht"`, keine Symbolerkennung (bekannte Grenze) |
 | Binärdatei | `status == "binary"`, kein Inhalt, kein Patch, keine Symbolerkennung |
 | `docs/decisions.md` fehlt | `decisions.status == "missing"` |
-| Feature-Spec ohne Given/When/Then | zählt trotzdem als Soll, mit `excerpt` statt `criteria` |
-| Symbol mit > 20 Aufrufern | `callers.shown` hat 20 Einträge, `callers.note` nennt den Rest |
-| Range mit nur einem Commit | dessen Message zählt nicht als Soll (Tautologie-Vermeidung) |
+| Feature-Spec ohne Given/When/Then, aber mit genug Prosa | zählt als Soll, mit `excerpt` statt `criteria` |
+| Feature-Spec leer, nur Leerraum oder nur eine Überschrift | zählt **nicht** als Soll — `find_feature_spec()` filtert sie heraus |
+| Symbol mit > 20 Aufrufern | `callers.shown` hat 20 Einträge, `callers.note` nennt den Rest — bei viel Rauschen (z. B. gleichnamige Methoden auf anderen Objekten) können die 20 gezeigten Treffer vollständig aus falsch-positiven Fundstellen bestehen |
+| Einzelner, ausführlicher Commit im Range | zählt als Soll — die Anzahl der Commits im Range ist irrelevant, nur der Inhalt jeder Message zählt |
+| Mehrere generische Commits im Range ("wip", "fix") | zählen weiterhin nicht als Soll, unabhängig von ihrer Anzahl |

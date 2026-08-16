@@ -2,6 +2,50 @@
 
 Branch: `feat/review-context` · Basis: `0831fb7` (specs/skill-foundation)
 
+## Fix-Runde (nach unabhängigem Review, live gegen den Branch reproduziert)
+
+Ein unabhängiger Reviewer hat drei Defekte live gegen den Branch-Code (nicht nur aus dem Diff)
+reproduziert. Alle drei sind behoben, Tests grün, Evals-Assertions manuell gegen den reparierten
+Code neu verifiziert (alle vier Fixtures neu gebaut und `collect_context.py` erneut laufen
+lassen — siehe unten).
+
+1. **`find_feature_spec()` prüfte Existenz statt Inhalt.** Eine leere oder nur aus einer
+   Überschrift bestehende Datei unter `docs/specs/wip/` ließ `resolve_soll()` fälschlich
+   `source == "feature_spec"` melden und unterdrückte damit den Kernbefund. Behoben durch
+   `_has_meaningful_spec_content()`: Ein vollständiges Given/When/Then-Kriterium zählt immer;
+   sonst müssen mindestens `MIN_SPEC_CONTENT_CHARS = 40` Zeichen Prosa jenseits von
+   Überschriften und Leerzeilen übrig bleiben. Neue Tests decken leere Datei, nur Leerraum, nur
+   Überschrift und echtes Prosa-Soll einzeln ab. In der SKILL.md und
+   `references/context-packets.md` dokumentiert; die 40-Zeichen-Grenze selbst ist als neue,
+   kleinere Heuristik-Grenze in `docs/known-limits.md` vermerkt.
+2. **`MIN_COMMITS_FOR_MESSAGE_SOLL = 2` maß am falschen Proxy.** Entfernt. **Gewählte
+   Inhaltsregel** (`_is_meaningful_commit_message()`): Eine Commit-Message zählt als Soll, wenn
+   sie einen Body jenseits der Betreffzeile hat, **oder** wenn ihre um ein Conventional-Commit-
+   Präfix (`fix: `, `feat(x): `, …) bereinigte Betreffzeile mindestens `MIN_SUBJECT_CHARS = 20`
+   Zeichen hat und nicht in einem Platzhalter-Set steht (`GENERIC_COMMIT_SUBJECTS`: `wip`,
+   `fix`, `tmp`, `misc`, `update`, `stuff`, `test`, `fixup`, …). Die Zahl der Commits im Range
+   ist irrelevant — ein einzelner, ausführlicher Commit zählt jetzt korrekt als Soll; mehrere
+   durchweg generische Commits ("wip", "fix") weiterhin nicht. Der wichtigste Eval
+   (`no-soll-is-a-finding-not-a-guess`) bleibt korrekt, weil seine Fixture-Commit-Message
+   ("add rundet jetzt" nach Präfixabzug, 16 Zeichen) unter der neuen wie der alten Regel gleich
+   ausfällt — keine Fixture-Änderung nötig, manuell nachgeprüft.
+3. **`docs/known-limits.md` beschrieb die Aufrufer-Grenze falsch herum.** Der Text behauptete,
+   `self.name(...)`-Aufrufe würden übersehen (falsch-negativ). Tatsächlich matcht
+   `\bname\s*\(` auch nach einem Punkt (`self.add(` und `seen_dirs.add(` matchen beide), zählt
+   sie also fälschlich **mit** (falsch-positiv) — reproduziert am eigenen Skript:
+   `gather_conventions()`s `seen_dirs.add(dir_rel)` würde als Treffer für ein Symbol namens
+   `add` mitgezählt. Text korrigiert, inklusive der vom Reviewer verlangten Überlegung: Die
+   20er-Deckelung wirkt bei falsch-positiven Treffern schädlicher als bei falsch-negativen,
+   weil Rauschen die gezeigten Plätze füllen und echte Aufrufer verdrängen kann, statt nur zu
+   fehlen. Dieselbe Klarstellung auch in `references/context-packets.md` ergänzt.
+
+**Zusätzliche Testarbeit dieser Runde:** `repo`-Fixture in `tests/test_review_context_collect.py`
+angepasst (zweiter Commit heißt jetzt bewusst `"wip"` statt einer ausführlichen Subject-Zeile,
+damit sie unter der neuen Inhaltsregel weiterhin nicht als Soll zählt); `commit_all()`-Testhelfer
+committet jetzt mit `--allow-empty`, weil mehrere neue Tests reine Message-Varianten ohne
+Dateiänderung brauchen. 217 statt 207 Tests (10 neu: 4 für `find_feature_spec`, 6 für
+`find_commit_message_soll`/`resolve_soll`).
+
 ## Was gebaut wurde
 
 Der Kontextpaket-Zulieferer aus Spec 04, Zuschnitt (a) — **nicht** die Linsen-Engine. Gebaut:

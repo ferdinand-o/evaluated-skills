@@ -41,15 +41,20 @@ muss, was eine Änderung erreichen sollte.
 
 ## Contract
 
-- **Kein Soll wird erfunden.** Fehlt Feature-Spec, PR-Beschreibung und (bei Ranges mit
-  mindestens zwei Commits) Commit-Messages, trägt das Paket den Befund „Änderung ohne
-  benanntes Soll ist nicht reviewbar" — es verweigert nicht, es liefert das Paket mitsamt
-  dieser Feststellung.
-- Ein Range mit genau **einem** Commit zählt dessen eigene Subject-Zeile nicht als Soll — sie
-  beschreibt den Diff, nicht das Ziel dahinter. Erst ab zwei Commits im Range erzählt die
-  Historie mehr als der Diff selbst.
+- **Kein Soll wird erfunden.** Trägt keine der drei Quellen (Feature-Spec, PR-Beschreibung,
+  Commit-Messages) inhaltlich etwas bei, trägt das Paket den Befund „Änderung ohne benanntes
+  Soll ist nicht reviewbar" — es verweigert nicht, es liefert das Paket mitsamt dieser
+  Feststellung.
+- **Existenz reicht nirgends, es zählt der Inhalt.** Eine Feature-Spec-Datei zählt nur, wenn
+  sie ein vollständiges Given/When/Then-Kriterium enthält oder mindestens 40 Zeichen Prosa
+  jenseits von Überschriften und Leerzeilen hat — eine leere Datei, eine mit nur Leerraum oder
+  eine mit nur einer Überschrift zählt nicht. Eine Commit-Message zählt, wenn sie einen Body
+  über die Betreffzeile hinaus hat oder ihre (um ein Conventional-Commit-Präfix bereinigte)
+  Betreffzeile mindestens 20 Zeichen hat und kein reiner Platzhalter ist (`wip`, `fix`, `tmp`
+  u. Ä.). Die **Anzahl** der Commits im Range sagt dabei nichts aus — auch ein einzelner,
+  ausführlicher Commit zählt als Soll.
 - Eine PR-Beschreibung zählt als Soll, ist im Paket aber `"weak": true` — schwächer als eine
-  Feature-Spec, weil sie kein festes Schema hat.
+  Feature-Spec, weil sie kein festes Schema hat. Commit-Messages sind ebenfalls `"weak": true`.
 - Jede Kappung (Aufrufer, Geschwisterdateien, Dateiinhalt, Patch) trägt ihre Zahl im Paket
   (`"N weitere … nicht gezeigt (Obergrenze M)"`). Stilles Abschneiden ist der einzige
   verbotene Weg.
