@@ -33,23 +33,27 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   `git|code|projekt|handoff|anlegen|erstellen|übergabe` prüft, fällt bei einer
   legitimen Rückfrage durch, die keines dieser Wörter benutzt. Inhärente Grenze
   des Ansatzes, kein Implementierungsfehler.
-- **Kein Pfad-Primitiv für „irgendeine Datei unter Verzeichnis X, die Muster Y
-  erfüllt".** `file_exists`/`file_matches`/`artifact_header` verlangen einen
-  exakten `path` (Spec 00 §2 sagt selbst, warum: ein `..`-Pfad oder ein
-  vertippter Pfad muss beim Laden auffallen, kein Glob). Das trifft Skills hart,
-  deren Artefaktname aus Freitext plus Laufzeitdatum entsteht — `debug-ledger`s
-  `new_ledger.py` leitet den Dateinamen aus `--symptom` (vom Agenten frei
-  formuliert) und dem realen Tagesdatum ab; weder ist zur Eval-Autorenzeit
-  bekannt, wie der Agent das Symptom in Worte fasst, noch an welchem Tag
-  `run_evals.py` tatsächlich läuft. Alle vier `evals/debug-ledger/evals.json`-Evals
-  weichen deshalb für den Ledger-Inhalt auf `judge`-Claims aus (die den vollen
-  `dump_changed_files()`-Dump sehen, nicht auf einen Pfad angewiesen) und nutzen
-  `file_exists`/`artifact_header`/`file_matches` nur auf dem einen Pfad, der
-  wirklich fest ist: `docs/debugging/INDEX.md` (von `new_ledger.py` bei jedem
-  Aufruf gebootstrapt, unabhängig vom Ledger-Dateinamen). Das erzwingt, dass
-  drei von vier Evals `class: behavior` sind, obwohl ihr Kerncheck („wurde eine
-  Datei mit Kopfzeile X angelegt") mechanisch billig wäre, gäbe es das
-  Glob-Primitiv.
+- **Behoben (Commit `a1417b3`): Assertion-Pfade dürfen Glob-Muster sein.**
+  `file_exists`/`file_matches`/`file_max_lines`/`artifact_header` lösen `path`
+  jetzt über `Path.glob()` auf, wenn er `*`/`?`/`[` enthält — Skills, deren
+  Artefaktname aus Freitext plus Laufzeitdatum entsteht (z. B. `debug-ledger`s
+  `new_ledger.py`), können ihn damit mechanisch statt per `judge` prüfen
+  (`docs/debugging/[0-9]*.md` trifft jede datierte Ledger-Datei, nie
+  `INDEX.md`). `file_unchanged` lehnt Globs ab, weil die Baseline nur exakte
+  Pfade kennt.
+- **Restlücke am selben Primitiv: „alphabetisch erster Treffer" ist nicht
+  „neuester Treffer".** Bei mehreren Glob-Treffern liest `resolve_target()` für
+  `file_matches`/`artifact_header`/`file_max_lines` immer den alphabetisch
+  ersten — sinnvoll für Determinismus, aber falsch, wenn eine Fixture bereits
+  eine Datei mitbringt, deren Name vor jedem neu erzeugten Namen sortiert.
+  Konkreter Fall: `evals/debug-ledger/evals.json`s `archive-hit-tested-first`
+  bringt ein Archiv mit vorab vorhandener `docs/debugging/2026-07-01-…-haengt.md`
+  mit; ein vom Agenten neu angelegtes Ledger trägt zwangsläufig ein späteres
+  Datum und sortiert danach. `file_matches` auf `docs/debugging/[0-9]*.md`
+  würde deshalb strukturell **immer** die alte Archiv-Datei lesen, nie die neue
+  — der Eval bliebe bei `class: behavior` und einem `judge`-Claim für den
+  Ledger-Inhalt. Es gibt kein Primitiv für „neuester Treffer" oder „Treffer
+  außer Pfad X".
 
 ## Betrieb
 
