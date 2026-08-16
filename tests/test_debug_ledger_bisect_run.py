@@ -103,3 +103,88 @@ def test_main_finds_culprit_end_to_end(bisect_repo, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "Erster schlechter Commit" in out
+
+
+# --- Reviewer-Fund 1: kaputtes Repro-Kommando muss VOR der Bisektion auffallen ---
+
+def test_verify_endpoints_rejects_command_that_fails_everywhere(bisect_repo):
+    """Reviewer-Reproduktion: `false` schlaegt an JEDEM Commit fehl (auch am
+    bekannt guten). Vorher liess `git bisect run false` trotzdem einen
+    scheinbaren Culprit finden -- verify_endpoints muss das jetzt VOR dem
+    eigentlichen Bisect abfangen."""
+    repo, good_hash, _ = bisect_repo
+    with pytest.raises(bisect_run.BisectError, match="bekannt guten Commit"):
+        bisect_run.verify_endpoints(repo, good_hash, "HEAD", ["false"])
+
+
+def test_run_bisect_raises_instead_of_reporting_a_fake_culprit(bisect_repo, capsys):
+    """End-to-End: main() darf bei einem durchgehend fehlschlagenden Kommando
+    NIE 'Erster schlechter Commit' drucken."""
+    repo, good_hash, _ = bisect_repo
+    rc = bisect_run.main(["--good", good_hash, "--bad", "HEAD", "--command", "false", "--repo", str(repo)])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Erster schlechter Commit" not in captured.out
+    assert "bekannt guten Commit" in captured.err
+
+
+def test_verify_endpoints_rejects_command_that_never_fails(bisect_repo):
+    """Umkehrfall: ein Kommando, das ueberall besteht (auch am bekannt
+    schlechten Commit), unterscheidet nicht und ist genauso wertlos."""
+    repo, good_hash, _ = bisect_repo
+    with pytest.raises(bisect_run.BisectError, match="bekannt schlechten Commit"):
+        bisect_run.verify_endpoints(repo, good_hash, "HEAD", ["true"])
+
+
+def test_verify_endpoints_passes_for_a_real_discriminating_command(bisect_repo):
+    """Gegenrichtung: ein echt unterscheidendes Kommando darf nicht scheitern."""
+    repo, good_hash, _ = bisect_repo
+    bisect_run.verify_endpoints(repo, good_hash, "HEAD", shlex_command())
+
+
+def shlex_command():
+    import shlex
+    return shlex.split(COMMAND)
+
+
+def test_verify_endpoints_restores_original_ref(bisect_repo):
+    repo, good_hash, _ = bisect_repo
+    branch_before = git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    bisect_run.verify_endpoints(repo, good_hash, "HEAD", shlex_command())
+    branch_after = git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    assert branch_before == branch_after == "main"
+
+
+# --- Reviewer-Fund 2: eine laufende Bisektion darf nie kommentarlos verworfen werden ---
+
+def test_bisect_in_progress_false_when_no_session(bisect_repo):
+    repo, _, _ = bisect_repo
+    assert bisect_run.bisect_in_progress(repo) is False
+
+
+def test_bisect_in_progress_true_mid_session(bisect_repo):
+    repo, good_hash, _ = bisect_repo
+    git(repo, "bisect", "start")
+    git(repo, "bisect", "bad", "HEAD")
+    git(repo, "bisect", "good", good_hash)
+    try:
+        assert bisect_run.bisect_in_progress(repo) is True
+    finally:
+        git(repo, "bisect", "reset")
+
+
+def test_main_aborts_visibly_when_bisect_already_in_progress(bisect_repo, capsys):
+    """Reviewer-Reproduktion: eine vom Nutzer selbst gestartete Bisektion darf
+    nicht stillschweigend verworfen werden."""
+    repo, good_hash, _ = bisect_repo
+    git(repo, "bisect", "start")
+    git(repo, "bisect", "bad", "HEAD")
+    git(repo, "bisect", "good", good_hash)
+    try:
+        rc = bisect_run.main(["--good", good_hash, "--bad", "HEAD", "--command", COMMAND, "--repo", str(repo)])
+        assert rc == 3
+        assert "läuft bereits eine git-bisect-Sitzung" in capsys.readouterr().err
+        # Der entscheidende Teil: die Sitzung des Nutzers existiert danach noch.
+        assert bisect_run.bisect_in_progress(repo) is True
+    finally:
+        git(repo, "bisect", "reset")
