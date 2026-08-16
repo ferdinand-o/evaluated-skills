@@ -61,13 +61,19 @@ def index_path(repo: Path) -> Path:
     return repo / "docs" / "debugging" / "INDEX.md"
 
 
-def bootstrap_index(repo: Path) -> bool:
-    """Archiv anlegen, falls es noch nicht existiert. Meldet die Anlage (Bootstrap-Regel)."""
+def bootstrap_index(repo: Path, generated: str) -> bool:
+    """Archiv anlegen, falls es noch nicht existiert. Meldet die Anlage (Bootstrap-Regel).
+
+    `generated` ist das tatsächlich laufende Kommando (der Aufruf, der den
+    Bootstrap gerade auslöst) — nie ein festes `--resolve`-Template. Reviewer-Fund:
+    Ein Bootstrap über `--symptom` trug vorher eine `--resolve`-Kopfzeile mit
+    literalen Platzhaltern, die nie lief und nicht re-eintippbar war
+    (`docs/artifact-header.md`: "so wie man es erneut eintippen würde").
+    """
     idx = index_path(repo)
     if idx.is_file():
         return False
     idx.parent.mkdir(parents=True, exist_ok=True)
-    generated = f"python {SCRIPT_LABEL} --resolve <ledger> --cause <ursache>"
     content = (
         header_line(generated) + "\n\n"
         "# Debugging-Archiv\n\n"
@@ -93,8 +99,14 @@ def action_new(
     repo: Path, *, symptom: str, repro: str, expected: str, observed: str,
     slug: str | None, date_str: str | None,
 ) -> Path:
+    generated = (
+        f"python {SCRIPT_LABEL} --symptom {shlex.quote(symptom)} "
+        f"--repro {shlex.quote(repro)} --expected {shlex.quote(expected)} "
+        f"--observed {shlex.quote(observed)}"
+    )
+
     created_dir = not (repo / "docs" / "debugging").is_dir()
-    bootstrap_index(repo)
+    bootstrap_index(repo, generated)
     if created_dir:
         print(f"Archiv-Verzeichnis neu angelegt: {(repo / 'docs' / 'debugging').relative_to(repo)}")
 
@@ -103,11 +115,6 @@ def action_new(
     target = find_free_path(repo, date_str, slug)
 
     mini_template, _ = load_template()
-    generated = (
-        f"python {SCRIPT_LABEL} --symptom {shlex.quote(symptom)} "
-        f"--repro {shlex.quote(repro)} --expected {shlex.quote(expected)} "
-        f"--observed {shlex.quote(observed)}"
-    )
     body = mini_template.format(symptom=symptom, repro=repro, expected=expected, observed=observed)
     target.write_text(header_line(generated) + "\n\n" + body, encoding="utf-8")
     print(f"Mini-Ledger angelegt: {target.relative_to(repo)}")
@@ -148,7 +155,8 @@ def action_resolve(repo: Path, ledger_rel: str, cause: str) -> None:
         raise LedgerError(f"Ledger nicht gefunden: {ledger_rel}")
     symptom = _extract_symptom(target.read_text(encoding="utf-8"))
 
-    bootstrap_index(repo)
+    generated = f"python {SCRIPT_LABEL} --resolve {shlex.quote(ledger_rel)} --cause {shlex.quote(cause)}"
+    bootstrap_index(repo, generated)
     idx = index_path(repo)
     content = idx.read_text(encoding="utf-8")
 

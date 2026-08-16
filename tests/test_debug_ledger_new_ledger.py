@@ -48,6 +48,39 @@ def test_action_new_bootstraps_archive_and_index(tmp_path):
     assert index.read_text(encoding="utf-8").startswith("<!-- skill: debug-ledger | schema: 1")
 
 
+def test_action_new_bootstrap_header_reflects_the_real_invoking_command(tmp_path):
+    """Reviewer-Fund: ein Bootstrap über --symptom trug vorher fest eine
+    --resolve-Kopfzeile mit literalen Platzhaltern ('<ledger>', '<ursache>') —
+    ein Kommando, das nie lief und nicht re-eintippbar war. Die Kopfzeile muss
+    das tatsächlich laufende --symptom-Kommando zeigen."""
+    new_ledger.action_new(
+        tmp_path, symptom="Login hängt", repro="pytest -x", expected="ok", observed="haengt",
+        slug="bug", date_str="2026-08-16",
+    )
+    index_text = (tmp_path / "docs" / "debugging" / "INDEX.md").read_text(encoding="utf-8")
+    header_line = index_text.splitlines()[0]
+    assert "--symptom" in header_line
+    assert "--resolve" not in header_line
+    assert "<ledger>" not in header_line
+    assert "<ursache>" not in header_line
+
+
+def test_action_resolve_bootstrap_header_uses_resolve_command(tmp_path):
+    """Gegenrichtung: bootstrapt --resolve das Archiv (kein --symptom-Aufruf
+    vorher), muss die Kopfzeile korrekt das --resolve-Kommando zeigen."""
+    target = new_ledger.action_new(
+        tmp_path, symptom="Bug", repro="cmd", expected="a", observed="b",
+        slug="bug", date_str="2026-08-16",
+    )
+    (tmp_path / "docs" / "debugging" / "INDEX.md").unlink()  # Bootstrap erneut erzwingen
+    rel = target.relative_to(tmp_path).as_posix()
+    new_ledger.action_resolve(tmp_path, rel, "Ursache X")
+    header_line = (tmp_path / "docs" / "debugging" / "INDEX.md").read_text(encoding="utf-8").splitlines()[0]
+    assert "--resolve" in header_line
+    assert rel in header_line
+    assert "Ursache X" in header_line
+
+
 def test_action_new_does_not_recreate_existing_index(tmp_path):
     (tmp_path / "docs" / "debugging").mkdir(parents=True)
     index = tmp_path / "docs" / "debugging" / "INDEX.md"
