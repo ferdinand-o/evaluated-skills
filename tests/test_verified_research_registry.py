@@ -138,6 +138,80 @@ def test_lookup_checks_allgemein_section_too():
     assert hit["domain"] == "allgemein"
 
 
+# --- lookup: Host-/Pfad-Grenzen (Regression, ehemals reiner Teilstring-Vergleich) ----
+
+def _prefix_registry(pattern="ir.", name="IR-Seiten", tier=1):
+    return {
+        "domains": {"wirtschaft-statistik": [
+            {"pattern": pattern, "name": name, "tier": tier, "notiz": "Primärquelle, Anreizlage beachten."},
+        ]},
+        "allgemein": [],
+    }
+
+
+def test_lookup_prefix_pattern_does_not_match_inside_word():
+    """Der vom Reviewer gemeldete Fall: 'ir.' als Teilstring von 'elixir.example.com'
+    darf keine Investor-Relations-Seite ergeben — die Buchstabenfolge kommt zufällig
+    vor, niemand hat diese Domain bewertet."""
+    data = _prefix_registry()
+    assert registry.lookup(data, "https://elixir.example.com/docs") is None
+
+
+def test_lookup_prefix_pattern_does_not_match_inside_second_word():
+    data = _prefix_registry()
+    assert registry.lookup(data, "https://kefir.example.blog/rezept") is None
+
+
+def test_lookup_prefix_pattern_matches_at_string_start():
+    data = _prefix_registry()
+    hit = registry.lookup(data, "ir.example.com")
+    assert hit is not None
+    assert hit["name"] == "IR-Seiten"
+
+
+def test_lookup_prefix_pattern_matches_after_scheme():
+    data = _prefix_registry()
+    hit = registry.lookup(data, "https://ir.example.com/reports")
+    assert hit is not None
+
+
+def test_lookup_prefix_pattern_matches_as_subdomain_after_dot():
+    data = _prefix_registry()
+    hit = registry.lookup(data, "www.ir.example.com")
+    assert hit is not None
+
+
+def test_lookup_suffix_hyphen_pattern_still_matches_inside_label():
+    """'-vergleich.de' soll bewusst mitten in einem Label ziehen (Suffix-Wildcard für
+    Vergleichsportale) — das Trennzeichen '-' ist Teil des Musters, keine zusätzliche
+    Randprüfung nötig."""
+    data = {"domains": {}, "allgemein": [
+        {"pattern": "-vergleich.de", "name": "Vergleichsportale", "tier": 3, "notiz": "Anreizlage Affiliate, kein Track Record."},
+    ]}
+    assert registry.lookup(data, "https://www.auto-vergleich.de/produkt") is not None
+
+
+def test_lookup_full_domain_pattern_does_not_match_as_substring_of_longer_host():
+    """Ein zweiter, realer Fall aus der Register-Durchsicht: 'arxiv.org' darf nicht in
+    'chemarxiv.org' (ChemRxiv, ein eigenständiger, anderer Preprint-Server) zünden."""
+    data = {"domains": {"wissenschaft": [
+        {"pattern": "arxiv.org", "name": "arXiv (Preprints)", "tier": 1, "notiz": "Primärquelle für die Autoren-Aussage."},
+    ]}, "allgemein": []}
+    assert registry.lookup(data, "https://chemarxiv.org/engage/chemrxiv/article") is None
+    assert registry.lookup(data, "https://arxiv.org/abs/1234.5678") is not None
+
+
+def test_lookup_file_path_pattern_still_matches_exact_source(tmp_path):
+    """Fixture-Pfadmuster (keine Domains) bleiben von der Grenzprüfung unberührt,
+    solange der Fundort an einer echten Pfadgrenze ('/', '.', Anfang/Ende) liegt."""
+    data = {"domains": {"software-tech": [
+        {"pattern": "internal-tool-docs.example", "name": "Interne Doku", "tier": 1, "notiz": "Primärquelle, Projektteam."},
+    ]}, "allgemein": []}
+    hit = registry.lookup(data, "sources/internal-tool-docs.example.md")
+    assert hit is not None
+    assert hit["name"] == "Interne Doku"
+
+
 # --- add_entry --------------------------------------------------------------
 
 def test_add_entry_appends_valid_entry():

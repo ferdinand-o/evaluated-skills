@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -43,18 +44,21 @@ class RegistryError(RuntimeError):
 def resolve_base_dir(repo: Path, home: Path | None = None) -> tuple[Path, bool]:
     """Basisverzeichnis für Register und Wissensdateien dieser Skill.
 
-    Spec 00 §1 sagt für nicht projektgebundene Artefakte: Standard ist `~/.skills/`,
-    mit optionalem Projekt-Override, "falls eine gleichnamige Datei im Repo liegt".
-    Wörtlich auf Datei-Ebene geprüft, bricht das bei `research/<thema>.md`: Die erste
-    Recherche zu einem neuen Thema hat naturgemäß noch keine gleichnamige Datei im
-    Projekt, der Override würde nie greifen, und der erste Schreibzugriff ginge nach
-    `~` — im Eval-Harness das echte Home-Verzeichnis des Aufrufers (siehe
-    docs/known-limits.md, Abschnitt "Isolation").
+    Spec 00 §1 sagt für nicht projektgebundene Artefakte nur: Standard ist `~/.skills/`,
+    mit optionalem Projekt-Override — "dasselbe Muster wie persönliche vs.
+    Projekt-Skills". Sie nennt keine Bedingung dafür, wann der Override greift, das
+    ist an dieser Stelle offen.
 
-    Deshalb prüft diese Funktion auf Verzeichnis-Ebene: Existiert
-    `.skills/verified-research/` bereits im Projekt (mit beliebigem Inhalt, und sei es
-    nur die registry.json), gilt der Override für *alle* Artefakte dieser Skill in
-    diesem Lauf. Sonst ist `~/.skills/verified-research/` die Basis.
+    Eigene Entscheidung dieser Implementierung, keine Spec-00-Vorgabe: Ein Override auf
+    Datei-Ebene (nur falls eine gleichnamige Datei im Projekt schon existiert, wie es
+    Spec 12 für das Register nahelegt) würde bei `research/<thema>.md` nie greifen — die
+    erste Recherche zu einem neuen Thema hat naturgemäß noch keine gleichnamige Datei im
+    Projekt, der erste Schreibzugriff ginge also immer nach `~` — im Eval-Harness das
+    echte Home-Verzeichnis des Aufrufers (siehe docs/known-limits.md, Abschnitt
+    "Isolation"). Deshalb prüft diese Funktion stattdessen auf Verzeichnis-Ebene:
+    Existiert `.skills/verified-research/` bereits im Projekt (mit beliebigem Inhalt,
+    und sei es nur die registry.json), gilt der Override für *alle* Artefakte dieser
+    Skill in diesem Lauf. Sonst ist `~/.skills/verified-research/` die Basis.
     """
     home = home or Path.home()
     project_dir = repo / ".skills" / SKILL_DIRNAME
@@ -114,16 +118,42 @@ def _iter_sections(data: dict):
         yield "allgemein", entry
 
 
+def _boundary_pattern(pattern: str) -> re.Pattern[str]:
+    """Kompiliert `pattern` zu einer Regex, die Host-/Pfad-Grenzen respektiert.
+
+    Reiner Teilstring-Vergleich lässt ein Muster wie "ir." (gedacht als Präfix für
+    Investor-Relations-Subdomains "ir.<firma>.<tld>") mitten in "elixir.example.com"
+    oder "kefir.example.blog" zünden — die Buchstabenfolge kommt zufällig vor, ohne
+    dass irgendjemand diese Domain bewertet hätte. Ein Claim, der darauf ruht, gilt
+    dann fälschlich als durch eine Tier-1-Primärquelle belegt.
+
+    Deshalb: Ein alphanumerisches Randzeichen des Musters darf im Fundort nicht mitten
+    in einem längeren alphanumerischen Lauf der Zielzeichenkette stecken — das Zeichen
+    unmittelbar davor bzw. danach muss fehlen oder selbst nicht alphanumerisch sein.
+    Ein Muster, dessen Rand bereits ein Trennzeichen ist (z. B. "-vergleich.de", das
+    bewusst mitten in einem Label wie "auto-vergleich.de" ziehen soll), bekommt an
+    dieser Seite keine zusätzliche Grenze — das Trennzeichen ist dann schon Teil des
+    Musters und drückt die Absicht bereits aus.
+    """
+    escaped = re.escape(pattern)
+    left = r"(?<![A-Za-z0-9])" if pattern[:1].isalnum() else ""
+    right = r"(?![A-Za-z0-9])" if pattern[-1:].isalnum() else ""
+    return re.compile(left + escaped + right, re.IGNORECASE)
+
+
 def lookup(data: dict, needle: str) -> dict | None:
-    """Bester (längster) Substring-Treffer über alle Domänen + allgemein, oder None."""
+    """Bester (längster) Grenz-sicherer Treffer über alle Domänen + allgemein, oder None.
+
+    "Längster" heißt: das spezifischste Muster gewinnt, wenn mehrere zünden (z. B.
+    "docs.example.com" vor "example.com"). Grenz-sicher heißt: siehe _boundary_pattern().
+    """
     if not needle:
         return None
-    needle_lower = needle.lower()
     best: dict | None = None
     best_len = -1
     for domain, entry in _iter_sections(data):
         pattern = entry.get("pattern", "")
-        if pattern and pattern.lower() in needle_lower and len(pattern) > best_len:
+        if pattern and len(pattern) > best_len and _boundary_pattern(pattern).search(needle):
             best = {**entry, "domain": domain}
             best_len = len(pattern)
     return best
