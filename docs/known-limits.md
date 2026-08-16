@@ -44,6 +44,14 @@ Das ist keine Eigenheit dieser einen Skill, sondern der Auswahl: Der Agent
 entscheidet anhand der Descriptions, und diese Entscheidung schwankt — verschärft
 dadurch, dass 16 fremde Skills mitkonkurrieren (siehe „Isolation" unten).
 
+**Zweiter Beleg, andere Skill, anderer Mechanismus** (2026-08-16): debug-ledgers
+`env-var-layers-instruments-boundaries` fiel im ersten Lauf durch — das Ledger
+war angelegt, blieb aber im Mini-Modus ohne Hypothesen-Tabelle, die Eskalation
+zum vollen Prozess hatte nicht gegriffen. Zweite Stichprobe über denselben
+Commit: bestanden. Es schwankt also nicht nur, *ob* eine Skill geladen wird,
+sondern auch, *wie weit* sie ihren eigenen Ablauf durchläuft. Eine Skill kann
+denselben Auslöser einmal erkennen und einmal übergehen.
+
 Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 - **Ein grüner Lauf beweist nicht, dass die Skill zuverlässig triggert.** Alle in
