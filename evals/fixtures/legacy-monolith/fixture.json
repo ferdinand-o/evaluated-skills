@@ -1,16 +1,150 @@
 {
   "git": true,
-  "description": "Gewachsenes Bestellsystem ohne jede Testdatei — der Legacy-Trap-Eval.",
+  "description": "Gewachsenes Bestellsystem ohne jede Testdatei — der Legacy-Trap-Eval. 24 Commits/Module ueberschreiten bewusst die neu geschaerften Umfangsschwellen (Datei- und Commit-Zahl), damit 'keine Tests' hier nicht die alleinige Grundlage fuer den Legacy-Verdacht ist.",
   "commits": [
-    {"message": "feat: Bestellungen anlegen", "touch": {"src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n"}},
-    {"message": "feat: Rabatt-Logik", "touch": {"src/discounts.py": "def apply_discount(total, code):\n    if code == 'VIP':\n        return total * 0.9\n    return total\n"}},
-    {"message": "feat: Versandkosten", "touch": {"src/shipping.py": "def shipping_cost(total, country):\n    if country == 'DE':\n        return 0 if total > 50 else 4.99\n    return 9.99\n"}},
-    {"message": "fix: Rundungsfehler bei Rabatt", "touch": {"src/discounts.py": "def apply_discount(total, code):\n    if code == 'VIP':\n        return round(total * 0.9, 2)\n    return total\n"}},
-    {"message": "feat: Zahlungsabgleich", "touch": {"src/payments.py": "def reconcile(order, payment):\n    return order['total'] == payment['amount']\n"}},
-    {"message": "feat: Stornierung", "touch": {"src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n\n\ndef cancel_order(order):\n    order['status'] = 'cancelled'\n    return order\n"}},
-    {"message": "feat: Lagerbestand pruefen", "touch": {"src/inventory.py": "def check_stock(item, available):\n    return available.get(item, 0) > 0\n"}},
-    {"message": "fix: Stornierung nach Zahlung blockieren", "touch": {"src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n\n\ndef cancel_order(order):\n    if order['status'] == 'paid':\n        raise ValueError('bereits bezahlt')\n    order['status'] = 'cancelled'\n    return order\n"}},
-    {"message": "feat: Rechnungsexport", "touch": {"src/invoices.py": "def export(order):\n    return 'Rechnung: ' + str(order['total'])\n"}},
-    {"message": "feat: Kundendaten anonymisieren", "touch": {"src/gdpr.py": "def anonymize(customer):\n    customer['name'] = 'ANONYM'\n    customer['email'] = None\n    return customer\n"}}
+    {
+      "message": "feat: orders ergaenzt",
+      "touch": {
+        "src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n"
+      }
+    },
+    {
+      "message": "feat: discounts ergaenzt",
+      "touch": {
+        "src/discounts.py": "def apply_discount(total, code):\n    if code == 'VIP':\n        return round(total * 0.9, 2)\n    return total\n"
+      }
+    },
+    {
+      "message": "feat: shipping ergaenzt",
+      "touch": {
+        "src/shipping.py": "def shipping_cost(total, country):\n    if country == 'DE':\n        return 0 if total > 50 else 4.99\n    return 9.99\n"
+      }
+    },
+    {
+      "message": "feat: payments ergaenzt",
+      "touch": {
+        "src/payments.py": "def reconcile(order, payment):\n    return order['total'] == payment['amount']\n"
+      }
+    },
+    {
+      "message": "feat: inventory ergaenzt",
+      "touch": {
+        "src/inventory.py": "def check_stock(item, available):\n    return available.get(item, 0) > 0\n"
+      }
+    },
+    {
+      "message": "feat: invoices ergaenzt",
+      "touch": {
+        "src/invoices.py": "def export(order):\n    return 'Rechnung: ' + str(order['total'])\n"
+      }
+    },
+    {
+      "message": "feat: gdpr ergaenzt",
+      "touch": {
+        "src/gdpr.py": "def anonymize(customer):\n    customer['name'] = 'ANONYM'\n    customer['email'] = None\n    return customer\n"
+      }
+    },
+    {
+      "message": "feat: refunds ergaenzt",
+      "touch": {
+        "src/refunds.py": "def refund(order, amount):\n    order['refunded'] = amount\n    return order\n"
+      }
+    },
+    {
+      "message": "feat: notifications ergaenzt",
+      "touch": {
+        "src/notifications.py": "def notify(customer, message):\n    return f'An {customer}: {message}'\n"
+      }
+    },
+    {
+      "message": "feat: reports ergaenzt",
+      "touch": {
+        "src/reports.py": "def daily_report(orders):\n    return sum(o['total'] for o in orders)\n"
+      }
+    },
+    {
+      "message": "feat: audit ergaenzt",
+      "touch": {
+        "src/audit.py": "def log_change(entity, field, old, new):\n    return f'{entity}.{field}: {old} -> {new}'\n"
+      }
+    },
+    {
+      "message": "feat: webhooks ergaenzt",
+      "touch": {
+        "src/webhooks.py": "def dispatch(event, payload):\n    return {'event': event, 'payload': payload}\n"
+      }
+    },
+    {
+      "message": "feat: exports csv ergaenzt",
+      "touch": {
+        "src/exports_csv.py": "def to_csv(rows):\n    return '\\n'.join(','.join(str(v) for v in r) for r in rows)\n"
+      }
+    },
+    {
+      "message": "feat: tax ergaenzt",
+      "touch": {
+        "src/tax.py": "def vat(total, rate=0.19):\n    return round(total * rate, 2)\n"
+      }
+    },
+    {
+      "message": "feat: currency ergaenzt",
+      "touch": {
+        "src/currency.py": "def convert(amount, rate):\n    return round(amount * rate, 2)\n"
+      }
+    },
+    {
+      "message": "feat: loyalty ergaenzt",
+      "touch": {
+        "src/loyalty.py": "def points_for(total):\n    return int(total // 10)\n"
+      }
+    },
+    {
+      "message": "feat: support tickets ergaenzt",
+      "touch": {
+        "src/support_tickets.py": "def open_ticket(order_id, reason):\n    return {'order_id': order_id, 'reason': reason, 'status': 'open'}\n"
+      }
+    },
+    {
+      "message": "feat: warehouse ergaenzt",
+      "touch": {
+        "src/warehouse.py": "def reserve(item, qty, stock):\n    stock[item] = stock.get(item, 0) - qty\n    return stock\n"
+      }
+    },
+    {
+      "message": "feat: returns ergaenzt",
+      "touch": {
+        "src/returns.py": "def start_return(order):\n    order['status'] = 'return_requested'\n    return order\n"
+      }
+    },
+    {
+      "message": "feat: pricing ergaenzt",
+      "touch": {
+        "src/pricing.py": "def bulk_price(unit_price, qty):\n    return unit_price * qty * (0.95 if qty >= 10 else 1)\n"
+      }
+    },
+    {
+      "message": "feat: suppliers ergaenzt",
+      "touch": {
+        "src/suppliers.py": "def reorder_point(item, lead_time_days, daily_sales):\n    return lead_time_days * daily_sales\n"
+      }
+    },
+    {
+      "message": "feat: subscriptions ergaenzt",
+      "touch": {
+        "src/subscriptions.py": "def next_billing_date(current, interval_days):\n    return current + interval_days\n"
+      }
+    },
+    {
+      "message": "feat: promocodes ergaenzt",
+      "touch": {
+        "src/promocodes.py": "def is_valid(code, used_codes):\n    return code not in used_codes\n"
+      }
+    },
+    {
+      "message": "feat: archival ergaenzt",
+      "touch": {
+        "src/archival.py": "def archive_order(order, archive):\n    archive.append(order)\n    return archive\n"
+      }
+    }
   ]
 }
