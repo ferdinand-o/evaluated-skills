@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Ledger-Pflichtfelder mechanisch prüfen. Tier 1: nur Stdlib.
+
+G2 nach Spec 00 §4: Das Urteil ist maschinell (dieses Skript entscheidet), der
+Aufruf bleibt freiwillig — "meldet Verstoß", nicht "blockiert". G3 entsteht nur,
+wenn der Nutzer `assets/hooks/check-ledger.json` selbst einrichtet; dieses Skript
+installiert nie sich selbst als Hook.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+SCHEMA_VERSION = 1
+SKILL_NAME = "debug-ledger"
+PLACEHOLDER = "_(noch offen)_"
+
+HEADER_RE = re.compile(
+    r"^(?:<!--|#)\s*skill:\s*(?P<skill>[a-z0-9][a-z0-9-]*)\s*\|"
+    r"\s*schema:\s*(?P<schema>\d+)\s*\|"
+    r"\s*generated:\s*(?P<cmd>.+?)\s*(?:-->)?\s*$"
+)
+SECTION_RE = re.compile(r"^##\s*(?P<heading>.+?)\s*$", re.MULTILINE)
+
+# Die drei Pflichtfelder des Mini-Ledgers — immer geprüft, ob mini oder voll.
+MINI_FIELDS = ("Symptom", "Repro-Kommando", "Erwartung vs. Beobachtung")
+
+
+def read_header(text: str) -> dict | None:
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = HEADER_RE.match(line.strip())
+        if not match:
+            return None
+        return {
+            "skill": match.group("skill"),
+            "schema": int(match.group("schema")),
+            "generated": match.group("cmd"),
+        }
+    return None
+
+
+def parse_sections(text: str) -> dict[str, str]:
+    """`## Überschrift` -> Text bis zur nächsten `##`-Überschrift."""
+    matches = list(SECTION_RE.finditer(text))
+    sections: dict[str, str] = {}
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[match.group("heading")] = text[start:end]
+    return sections
+
+
+def _strip_fences(body: str) -> str:
+    """Code-Fence-Zeilen (```) entfernen, damit der Inhalt darin geprüft wird."""
+    lines = [line for line in body.strip("\n").splitlines() if not line.strip().startswith("```")]
+    return "\n".join(lines).strip()
+
+
+def is_unfilled(body: str) -> bool:
+    content = _strip_fences(body)
+    return content == "" or content == PLACEHOLDER
+
+
+_SEPARATOR_CELL_RE = re.compile(r"^-+$")
+
+
+def parse_hypothesis_rows(body: str) -> list[list[str]]:
+    """Datenzeilen der Hypothesen-Tabelle, ohne Kopf- und Trennzeile."""
+    rows: list[list[str]] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if cells and all(_SEPARATOR_CELL_RE.match(c) for c in cells):
+            continue  # Trennzeile ("| --- | --- | ... |")
+        if cells and cells[0] == "Hypothese":
+            continue  # Kopfzeile
+        rows.append(cells)
+    return rows
+
+
+def count_tested_hypotheses(body: str) -> int:
+    """Zeilen, deren vier Spalten alle gefüllt und ohne Platzhalter sind."""
+    count = 0
+    for cells in parse_hypothesis_rows(body):
+        if len(cells) < 4:
+            continue
+        if all(cell and cell != PLACEHOLDER for cell in cells[:4]):
+            count += 1
+    return count
+
+
+def check(path: Path) -> list[str]:
+    """Liefert die Liste der Verstöße; leer heißt sauber."""
+    text = path.read_text(encoding="utf-8")
+    violations: list[str] = []
+
+    header = read_header(text)
+    if header is None:
+        violations.append("Kopfzeile fehlt oder ist falsch formatiert")
+    else:
+        if header["skill"] != SKILL_NAME:
+            violations.append(f"Kopfzeile nennt Skill {header['skill']!r}, erwartet {SKILL_NAME!r}")
+        if header["schema"] != SCHEMA_VERSION:
+            violations.append(f"Kopfzeile nennt schema {header['schema']}, erwartet {SCHEMA_VERSION}")
+
+    sections = parse_sections(text)
+    for field in MINI_FIELDS:
+        body = sections.get(field)
+        if body is None:
+            violations.append(f"Pflichtfeld fehlt: {field}")
+        elif is_unfilled(body):
+            violations.append(f"Pflichtfeld leer: {field}")
+
+    full_mode = "Hypothesen" in sections
+    if full_mode:
+        fix_filled = not is_unfilled(sections.get("Fix", ""))
+        tested = count_tested_hypotheses(sections.get("Hypothesen", ""))
+        if fix_filled and tested == 0:
+            violations.append(
+                "Fix vorgeschlagen ohne mindestens eine getestete Zeile in der Hypothesen-Tabelle"
+            )
+
+    return violations
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="debug-ledger: Ledger-Pflichtfelder prüfen (G2)")
+    parser.add_argument("ledger", type=Path)
+    args = parser.parse_args(argv)
+
+    if not args.ledger.is_file():
+        print(f"debug-ledger: Ledger nicht gefunden: {args.ledger}", file=sys.stderr)
+        return 2
+
+    violations = check(args.ledger)
+    if not violations:
+        print(f"OK: {args.ledger}")
+        return 0
+
+    print(f"Verstoß gemeldet ({len(violations)}):")
+    for violation in violations:
+        print(f"  - {violation}")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
