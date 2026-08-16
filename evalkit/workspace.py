@@ -192,6 +192,15 @@ def dump_changed_files(root: Path, baseline: dict[str, str], *, max_bytes: int =
         if baseline.get(rel) == digest:
             continue
         text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        if "\x00" in text:
+            # Nullbytes sind gültiges UTF-8 und überleben errors="replace" — aber
+            # `subprocess` verbietet sie in Argumenten, und der Dump geht als Argument
+            # in den Judge-Aufruf. Ohne diesen Zweig stirbt jede behavior-Eval mit
+            # `ValueError: embedded null byte`, sobald der Agent zufällig eine
+            # Binärdatei hinterlässt — ein einziges __pycache__/*.pyc genügt. Der
+            # Inhalt hilft dem Judge ohnehin nicht; die Existenz der Datei schon.
+            chunks.append(f"--- DATEI: {rel} --- (binär, {len(text)} Zeichen, Inhalt ausgelassen)")
+            continue
         if len(text) > budget:
             text = text[:budget] + "\n… (gekürzt)"
         chunks.append(f"--- DATEI: {rel} ---\n{text}")
