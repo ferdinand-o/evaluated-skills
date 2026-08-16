@@ -202,6 +202,18 @@ class Widget(Base):
     assert "nicht auflösbar" in text
 
 
+def test_render_mermaid_includes_relationship_calls_as_comments():
+    src = '''
+class User(Base):
+    __tablename__ = "users"
+    id = Column(BigInteger, primary_key=True)
+    orders = relationship("Order", back_populates="user")
+'''
+    result = erd.scan_source(src)
+    text = erd.render_mermaid(result)
+    assert "%% relationship: users.orders -> Order" in text
+
+
 def test_render_mermaid_table_without_columns_says_so():
     src = 'class Empty(Base):\n    __tablename__ = "empties"\n'
     result = erd.scan_source(src)

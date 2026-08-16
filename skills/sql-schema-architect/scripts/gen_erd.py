@@ -309,6 +309,16 @@ def render_mermaid(result: ScanResult) -> str:
             cardinality = '||--||' if col.unique else '||--o{'
             lines.append(f'    {target_table} {cardinality} {table.name} : "{col.name}"')
 
+    relationship_lines = [
+        f"    %% relationship: {table.name}.{rel['attr']} -> {rel['target']}"
+        for table in result.tables
+        for rel in table.relationships
+    ]
+    if relationship_lines:
+        lines.append("")
+        lines.append("    %% relationship()-Aufrufe (Kardinalität nicht garantiert, nur FK-Kanten oben sind verlässlich):")
+        lines.extend(relationship_lines)
+
     if result.warnings:
         lines.append("")
         lines.append("    %% Warnungen — statisch nicht vollständig auflösbar:")
