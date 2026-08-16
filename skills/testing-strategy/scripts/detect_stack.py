@@ -5,10 +5,25 @@ Spec 05 deklariert diesen Skript-Kopf ursprünglich als Tier 2 — geprüft und
 verworfen (Spec 00 §3 macht Tier 1 zum Standard, jede Stufe darüber ist zu
 begründen). Was gebraucht wird, geht mit Stdlib: `package.json`/`manifest.json`
 sind JSON, `pyproject.toml` muss hier nur nach Substrings (Abhängigkeitsnamen,
-`[project.scripts]`) durchsucht werden, keine echte TOML-Semantik — das
+`[project.scripts]`) durchsucht werden, keine echte TOML-Semantik nötig — das
 vermeidet zusätzlich eine Abhängigkeit von `tomllib`, das erst ab Python 3.11
 in der Stdlib liegt. git-Aufrufe über `subprocess` gelten hier wie bei
 `skills/dev-report/scripts/collect.py` als Tier 1 (etablierter Präzedenzfall).
+
+**Fix-Runde (Review):** „Nur Substrings" hieß ursprünglich: der komplette
+Rohtext, Kommentare eingeschlossen. Ein Kommentar wie `# früher haben wir
+django evaluiert` reichte damit, ein reines CLI-Tool als `rest-api` zu
+klassifizieren. Das widerlegt nicht die Tier-1-Entscheidung, sondern verlangt
+eine schärfere Suche: `_strip_toml_line_comments`/`_extract_toml_dependency_text`
+entfernen Kommentare zeilenweise (ohne `#` in Anführungszeichen zu werten) und
+beschränken die Suche auf die Abschnitte, in denen Abhängigkeiten laut
+TOML-Struktur überhaupt stehen können (`dependencies = [...]` im
+`[project]`-Wurzelabschnitt, sowie `[project.optional-dependencies]` und
+`[tool.poetry.(dev-)dependencies]`-Tabellen) — Freitextfelder wie
+`description` fließen nie ein. `requirements.txt` und `pom.xml`/`build.gradle`
+bekommen dieselbe Kommentar-Bereinigung, jeweils mit der für ihr Format
+passenden Kommentarsyntax (`#` bzw. `<!-- -->`). Immer noch kein echter
+Parser — genug, um einen Kommentar nicht mit einer Abhängigkeit zu verwechseln.
 
 R5 (Auftrag): Es gibt keine Veraltungsregel für den Cache unter
 `.skills/cache/detect_stack.json`. Jeder explizite Aufruf klassifiziert neu und
@@ -69,10 +84,23 @@ CLI_DEP_NAMES = ("click", "typer", "commander", "yargs", "oclif")
 FRONTEND_DEP_NAMES = ("react", "vue", "svelte", "@angular/core", "solid-js", "preact")
 JS_TEST_RUNNERS = ("vitest", "jest", "mocha", "playwright", "@playwright/test", "cypress")
 
-LEGACY_THRESHOLD = 3
-LEGACY_FILE_COUNT_THRESHOLD = 15
-LEGACY_COMMIT_COUNT_THRESHOLD = 8
+# "keine Tests" ist eine notwendige, nie eine hinreichende Bedingung für
+# Legacy-Verdacht (Review-Fund: sonst gilt jedes frische, gerade erst
+# begonnene Projekt als Legacy). Hinreichend wird sie erst zusammen mit einem
+# Alters- oder Umfangssignal, dessen Schwellen bewusst über das hinausgehen,
+# was ein Projekt in seinen ersten Commits ansammelt.
+LEGACY_FILE_COUNT_THRESHOLD = 20
+LEGACY_COMMIT_COUNT_THRESHOLD = 25
 LEGACY_AGE_DAYS_THRESHOLD = 3 * 365
+
+# TOML-Kommentare und Abhängigkeits-Abschnitte (siehe Skriptkopf, Fix-Runde).
+_TOML_SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
+_TOML_DEP_TABLE_RE = re.compile(
+    r"^(project\.optional-dependencies(\.[\w-]+)?"
+    r"|tool\.poetry\.(dev-)?dependencies"
+    r"|tool\.poetry\.group\.[\w-]+\.dependencies)$"
+)
+_TOML_SCRIPTS_SECTION_RE = re.compile(r"^(project\.scripts|tool\.poetry\.scripts)$")
 
 
 class DetectError(RuntimeError):
@@ -113,6 +141,94 @@ def _read_text(path: Path, limit: int = 100_000) -> str:
 def _bump(scores: dict[str, int], signals: dict[str, list[str]], kind: str, points: int, why: str) -> None:
     scores[kind] = scores.get(kind, 0) + points
     signals.setdefault(kind, []).append(why)
+
+
+def _strip_toml_line_comments(text: str) -> str:
+    """Entfernt `#`-Kommentare zeilenweise, ohne ein `#` innerhalb von
+    Anführungszeichen als Kommentarbeginn zu werten. Kein echter TOML-Parser
+    (Tier 1, siehe Skriptkopf) — aber genug, um einen Kommentar wie `# früher
+    haben wir django evaluiert` nicht als Abhängigkeit misszuverstehen."""
+    out_lines = []
+    for line in text.splitlines():
+        chars: list[str] = []
+        quote: str | None = None
+        for ch in line:
+            if quote:
+                chars.append(ch)
+                if ch == quote:
+                    quote = None
+            elif ch in ("'", '"'):
+                quote = ch
+                chars.append(ch)
+            elif ch == "#":
+                break
+            else:
+                chars.append(ch)
+        out_lines.append("".join(chars))
+    return "\n".join(out_lines)
+
+
+def _extract_toml_dependency_text(text: str) -> str:
+    """Nur der Text, in dem Abhängigkeitsnamen laut TOML-Struktur überhaupt
+    stehen können: die `dependencies = [...]`-Zeile(n) im
+    `[project]`-Wurzelabschnitt, plus jede Zeile innerhalb einer bekannten
+    Abhängigkeits-Tabelle (`[project.optional-dependencies]`,
+    `[tool.poetry.dependencies]`, …). Freitextfelder wie `description` und
+    Kommentare fließen nie ein — siehe Skriptkopf, Fix-Runde."""
+    clean = _strip_toml_line_comments(text)
+    relevant: list[str] = []
+    current_section = ""
+    in_dep_array = False
+
+    for raw_line in clean.splitlines():
+        header = _TOML_SECTION_RE.match(raw_line.strip())
+        if header:
+            current_section = header.group(1)
+            in_dep_array = False
+            continue
+
+        if in_dep_array:
+            relevant.append(raw_line)
+            if raw_line.count("]") >= raw_line.count("["):
+                in_dep_array = False
+            continue
+
+        stripped_line = raw_line.strip()
+        if current_section in ("project", "") and re.match(r"^dependencies\s*=", stripped_line):
+            relevant.append(raw_line)
+            in_dep_array = raw_line.count("[") > raw_line.count("]")
+            continue
+
+        if _TOML_DEP_TABLE_RE.match(current_section):
+            relevant.append(raw_line)
+
+    return "\n".join(relevant)
+
+
+def _has_toml_scripts_section(text: str) -> bool:
+    """`[project.scripts]`/`[tool.poetry.scripts]` nur als echte Abschnitts-
+    Kopfzeile, nicht als Substring irgendwo im Text (auch nicht in einem
+    Kommentar wie `# TODO: add [project.scripts] someday`)."""
+    clean = _strip_toml_line_comments(text)
+    return any(
+        _TOML_SCRIPTS_SECTION_RE.match(_TOML_SECTION_RE.match(line.strip()).group(1))
+        for line in clean.splitlines()
+        if _TOML_SECTION_RE.match(line.strip())
+    )
+
+
+def _strip_hash_comments(text: str) -> str:
+    """Zeilenweises `#`-Kommentar-Entfernen für `requirements.txt` — dort
+    gibt es keine Anführungszeichen-Fälle wie in TOML, ein einfacher Split
+    reicht."""
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+def _strip_xml_comments(text: str) -> str:
+    """`<!-- ... -->`-Kommentare aus pom.xml/build.gradle entfernen, damit ein
+    Kommentar wie `<!-- frueher spring-web erwogen -->` keine Abhängigkeit
+    vortäuscht."""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -179,18 +295,23 @@ def _scan_pyproject(loc_label: str, loc_path: Path, scores: dict, signals: dict,
     path = loc_path / "pyproject.toml"
     if not path.is_file():
         return
-    text = _read_text(path).lower()
-    runner = "pytest" if "pytest" in text else None
+    raw_text = _read_text(path)
+    # Nur der Abhängigkeits-relevante Text zählt — Kommentare und Freitextfelder
+    # (description, readme, …) fließen nicht ein (siehe Skriptkopf, Fix-Runde).
+    dep_text = _extract_toml_dependency_text(raw_text).lower()
+    has_scripts_section = _has_toml_scripts_section(raw_text)
+
+    runner = "pytest" if "pytest" in dep_text else None
     languages.append({"name": "python", "location": loc_label, "runner": runner})
 
-    rest_hits = [n for n in REST_API_DEP_NAMES if n in text]
+    rest_hits = [n for n in REST_API_DEP_NAMES if n in dep_text]
     if rest_hits:
-        _bump(scores, signals, "rest-api", 1, f"pyproject.toml in {loc_label} erwähnt {', '.join(rest_hits)}")
+        _bump(scores, signals, "rest-api", 1,
+              f"pyproject.toml in {loc_label} erwähnt {', '.join(rest_hits)} (Abhängigkeitsabschnitt)")
 
-    cli_hits = [n for n in CLI_DEP_NAMES if n in text]
-    has_scripts_section = "[project.scripts]" in text or "[tool.poetry.scripts]" in text
+    cli_hits = [n for n in CLI_DEP_NAMES if n in dep_text]
     if cli_hits or has_scripts_section:
-        why = (f"pyproject.toml in {loc_label} erwähnt {', '.join(cli_hits)}" if cli_hits
+        why = (f"pyproject.toml in {loc_label} erwähnt {', '.join(cli_hits)} (Abhängigkeitsabschnitt)" if cli_hits
                else f"pyproject.toml in {loc_label} hat einen Scripts-Abschnitt")
         _bump(scores, signals, "cli-library", 2, why)
 
@@ -203,7 +324,9 @@ def _scan_requirements(loc_label: str, loc_path: Path, scores: dict, signals: di
     # Fallback für Repos ohne pyproject.toml.
     if any(lang["location"] == loc_label and lang["name"] == "python" for lang in languages):
         return
-    text = _read_text(path).lower()
+    # requirements.txt ist zeilenweise ohnehin nur Abhängigkeiten (kein
+    # Freitext wie bei pyproject.toml) — hier reicht Kommentar-Entfernung.
+    text = _strip_hash_comments(_read_text(path)).lower()
     runner = "pytest" if "pytest" in text else None
     languages.append({"name": "python", "location": loc_label, "runner": runner})
 
@@ -219,7 +342,8 @@ def _scan_pom(loc_label: str, loc_path: Path, scores: dict, signals: dict, langu
             break
     else:
         return
-    text = _read_text(build_file).lower()
+    raw_text = _read_text(build_file)
+    text = _strip_xml_comments(raw_text).lower()
     runner = "maven/junit" if "junit" in text else None
     languages.append({"name": "java", "location": loc_label, "runner": runner})
     if "spring-boot-starter-web" in text or "spring-web" in text:
@@ -293,33 +417,43 @@ def _git_info(repo: Path) -> dict:
 
 
 def _legacy_score(file_count: int, tests_found: bool, git_info: dict) -> dict:
-    """Score, kein Orakel (Spec 05). Bekannte Grenze: `evalkit`-Fixtures können
-    kein Commit-Alter simulieren (alle Fixture-Commits entstehen "jetzt") — die
-    Alterskomponente unten ist deshalb über Evals nicht auslösbar, siehe
-    docs/known-limits.md, Abschnitt testing-strategy."""
-    score = 0
-    reasons: list[str] = []
+    """Score, kein Orakel (Spec 05) — aber **keine reine Summe mehr** (Review-
+    Fund): 'keine Tests' ist eine notwendige, nie eine hinreichende Bedingung.
+    Ein frisches, gerade erst begonnenes Projekt hat fast immer noch keine
+    Tests und ist trotzdem kein Legacy-Fall, sondern braucht normale Units —
+    der Unterschied zwischen beiden ist der ganze Sinn dieses Adapters.
+    `suspected` ist deshalb: keine Tests **UND** (Alterssignal ODER
+    Umfangssignal), wobei die Umfangsschwellen bewusst über das hinausgehen,
+    was ein Projekt in seinen ersten Commits ansammelt.
 
-    if not tests_found:
-        score += 2
-        reasons.append("keine Testdateien gefunden")
-    if file_count >= LEGACY_FILE_COUNT_THRESHOLD:
-        score += 1
-        reasons.append(f"{file_count} Dateien im Repo (Schwelle {LEGACY_FILE_COUNT_THRESHOLD})")
+    Bekannte Grenze: `evalkit`-Fixtures können kein Commit-Alter simulieren
+    (alle Fixture-Commits entstehen "jetzt") — das Alterssignal ist deshalb
+    über Evals nicht auslösbar, nur das Umfangssignal (Datei-/Commit-Zahl).
+    Siehe docs/known-limits.md, Abschnitt testing-strategy."""
+    if tests_found:
+        return {"suspected": False, "score": 0, "reasons": ["Testdateien gefunden"]}
+
+    reasons: list[str] = ["keine Testdateien gefunden"]
+    scale_signals: list[str] = []
 
     if git_info["available"]:
         commit_count = git_info["commit_count"] or 0
         if commit_count >= LEGACY_COMMIT_COUNT_THRESHOLD:
-            score += 1
-            reasons.append(f"{commit_count} Commits Historie (Schwelle {LEGACY_COMMIT_COUNT_THRESHOLD})")
+            scale_signals.append(f"{commit_count} Commits Historie (Schwelle {LEGACY_COMMIT_COUNT_THRESHOLD})")
         days = git_info["first_commit_days_ago"]
         if days is not None and days >= LEGACY_AGE_DAYS_THRESHOLD:
-            score += 2
-            reasons.append(f"erster Commit vor {days / 365:.1f} Jahren")
+            scale_signals.append(f"erster Commit vor {days / 365:.1f} Jahren")
     else:
         reasons.append("kein Git-Repo — Historiensignale (Alter, Commit-Zahl) fehlen")
 
-    return {"suspected": score >= LEGACY_THRESHOLD, "score": score, "reasons": reasons}
+    if file_count >= LEGACY_FILE_COUNT_THRESHOLD:
+        scale_signals.append(f"{file_count} Dateien im Repo (Schwelle {LEGACY_FILE_COUNT_THRESHOLD})")
+
+    reasons.extend(scale_signals)
+    # score bleibt informativ (wie viele Umfangs-/Alterssignale zusätzlich zu
+    # "keine Tests" vorliegen) — die Entscheidung selbst ist die
+    # notwendig-und-hinreichend-Bedingung unten, kein Schwellenwert-Vergleich.
+    return {"suspected": bool(scale_signals), "score": len(scale_signals) + 1, "reasons": reasons}
 
 
 # ---------------------------------------------------------------------------

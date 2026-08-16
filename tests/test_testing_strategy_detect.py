@@ -107,6 +107,75 @@ def test_express_dependency_in_package_json_signals_rest_api(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Kommentare und Abschnittsgrenzen in pyproject.toml/requirements.txt
+# (Reviewer-Fund: Substring-Suche griff bisher auch in Kommentaren/Freitext)
+# ---------------------------------------------------------------------------
+
+
+def test_pyproject_comment_mentioning_framework_is_not_a_signal(tmp_path):
+    """Ein reines Click-CLI-Tool mit einem Kommentar, der 'django' nur
+    erwähnt, darf nicht als rest-api klassifiziert werden."""
+    write(tmp_path, "pyproject.toml",
+          "[project]\n"
+          "name = 'x'\n"
+          "# früher haben wir django evaluiert, jetzt ist es ein reines CLI-Tool\n"
+          "dependencies = ['click']\n")
+    result = detect_stack.classify(tmp_path)
+    types = {c["type"] for c in result["candidates"]}
+    assert "rest-api" not in types
+    assert result["primary"] == "cli-library"
+
+
+def test_pyproject_real_dependency_still_detected_alongside_unrelated_comments(tmp_path):
+    """Gegenprobe: Ein echtes Django-Projekt (django in der echten
+    Dependency-Liste, nicht nur im Kommentar) wird weiterhin erkannt, auch
+    wenn Kommentare an anderer Stelle stehen."""
+    write(tmp_path, "pyproject.toml",
+          "[project]\n"
+          "name = 'x'\n"
+          "# TODO: irgendwann auf uv umstellen\n"
+          "dependencies = ['django']\n")
+    result = detect_stack.classify(tmp_path)
+    assert result["primary"] == "rest-api"
+
+
+def test_pyproject_description_field_is_not_scanned_for_dependency_names(tmp_path):
+    """Freitextfelder wie `description` sind kein Abhängigkeitsabschnitt —
+    ein Produktname 'flask-shaped mug' darf keine rest-api-Erkennung sein."""
+    write(tmp_path, "pyproject.toml",
+          "[project]\n"
+          "name = 'x'\n"
+          "description = 'sells a flask-shaped mug'\n"
+          "dependencies = ['click']\n")
+    result = detect_stack.classify(tmp_path)
+    types = {c["type"] for c in result["candidates"]}
+    assert "rest-api" not in types
+
+
+def test_project_scripts_mentioned_only_in_comment_is_not_cli_signal(tmp_path):
+    write(tmp_path, "pyproject.toml",
+          "[project]\n"
+          "name = 'x'\n"
+          "# TODO: add [project.scripts] someday\n"
+          "dependencies = ['requests']\n")
+    result = detect_stack.classify(tmp_path)
+    assert result["candidates"] == []
+
+
+def test_requirements_txt_comment_only_mention_is_not_a_signal(tmp_path):
+    write(tmp_path, "requirements.txt", "# django war mal im Rennen, jetzt nicht mehr\npytest\nclick\n")
+    result = detect_stack.classify(tmp_path)
+    types = {c["type"] for c in result["candidates"]}
+    assert "rest-api" not in types
+
+
+def test_requirements_txt_inline_comment_stripped_but_dependency_still_detected(tmp_path):
+    write(tmp_path, "requirements.txt", "flask==2.0  # Webframework fuer die API\npytest\n")
+    result = detect_stack.classify(tmp_path)
+    assert result["primary"] == "rest-api"
+
+
+# ---------------------------------------------------------------------------
 # Frontend-SPA und CLI-Library
 # ---------------------------------------------------------------------------
 
@@ -229,24 +298,64 @@ def test_pom_xml_signals_java_and_spring_as_rest_api(tmp_path):
     assert result["primary"] == "rest-api"
 
 
+def test_pom_xml_comment_mentioning_spring_web_is_not_a_signal(tmp_path):
+    """Dieselbe Fehlerklasse wie bei pyproject.toml: ein XML-Kommentar darf
+    keine Abhängigkeit vortäuschen."""
+    write(tmp_path, "pom.xml",
+          "<project><!-- frueher spring-web erwogen, jetzt reines Batch-Tool -->"
+          "<dependencies><dependency>junit</dependency></dependencies></project>")
+    result = detect_stack.classify(tmp_path)
+    assert result["candidates"] == []
+
+
 # ---------------------------------------------------------------------------
 # Legacy-Score
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_suspected_via_no_tests_and_commit_count(tmp_path):
+def test_legacy_no_tests_alone_is_not_sufficient(tmp_path):
+    """Kernfall aus der Reviewrunde: Ein frisches, gerade erst begonnenes
+    Projekt hat fast immer noch keine Tests — das allein macht es nicht zu
+    Legacy. 'keine Tests' ist eine notwendige, nie eine hinreichende
+    Bedingung; ohne ein zusätzliches Alters- oder Umfangssignal bleibt
+    suspected False, egal wie viele (wenige) Commits es schon gibt."""
     init_git(tmp_path)
-    for i in range(10):
+    for i in range(8):
+        write(tmp_path, f"module_{i}.py", f"def f_{i}():\n    return {i}\n")
+        commit_all(tmp_path, f"feat: modul {i}")
+    result = detect_stack.classify(tmp_path)
+    assert result["tests_found"] is False
+    assert result["legacy"]["suspected"] is False
+
+
+def test_legacy_suspected_via_no_tests_and_large_commit_count(tmp_path):
+    init_git(tmp_path)
+    for i in range(26):
         write(tmp_path, f"module_{i}.py", f"def f_{i}():\n    return {i}\n")
         commit_all(tmp_path, f"feat: modul {i}")
     result = detect_stack.classify(tmp_path)
     assert result["legacy"]["suspected"] is True
-    assert result["legacy"]["score"] >= 3
+    assert any("Commits" in reason for reason in result["legacy"]["reasons"])
 
 
-def test_legacy_not_suspected_when_tests_exist(tmp_path):
+def test_legacy_suspected_via_no_tests_and_large_file_count(tmp_path):
+    """Das Umfangssignal wirkt auch ohne viele Commits — ein einziger Commit
+    mit vielen Dateien reicht, solange keine Tests dabei sind."""
     init_git(tmp_path)
-    for i in range(10):
+    for i in range(22):
+        write(tmp_path, f"src/module_{i}.py", f"def f_{i}():\n    return {i}\n")
+    commit_all(tmp_path, "feat: initialer Import aus dem alten System")
+    result = detect_stack.classify(tmp_path)
+    assert result["legacy"]["suspected"] is True
+    assert any("Dateien" in reason for reason in result["legacy"]["reasons"])
+
+
+def test_legacy_not_suspected_when_tests_exist_even_with_large_history(tmp_path):
+    """Gegenprobe: Selbst ein umfangreiches Repo gilt nicht als Legacy, wenn
+    es Tests hat — Umfang allein ersetzt die fehlenden Tests nicht als
+    Voraussetzung."""
+    init_git(tmp_path)
+    for i in range(26):
         write(tmp_path, f"module_{i}.py", f"def f_{i}():\n    return {i}\n")
         commit_all(tmp_path, f"feat: modul {i}")
     write(tmp_path, "tests/test_module_0.py", "def test_f_0():\n    assert True\n")
