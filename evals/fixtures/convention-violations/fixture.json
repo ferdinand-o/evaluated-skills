@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein Model mit zwei mechanisch erkennbaren Konventions-Verstoessen: camelCase-Spalte und varchar(50) statt text."
+}
