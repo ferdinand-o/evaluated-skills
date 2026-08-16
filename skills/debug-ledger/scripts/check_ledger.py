@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -130,10 +131,63 @@ def check(path: Path) -> list[str]:
     return violations
 
 
+def _is_git_repo(repo: Path) -> bool:
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=repo, capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0 and done.stdout.strip() == "true"
+
+
+def staged_ledgers(repo: Path) -> list[str]:
+    """Gestagte Ledger-Dateien unter docs/debugging/, ohne INDEX.md.
+
+    Grundlage für den optionalen G3-Hook (`assets/hooks/check-ledger.json`): Der
+    Hook ruft `check_ledger.py --staged` statt einer festen Ledger-Datei, weil er
+    zum Zeitpunkt des Commits nicht weiß, welche Datei gemeint ist.
+    """
+    done = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo, capture_output=True, text=True, timeout=30, check=False,
+    )
+    paths = [p.strip() for p in done.stdout.splitlines() if p.strip()]
+    return [p for p in paths if p.startswith("docs/debugging/") and p.endswith(".md") and not p.endswith("INDEX.md")]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="debug-ledger: Ledger-Pflichtfelder prüfen (G2)")
-    parser.add_argument("ledger", type=Path)
+    parser.add_argument("ledger", type=Path, nargs="?", help="Pfad zu einer Ledger-Datei")
+    parser.add_argument("--staged", action="store_true", help="alle gestagten Ledger prüfen (für den G3-Hook)")
+    parser.add_argument("--repo", type=Path, default=Path("."), help="nur mit --staged relevant")
     args = parser.parse_args(argv)
+
+    if args.staged and args.ledger:
+        parser.error("--staged und ein Ledger-Pfad schließen sich aus")
+    if not args.staged and not args.ledger:
+        parser.error("Ledger-Pfad oder --staged angeben")
+
+    if args.staged:
+        if not _is_git_repo(args.repo):
+            print(f"debug-ledger: kein Git-Repository unter {args.repo} — --staged nicht verfügbar", file=sys.stderr)
+            return 2
+        ledgers = staged_ledgers(args.repo)
+        if not ledgers:
+            print("OK: keine gestagten Ledger-Dateien")
+            return 0
+        any_violation = False
+        for rel in ledgers:
+            violations = check(args.repo / rel)
+            if violations:
+                any_violation = True
+                print(f"Verstoß gemeldet in {rel} ({len(violations)}):")
+                for violation in violations:
+                    print(f"  - {violation}")
+            else:
+                print(f"OK: {rel}")
+        return 1 if any_violation else 0
 
     if not args.ledger.is_file():
         print(f"debug-ledger: Ledger nicht gefunden: {args.ledger}", file=sys.stderr)

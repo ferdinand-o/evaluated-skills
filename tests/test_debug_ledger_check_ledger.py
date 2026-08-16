@@ -152,6 +152,74 @@ def test_main_clean_ledger_returns_zero_and_prints_ok(tmp_path, capsys):
     assert "OK" in capsys.readouterr().out
 
 
+# --- --staged (Grundlage des optionalen G3-Hooks) -------------------------------
+
+def git(repo, *args):
+    import subprocess
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+@pytest.fixture
+def staged_repo(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "README.md").write_text("x\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "init")
+    return tmp_path
+
+
+def test_staged_ledgers_finds_only_staged_debugging_files(staged_repo):
+    target = make_mini_ledger(staged_repo)
+    git(staged_repo, "add", "-A")
+    rels = check_ledger.staged_ledgers(staged_repo)
+    assert rels == [target.relative_to(staged_repo).as_posix()]
+
+
+def test_staged_ledgers_excludes_index(staged_repo):
+    make_mini_ledger(staged_repo)  # bootstrapt auch INDEX.md
+    git(staged_repo, "add", "-A")
+    rels = check_ledger.staged_ledgers(staged_repo)
+    assert all(not r.endswith("INDEX.md") for r in rels)
+
+
+def test_main_staged_clean_when_nothing_staged(staged_repo, capsys):
+    rc = check_ledger.main(["--staged", "--repo", str(staged_repo)])
+    assert rc == 0
+    assert "OK" in capsys.readouterr().out
+
+
+def test_main_staged_reports_violation(staged_repo, capsys):
+    target = make_mini_ledger(staged_repo)
+    rel = target.relative_to(staged_repo).as_posix()
+    new_ledger.action_escalate(staged_repo, rel)
+    text = target.read_text(encoding="utf-8")
+    text = text.replace("## Fix\n_(noch offen)_", "## Fix\nirgendein Fix")
+    target.write_text(text, encoding="utf-8")
+    git(staged_repo, "add", "-A")
+
+    rc = check_ledger.main(["--staged", "--repo", str(staged_repo)])
+    assert rc == 1
+    assert "Hypothesen-Tabelle" in capsys.readouterr().out
+
+
+def test_main_staged_rejects_non_git_repo(tmp_path, capsys):
+    rc = check_ledger.main(["--staged", "--repo", str(tmp_path)])
+    assert rc == 2
+    assert "kein Git-Repository" in capsys.readouterr().err
+
+
+def test_main_rejects_staged_and_ledger_together(tmp_path):
+    with pytest.raises(SystemExit):
+        check_ledger.main(["--staged", str(tmp_path / "x.md")])
+
+
+def test_main_rejects_neither_staged_nor_ledger():
+    with pytest.raises(SystemExit):
+        check_ledger.main([])
+
+
 def test_main_violation_returns_one_and_lists_it(tmp_path, capsys):
     target = make_mini_ledger(tmp_path)
     rel = target.relative_to(tmp_path).as_posix()
