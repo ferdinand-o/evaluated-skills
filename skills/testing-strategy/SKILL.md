@@ -82,6 +82,17 @@ Message-Route in einer Chrome-Extension nennt `Schichten:` explizit
 **SW-Termination** mit dem betroffenen Route-Namen — das ist das Kernrisiko
 jeder MV3-Extension und darf nie stillschweigend fehlen.
 
+## Die Playwright-Fixture ist ungeprüft
+
+`references/chrome-extension.md` enthält eine vollständig ausgeschriebene
+Playwright-Persistent-Context-Fixture und ein SW-Termination-Chaostest-Muster.
+**Keines von beiden ist je gegen einen echten Browser gelaufen.** Schreib
+nirgends — auch nicht sinngemäß, auch nicht in einer Randbemerkung — dass
+diese Fixture „getestet", „erprobt", „verifiziert" oder „funktioniert" sei.
+Jeder Verweis darauf trägt den Vorbehalt „ungeprüft, siehe
+`docs/known-limits.md`". Das gilt unabhängig davon, ob der Test-Plan-Block
+oder die Anti-Zeremonie-Ausnahme greift.
+
 ## Anti-Zeremonie-Ausnahme
 
 Ein einzelner neuer Test in einem laut `detect_stack.json` bereits getesteten,

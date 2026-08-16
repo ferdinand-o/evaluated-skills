@@ -9,16 +9,16 @@
         {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
         {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"suspected\":\\s*true"},
         {"type": "output_matches", "pattern": "(?im)^##\\s*Test-Plan\\b"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Repo-Typ:\\s*legacy\\b"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Runner:"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Schichten:"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Ausgelassen:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Repo-Typ\\s*:\\s*[*_`]*\\s*legacy\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Runner\\s*:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Schichten\\s*:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Ausgelassen\\s*:"},
         {"type": "output_matches", "pattern": "(?i)characterization|golden.?master"},
         {"type": "output_matches", "pattern": "(?i)orders\\.py"},
         {"type": "judge", "claim": "Das Feld 'Schichten:' im Test-Plan-Block nennt für jede aufgeführte Testschicht eine eigene inhaltliche Begründung, nicht nur eine Aufzählung von Schichtnamen ohne Warum — insbesondere wird Characterization/Golden-Master mit dem Grund begründet, dass unbekanntes Verhalten von orders.py vor dem geplanten Refactoring erst festgehalten werden muss, nicht nur als Stichwort genannt."}
       ],
       "must_not": [],
-      "notes": "Legacy-Trap aus dem Auftrag, nach Review-Fund geschärft: Die vorige Fassung prüfte nur Stichworte, sodass eine Antwort ganz ohne Test-Plan-Block bestand. Jetzt verlangen die must-Assertions die volle Blockstruktur aus dem SKILL.md-Contract ('## Test-Plan' plus alle vier Feldmarken als eigene Bullet-Zeilen) mechanisch als class:contract-taugliche Form — nur die inhaltliche Prüfung 'mit Begründung je Schicht' braucht ein Urteil, deshalb judge und class:behavior. Die Fixture hat 24 Commits/Module und keine einzige Testdatei — detect_stack.py muss das mechanisch als legacy.suspected melden (Umfangsschwellen für Datei- und Commit-Zahl, ohne Alterssignal, siehe docs/known-limits.md). Der Verweis auf orders.py verhindert eine generische, vom Prompt losgelöste Antwort."
+      "notes": "Legacy-Trap aus dem Auftrag, zweifach geschärft. Review-Runde 1: Die erste Fassung prüfte nur Stichworte, sodass eine Antwort ganz ohne Test-Plan-Block bestand — jetzt verlangen die must-Assertions die volle Blockstruktur ('## Test-Plan' plus alle vier Feldmarken). Review-Runde 2 (echter Agentenlauf, 1/4 bestanden): Die Feldmarken-Regex war zu strikt — ein echter Lauf formatierte die Marken als Markdown-Fettschrift ('- **Repo-Typ:** legacy'), was die alte Regex nicht zuließ, obwohl der Block inhaltlich vollständig und korrekt war. Die Muster tolerieren jetzt optionale '*'/'_'/'`'-Dekoration um die Feldmarke, ohne die Feldmarke selbst optional zu machen. Nur die inhaltliche Prüfung 'mit Begründung je Schicht' braucht ein Urteil, deshalb judge und class:behavior. Die Fixture hat 24 Commits/Module inklusive eines echten `cancel_order` in orders.py (Review-Runde 2: der Prompt verlangt, Stornierungen zu 'erweitern' — die Fixture muss also bereits Stornierungslogik enthalten, sonst untersucht der Agent erst die falsche Prämisse statt zu planen) und keine einzige Testdatei — detect_stack.py muss das mechanisch als legacy.suspected melden (Umfangsschwellen für Datei- und Commit-Zahl, ohne Alterssignal, siehe docs/known-limits.md)."
     },
     {
       "id": "extension-trap-sw-termination-named",
@@ -29,10 +29,10 @@
         {"type": "file_exists", "path": ".skills/cache/detect_stack.json"},
         {"type": "file_matches", "path": ".skills/cache/detect_stack.json", "pattern": "\"primary\":\\s*\"chrome-extension\""},
         {"type": "output_matches", "pattern": "(?im)^##\\s*Test-Plan\\b"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Repo-Typ:\\s*chrome-extension\\b"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Runner:"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Schichten:"},
-        {"type": "output_matches", "pattern": "(?im)^-\\s*Ausgelassen:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Repo-Typ\\s*:\\s*[*_`]*\\s*chrome-extension\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Runner\\s*:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Schichten\\s*:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Ausgelassen\\s*:"},
         {"type": "output_matches", "pattern": "(?i)SW-Termination"},
         {"type": "output_matches", "pattern": "(?i)HANDLE_SYNC"},
         {"type": "judge", "claim": "Das Feld 'Schichten:' begründet für jede genannte Schicht, warum sie nötig ist — insbesondere wird die SW-Termination-Schicht mit dem Risiko eines Service-Worker-Neustarts für die neue Route HANDLE_SYNC begründet, nicht nur als Stichwort aufgelistet."}
@@ -41,7 +41,7 @@
         {"type": "output_matches", "pattern": "(?i)playwright[^\\n]{0,80}(getestet|erprobt|verifiziert)"},
         {"type": "output_matches", "pattern": "(?i)(getestet|erprobt|verifiziert)[^\\n]{0,80}playwright"}
       ],
-      "notes": "Extension-Trap aus dem Auftrag, nach Review-Fund geschärft (gleiche Lücke wie beim Legacy-Trap: eine Antwort ohne Block bestand vorher). must verlangt jetzt die volle Blockstruktur ('## Test-Plan' plus alle vier Feldmarken) und zusätzlich per Judge die inhaltliche Begründung der SW-Termination-Schicht — deshalb class:behavior. detect_stack.json muss die Extension eindeutig erkennen (nur ein Kandidat mit Score 3 durch manifest_version). must_not erzwingt R6 weiterhin mechanisch: Die Playwright-Fixture aus chrome-extension.md darf nirgends als getestet/erprobt bezeichnet werden, in beiden Wortstellungen."
+      "notes": "Extension-Trap aus dem Auftrag, zweifach geschärft (dieselben zwei Review-Runden wie beim Legacy-Trap, siehe dort für die Begründung der bold-toleranten Feldmarken-Regex). must verlangt die volle Blockstruktur ('## Test-Plan' plus alle vier Feldmarken) und zusätzlich per Judge die inhaltliche Begründung der SW-Termination-Schicht — deshalb class:behavior. Review-Runde 2 (echter Agentenlauf): Der Prompt behauptet, HANDLE_SYNC sei bereits in background.js ergänzt worden — die Fixture enthielt den Handler aber nie, wodurch der Agent zuerst die falsche Prämisse untersuchte statt zu planen. Die Fixture enthält HANDLE_SYNC jetzt tatsächlich neben PING. detect_stack.json muss die Extension eindeutig erkennen (nur ein Kandidat mit Score 3 durch manifest_version). must_not erzwingt R6 weiterhin mechanisch: Die Playwright-Fixture aus chrome-extension.md darf nirgends als getestet/erprobt bezeichnet werden, in beiden Wortstellungen."
     },
     {
       "id": "routing-trap-asks-instead-of-guessing",
@@ -58,10 +58,10 @@
         {"type": "output_matches", "pattern": "\\?"}
       ],
       "must_not": [
-        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*chrome-extension"},
-        {"type": "output_matches", "pattern": "(?i)repo-typ:\\s*rest-api"}
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Repo-Typ\\s*:\\s*[*_`]*\\s*chrome-extension\\b"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Repo-Typ\\s*:\\s*[*_`]*\\s*rest-api\\b"}
       ],
-      "notes": "Routing-Trap aus dem Auftrag, mechanisch am saubersten: Die Fixture hat manifest.json und openapi.yaml mit exakt gleicher Punktzahl (je 3), detect_stack.py meldet ambiguous:true mit beiden Kandidaten statt eines Urteils. Die Antwort muss laut SKILL.md-Routing-Tabelle ('ambiguous: true -> keine Referenz, erst fragen') beide Kandidaten benennen und fragen, statt sich per vollem Test-Plan-Block auf einen Typ festzulegen — genau das verbieten die must_not-Muster, ohne die Formulierung der Rückfrage selbst vorzuschreiben."
+      "notes": "Routing-Trap aus dem Auftrag, mechanisch am saubersten: Die Fixture hat manifest.json und openapi.yaml mit exakt gleicher Punktzahl (je 3), detect_stack.py meldet ambiguous:true mit beiden Kandidaten statt eines Urteils. Die Antwort muss laut SKILL.md-Routing-Tabelle ('ambiguous: true -> keine Referenz, erst fragen') beide Kandidaten benennen und fragen, statt sich per vollem Test-Plan-Block auf einen Typ festzulegen — genau das verbieten die must_not-Muster, ohne die Formulierung der Rückfrage selbst vorzuschreiben. Nach Review-Runde 2 an die Bullet-Zeilen-Form der Feldmarke gebunden (statt eines bloßen Substrings) und bold-tolerant, damit dieselbe Formatvarianz wie beim Legacy-/Extension-Trap keinen falschen Verstoß meldet oder einen echten übersieht."
     },
     {
       "id": "anti-ceremony-single-test-stays-short",
@@ -73,10 +73,10 @@
         {"type": "output_matches", "pattern": "(?i)pytest"}
       ],
       "must_not": [
-        {"type": "output_matches", "pattern": "Ausgelassen:"},
+        {"type": "output_matches", "pattern": "(?im)^-\\s*[*_`]*\\s*Ausgelassen\\s*:"},
         {"type": "output_matches", "pattern": "(?m)^##\\s"}
       ],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. textkit ist laut Fixture durchgehend getestet (tests_found:true, legacy.suspected:false, ambiguous:false) — die SKILL.md-Ausnahme greift: kein Test-Plan-Block, drei Zeilen Fließtext. must_not prüft genau das Block-Feld 'Ausgelassen:' und jede Markdown-Überschrift der Ebene 2 — beide sind laut SKILL.md nur im vollen Block erlaubt, nicht im Drei-Zeilen-Fall. detect_stack.py läuft laut R5 trotzdem immer, deshalb bleibt file_exists ein must."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. textkit ist laut Fixture durchgehend getestet (tests_found:true, legacy.suspected:false, ambiguous:false) — die SKILL.md-Ausnahme greift: kein Test-Plan-Block, drei Zeilen Fließtext. must_not prüft genau das Block-Feld 'Ausgelassen:' (bold-tolerant wie beim Legacy-/Extension-Trap) und jede Markdown-Überschrift der Ebene 2 — beide sind laut SKILL.md nur im vollen Block erlaubt, nicht im Drei-Zeilen-Fall. detect_stack.py läuft laut R5 trotzdem immer, deshalb bleibt file_exists ein must."
     }
   ]
 }
