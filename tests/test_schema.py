@@ -165,3 +165,19 @@ def test_rejects_non_string_claim(tmp_path):
     }
     with pytest.raises(EvalSchemaError, match="Zeichenkette"):
         load_evals(write(tmp_path, payload))
+
+
+def test_file_unchanged_rejects_a_glob_path(tmp_path):
+    """Die Baseline kennt nur exakte Pfade -- ein Glob fände dort nie einen Schluessel.
+
+    Ohne diese Sperre meldete die Assertion "nicht in der Baseline": ein Fehlschlag,
+    der wie ein Befund ueber die Skill aussieht, aber einer ueber die evals.json ist.
+    """
+    path = tmp_path / "evals.json"
+    path.write_text(json.dumps({"evals": [{
+        "id": "x", "class": "contract", "prompt": "p",
+        "must": [{"type": "file_unchanged", "path": "docs/*.md"}],
+    }]}), encoding="utf-8")
+
+    with pytest.raises(EvalSchemaError, match="Glob-Muster"):
+        load_evals(path)
