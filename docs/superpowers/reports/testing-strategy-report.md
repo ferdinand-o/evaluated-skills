@@ -25,7 +25,8 @@ skills/testing-strategy/
                               .skills/cache/detect_stack.json
 
 tests/test_testing_strategy_detect.py   29 Tests (reine Funktionen + Verdrahtung)
-evals/testing-strategy/evals.json       4 Evals, alle class "contract"
+evals/testing-strategy/evals.json       4 Evals: 2 class "contract", 2 class
+                                         "behavior" (siehe Fix-Runde unten)
 evals/fixtures/legacy-monolith/         (kanonischer Name aus Spec 00 §2)
 evals/fixtures/chrome-extension/        (kanonischer Name aus Spec 00 §2)
 evals/fixtures/ambiguous-extension-api/
@@ -109,21 +110,93 @@ Sieben Commits, jeweils ein zusammenhängender Baustein (Plan, `detect_stack.py`
   `detect_stack.py` `primary: null` statt `rest-api`. Ergänzt in
   `docs/known-limits.md`.
 
-## Test- und Validierungsstand
+## Test- und Validierungsstand (nach der Fix-Runde)
 
-- Volle Suite: **175 von 175 Tests grün** (146 vorher + 29 neu für
-  `detect_stack.py`, reine Funktionen und Verdrahtung — u. a. ein expliziter
-  Test, dass ein mehrdeutiger Fund beide Kandidaten samt Signalen im
-  Endergebnis trägt, nicht nur in den Einzel-Scannern).
+- Volle Suite: **184 von 184 Tests grün** (146 Basis + 29 erste Runde für
+  `detect_stack.py` + 9 Fix-Runde: 5 Legacy-Score-Tests ersetzt/ergänzt
+  (notwendig-und-hinreichend-Semantik), 6 Kommentar-/Abschnitts-Tests inkl.
+  zweier expliziter Gegenproben, netto +9 — reine Funktionen und Verdrahtung,
+  u. a. ein expliziter Test, dass ein mehrdeutiger Fund beide Kandidaten samt
+  Signalen im Endergebnis trägt, nicht nur in den Einzel-Scannern).
 - `evals/testing-strategy/evals.json`: 4 Evals, Schema-Validierung ohne
-  Agentenlauf bestanden, alle `class: "contract"` (bewusst — der
-  Pflicht-Anti-Zeremonie-Eval liegt hier in `contract`, nicht wie bei
-  `handoff` in `behavior`, das den bekannten Fehler aus `docs/known-limits.md`
-  wiederholt hätte).
+  Agentenlauf bestanden. **2× `class: "contract"`** (Routing-Trap,
+  Anti-Zeremonie — vollständig mechanisch, der Pflicht-Anti-Zeremonie-Eval
+  liegt bewusst in `contract`, nicht wie bei `handoff` in `behavior`, das den
+  bekannten Fehler aus `docs/known-limits.md` wiederholt hätte). **2×
+  `class: "behavior"`** (Legacy-Trap, Extension-Trap — seit der Fix-Runde
+  mit einer Judge-Assertion für die inhaltliche „Begründung je Schicht"-Prüfung,
+  die `class: contract` laut Spec 00 §2 nicht erlaubt; die reine
+  Blockstruktur-Prüfung bleibt trotzdem mechanisch über `output_matches`).
 - Alle datei-basierten `must`/`must_not`-Assertionen mechanisch gegen echte
   Fixture-Workspaces gegenprüft (siehe oben) — kein Assertion-Typ, der
   gegen den tatsächlichen `detect_stack.json`-Output der jeweiligen Fixture
   anders ausgefallen wäre als erwartet.
+- Die geschärften `output_matches`-Muster für den Test-Plan-Block zusätzlich
+  gegen zwei von Hand konstruierte Beispieltexte geprüft: ein „gegamter" Text
+  ohne Block (fällt jetzt bei allen vier Feldmarken-Assertions durch) und ein
+  vollständiger Block (besteht alle sieben must-Assertions).
+
+## Fix-Runde (unabhängiger Review)
+
+Vier Befunde, alle behoben:
+
+1. **Test-Plan-Evals prüften Stichworte statt des Contracts.** Eine Antwort
+   ganz ohne Test-Plan-Block bestand Legacy-Trap und Extension-Trap. Fix:
+   Beide Evals verlangen jetzt mechanisch die volle Blockstruktur aus dem
+   SKILL.md-Contract (`## Test-Plan` plus alle vier Feldmarken `Repo-Typ:`,
+   `Runner:`, `Schichten:`, `Ausgelassen:` als eigene Bullet-Zeilen). Die
+   inhaltliche Prüfung „Schichten mit Begründung" braucht ein Urteil und ist
+   jetzt eine Judge-Assertion — beide Evals liegen deshalb neu in
+   `class: behavior`, nicht mehr `contract`. Gegenprobe: Ein von Hand
+   konstruierter „gegamter" Text, der nur die alten Stichworte trifft, aber
+   keinen Block hat, scheitert jetzt an allen vier Feldmarken-Assertions
+   (`/tmp/.../verify_gamed_answer.py`, nicht Teil des Commits, nur zur
+   Verifikation genutzt); ein Text mit vollständigem Block besteht.
+2. **Substring-Suche klassifizierte an Kommentaren.** Ein Kommentar wie
+   `# früher haben wir django evaluiert` reichte, ein reines Click-Tool als
+   `rest-api` einzustufen. Fix: `_strip_toml_line_comments` entfernt
+   `#`-Kommentare zeilenweise (ohne `#` in Anführungszeichen zu werten),
+   `_extract_toml_dependency_text` beschränkt die Suche zusätzlich auf die
+   Abschnitte, in denen Abhängigkeitsnamen laut TOML-Struktur stehen können
+   (`dependencies = [...]` im `[project]`-Wurzelabschnitt,
+   `[project.optional-dependencies]`, `[tool.poetry.(dev-)dependencies]`);
+   `[project.scripts]`/`[tool.poetry.scripts]` wird nur noch als echte
+   Abschnitts-Kopfzeile erkannt, nicht als Substring. `requirements.txt`
+   bekam Kommentar-Stripping, `pom.xml` XML-Kommentar-Stripping (Bonus-Fix,
+   gleiche Fehlerklasse, vom Reviewer nicht explizit verlangt). Sechs neue
+   Tests, davon zwei explizite Gegenproben (echte Abhängigkeit trotz
+   unrelated Kommentaren weiterhin erkannt). **Nicht behoben:**
+   `build.gradle`s `//`-Zeilenkommentare werden nicht gestrippt — dieselbe
+   Fehlerklasse, außerhalb des geprüften Falls, in `docs/known-limits.md`
+   vermerkt.
+3. **Legacy-Score triggerte ohne Alterssignal.** „Keine Tests + ≥8 Commits"
+   reichte, jedes junge, aktive, ungetestete Repo als Legacy einzustufen.
+   **Neu geschnitten:** `suspected` ist keine Summe über eine Schwelle mehr,
+   sondern eine notwendig-und-hinreichend-Bedingung: „keine Tests" **UND**
+   (Altersignal **ODER** Umfangssignal). Die Umfangsschwellen wurden dabei
+   angehoben, damit sie nicht mehr von den ersten Commits eines frischen
+   Projekts erreicht werden: `LEGACY_FILE_COUNT_THRESHOLD` 15→20,
+   `LEGACY_COMMIT_COUNT_THRESHOLD` 8→25 (Altersschwelle unverändert 3 Jahre).
+   Ein Repo mit Tests ist jetzt nie mehr suspected, unabhängig vom Umfang —
+   Umfang ersetzt Tests nicht, er ersetzt nur das Alterssignal, das der
+   Harness nicht simulieren kann. Die `legacy-monolith`-Fixture wuchs von 10
+   auf 24 Commits/Module, um die neuen Schwellen zu überschreiten (weiterhin
+   mechanisch gegen den echten Fixture-Workspace verifiziert:
+   `legacy.suspected: true`, Gründe „keine Testdateien gefunden", „25 Commits
+   Historie", „25 Dateien im Repo"). Fünf neue/ersetzte Unit-Tests, darunter
+   `test_legacy_no_tests_alone_is_not_sufficient` als direkte Kodierung des
+   Reviewer-Falls und eine Gegenprobe mit Tests trotz großem Umfang.
+4. **`chrome-extension.md` bei 194 Zeilen.** Kein Handlungsbedarf laut
+   Review. Bleibt der erste Kandidat für die Promotion-Regel — vermerkt im
+   SKILL.md-Abschnitt „Promotion-Regel" und in `chrome-extension.md` selbst.
+
+Nach der Fix-Runde: **184 von 184 Tests grün** (175 vorher + 9 neu:
+5 Legacy-Score-Tests ersetzt/ergänzt, 6 Kommentar-/Abschnitts-Tests, netto
++9). `evals/testing-strategy/evals.json` weiterhin schema-valide, jetzt 2
+`contract`- und 2 `behavior`-Evals (vorher 4× `contract`) — bewusst, weil
+zwei der vier Evals jetzt eine Judge-Assertion für die inhaltliche
+„mit Begründung"-Prüfung brauchen, die `class: contract` laut Spec 00 §2
+nicht erlaubt.
 
 ## Offene Sorgen
 
@@ -133,10 +206,20 @@ Sieben Commits, jeweils ein zusammenhängender Baustein (Plan, `detect_stack.py`
    `Ausgelassen:`-Verbot) sind bewusst eng an Formulierungen gebunden, die in
    der SKILL.md selbst als Contract stehen — aber ob ein echtes Modell diese
    Formulierungen tatsächlich so trifft, ist ungeprüft.
-2. Der Legacy-Score-Schwellenwert (3) und die Einzelgewichte sind meine eigene
-   Kalibrierung, nicht aus der Spec abgeleitet — plausibel begründet, aber
-   ohne Gegenprobe an einem echten alten Repository.
-3. `chrome-extension.md` liegt mit 194 Zeilen bereits recht nah an der in der
-   eigenen Promotion-Regel genannten ~300-Zeilen-Schwelle; ein Ausbau (z. B.
-   ein echtes CDP-Hilfsskript) würde die Beförderung zur Geschwister-Skill
-   auslösen, wie im Dokument selbst vermerkt.
+2. Die Legacy-Umfangsschwellen (20 Dateien, 25 Commits) sind nach der
+   Fix-Runde meine eigene, zweite Kalibrierung — plausibler begründet als die
+   erste (notwendig-und-hinreichend statt Summe), aber immer noch ohne
+   Gegenprobe an einem echten, gewachsenen Repository. Ob 20/25 der richtige
+   Punkt ist, an dem „viele frühe Commits" in „echter Umfang" übergeht, bleibt
+   eine Annahme.
+3. Die Kommentar-/Abschnitts-Erkennung in `_extract_toml_dependency_text` ist
+   ein zeilenbasierter Heuristik-Ansatz, kein echter TOML-Parser — mehrzeilige
+   Inline-Tabellen (`dependencies = [{name = "x", version = "..."}]` über
+   mehrere Zeilen mit verschachtelten Klammern) sind nicht unit-getestet und
+   könnten die einfache Klammer-Zählung in `in_dep_array` verwirren. Ebenso
+   ungetestet: `build.gradle`s `//`-Kommentare (siehe `docs/known-limits.md`).
+4. `chrome-extension.md` liegt mit 194 Zeilen bereits recht nah an der in der
+   eigenen Promotion-Regel genannten ~300-Zeilen-Schwelle; laut Review kein
+   Handlungsbedarf jetzt, aber der nächste Promotion-Kandidat. Ein Ausbau
+   (z. B. ein echtes CDP-Hilfsskript) würde die Beförderung zur
+   Geschwister-Skill auslösen, wie im Dokument selbst vermerkt.

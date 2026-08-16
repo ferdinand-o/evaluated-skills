@@ -151,10 +151,42 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   jeden deklarierten Fixture-Commit zum Zeitpunkt des Eval-Laufs, nicht mit
   einem frei wählbaren Datum. Für `testing-strategy` heißt das konkret: Der
   Legacy-Trap-Eval (`legacy-trap-characterization-not-invented-behavior`)
-  kann `legacy.suspected: true` nur über die Kombination
-  „keine Testdateien" + „Commit-Zahl über der Schwelle" erreichen, nie über
-  das Alterssignal — dieser Codepfad in `_legacy_score()` ist unit-getestet,
+  kann `legacy.suspected: true` nur über das Umfangssignal erreichen (Datei-
+  oder Commit-Zahl über der Schwelle, siehe unten), nie über das
+  Alterssignal — dieser Codepfad in `_legacy_score()` ist unit-getestet,
   aber nie unter Eval-Bedingungen durchlaufen worden.
+- **Fix-Runde: „keine Tests" allein durfte ursprünglich Legacy bedeuten —
+  behoben, dokumentiert als Warnung für künftige Schwellenänderungen.** Die
+  erste Fassung von `_legacy_score()` summierte Punkte über eine feste
+  Schwelle (3), erreichbar allein über „keine Testdateien" (+2) plus „≥8
+  Commits" (+1) — damit galt jedes frische, gerade erst begonnene, noch
+  ungetestete Projekt fälschlich als Legacy. Ein unabhängiger Reviewer hat
+  das gefunden. Behoben: `suspected` ist jetzt eine notwendig-und-hinreichend-
+  Bedingung, keine Summe — „keine Tests" ist notwendig, aber erst zusammen
+  mit einem Alters- **oder** Umfangssignal hinreichend, dessen Schwellen
+  bewusst über das hinausgehen, was ein Projekt in seinen ersten Commits
+  ansammelt (`LEGACY_FILE_COUNT_THRESHOLD = 20`,
+  `LEGACY_COMMIT_COUNT_THRESHOLD = 25`, unverändert `LEGACY_AGE_DAYS_THRESHOLD
+  = 3 Jahre`). Die `legacy-monolith`-Fixture wurde von 10 auf 24 Commits/Module
+  erweitert, um die geschärften Schwellen zu überschreiten. Wer diese
+  Schwellen künftig weiter absenkt, sollte `test_legacy_no_tests_alone_is_not_sufficient`
+  in `tests/test_testing_strategy_detect.py` im Kopf behalten — der Test
+  scheitert, sobald ein kleines, frisches Repo wieder als Legacy gilt.
+- **Fix-Runde: Die Substring-Suche in `pyproject.toml`/`requirements.txt`
+  klassifizierte ursprünglich auch an Kommentaren — behoben.** Ein
+  Kommentar wie `# früher haben wir django evaluiert` reichte, ein reines
+  Click-CLI-Tool als `rest-api` zu klassifizieren, weil der komplette
+  Rohtext durchsucht wurde. Behoben: `_strip_toml_line_comments`/
+  `_extract_toml_dependency_text` entfernen Kommentare zeilenweise und
+  beschränken die Suche auf die Abschnitte, in denen Abhängigkeitsnamen laut
+  TOML-Struktur überhaupt stehen können (`dependencies = [...]` im
+  `[project]`-Wurzelabschnitt, `[project.optional-dependencies]`,
+  `[tool.poetry.(dev-)dependencies]`); `requirements.txt` und `pom.xml`
+  bekamen dieselbe Kommentar-Bereinigung mit ihrer jeweiligen Syntax (`#`
+  bzw. `<!-- -->`). Weiterhin kein echter Parser — `build.gradle`s
+  `//`-Zeilenkommentare werden **nicht** entfernt (nur die für pom.xml
+  ergänzte XML-Kommentarbereinigung greift dort), eine bekannte Lücke
+  derselben Fehlerklasse, die der Review nicht explizit geprüft hat.
 - **Der Router-Muster-Scan ist ein bewusst enger Textabgleich, keine
   Code-Analyse.** `detect_stack.py` durchsucht nur eine feste Liste bekannter
   Entry-Point-Dateinamen (`app.py`, `main.py`, `server.js`, …) nach wenigen
