@@ -32,6 +32,7 @@ class ColumnInfo:
     unique: bool
     has_index: bool
     fk_target: str
+    fk_ondelete: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,12 +87,16 @@ def _find_nested_call(call: ast.Call, names: tuple) -> ast.Call | None:
     return None
 
 
-def _fk_target(column_call: ast.Call) -> str:
+def _fk_info(column_call: ast.Call) -> tuple:
+    """(target, ondelete) aus einem verschachtelten ForeignKey(...)-Aufruf, oder ("", "")."""
     fk_call = _find_nested_call(column_call, ("ForeignKey",))
-    if fk_call is None or not fk_call.args:
-        return ""
-    target = _string_literal(fk_call.args[0])
-    return target or _unparse(fk_call.args[0])
+    if fk_call is None:
+        return "", ""
+    target = ""
+    if fk_call.args:
+        target = _string_literal(fk_call.args[0]) or _unparse(fk_call.args[0])
+    ondelete = _kwargs_of(fk_call).get("ondelete", "")
+    return target, ondelete.strip("'\"") if ondelete else ""
 
 
 def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
@@ -111,6 +116,7 @@ def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
         type_text = _unparse(a)
         break
 
+    fk_target, fk_ondelete = _fk_info(call)
     return ColumnInfo(
         name=attr_name,
         type_text=type_text or "?",
@@ -118,7 +124,8 @@ def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
         primary_key=_bool_text(kwargs.get("primary_key", "False")),
         unique=_bool_text(kwargs.get("unique", "False")),
         has_index=_bool_text(kwargs.get("index", "False")),
-        fk_target=_fk_target(call),
+        fk_target=fk_target,
+        fk_ondelete=fk_ondelete,
     )
 
 
@@ -237,6 +244,7 @@ def scan_source(source: str, filename: str = "<unknown>") -> ScanResult:
                 name=columns[0].name, type_text=columns[0].type_text,
                 nullable=columns[0].nullable, primary_key=columns[0].primary_key,
                 unique=columns[0].unique, has_index=True, fk_target=columns[0].fk_target,
+                fk_ondelete=columns[0].fk_ondelete,
             )
 
         tables.append(TableInfo(

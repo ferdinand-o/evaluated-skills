@@ -103,6 +103,26 @@ class User(Base):
     assert col.unique is True
 
 
+def test_scan_source_captures_fk_ondelete():
+    src = '''
+class Order(Base):
+    __tablename__ = "orders"
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+'''
+    result = erd.scan_source(src)
+    orders = next(t for t in result.tables if t.name == "orders")
+    col = next(c for c in orders.columns if c.name == "user_id")
+    assert col.fk_ondelete == "CASCADE"
+
+
+def test_scan_source_fk_without_ondelete_is_empty_string():
+    result = erd.scan_source(SIMPLE_MODEL)
+    orders = next(t for t in result.tables if t.name == "orders")
+    col = next(c for c in orders.columns if c.name == "user_id")
+    assert col.fk_ondelete == ""
+
+
 def test_scan_source_captures_relationship_calls():
     src = '''
 class User(Base):

@@ -16,8 +16,7 @@
     "timestamp_type": "timestamptz",
     "reject_datetime_without_timezone": true,
     "string_type_default": "text",
-    "reject_varchar_without_reason": true,
-    "varchar_reason_marker": "# grund:"
+    "reject_varchar": true
   },
   "required_columns": ["created_at", "updated_at"],
   "soft_delete": {
