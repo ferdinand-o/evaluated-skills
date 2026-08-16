@@ -94,6 +94,19 @@ def check_types(tables, conventions: dict) -> list:
         if not t.resolvable:
             continue
         for c in t.columns:
+            if c.type_unresolved:
+                # Review-Fund 4: SQL-Typ nicht statisch auflösbar (oft SQLAlchemy-2.0-Stil
+                # ohne explizites Typ-Argument) — die Regeln unten würden hier ohnehin nicht
+                # feuern, aber stillschweigend nichts zu finden ist keine bestandene Prüfung,
+                # sondern eine ungeprüfte Spalte. Das muss sichtbar sein, nicht nur ein "?"
+                # im Diagramm.
+                hint = f" (Python-Annotation: {c.python_annotation})" if c.python_annotation else ""
+                findings.append(_finding(
+                    "type_coverage", t.name,
+                    f"Typ von Spalte '{c.name}' nicht statisch auflösbar{hint} — "
+                    f"varchar-/timestamptz-Prüfung konnte diese Spalte nicht bewerten",
+                ))
+                continue
             if reject_varchar and VARCHAR_RE.search(c.type_text):
                 findings.append(_finding(
                     "type", t.name,

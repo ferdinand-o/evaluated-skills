@@ -33,6 +33,15 @@ class ColumnInfo:
     has_index: bool
     fk_target: str
     fk_ondelete: str = ""
+    # True, wenn kein SQL-Typ-Ausdruck aus Column(...)/mapped_column(...) lesbar war — z. B.
+    # SQLAlchemy-2.0-Stil (`id: Mapped[int] = mapped_column(primary_key=True)`), bei dem der
+    # SQL-Typ erst aus einer projektspezifischen `type_annotation_map` folgt, die diese Skill
+    # nicht kennt (Review-Fund 4). Konsumenten (lint_schema.py) dürfen für diese Spalte keine
+    # Typ-Regel anwenden, sondern müssen die Lücke selbst melden statt sie zu übergehen.
+    type_unresolved: bool = False
+    # Python-Annotation als Diagnose-Hinweis, falls vorhanden (z. B. "int" aus Mapped[int]) —
+    # kein SQL-Typ, nur ein Hinweis, warum type_unresolved gesetzt ist.
+    python_annotation: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,7 +108,23 @@ def _fk_info(column_call: ast.Call) -> tuple:
     return target, ondelete.strip("'\"") if ondelete else ""
 
 
-def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
+def _mapped_annotation_type(annotation) -> str | None:
+    """T aus einer `Mapped[T]`-Annotation (SQLAlchemy 2.0), sonst None.
+
+    Nur ein Diagnose-Hinweis — T ist ein Python-Typ (`int`, `str`, `Optional[str]`), kein
+    SQL-Typ. Der reale SQL-Typ folgt bei diesem Stil oft erst aus einer projektspezifischen
+    `type_annotation_map`, die diese Skill nicht kennt und nicht raten darf.
+    """
+    if not isinstance(annotation, ast.Subscript):
+        return None
+    value = annotation.value
+    name = value.id if isinstance(value, ast.Name) else (value.attr if isinstance(value, ast.Attribute) else None)
+    if name != "Mapped":
+        return None
+    return _unparse(annotation.slice)
+
+
+def _column_from_call(attr_name: str, call: ast.Call, annotation=None) -> ColumnInfo | None:
     call_name = _call_name(call)
     if call_name not in ("Column", "mapped_column"):
         return None
@@ -116,6 +141,16 @@ def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
         type_text = _unparse(a)
         break
 
+    # Kein SQL-Typ-Ausdruck gefunden — häufig SQLAlchemy-2.0-Stil ohne explizites
+    # Typ-Argument (`id: Mapped[int] = mapped_column(primary_key=True)`). Der SQL-Typ bleibt
+    # unbekannt (Review-Fund 4); die Python-Annotation ist nur ein Hinweis für Menschen.
+    type_unresolved = not type_text
+    python_annotation = ""
+    if type_unresolved and annotation is not None:
+        mapped_type = _mapped_annotation_type(annotation)
+        if mapped_type is not None:
+            python_annotation = mapped_type
+
     fk_target, fk_ondelete = _fk_info(call)
     return ColumnInfo(
         name=attr_name,
@@ -126,6 +161,8 @@ def _column_from_call(attr_name: str, call: ast.Call) -> ColumnInfo | None:
         has_index=_bool_text(kwargs.get("index", "False")),
         fk_target=fk_target,
         fk_ondelete=fk_ondelete,
+        type_unresolved=type_unresolved,
+        python_annotation=python_annotation,
     )
 
 
@@ -196,18 +233,28 @@ def scan_source(source: str, filename: str = "<unknown>") -> ScanResult:
         for stmt in cls.body:
             attr = None
             value = None
+            annotation = None
             if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
                 attr, value = stmt.targets[0].id, stmt.value
             elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-                attr, value = stmt.target.id, stmt.value
+                attr, value, annotation = stmt.target.id, stmt.value, stmt.annotation
             if attr is None or not isinstance(value, ast.Call):
                 continue
-            col = _column_from_call(attr, value)
+            col = _column_from_call(attr, value, annotation)
             if col is not None:
                 columns.append(col)
 
         has_table_args_index = _table_args_has_index(cls.body)
         relationships = _relationships_of(cls.body)
+
+        unresolved_types = [c.name for c in columns if c.type_unresolved]
+        if unresolved_types:
+            warnings.append(
+                f"Klasse {cls.name}: Typ von Spalte(n) {', '.join(unresolved_types)} nicht "
+                f"statisch auflösbar (kein Typ-Positionalargument in Column(...)/"
+                f"mapped_column(...) — SQLAlchemy-2.0-Mapped[...]-Stil?) — Typ-Prüfungen "
+                f"(lint_schema.py) können diese Spalten nicht bewerten"
+            )
 
         if tablename is None and resolvable is False:
             # Attribut vorhanden, aber z.B. f-String oder Funktionsaufruf.
@@ -285,6 +332,8 @@ def _column_line(col: ColumnInfo) -> str:
         flags.append("UK")
     suffix = f" {','.join(flags)}" if flags else ""
     type_text = col.type_text.replace('"', "'")
+    if col.type_unresolved and col.python_annotation:
+        type_text = f"{type_text}(Mapped_{col.python_annotation})"
     return f'        {type_text} {col.name}{suffix}'
 
 

@@ -138,6 +138,34 @@ class User(Base):
     assert findings == []
 
 
+# --- Review-Fund 4: SQLAlchemy-2.0-Stil (Mapped[T]) darf nicht stillschweigend ungeprueft bleiben
+
+def test_check_types_reports_unresolved_type_instead_of_silently_skipping():
+    erd = lint._load_gen_erd()
+    result = erd.scan_source('''
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+''')
+    findings = lint.check_types(result.tables, {"types": {"reject_varchar": True, "reject_datetime_without_timezone": True}})
+    assert len(findings) == 2
+    assert all(f["rule"] == "type_coverage" for f in findings)
+    assert any("id" in f["message"] and "int" in f["message"] for f in findings)
+
+
+def test_check_types_unresolved_column_does_not_also_fire_varchar_or_datetime_rules():
+    erd = lint._load_gen_erd()
+    result = erd.scan_source('''
+class User(Base):
+    __tablename__ = "users"
+    created_at: Mapped[object] = mapped_column()
+''')
+    findings = lint.check_types(result.tables, {"types": {"reject_varchar": True, "reject_datetime_without_timezone": True}})
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "type_coverage"
+
+
 # --- Pflichtspalten ----------------------------------------------------------------------
 
 def test_check_required_columns_flags_missing():

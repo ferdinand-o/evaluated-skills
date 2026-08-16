@@ -43,6 +43,51 @@ def test_scan_source_detects_foreign_key_target():
     assert fk_col.fk_target == "users.id"
 
 
+# --- Review-Fund 4: SQLAlchemy-2.0-Stil (Mapped[T]) muss sichtbar bleiben, nicht raten ---
+
+MAPPED_STYLE_MODEL = '''
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+'''
+
+
+def test_scan_source_flags_mapped_style_column_as_type_unresolved():
+    result = erd.scan_source(MAPPED_STYLE_MODEL)
+    users = next(t for t in result.tables if t.name == "users")
+    id_col = next(c for c in users.columns if c.name == "id")
+    assert id_col.type_unresolved is True
+    assert id_col.type_text == "?"
+    assert id_col.python_annotation == "int"
+
+
+def test_scan_source_warns_about_unresolved_types_visibly():
+    result = erd.scan_source(MAPPED_STYLE_MODEL)
+    assert any("nicht statisch auflösbar" in w and "User" in w for w in result.warnings)
+
+
+def test_scan_source_mapped_style_with_explicit_type_arg_is_resolved():
+    """Wenn ein Typ-Positionalargument da ist, bleibt es die verlässliche Quelle —
+    Mapped[...] ergänzt nur, überschreibt nicht."""
+    src = '''
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+'''
+    result = erd.scan_source(src)
+    users = next(t for t in result.tables if t.name == "users")
+    id_col = next(c for c in users.columns if c.name == "id")
+    assert id_col.type_unresolved is False
+    assert id_col.type_text == "BigInteger"
+
+
+def test_render_mermaid_shows_mapped_annotation_hint():
+    result = erd.scan_source(MAPPED_STYLE_MODEL)
+    text = erd.render_mermaid(result)
+    assert "Mapped_int" in text
+
+
 def test_scan_source_no_warnings_for_clean_models():
     result = erd.scan_source(SIMPLE_MODEL)
     assert result.warnings == []
