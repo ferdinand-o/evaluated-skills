@@ -128,6 +128,47 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## rest-api-architect
+
+- **Der Spectral-/oasdiff-Erfolgspfad in `gate.py` ist nur mit gemocktem `subprocess`
+  getestet, nie mit einem echten Werkzeug.** Spectral, oasdiff und `npx` sind in dieser
+  Umgebung nicht installiert (Node ist vorhanden, `npx` nicht) — `run_lint` und
+  `run_breaking_change_check` shellen im Erfolgspfad tatsächlich `spectral lint`/`oasdiff
+  breaking` aus und parsen deren JSON-Ausgabe, aber kein Test hat das gegen ein echtes
+  Werkzeug verifiziert. Mechanisch geprüft ist: Toolchain-Erkennung, Degradationsmeldung,
+  die Konventions-Checkliste, und die Parsing-Logik gegen selbst konstruierte Fake-JSON-
+  Ausgaben. Ob das reale CLI-Format (Flags, Exit-Codes, JSON-Struktur von `spectral lint -f
+  json` und `oasdiff breaking -f json`) tatsächlich so aussieht wie hier angenommen, ist
+  unverifizierte Annahme, kein Befund. Nirgends in Code oder Doku dieser Skill steht
+  „erprobt" für diesen Pfad.
+- **Ob echtes Spectral den `_meta`-Schlüssel im generierten Ruleset toleriert, ist
+  ungeprüft.** `docs/artifact-header.md` verlangt für JSON-Artefakte einen `_meta`-Schlüssel;
+  `spectral-ruleset.json` trägt ihn entsprechend der Konvention. Ob Spectrals
+  Ruleset-Schema-Validierung einen unbekannten Top-Level-Schlüssel klaglos akzeptiert oder
+  den Ladevorgang verweigert, konnte hier nicht getestet werden (kein Spectral installiert).
+- **Der YAML-Dumper in `extract_openapi.py` ist nur mit golden-string-Tests verifiziert, nie
+  mit einem echten YAML-Parser gegengeprüft.** PyYAML ist in keiner der geprüften
+  Python-Installationen verfügbar (Projekt-venv, System-`python3`, Miniconda-`python3`). Der
+  Dumper quotet jeden String immer doppelt (statt Sonderfälle zu erkennen) und ist bewusst
+  nur für die selbst erzeugten, kontrollierten Strukturen gedacht (dict/list/str/bool/int/
+  float/None). Die Tests bestätigen, dass die Ausgabe dem erwarteten String entspricht —
+  nicht, dass ein echter YAML-Loader sie für jeden denkbaren Fall akzeptiert.
+- **Cross-File-Router-Komposition wird von `extract_openapi.py` nicht aufgelöst.**
+  `app.include_router(sub_router, prefix="/v1")`, wenn `sub_router` in einer anderen Datei
+  definiert ist, wird nicht verfolgt — Pfade aus einem so gemounteten Sub-Router erscheinen
+  ohne das Präfix. Bewusste Aufwand-Nutzen-Grenze, keine False-Positive-Gefahr (kein Pfad
+  wird erfunden), aber eine Lücke in der Vollständigkeit.
+- **Express/Hono-Routen sind strukturell immer `x-verified: false`, auch bei korrekt
+  passender Textsuche.** Beabsichtigt (R2: Textsuche kennt keinen Kontrollfluss), bedeutet
+  aber auch: Eine vollständig saubere Express-Codebasis bekommt von diesem Skript nie ein
+  `x-verified: true` — echtes AST-Parsing für JS/TS wäre eine neue Abhängigkeit und ist
+  out of scope.
+- **Die fünf rest-api-architect-Evals sind nicht gelaufen.** `load_evals()` bestätigt nur
+  Schema-Gültigkeit und dass die Fixtures einen Workspace aufbauen (per
+  `evalkit.workspace.prepare()` geprüft). Ob die Prompts die beschriebenen Verhaltensweisen
+  tatsächlich provozieren (Umbenennungs-Versuchung, Massen-Refactoring-Versuchung, stille
+  Spec-Drift), zeigt erst ein echter `run_evals.py`-Lauf.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
