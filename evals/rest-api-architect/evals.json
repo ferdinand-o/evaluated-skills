@@ -1,0 +1,70 @@
+{
+  "evals": [
+    {
+      "id": "rename-triggers-deprecation-path",
+      "class": "contract",
+      "fixture": "rename-trap",
+      "prompt": "Das Feld `user_name` im User-Objekt in `api/openapi.yaml` ist verwirrend benannt — ich möchte es zu `full_name` machen. Bau das direkt in der Spec um.",
+      "must": [
+        {"type": "file_exists", "path": "api/openapi.yaml"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "user_name"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "full_name"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "(?i)deprecat"}
+      ],
+      "must_not": [],
+      "notes": "Spec 07 Eval 1 / Anti-Rationalisierungs-Zeile 1. Eine stille Umbenennung würde user_name aus der Spec entfernen und das erste must verfehlen; ein Umbenennen ohne Deprecation-Hinweis verfehlt das vierte must. Beide Richtungen sind mechanisch prüfbar, kein Judge nötig."
+    },
+    {
+      "id": "brownfield-audit-reports-not-refactors",
+      "class": "contract",
+      "fixture": "brownfield-api",
+      "prompt": "Erfasse die REST-API in `app/main.py` (FastAPI) brownfield und mach ein Konventions-Audit dagegen. Der Service heißt `accounts`.",
+      "must": [
+        {"type": "file_exists", "path": "api/openapi.yaml"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "x-verified"},
+        {"type": "file_exists", "path": "docs/api-audit-accounts.md"},
+        {"type": "file_unchanged", "path": "app/main.py"}
+      ],
+      "must_not": [],
+      "notes": "Spec 07 Eval 2 / R5. `file_unchanged` auf app/main.py ist der scharfe Test gegen ungefragtes Massen-Refactoring — kein Judge nötig, die Quelldatei ändert sich entweder oder nicht."
+    },
+    {
+      "id": "endpoint-without-spec-update-is-caught",
+      "class": "contract",
+      "fixture": "spec-drift",
+      "prompt": "Implementiere in `app/main.py` einen neuen Endpoint `GET /v1/orders/{id}`, der eine einzelne Order als JSON zurückgibt (Felder wie im bestehenden Order-Schema).",
+      "must": [
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "/v1/orders/\\{id\\}"}
+      ],
+      "must_not": [],
+      "notes": "Spec 07 Eval 3. Der Prompt erwähnt die Spec bewusst nicht — die Skill soll den Contract 'kein Endpoint ohne Spec-Eintrag' trotzdem durchsetzen. Die alte Spec hatte nur /v1/orders (Liste), der neue Pfad mit {id} ist eindeutig neu."
+    },
+    {
+      "id": "exotic-framework-marks-unverified",
+      "class": "contract",
+      "fixture": "exotic-framework",
+      "prompt": "Erfasse die REST-API in `app.py` brownfield. Es ist eine Flask-App — falls euer Extraktions-Skript sie nicht erkennt, lies den Code und trag die Endpunkte trotzdem in `api/openapi.yaml` ein.",
+      "must": [
+        {"type": "file_exists", "path": "api/openapi.yaml"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "/v1/widgets"},
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "x-verified:\\s*false"}
+      ],
+      "must_not": [],
+      "notes": "Spec 07 Eval 4 / R2. extract_openapi.py findet in einer Flask-App strukturell null Routen (kein @app.get()/@app.post()) — die statische Grenze ist damit sichtbar, nicht unscharf. Von Claude manuell ergänzte Einträge müssen x-verified: false tragen, nicht stillschweigend als geprüft gelten."
+    },
+    {
+      "id": "anti-ceremony-compliant-endpoint",
+      "class": "contract",
+      "fixture": "compliant-endpoint",
+      "prompt": "Füge in `api/openapi.yaml` einen Endpoint `GET /v1/widgets/{id}/events` hinzu: Cursor-Paginierung (`cursor`/`limit`-Parameter, Antwort mit `next_cursor`), Felder in snake_case, Fehler über das bestehende Error-Schema — genau wie beim bestehenden `/v1/widgets`-Endpoint. Der Service heißt `catalog`.",
+      "must": [
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "/v1/widgets/\\{id\\}/events"},
+        {"type": "file_absent", "path": "docs/api-audit-catalog.md"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "api/openapi.yaml", "pattern": "x-deviation"}
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Der Nutzer beschreibt einen bereits vollständig konventionskonformen Endpoint bis ins Detail — das darf keinen Audit-Bericht (der ist Brownfield-Sache) und keine x-deviation-Einträge (die sind für echte Abweichungen) auslösen. `file_absent` steht bewusst allein im `must`, nicht zusätzlich gespiegelt im `must_not` — sonst doppelte Verneinung auf demselben Fakt."
+    }
+  ]
+}
