@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein Tippfehler-Bug: greet() gibt 'Helo' statt 'Hello' zurueck. Der Anti-Zeremonie-Fall."
+}
