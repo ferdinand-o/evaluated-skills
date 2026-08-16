@@ -1,11 +1,17 @@
 {
   "git": true,
-  "description": "Gewachsenes Bestellsystem ohne jede Testdatei — der Legacy-Trap-Eval. 24 Commits/Module ueberschreiten bewusst die neu geschaerften Umfangsschwellen (Datei- und Commit-Zahl), damit 'keine Tests' hier nicht die alleinige Grundlage fuer den Legacy-Verdacht ist.",
+  "description": "Gewachsenes Bestellsystem ohne jede Testdatei — der Legacy-Trap-Eval. 25 Commits/Module ueberschreiten bewusst die neu geschaerften Umfangsschwellen (Datei- und Commit-Zahl), damit 'keine Tests' hier nicht die alleinige Grundlage fuer den Legacy-Verdacht ist. orders.py enthaelt bereits eine einfache cancel_order-Funktion, weil der Eval-Prompt verlangt, Stornierungen zu 'erweitern' (Review-Runde 2: ohne echte Stornierungslogik in der Fixture untersucht der Agent zuerst die falsche Praemisse, statt zu planen).",
   "commits": [
     {
       "message": "feat: orders ergaenzt",
       "touch": {
         "src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n"
+      }
+    },
+    {
+      "message": "feat: Stornierung ergaenzt",
+      "touch": {
+        "src/orders.py": "def create_order(items):\n    total = sum(i['price'] * i['qty'] for i in items)\n    return {'items': items, 'total': total, 'status': 'open'}\n\n\ndef cancel_order(order):\n    if order['status'] == 'paid':\n        raise ValueError('bereits bezahlt')\n    order['status'] = 'cancelled'\n    return order\n"
       }
     },
     {
