@@ -245,3 +245,162 @@ def list_changed_files(repo: Path, mode: str, base: str, head: str | None) -> li
             "changed_ranges_after": changed_ranges_after,
         })
     return results
+
+
+# --- Soll-Auflösung --------------------------------------------------------
+#
+# Reihenfolge (R13 des Auftrags): Feature-Spec unter docs/specs/wip/ (ideal
+# mit Given/When/Then aus Spec 03), sonst PR-Beschreibung (zählt als Soll,
+# aber als schwächere Quelle markiert), sonst Commit-Messages des Bereichs.
+# Fehlt alles, ist das ein Befund ("nicht reviewbar"), keine Notlage — das
+# Paket wird trotzdem geschrieben.
+
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+_GWT_RE = re.compile(r"^\s*[-*]?\s*\**\s*(Given|When|Then|And)\**\s*:?\s*(.*)$")
+
+
+def parse_given_when_then(text: str) -> list[dict]:
+    """Given/When/Then-Blöcke aus Markdown extrahieren.
+
+    Erwartetes Format (Spec 03s ideales Format): pro Kriterium eine Given-,
+    When- und Then-Zeile, optional mit vorangestelltem Listenzeichen oder
+    Fett-Markierung ("- **Given:** ..."). And-Zeilen hängen sich als
+    Zusatzbedingung an das laufende Kriterium. Eine vorausgehende Überschrift
+    wird als Kriterien-Titel übernommen. Ein Kriterium zählt erst als
+    vollständig, wenn Given, When und Then alle gesetzt sind — sonst wird es
+    verworfen, nicht raten-ergänzt.
+    """
+    criteria: list[dict] = []
+    title: str | None = None
+    block: dict | None = None
+
+    def flush() -> None:
+        nonlocal block
+        if block and block["given"] and block["when"] and block["then"]:
+            criteria.append(block)
+        block = None
+
+    def ensure_block() -> dict:
+        nonlocal block
+        if block is None:
+            block = {"title": title, "given": "", "when": "", "then": "", "and_": []}
+        return block
+
+    for raw_line in text.splitlines():
+        heading = _HEADING_RE.match(raw_line)
+        if heading:
+            flush()
+            title = heading.group(1).strip()
+            continue
+        match = _GWT_RE.match(raw_line)
+        if not match:
+            continue
+        keyword, rest = match.group(1), match.group(2).strip()
+        if not rest:
+            continue
+        if keyword == "Given":
+            current = ensure_block()
+            if current["given"] and current["when"] and current["then"]:
+                flush()
+                current = ensure_block()
+            current["given"] = rest
+        elif keyword == "When":
+            ensure_block()["when"] = rest
+        elif keyword == "Then":
+            ensure_block()["then"] = rest
+        elif keyword == "And":
+            ensure_block()["and_"].append(rest)
+    flush()
+    return criteria
+
+
+def find_feature_spec(repo: Path) -> list[dict] | None:
+    """Feature-Spezifikationen unter `docs/specs/wip/` (Spec 03), falls vorhanden.
+
+    Fehlt der Ordner oder enthält er keine Markdown-Datei: `None` — kein
+    Fehler, nur „hier gibt es keine". Eine gefundene Spec zählt als Soll,
+    auch ohne geparste Given/When/Then-Blöcke (dann trägt sie einen Excerpt
+    statt struktierter Kriterien — R13 verlangt nur „gar nichts" als Trigger
+    für den Befund, nicht „nicht ideal formatiert").
+    """
+    spec_dir = repo / "docs" / "specs" / "wip"
+    if not spec_dir.is_dir():
+        return None
+    md_files = sorted(p for p in spec_dir.glob("*.md") if p.is_file())
+    if not md_files:
+        return None
+
+    specs: list[dict] = []
+    for path in md_files:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        criteria = parse_given_when_then(text)
+        entry: dict = {"path": path.relative_to(repo).as_posix(), "criteria": criteria}
+        if not criteria:
+            excerpt, _ = _truncate(text, MAX_FILE_CHARS)
+            entry["excerpt"] = excerpt
+        specs.append(entry)
+    return specs
+
+
+def find_pr_description(
+    pr_description: str | None, pr_description_file: str | None, repo: Path,
+) -> dict | None:
+    """PR-Beschreibung aus `--pr-description` oder `--pr-description-file`.
+
+    Ein lokales Skript kann keine PR-API abfragen — der Aufrufer (Agent oder
+    Mensch, der z. B. `gh pr view` gelesen hat) reicht den Text explizit rein.
+    """
+    if pr_description and pr_description_file:
+        raise CollectError("--pr-description und --pr-description-file schließen sich aus")
+    if pr_description:
+        return {"text": pr_description.strip()}
+    if pr_description_file:
+        path = Path(pr_description_file)
+        if not path.is_absolute():
+            path = repo / path
+        if not path.is_file():
+            raise CollectError(f"--pr-description-file nicht gefunden: {pr_description_file}")
+        return {"text": path.read_text(encoding="utf-8", errors="replace").strip()}
+    return None
+
+
+def find_commit_message_soll(repo: Path, mode: str, base: str, head: str | None) -> dict | None:
+    """Commit-Messages des Bereichs als letzte, schwache Soll-Quelle.
+
+    Gilt nur ab zwei Commits im Range: Ein Range mit genau einem Commit
+    reviewt gerade diesen einen Commit — seine eigene Subject-Zeile
+    beschreibt den Diff, nicht das Ziel dahinter (Tautologie). Uncommitted-
+    Diffs haben keine zugehörige Commit-Message und liefern deshalb immer
+    `None`.
+    """
+    if mode != "range":
+        return None
+    raw = _git(repo, "log", f"{base}..{head}", "--format=%s%x1f%b%x1e")
+    blocks = [b for b in raw.split("\x1e") if b.strip("\n")]
+    if len(blocks) < MIN_COMMITS_FOR_MESSAGE_SOLL:
+        return None
+    messages = []
+    for block in blocks:
+        subject, _, body = block.strip("\n").partition("\x1f")
+        text = subject.strip()
+        if body.strip():
+            text += "\n" + body.strip()
+        messages.append(text)
+    return {"text": "\n\n".join(messages), "count": len(messages)}
+
+
+def resolve_soll(
+    repo: Path, mode: str, base: str, head: str | None,
+    pr_description: str | None, pr_description_file: str | None,
+) -> dict:
+    """Soll-Quelle in Prioritätsreihenfolge auflösen (R13)."""
+    spec = find_feature_spec(repo)
+    if spec:
+        return {"source": "feature_spec", "weak": False, "spec": spec}
+    pr = find_pr_description(pr_description, pr_description_file, repo)
+    if pr:
+        return {"source": "pr_description", "weak": True, **pr}
+    commit_soll = find_commit_message_soll(repo, mode, base, head)
+    if commit_soll:
+        return {"source": "commit_messages", "weak": True, **commit_soll}
+    return {"source": "none", "weak": None}
