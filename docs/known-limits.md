@@ -66,7 +66,11 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   Konvention. `handoff`s Anti-Zeremonie-Eval
   (`anti-ceremony-invents-nothing`) liegt außerdem in der Klasse `behavior`,
   läuft also nicht im billigen `--class contract`-Routine-Gate mit, obwohl gerade
-  dieser Eval typischerweise bei jeder Änderung laufen sollte.
+  dieser Eval typischerweise bei jeder Änderung laufen sollte. `learning-coach`s
+  Anti-Zeremonie-Eval (`nothing-due-stays-honest`) liegt aus demselben Grund
+  ebenfalls in `behavior` (siehe unten, Abschnitt „learning-coach") — SKILL.md
+  mandatiert für den „nichts fällig"-Fall keine exakte Phrase, eine rein
+  mechanische `output_matches`-Regex wäre also zwangsläufig zu eng.
 
 ## Fixtures
 
@@ -127,6 +131,46 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   Eigenreport. Kein Eval ruft den Modus mit Zielgruppe „Team" oder
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
+
+## learning-coach
+
+- **Zwei in einer Fix-Runde behobene Eval-Defekte, hier zur Nachvollziehbarkeit
+  belassen.** Ein unabhängiger Review fand vor der ersten Ausführung von
+  `run_evals.py` zwei strukturelle Fehler in `evals/learning-coach/evals.json`:
+  (1) `frustration-moves-one-rung-not-to-solution` verlangte ursprünglich anhand
+  eines Prompts, der mit „sag's mir einfach" endete, dass die Skill *nicht* zur
+  Lösung geht — `hint-ladder.md` nennt genau diese Formulierung aber als
+  sanktionierten Auslöser für Stufe 4. Ein doktrintreuer Agent hätte den Eval
+  strukturell nicht bestehen können. Behoben, indem der Prompt Frustration ohne
+  explizite Lösungs-Bitte formuliert. (2) Der Pflicht-Anti-Zeremonie-Eval
+  `nothing-due-stays-honest` prüfte mit `(?i)nichts.*fällig|keine.*fällig|derzeit
+  keine`, ob eine von drei Formulierungen erscheint — eine inhaltlich korrekte
+  Antwort wie „kein Thema fällig" (Singular) erfüllte keines der drei Muster und
+  wäre fälschlich durchgefallen. Genau die Fehlerklasse, die oben unter
+  „Assertion-Vokabular" bereits dokumentiert ist. Behoben, indem der Eval auf
+  `class: behavior` mit Judge-Claim für die Formulierung umgestellt wurde
+  (mechanisches `file_unchanged` bleibt als `must` bestehen). Beide Fixes sind
+  in `evals/learning-coach/evals.json` umgesetzt, aber wie der Rest der Skill
+  **nicht** gegen einen echten Agenten gelaufen — die Korrektheit der neuen
+  Prompts/Claims ist plausibilisiert, nicht gezeigt.
+- **Aufgaben-Datei-Status kennt nur die Top-Level-Form „JSON-Array".**
+  `due_topics.py::exercises_status()` behandelt jede Nicht-Array-Form (z. B.
+  `{"tasks": [...]}`) als `malformed`, obwohl Spec 13 die genaue Top-Level-Form
+  nicht festlegt — nur „Alle Aufgaben leben in einem festen JSON-Schema". Das ist
+  eine eigene, konservative Annahme dieser Implementierung (ein Array ist die
+  nächstliegende Form für „mehrere Aufgaben zu einem Thema"), keine bestätigte
+  Spec-13-Vorgabe. Sobald exercise-forge (parallel gebaut) sein tatsächliches
+  Schema festlegt, muss dieser Punkt gegen die reale Ausgabe geprüft werden —
+  liegt die Top-Level-Form anders, meldet `due_topics.py` fälschlich „Keine
+  verifizierten Aufgaben gefunden" für eine tatsächlich befüllte Datei.
+- **Doppelte Themen-Slugs in `learner.md` werden erkannt, aber nicht aufgelöst.**
+  `parse_learner()` warnt bei doppeltem Slug, behält aber beide Sektionen. Weder
+  `due_topics.py` noch `SKILL.md` legen fest, welche der beiden Sektionen ein
+  Agent am Sitzungsende aktualisieren soll — beide zeigen auf denselben
+  Aufgaben-Pfad (`exercises_path_for()` kennt nur den Slug, keine Sektion). Kein
+  Eval deckt diesen Fall ab. Aus einem unabhängigen Review als Anmerkung
+  eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst, das Thema
+  verschwindet nicht), aber ein unterspezifizierter Update-Fall.
 
 ## Verweise
 
