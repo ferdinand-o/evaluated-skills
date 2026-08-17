@@ -107,9 +107,24 @@ wörtlich festgehaltener Fehler lässt sich beim nächsten Abruf gezielt erneut 
 
 Aufgaben-JSONs liegen **nicht** unter `learning-coach/`, sondern neben der
 Wissensdatei aus Spec 12: `~/.skills/verified-research/research/<slug>.exercises.json`
-(projektlokal nach demselben Muster). `due_topics.py` prüft nur, ob diese Datei
-existiert — sie enthält nach Spec 13 pro Aufgabe mindestens Typ, Lernziel,
-Schwierigkeit und ein Verifikations-Protokoll, aber die genauen Feldnamen legt
-exercise-forge fest (wird parallel zu dieser Skill gebaut) und werden hier nicht
-angenommen. Fehlt die Datei zu einem fälligen Thema, ist das normal, kein Fehler —
+(projektlokal nach demselben Muster). `due_topics.py::exercises_status()` prüft
+Existenz und **grobe Struktur** dieser Datei, nie den Inhalt der einzelnen Aufgaben
+— sie enthält nach Spec 13 pro Aufgabe mindestens Typ, Lernziel, Schwierigkeit und
+ein Verifikations-Protokoll, aber die genauen Feldnamen legt exercise-forge fest
+(wird parallel zu dieser Skill gebaut) und werden hier nicht angenommen. Die einzige
+Annahme über die Top-Level-Form ist ein JSON-*Array* von Aufgaben-Objekten (Spec 13:
+„Alle Aufgaben leben in einem festen JSON-Schema").
+
+Vier Zustände, drei davon ergeben dieselbe Meldung:
+
+| Zustand | Bedeutung | Meldung |
+| --- | --- | --- |
+| fehlt | Datei existiert nicht | „Keine verifizierten Aufgaben gefunden" |
+| leer | gültiges JSON-Array ohne Einträge | „Keine verifizierten Aufgaben gefunden" |
+| strukturell unerwartet | kein gültiges JSON, oder kein Array (z. B. ein Objekt) | „Keine verifizierten Aufgaben gefunden" |
+| gefunden | gültiges, nicht-leeres JSON-Array | Pfad wird genannt, Inhalt ungeprüft |
+
+Alle drei Nicht-Erfolgsfälle sind aus Nutzersicht gleich (kein verwertbarer
+Aufgabenbestand) und deshalb bewusst nicht unterschieden — nur der Detailtext im
+Skript-Output unterscheidet sie für die Fehlersuche. Das ist normal, kein Fehler —
 SKILL.md schlägt dann vor, exercise-forge aufzurufen.

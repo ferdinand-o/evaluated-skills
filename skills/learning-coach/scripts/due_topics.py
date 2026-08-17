@@ -11,15 +11,21 @@ Intervall aussieht.
 
 Schnittstelle zu exercise-forge (Spec 13, E3): Nur der Pfad
 `~/.skills/verified-research/research/<slug>.exercises.json` wird geprüft — auf
-Existenz, nicht auf Inhalt. Das Aufgaben-JSON-Schema von exercise-forge wird hier
-nicht geparst, weil Spec 13 parallel zu dieser Skill gebaut wird und die genauen
-Feldnamen nicht bekannt sind (A4: was nicht sicher bekannt ist, wird nicht
-angenommen).
+Existenz und grobe Struktur (gültiges JSON, nicht-leeres Array), nicht auf den
+Inhalt der einzelnen Aufgaben. Das Aufgaben-JSON-Schema von exercise-forge wird hier
+nicht im Detail geparst, weil Spec 13 parallel zu dieser Skill gebaut wird und die
+genauen Feldnamen nicht bekannt sind (A4: was nicht sicher bekannt ist, wird nicht
+angenommen) — dass die Datei ein JSON-*Array* von Aufgaben ist ("Alle Aufgaben leben
+in einem festen JSON-Schema", Spec 13), gilt als die einzige tragfähige Annahme über
+die Top-Level-Form; jede andere Form (kaputtes JSON, ein Objekt statt eines Arrays,
+ein leeres Array) wird konservativ als "keine verwertbare Aufgabe" behandelt statt
+stillschweigend als in Ordnung durchzuwinken (A4).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -96,6 +102,44 @@ def learner_path_for(base_dir: Path) -> Path:
 def exercises_path_for(repo: Path, slug: str, home: Path | None = None) -> Path:
     base_dir, _ = resolve_base_dir(repo, EXERCISES_SKILL_DIRNAME, home)
     return base_dir / "research" / f"{slug}.exercises.json"
+
+
+EXERCISES_STATUS_MISSING = "missing"
+EXERCISES_STATUS_MALFORMED = "malformed"
+EXERCISES_STATUS_EMPTY = "empty"
+EXERCISES_STATUS_OK = "ok"
+
+
+def exercises_status(ex_path: Path) -> tuple[str, str]:
+    """Existenz- und Grobstruktur-Check für ein Aufgaben-JSON, ohne das
+    Aufgaben-Schema von exercise-forge im Detail zu kennen (A4/E3).
+
+    Rückgabe `(status, detail)`:
+    - `missing`   — Datei existiert nicht (Normalfall, kein Fehler).
+    - `malformed` — Datei existiert, ist aber kein lesbares/gültiges JSON-Array.
+      Ein Objekt statt eines Arrays zählt ebenfalls als `malformed`, weil die
+      erwartete Top-Level-Form laut Spec 13 ein Array von Aufgaben ist — eine
+      andere Form ist "strukturell unerwartet" und wird konservativ behandelt,
+      nie stillschweigend als in Ordnung angenommen (A4).
+    - `empty`     — gültiges JSON-Array, aber ohne Einträge.
+    - `ok`        — gültiges, nicht-leeres JSON-Array. Der Inhalt der einzelnen
+      Aufgaben (Feldnamen, Verifikations-Protokoll) wird NICHT geprüft.
+    """
+    if not ex_path.is_file():
+        return EXERCISES_STATUS_MISSING, "Datei nicht gefunden"
+    try:
+        raw = ex_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return EXERCISES_STATUS_MALFORMED, f"nicht lesbar ({exc})"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return EXERCISES_STATUS_MALFORMED, f"kein gültiges JSON ({exc})"
+    if not isinstance(data, list):
+        return EXERCISES_STATUS_MALFORMED, f"erwartet ein JSON-Array, war {type(data).__name__}"
+    if not data:
+        return EXERCISES_STATUS_EMPTY, "Array ist leer, enthält keine Aufgabe"
+    return EXERCISES_STATUS_OK, f"{len(data)} Aufgabe(n)"
 
 
 def ensure_learner(repo: Path, assets_path: Path, home: Path | None = None) -> tuple[Path, bool]:
@@ -330,10 +374,14 @@ def _cmd_due(args: argparse.Namespace) -> int:
             for warning in topic.warnings:
                 print(f"  Warnung: {warning}")
             ex_path = exercises_path_for(args.repo, topic.slug)
-            if ex_path.is_file():
-                print(f"  Aufgaben: {ex_path}")
+            ex_status, ex_detail = exercises_status(ex_path)
+            if ex_status == EXERCISES_STATUS_OK:
+                print(f"  Aufgaben: {ex_path} ({ex_detail})")
             else:
-                print(f"  Aufgaben: Keine verifizierten Aufgaben gefunden ({ex_path})")
+                # missing/empty/malformed führen alle zur selben, in SKILL.md
+                # mandatierten Phrase — aus Nutzersicht ist "keine Datei", "leeres
+                # Array" und "kaputtes JSON" gleich: kein verwertbarer Aufgabenbestand.
+                print(f"  Aufgaben: Keine verifizierten Aufgaben gefunden ({ex_path} — {ex_detail})")
         print("Abruf-Quiz-Budget: 2-4 Fragen aus den fälligen Themen.")
 
     not_due = sorted((t for t in topics if not is_due(t, today)), key=lambda t: (t.next_due, t.slug))

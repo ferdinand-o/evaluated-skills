@@ -14,11 +14,16 @@ stellen: Diese Skill lehrt durch Abruf und Hinweise, nicht durch Vorträge.
    ```bash
    python skills/learning-coach/scripts/due_topics.py --repo . due
    ```
-   Liefert fällige Themen samt Grad, Überfälligkeits-Status und — pro Thema — ob
-   verifizierte Aufgaben unter `~/.skills/verified-research/research/<slug>.exercises.json`
-   existieren. Fehlt die Datei zu einem fälligen Thema, sag genau
-   **„Keine verifizierten Aufgaben gefunden"** und biete an, sie über exercise-forge
-   erzeugen zu lassen — das ist normal, kein Fehler (Spec 13 wird parallel gebaut).
+   Liefert fällige Themen samt Grad, Überfälligkeits-Status und — pro Thema — den
+   Zustand der zugehörigen Aufgaben-Datei unter
+   `~/.skills/verified-research/research/<slug>.exercises.json`: **fehlt**, **leer**
+   (Array ohne Einträge) oder **strukturell unerwartet** (kein gültiges JSON-Array)
+   ergeben alle dieselbe Meldung — sag genau **„Keine verifizierten Aufgaben
+   gefunden"** und biete an, sie über exercise-forge erzeugen zu lassen. Das ist der
+   Normalfall, kein Fehler (Spec 13 wird parallel gebaut); die drei Zustände sind aus
+   Nutzersicht gleich: kein verwertbarer Aufgabenbestand. Nur wenn die Datei ein
+   nicht-leeres JSON-Array ist, gilt sie als gefunden — der Inhalt der einzelnen
+   Aufgaben wird dabei nicht geprüft (`due_topics.py::exercises_status`).
 2. **Abruf-Quiz zuerst** — 2 bis 4 Fragen aus dem Bestand (gern exercise-forge-Aufgaben),
    zu den fälligen Themen. Bei mehreren fälligen Themen zwischen ihnen wechseln
    (Interleaving, `references/methods.md`), nicht Thema für Thema in Blöcken. Abruf vor
@@ -77,6 +82,7 @@ explizite Aufforderung**, mit Rück-Erklärungspflicht. Pro Nachfrage genau eine
 | „Die Lösung ist doch offensichtlich richtig, ich sag sie einfach" | Ungefragt bleibt ungefragt — auch eine offensichtliche Lösung wartet auf die Aufforderung. |
 | „Er hat die Lösung erklärt bekommen, das zählt als gelernt" | Nur mit Rückerklärung. Ohne sie bleibt das Thema offen. |
 | „Keine Aufgaben-Datei da, dann erklär ich einfach selbst was" | Sag „Keine verifizierten Aufgaben gefunden", biete exercise-forge an — keine ungeprüfte Ersatzaufgabe aus dem Ärmel. |
+| „Die Datei ist zwar leer/kaputt, aber immerhin da — zählt als gefunden" | Zählt nicht. Leer und strukturell unerwartet ergeben dieselbe Meldung wie fehlend — kein verwertbarer Aufgabenbestand ist kein verwertbarer Aufgabenbestand. |
 
 ## Abgrenzung
 

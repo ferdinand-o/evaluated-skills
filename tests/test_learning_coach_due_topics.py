@@ -201,6 +201,67 @@ def test_exercises_path_uses_verified_research_namespace(tmp_path):
     assert path == home / ".skills" / "verified-research" / "research" / "closures.exercises.json"
 
 
+# --- exercises_status: fehlend/leer/kaputt/strukturell unerwartet (Review-Fund 3) ----
+
+def test_exercises_status_missing(tmp_path):
+    status, _ = due_topics_mod.exercises_status(tmp_path / "nope.exercises.json")
+    assert status == due_topics_mod.EXERCISES_STATUS_MISSING
+
+
+def test_exercises_status_malformed_json(tmp_path):
+    path = tmp_path / "x.exercises.json"
+    path.write_text("{kaputt", encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_MALFORMED
+    assert "JSON" in detail
+
+
+def test_exercises_status_unexpected_top_level_shape(tmp_path):
+    """Ein Objekt statt eines Arrays ist strukturell unerwartet, kein Fehler beim
+    Parsen — Spec 13 sagt 'Aufgaben leben in einem festen JSON-Schema', die
+    einzige tragfähige Top-Level-Annahme ist ein Array."""
+    path = tmp_path / "x.exercises.json"
+    path.write_text('{"tasks": []}', encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_MALFORMED
+    assert "Array" in detail
+
+
+def test_exercises_status_empty_array(tmp_path):
+    path = tmp_path / "x.exercises.json"
+    path.write_text("[]", encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_EMPTY
+    assert "leer" in detail
+
+
+def test_exercises_status_ok(tmp_path):
+    path = tmp_path / "x.exercises.json"
+    path.write_text('[{"typ": "mc"}, {"typ": "flashcard"}]', encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_OK
+    assert "2" in detail
+
+
+def test_cli_due_reports_missing_phrase_for_empty_exercises_array(tmp_path, capsys):
+    """Review-Fund 3: eine existierende, aber leere Aufgaben-Datei darf nicht als
+    'Aufgaben gefunden' durchgehen — dieselbe mandatierte Phrase wie bei Datei-fehlt."""
+    repo = tmp_path / "repo"
+    write_learner(
+        repo / ".skills" / "learning-coach" / "learner.md",
+        "## css-grid: CSS – Grid-Layout\n\n- Beherrschungsgrad: 2\n- Nächste Fälligkeit: 2020-01-01\n",
+    )
+    ex_dir = repo / ".skills" / "verified-research" / "research"
+    ex_dir.mkdir(parents=True)
+    (ex_dir / "css-grid.exercises.json").write_text("[]", encoding="utf-8")
+
+    rc = due_topics_mod.main(["--repo", str(repo), "due", "--today", "2026-08-17"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Keine verifizierten Aufgaben gefunden" in out
+    assert "leer" in out
+
+
 # --- next_grade / next_interval --------------------------------------------------
 
 def test_next_grade_success_increments_capped_at_4():
