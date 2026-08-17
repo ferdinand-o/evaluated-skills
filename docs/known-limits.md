@@ -6,7 +6,93 @@ Was nicht in Code floss, steht hier — sonst verschwindet es mit dem
 gitignoreten `.superpowers/`-Ledger, sobald der Branch gemerged ist. Jede
 Grenze nennt den konkreten Fall, in dem sie beißt.
 
+## Stand der Verifikation (2026-08-15)
+
+Bis zu diesem Datum war der Harness nie gegen echte Agentenläufe gefahren
+worden — alles darunter Stehende beruhte auf Unit-Tests und Codelektüre. Das
+ist inzwischen nachgeholt, und zwar in beide Richtungen, weil ein Harness, der
+nur bestehen kann, nichts beweist:
+
+- Die vier `contract`-Evals von dev-report laufen durch (4 bestanden), ebenso
+  der eine `behavior`-Eval (1 bestanden). Damit sind Dispatch, Workspace-Aufbau,
+  Fixture-Anwendung, mechanische Assertions, Judge-Pfad und Report einmal
+  vollständig durchlaufen.
+- **Gegenprobe mechanisch:** Ein Eval, der eine Datei fordert, die der Lauf
+  nachweislich nicht anlegt, wird korrekt als FAIL gemeldet, mit benannter
+  Ursache („… existiert nicht").
+- **Gegenprobe Judge:** Ein Judge-Claim, der etwas nachweislich nicht
+  Geschehenes behauptet, wird korrekt verneint und der Eval fällt.
+
+Beide Gegenproben liefen über eine Wegwerf-Eval-Sammlung via `--evals-dir` und
+sind nicht im Repo — sie sind Nachweis, nicht Regressionsschutz. Wer dem
+Harness nach einer Änderung wieder trauen will, wiederholt sie.
+
+Was das **nicht** zeigt: dass die Assertions der einzelnen Skills scharf genug
+sind. Die Abschnitte weiter unten nennen mehrere, die es nachweislich nicht
+sind.
+
+## Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis
+
+**Ob eine Skill überhaupt geladen wird, ist nicht deterministisch.** Gemessen am
+Eval `anti-ceremony-single-test-stays-short` von testing-strategy (2026-08-16):
+Zwei aufeinanderfolgende Läufe über denselben Commit, dieselbe Fixture und
+denselben Prompt lieferten **einmal FAIL und einmal PASS**. Im roten Lauf fehlte
+`.skills/cache/detect_stack.json`, die Skill wurde also gar nicht aufgerufen; im
+grünen lief sie durch.
+
+Das ist keine Eigenheit dieser einen Skill, sondern der Auswahl: Der Agent
+entscheidet anhand der Descriptions, und diese Entscheidung schwankt — verschärft
+dadurch, dass 16 fremde Skills mitkonkurrieren (siehe „Isolation" unten).
+
+**Zweiter Beleg, andere Skill, anderer Mechanismus** (2026-08-16): debug-ledgers
+`env-var-layers-instruments-boundaries` fiel im ersten Lauf durch — das Ledger
+war angelegt, blieb aber im Mini-Modus ohne Hypothesen-Tabelle, die Eskalation
+zum vollen Prozess hatte nicht gegriffen. Zweite Stichprobe über denselben
+Commit: bestanden. Es schwankt also nicht nur, *ob* eine Skill geladen wird,
+sondern auch, *wie weit* sie ihren eigenen Ablauf durchläuft. Eine Skill kann
+denselben Auslöser einmal erkennen und einmal übergehen.
+
+Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
+
+- **Ein grüner Lauf beweist nicht, dass die Skill zuverlässig triggert.** Alle in
+  den Berichten genannten Zahlen sind Einzelstichproben, sofern nicht ausdrücklich
+  anders vermerkt.
+- **Ein roter Lauf beweist keinen Defekt.** Vor jeder Fix-Runde gehört ein zweiter
+  Lauf — sonst repariert man eine Skill, die funktioniert. Bei testing-strategy ist
+  genau das um Haaresbreite passiert.
+- **Ein Diagnoselauf, der besteht, belegt eine Description-Korrektur nicht.** Er
+  zeigt, dass Triggern *möglich* ist, nicht dass es verlässlich geschieht.
+- Wer Verlässlichkeit wirklich messen will, braucht denselben Eval mehrfach und
+  eine Quote statt eines Urteils. Der Runner kennt dafür heute kein Primitiv.
+
 ## Isolation
+
+- **Fremde Skills sind im Eval-Agenten sichtbar — `--setting-sources project` hält sie
+  nicht heraus.** Gemessen am `system.init`-Ereignis (2026-08-15): In einem leeren
+  Verzeichnis ohne jede Projektkonfiguration sieht der Agent **16 global installierte
+  Skills** (`deep-research`, `dataviz`, `code-review`, `debug`, `verify`, `simplify`,
+  `claude-api` und weitere). Mit installierter Projekt-Skill sind es 17 — die eigene
+  plus dieselben 16. `--strict-mcp-config` schaltet MCP-Server korrekt ab, für Skills
+  gibt es keine Entsprechung: `--disable-slash-commands` entfernt **alle** Skills
+  einschließlich der zu testenden und ist damit unbrauchbar. Es existiert keine
+  Flaggen-Kombination, die nur die Projekt-Skill stehen lässt.
+
+  Das beschädigt Eval-Ergebnisse in **beide** Richtungen, und die zweite ist die
+  gefährlichere:
+  - *Falsch rot:* Eine fremde Skill fängt den Prompt ab, die getestete kommt nie zum
+    Zug. Genau das ist bei `visual-summary` passiert — der Eval `bare-request-triggers-triage`
+    fiel durch, weil der Agent bei „Fass das zusammen." gar nicht erst die Skill
+    aufrief. Zwei Runden Textänderungen am Ablauf blieben wirkungslos, weil der Body
+    nie geladen wurde; die Ursache saß in der Frontmatter-`description`.
+  - *Falsch grün:* Eine fremde Skill erledigt die Arbeit, und der Eval schreibt sie der
+    getesteten gut. Von außen ist das nicht unterscheidbar.
+
+  **Konsequenz für den Eval-Entwurf:** Assertions müssen an Artefakten hängen, die
+  *nur* die getestete Skill erzeugt — ihre Ledger-Datei, ihr Registereintrag, ihre
+  Kopfzeile, ihr Ablagepfad — nie an generischer Ergebnisqualität. Besonders betroffen
+  sind Skills mit einem global installierten Gegenstück: `debug-ledger` gegen `debug`,
+  `verified-research` gegen `deep-research` (von dem es ein Fork ist), `code-review`
+  gegen `code-review`.
 
 - **Die Prozessumgebung des Agenten ist nicht isoliert.** `evalkit.dispatch.run_agent`
   erzwingt nur das Arbeitsverzeichnis, `--setting-sources project` und
@@ -134,49 +220,92 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## learning-coach
 
-- **Zwei in einer Fix-Runde behobene Eval-Defekte, hier zur Nachvollziehbarkeit
-  belassen.** Ein unabhängiger Review fand vor der ersten Ausführung von
-  `run_evals.py` zwei strukturelle Fehler in `evals/learning-coach/evals.json`:
-  (1) `frustration-moves-one-rung-not-to-solution` verlangte ursprünglich anhand
-  eines Prompts, der mit „sag's mir einfach" endete, dass die Skill *nicht* zur
-  Lösung geht — `hint-ladder.md` nennt genau diese Formulierung aber als
-  sanktionierten Auslöser für Stufe 4. Ein doktrintreuer Agent hätte den Eval
-  strukturell nicht bestehen können. Behoben, indem der Prompt Frustration ohne
-  explizite Lösungs-Bitte formuliert. (2) Der Pflicht-Anti-Zeremonie-Eval
-  `nothing-due-stays-honest` prüfte mit `(?i)nichts.*fällig|keine.*fällig|derzeit
-  keine`, ob eine von drei Formulierungen erscheint — eine inhaltlich korrekte
-  Antwort wie „kein Thema fällig" (Singular) erfüllte keines der drei Muster und
-  wäre fälschlich durchgefallen. Genau die Fehlerklasse, die oben unter
-  „Assertion-Vokabular" bereits dokumentiert ist. Behoben, indem der Eval auf
-  `class: behavior` mit Judge-Claim für die Formulierung umgestellt wurde
-  (mechanisches `file_unchanged` bleibt als `must` bestehen). Beide Fixes sind
-  in `evals/learning-coach/evals.json` umgesetzt, aber wie der Rest der Skill
-  **nicht** gegen einen echten Agenten gelaufen — die Korrektheit der neuen
-  Prompts/Claims ist plausibilisiert, nicht gezeigt.
-- **Aufgaben-Datei-Status: Top-Level-Form korrigiert, jetzt gegen den echten
-  Erzeuger verifiziert.** Eine frühere Fix-Runde hatte `exercises_status()` auf
-  ein Top-Level-JSON-*Array* ausgelegt, abgeleitet aus dem Spec-13-Text („Alle
-  Aufgaben leben in einem festen JSON-Schema") — keine bestätigte Vorgabe, nur
-  eine Ableitung, weil `learning-coach` und `exercise-forge` parallel gebaut
-  wurden und die Testsuiten beider Seiten jeweils nur gegen die eigene Annahme
-  grün liefen. Der Koordinator prüfte das nach der gemeldeten Sorge gegen den
-  echten Code (`exercise-forge`s `export.py`: `data.get("exercises", [])`) und
-  fand: die reale Form ist ein JSON-**Objekt** mit `"exercises"`-Liste, kein
-  Array. Mit der ursprünglichen Annahme hätte `due_topics.py` **jede** real von
-  exercise-forge erzeugte Aufgabendatei als `malformed` gemeldet. Korrigiert:
-  `exercises_status()` erwartet jetzt ein Objekt mit `"exercises"`-Schlüssel;
-  fehlt der Schlüssel oder ist sein Wert keine Liste, bleibt es `malformed`.
-  Bleibt als Grenze: der Inhalt der einzelnen Aufgaben-Objekte innerhalb von
-  `"exercises"` ist weiterhin ungeprüft (bewusst, A4) — nur die Top-Level-Form
-  ist jetzt gegen echten Code statt gegen eine Textableitung abgesichert.
+- **Fix-Runde 1 (vor jedem echten Agentenlauf, per Review):** Ein unabhängiger
+  Review fand vor der ersten Ausführung von `run_evals.py` zwei strukturelle
+  Fehler in `evals/learning-coach/evals.json`: (1)
+  `frustration-moves-one-rung-not-to-solution` verlangte anhand eines Prompts,
+  der mit „sag's mir einfach" endete, dass die Skill *nicht* zur Lösung geht —
+  `hint-ladder.md` nennt genau diese Formulierung aber als sanktionierten
+  Auslöser für Stufe 4. Behoben, indem der Prompt Frustration ohne explizite
+  Lösungs-Bitte formuliert. (2) Der Pflicht-Anti-Zeremonie-Eval
+  `nothing-due-stays-honest` prüfte mit einer zu engen `output_matches`-Regex
+  (Assertion-Vokabular-Grenze oben) — behoben durch Umstellung auf
+  `class: behavior` mit Judge-Claim.
+- **Fix-Runde 2 (Schnittstelle gegen den echten Erzeuger geprüft):**
+  `due_topics.py::exercises_status()` hatte ein Top-Level-JSON-*Array* für
+  `*.exercises.json` angenommen, abgeleitet aus dem Spec-13-Text, nicht
+  bestätigt — `learning-coach` und `exercise-forge` wurden parallel gebaut, jede
+  Testsuite lief nur gegen die eigene Annahme grün. Der Koordinator prüfte
+  gegen den echten Code (`exercise-forge`s `export.py`: `data.get("exercises",
+  [])`) und fand: die reale Form ist ein JSON-**Objekt** mit
+  `"exercises"`-Liste. Mit der ursprünglichen Annahme hätte `due_topics.py`
+  **jede** real erzeugte Aufgabendatei als `malformed` gemeldet. Korrigiert.
+- **Fix-Runde 3 (erste echte Agentenläufe — zwei reproduzierte Defekte):**
+  Der Koordinator ließ `evals/learning-coach/evals.json` gegen echte
+  Agentenläufe laufen (ich selbst durfte das für die Diagnose nachvollziehen,
+  siehe unten). Zwei Evals fielen in zwei aufeinanderfolgenden Läufen identisch:
+  1. `abrupt-end-still-updates` (mechanisch, `file_unchanged`-Prüfung auf
+     `learner.md`): Bei einem abrupten Sitzungsende schrieb die Skill nichts.
+     Ursache, per direktem `evalkit.dispatch.run_agent`-Aufruf reproduziert: Der
+     Contract band das Update an einen „Abschluss"-Schritt und an eine formal
+     *gestellte* Abruf-Frage — ein vom Lernenden **unaufgefordert** geäußertes,
+     inhaltlich verwertbares Statement („ich glaube range(n) läuft von 0 bis
+     n-1") triggerte den Update-Mechanismus nicht, der Agent bestätigte nur
+     kurz und verabschiedete sich. Behoben: SKILL.md bindet die Persistenz jetzt
+     an jedes inhaltliche Statement zu einem fälligen Thema, unabhängig davon,
+     ob es auf eine gestellte Frage antwortet oder unaufgefordert kommt, und
+     unabhängig vom Sitzungsende.
+  2. `multi-due-session-starts-with-quiz` (Judge): Der erste Diagnoselauf zeigte
+     einen echten Skill-Defekt — die Skill blockierte den gesamten Abruf-Schritt,
+     wenn keine exercise-forge-Aufgaben vorlagen, und bot stattdessen eine
+     Optionsliste („Wie möchtest du weitermachen?") an, statt selbst zu
+     quizzen. Ursache: Der Contract-Satz „Aufgaben stammen aus exercise-forge,
+     nie aus eigener Erfindung" wurde vom Agenten so gelesen, dass er auch die
+     eigene, offene Abruf-Frage verbietet, wenn keine formale Aufgabe existiert
+     — SKILL.md unterschied das nicht klar genug. Behoben, mit einer expliziten
+     zweiten Quiz-Quelle (eigene offene Abruf-Fragen aus Thema/„Typische
+     Fehler", falls keine exercise-forge-Aufgaben vorliegen) und einer klaren
+     Abgrenzung „formale, als verifiziert ausgegebene Aufgabe" vs. „eigene
+     Gesprächsfrage". Nach dieser Korrektur blieb ein *zweiter*, kleinerer
+     Defekt: Die Skill quizzt jetzt korrekt, aber SKILL.md mandatiert selbst
+     eine kurze Themen-Übersicht plus die Pflichtphrase „Keine verifizierten
+     Aufgaben gefunden" vor der ersten Frage (E3-Contract) — der ursprüngliche
+     Judge-Claim verlangte aber „beginnt mit" im wörtlichen Sinn und schloss
+     jede Zusammenfassung aus. Das war ein Claim-Problem, kein Skill-Defekt:
+     Der Claim wurde angepasst, um genau diesen mandatierten, nicht-lehrenden
+     Vorlauf zu akzeptieren, verbietet aber weiterhin Optionslisten und
+     inhaltliche Erklärungen vor der ersten Frage.
+
+  **Für die Diagnose wurde `evalkit/` von `feat/dev-report` übernommen**
+  (`assertions.py`, `dispatch.py`, `judge.py`, `runner.py`, `schema.py`,
+  `workspace.py`, plus die zugehörigen Harness-Unit-Tests) — der Stand in
+  diesem Branch war sonst älter und hätte an einer bekannten Grenze
+  diagnostiziert: `--output-format text` liefert nur die *letzte*
+  Assistant-Nachricht, ein mehrzügiges Tool-Use-Gespräch (wie ein
+  Lern-Session-Start mit `due_topics.py`-Aufruf) wäre für den Judge nur
+  teilweise sichtbar gewesen. Beide Diagnosen liefen über den neuen
+  `assistant_text()`-Pfad (alle Assistant-Züge in Reihenfolge). Nicht
+  ausgeschlossen: dass ein Teil der ursprünglich gemeldeten Fehlschläge
+  tatsächlich auf diese Harness-Grenze zurückging statt auf die beiden hier
+  behobenen Skill-Defekte — beide Ursachen wurden aber unabhängig voneinander
+  bestätigt (Defekt 1 durch reproduzierten Dateizustand, Defekt 2 durch
+  reproduzierten Antworttext mit Optionsliste), nicht nur vermutet.
+- **Beide Fixes aus Runde 3 je dreimal gegen echte Agentenläufe grün** (über
+  `--evals-dir` mit einer Zwei-Eval-Teilmenge, nicht über die volle Suite —
+  siehe „Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis" oben, das gilt
+  auch hier: drei grüne Läufe sind ein starkes, aber kein endgültiges Signal).
+  Die übrigen sieben Evals der Skill wurden in dieser Runde nicht erneut
+  ausgeführt (Scope-Vorgabe: „diese beiden Evals selbst fahren"); eine
+  manuelle Durchsicht der SKILL.md-Änderungen gegen ihre Prompts/Claims ergab
+  keinen erkennbaren Konflikt, das ist aber kein Ersatz für einen echten Lauf.
 - **Doppelte Themen-Slugs in `learner.md` werden erkannt, aber nicht aufgelöst.**
   `parse_learner()` warnt bei doppeltem Slug, behält aber beide Sektionen. Weder
   `due_topics.py` noch `SKILL.md` legen fest, welche der beiden Sektionen ein
-  Agent am Sitzungsende aktualisieren soll — beide zeigen auf denselben
-  Aufgaben-Pfad (`exercises_path_for()` kennt nur den Slug, keine Sektion). Kein
-  Eval deckt diesen Fall ab. Aus einem unabhängigen Review als Anmerkung
-  eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst, das Thema
-  verschwindet nicht), aber ein unterspezifizierter Update-Fall.
+  Agent aktualisieren soll, wenn beide denselben Slug tragen — beide zeigen auf
+  denselben Aufgaben-Pfad (`exercises_path_for()` kennt nur den Slug, keine
+  Sektion). Kein Eval deckt diesen Fall ab. Aus einem unabhängigen Review als
+  Anmerkung eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst,
+  das Thema verschwindet nicht), aber ein unterspezifizierter Update-Fall.
 
 ## Verweise
 

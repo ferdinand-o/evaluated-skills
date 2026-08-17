@@ -25,23 +25,30 @@ Lücke dieser Implementierung.
 
 ```
 skills/learning-coach/
-├── SKILL.md                       (Frontmatter nur name/description)
+├── SKILL.md                       (Frontmatter nur name/description, 138 Zeilen)
 ├── references/
 │   ├── learner-schema.md          (Feldformat, Beherrschungsgrad 0-4, Beispiel, E3-Schnittstelle)
 │   ├── hint-ladder.md              (vier Stufen, Formulierungen je Aufgabentyp, Anti-Kollaps)
 │   └── methods.md                  (Abrufübung, Spacing-Tabelle, Fehleranalyse, Interleaving)
 ├── assets/learner-template.md      (Bootstrap-Vorlage mit Kopfzeile)
 └── scripts/due_topics.py           (Tier 1, 40 Unit-Tests)
-evals/learning-coach/evals.json     (9 Evals: 5 contract, 4 behavior — nach Fix-Runden)
+evals/learning-coach/evals.json     (9 Evals: 5 contract, 4 behavior — nach drei Fix-Runden)
 evals/fixtures/lc-*/                (6 Fixtures, alle mit .skills/learning-coach/learner.md)
 tests/test_learning_coach_due_topics.py
 docs/superpowers/plans/2026-08-17-learning-coach.md
 ```
 
-40 neue Unit-Tests, alle grün. Gesamtsuite: **186 von 186 bestanden** (146 bestehende
-+ 37 neue).
+Zusätzlich, außerhalb der Skill selbst (Fix-Runde 3, siehe unten): `evalkit/`
+(sechs Dateien) und die zugehörigen Harness-Unit-Tests wurden von `feat/dev-report`
+übernommen — auf ausdrückliche Anweisung des Koordinators, für eine akkurate
+Eval-Diagnose. Das ist geteilte Infrastruktur (Spec 00 §2), keine
+learning-coach-spezifische Änderung.
 
-## Fix-Runde (unabhängiger Review)
+40 neue Unit-Tests für `due_topics.py`, alle grün. Gesamtsuite: **202 von 202
+bestanden** (146 ursprüngliche Basis + 40 learning-coach + 16 aus der
+`evalkit`-Übernahme).
+
+## Fix-Runde 1 (unabhängiger Review)
 
 Ein unabhängiger Reviewer prüfte den Stand vor der ersten `run_evals.py`-Ausführung
 und fand zwei Defekte und zwei Lücken (Befund unter
@@ -107,6 +114,85 @@ Fixture `lc-broken-exercises` und der zugehörige Eval
 `empty-exercises-file-is-named-not-hidden` auf die korrigierte Form umgestellt.
 `due_topics.py` manuell gegen die korrigierte Fixture verifiziert (siehe
 „Testergebnis").
+
+## Fix-Runde 3 — erste echte Agentenläufe, zwei reproduzierte Skill-Defekte
+
+Der Koordinator ließ `evals/learning-coach/evals.json` gegen echte Agentenläufe
+laufen. Fünf Evals bestanden (`missing-exercises-file-is-named-not-hidden`,
+`empty-exercises-file-is-named-not-hidden`, `solution-request-needs-explain-back`,
+`frustration-moves-one-rung-not-to-solution`, `wrong-answer-writes-verbatim-mistake`
+— der umgebaute Frust-Eval aus Fix-Runde 1 trägt also). Zwei fielen in zwei
+aufeinanderfolgenden Läufen identisch — laut Auftrag ein starkes Signal für einen
+echten Defekt, keine Schwankung.
+
+**Vorbereitung:** Bevor ich selbst diagnostizieren durfte, habe ich `evalkit/`
+(sechs Dateien: `assertions.py`, `dispatch.py`, `judge.py`, `runner.py`,
+`schema.py`, `workspace.py`) plus die zugehörigen Harness-Unit-Tests von
+`feat/dev-report` in diesen Branch übernommen (`git checkout feat/dev-report --
+...`) — der Stand hier war sonst älter. Wichtigster Unterschied: Der alte Harness
+nutzte `--output-format text`, das nur die *letzte* Assistant-Nachricht liefert;
+ein mehrzügiges Gespräch (Skill liest `due_topics.py`, meldet Status, quizzt) war
+dem Judge damit nur teilweise sichtbar. Der neue Harness sammelt über
+`--output-format stream-json` alle Assistant-Züge in Reihenfolge
+(`assistant_text()`). 202 von 202 Tests bleiben grün nach der Übernahme (146
+Basis + 40 learning-coach + 16 neue/geänderte Harness-Tests). Nicht ausgeschlossen,
+dass ein Teil der ursprünglich gemeldeten Fehlschläge (mit-)auf diese
+Harness-Grenze zurückging — beide unten beschriebenen Ursachen wurden aber
+unabhängig davon bestätigt: Fund 1 über den tatsächlichen Dateizustand von
+`learner.md`, Fund 2 über den tatsächlichen Antworttext mit einer Optionsliste,
+beides per direktem `evalkit.dispatch.run_agent()`-Aufruf nachvollzogen, nicht nur
+vermutet.
+
+**Fund 1 — `abrupt-end-still-updates` (mechanisch, echter Defekt).** Reproduziert:
+Bei „Frag mich kurz zu Python-Schleifen. Ich glaube range(n) läuft von 0 bis n-1
+[...] jetzt muss ich aber sofort weg" bestätigte die Skill nur kurz und
+verabschiedete sich, `learner.md` blieb `file_unchanged`. Ursache, direkt aus dem
+Antworttext ablesbar: Der Contract band das Update an einen „Abschluss"-Schritt
+UND an eine formal *gestellte* Abruf-Frage — ein vom Lernenden unaufgefordert
+geäußertes, inhaltlich korrektes Statement triggerte den Update-Mechanismus nicht.
+Der Koordinator vermutete, das Update gehöre früher in den Loop; das war zutreffend,
+aber nicht der ganze Fall — die eigentliche Lücke war der Trigger selbst
+(„beantwortete Frage" statt „irgendein inhaltliches Statement zu einem fälligen
+Thema"). **Behoben:** SKILL.md (Schritt 2, Contract, zwei neue
+Anti-Rationalisierungs-Zeilen) bindet die Persistenz jetzt an jedes inhaltliche
+Statement zu einem fälligen Thema — gefragt oder unaufgefordert —, unabhängig vom
+Sitzungsende. Dreimal in Folge gegen echte Agentenläufe grün nach dem Fix.
+
+**Fund 2 — `multi-due-session-starts-with-quiz` (Judge, echter Defekt plus ein
+Claim-Problem).** Der erste Diagnoselauf zeigte einen echten Skill-Defekt: Bei
+drei fälligen Themen ohne exercise-forge-Aufgaben blockierte die Skill den
+gesamten Abruf-Schritt und bot stattdessen eine Optionsliste an
+(„1. exercise-forge bauen, 2. du stellst dir selbst Fragen, 3. Session vertagen —
+wie möchtest du weitermachen?"). Ursache: Der Contract-Satz „Aufgaben stammen aus
+exercise-forge, nie aus eigener Erfindung" wurde vom Agenten wörtlich genommen und
+verbot damit auch die eigene, offene Abruf-Frage, die Schritt 2 eigentlich
+vorsieht, sobald keine formale Aufgabe existiert. **Behoben:** SKILL.md nennt jetzt
+explizit zwei Quiz-Quellen (exercise-forge bevorzugt, sonst eigene offene
+Abruf-Fragen aus Thema/„Typische Fehler") und trennt scharf „formale, als
+verifiziert ausgegebene Aufgabe" (verboten, außer von exercise-forge) von
+„eigene Gesprächsfrage" (erlaubt, immer verfügbar). Nach diesem Fix quizzte die
+Skill korrekt (direkt eine Retrieval-Frage nach kurzer Themen-Übersicht), aber der
+Eval fiel weiter — jetzt aus einem zweiten Grund: SKILL.md mandatiert selbst eine
+kurze Übersicht plus die Pflichtphrase „Keine verifizierten Aufgaben gefunden" vor
+der ersten Frage (E3-Contract), der ursprüngliche Judge-Claim verlangte aber
+„beginnt mit" im wörtlichen Sinn und schloss jede Zusammenfassung kategorisch aus.
+**Diagnose laut Auftrags-Framework:** ein Claim-Problem, kein Skill-Defekt — der
+Satz vor der Frage ist zulässig, weil er selbst mandatiert ist und keine
+Lehrinhalte transportiert. Der Claim wurde entsprechend geschärft: akzeptiert die
+mandatierte Übersicht/Phrase, verbietet weiterhin Optionslisten, Rückfragen „wie
+weitermachen" und inhaltliche Erklärungen vor der ersten Frage. Zusätzlich
+begrenzt SKILL.md jetzt strukturell, was vor der ersten Frage stehen darf. Dreimal
+in Folge gegen echte Agentenläufe grün nach beiden Fixes.
+
+**Nicht erneut ausgeführt:** die übrigen sieben Evals der Skill (Auftrags-Scope war
+„diese beiden Evals selbst fahren"). Eine manuelle Durchsicht der SKILL.md-Änderungen
+gegen deren Prompts/Claims ergab keinen erkennbaren Konflikt — kein Ersatz für einen
+echten Lauf. `docs/known-limits.md` wurde außerdem um die vom Koordinator
+mitgelieferten allgemeinen Abschnitte aus `feat/dev-report` ergänzt
+(„Stand der Verifikation", „Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis",
+erweiterte „Isolation"-Sektion zu 16 fremden Skills im Eval-Agenten) — diese
+Lektionen erklären direkt, warum mein erster abrupt-end-Lauf bestand und der zweite
+fiel, bevor der eigentliche Fix stand.
 
 ## E1 — `due_topics.py` als Tier 1
 
@@ -230,21 +316,30 @@ Datei ändern, ist beim Zusammenführen der Branches ein trivialer Merge-Konflik
 ## Testergebnis
 
 ```
-186 passed in 3.18s
+202 passed in 3.16s
 ```
 
-(146 ursprünglich bestehende Tests + 40 neue für `due_topics.py`, davon 9 aus den
-beiden Fix-Runden für `exercises_status()` — 6 aus Runde 1, netto 3 weitere aus
-Runde 2 nach der Korrektur der Top-Level-Form — keine Regression.)
+(146 ursprüngliche Basis + 40 neue für `due_topics.py` — davon 9 aus den ersten
+beiden Fix-Runden für `exercises_status()` — + 16 aus der `evalkit`-Übernahme von
+`feat/dev-report` in Fix-Runde 3. `load_evals` validiert alle 9 Einträge in
+`evals/learning-coach/evals.json` fehlerfrei. Keine Regression.)
 
 ## Offene Sorgen
 
 - `brief-common.md` fehlte (siehe oben) — unklar, ob dort zusätzliche verbindliche
   Vorgaben standen, die hier nicht berücksichtigt sind.
-- Die neun Evals sind ungelaufen; ob die SKILL.md-Doktrin (harte Hinweis-Leiter,
-  Update-Pflicht, exakte Phrase) einen echten Agenten tatsächlich lenkt, ist nicht
-  gezeigt, nur plausibilisiert — das gilt insbesondere für die beiden in der
-  Fix-Runde umgebauten Evals, die noch nie gegen einen echten Agenten liefen.
+- Fünf der neun Evals liefen inzwischen echt und bestanden
+  (`missing-exercises-file-is-named-not-hidden`,
+  `empty-exercises-file-is-named-not-hidden`, `solution-request-needs-explain-back`,
+  `frustration-moves-one-rung-not-to-solution`, `wrong-answer-writes-verbatim-mistake`).
+  Zwei weitere (`abrupt-end-still-updates`, `multi-due-session-starts-with-quiz`)
+  liefen nach der Fix-Runde-3-Korrektur je dreimal grün — ein starkes, aber laut
+  `docs/known-limits.md` („Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis")
+  kein endgültiges Signal. Zwei (`nothing-due-stays-honest`,
+  `short-session-still-updates`) liefen noch nie gegen einen echten Agenten — die
+  SKILL.md-Änderungen aus Fix-Runde 3 berühren beide inhaltlich (Kurzform jetzt
+  Schritt 1+2 statt 1+5, Contract-Wortlaut geändert), nur manuell durchgesehen,
+  nicht ausgeführt.
 - Die Top-Level-Form von `exercises_status()` ist jetzt gegen `exercise-forge`s
   echten Code verifiziert (`export.py:254`, siehe Fix-Runde 2), nicht mehr nur
   eine Ableitung aus Spec 13 — das war der eine echte Defekt in der vorherigen
