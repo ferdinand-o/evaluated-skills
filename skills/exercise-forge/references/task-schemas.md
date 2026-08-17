@@ -96,3 +96,10 @@ Verstehen → Multiple Choice, Anwenden/Analysieren → offene Frage oder Coding
 `status: verified` entsteht **ausschließlich** durch `verify_blind.py` (bzw.
 `run_coding.py` für Coding). Eine neu erzeugte Aufgabe trägt
 `{"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null}`.
+
+**Von Hand `"status": "verified"` einzutragen bringt nichts.** `export.py`
+prüft die Herkunft: Nur `status: verified`/`suspicious` **mit** einem der vier
+echten `method`-Werte oben (nicht `not_run`) **und** gesetztem `checked_at`
+gilt als belegt. Fehlt eines davon, exportiert `export.py` die Aufgabe trotzdem
+— aber sichtbar als `[UNGEPRÜFT: …]`, nie als `[geprüft]`. Der einzige Weg zu
+`[geprüft]` bleibt ein echter Lauf von `verify_blind.py`.

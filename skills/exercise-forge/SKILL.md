@@ -31,10 +31,13 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
    Für Coding-Aufgaben ruft das Skript automatisch `run_coding.py` (pytest)
    auf. Fehlt `pytest` oder die `claude`-CLI, wird das benannt gemeldet und die
    Aufgabe bleibt `unverified` — nie stillschweigend `verified`.
-5. **Bei `suspicious`:** Distraktor schärfen (MC), Kriterium lockern (offene
-   Frage), Test entschärfen (Coding) oder Vorderseite präzisieren (Flashcard).
-   Erst danach erneut prüfen — nie die Musterlösung ändern, nur weil der
-   Blind-Löser abwich.
+5. **Bei `suspicious`:** Lies die zitierte Begründung des Blind-Lösers im
+   `detail`-Feld und beurteile selbst, ob sie trägt (das Gate markiert nur den
+   Verdacht, es urteilt nicht — siehe Contract unten). Trägt sie: Distraktor
+   schärfen (MC), Kriterium lockern (offene Frage), Test entschärfen (Coding)
+   oder Vorderseite präzisieren (Flashcard), dann erneut prüfen. Trägt sie
+   nicht (nur falsch geraten): erneut prüfen reicht, ohne etwas zu ändern —
+   nie die Musterlösung ändern, nur weil der Blind-Löser abwich.
 6. **Export:**
    ```bash
    python skills/exercise-forge/scripts/export.py --exercises <pfad> --out-dir docs/exercises
@@ -47,15 +50,27 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
 ## Contract
 
 - **Blind-Verifikation ist Pflicht-Gate, keine Ausnahme.** Jede Aufgabe im
-  Export trägt ein `verification`-Objekt. `status: verified` entsteht
-  ausschließlich durch das Blind-Gate — nie von Hand gesetzt.
-- Eine Aufgabe ohne Prüfnachweis (oder mit `suspicious`) wird als ungeprüft
-  exportiert, nicht stillschweigend als geprüft.
+  Export trägt ein `verification`-Objekt. `status: verified` soll ausschließlich
+  durch das Blind-Gate entstehen — und `export.py` glaubt eine von Hand
+  geschriebene Behauptung nicht: Es prüft, ob `method` einer der echten
+  Blind-Gate-Werte ist und `checked_at` gesetzt ist (Spuren, die nur ein
+  echter Lauf hinterlässt); fehlt eine davon, wird die Aufgabe beim Export
+  sichtbar auf ungeprüft zurückgestuft — sie verschwindet nicht, sie verliert
+  nur das `[geprüft]`.
+- Eine Aufgabe ohne Prüfnachweis (oder mit `suspicious`, oder mit einer
+  unbelegten `verified`-Behauptung) wird als ungeprüft exportiert, nicht
+  stillschweigend als geprüft.
 - Coding-Musterlösungen müssen ihre eigene Testsuite bestehen, bevor eine
   Blind-Lösung überhaupt getestet wird — scheitert die Musterlösung, ist die
   Aufgabe fehlerhaft, kein Blind-Löser-Problem.
-- Ein Distraktor, den der Blind-Löser mit nachvollziehbarer Begründung wählt,
-  ist kaputt — auch wenn er "eigentlich klar falsch" gemeint war.
+- **Was das MC-Gate wirklich leistet:** Wählt der Blind-Löser einen
+  Distraktor, markiert das Gate die Aufgabe als `suspicious` — jede Fehlwahl
+  identisch, unabhängig davon, ob die Begründung trägt. Das ist eine
+  Markierung zur menschlichen Durchsicht, **kein Urteil darüber, ob die
+  Begründung valide war**. Ob ein `suspicious`-Treffer einen kaputten
+  Distraktor aufdeckt oder nur eine falsch geratene, eigentlich funktionierende
+  Falle war, entscheidest du beim Review — das Gate liefert dafür die zitierte
+  Begründung des Blind-Lösers, kein Verdikt.
 - Flashcards: eine Information pro Karte. Fordert der Nutzer "20 Karten zu X",
   bleibt jede Karte atomar statt zu einer Karten-Müllhalde zu werden.
 - "Eine Stufe schwerer" ändert den Schwierigkeitsvektor nachvollziehbar
