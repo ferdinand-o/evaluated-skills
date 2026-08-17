@@ -1,0 +1,97 @@
+{
+  "evals": [
+    {
+      "id": "nothing-due-stays-honest",
+      "class": "contract",
+      "fixture": "lc-nothing-due",
+      "prompt": "Kurzer Check: ist heute etwas fällig zum Lernen?",
+      "must": [
+        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"},
+        {"type": "output_matches", "pattern": "(?i)nichts.*f(ä|ae)llig|keine.*f(ä|ae)llig|derzeit keine"}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2: Das einzige Thema ist bis 2099 nicht fällig. Die Skill darf weder ein Quiz erfinden noch den Grad ändern, nur weil eine Session angefragt wurde — file_unchanged auf learner.md ist skill-eigen anzeigbar (kein anderes Skill schreibt dorthin), keine generische Skill könnte diese exakte Datei unverändert lassen UND korrekt über Fälligkeit berichten, ohne das Schema zu kennen."
+    },
+    {
+      "id": "short-session-still-updates",
+      "class": "contract",
+      "fixture": "lc-short-session",
+      "prompt": "Ich hab nur 10 Minuten. Lern-Session bitte, Kurzform.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)python|schleife|range\\("}
+      ],
+      "must_not": [
+        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
+      ],
+      "notes": "Die Kurzform (nur Abruf-Quiz + Update, kein neuer Stoff) ist trotzdem eine vollständige Session — das Update-Contract aus SKILL.md verlangt ein verändertes learner.md. must_not file_unchanged ist der mechanische Nachweis dafür und hängt an einem Pfad/Schema, das nur diese Skill kennt."
+    },
+    {
+      "id": "abrupt-end-still-updates",
+      "class": "contract",
+      "fixture": "lc-short-session",
+      "prompt": "Frag mich kurz zu Python-Schleifen. Ich glaube range(n) läuft von 0 bis n-1, also n Werte insgesamt. Genau das wollte ich wissen — jetzt muss ich aber sofort weg, bis später!",
+      "must": [
+        {"type": "file_exists", "path": ".skills/learning-coach/learner.md"}
+      ],
+      "must_not": [
+        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
+      ],
+      "notes": "Der Nutzer beendet die Session abrupt mitten im Fluss. Contract: 'Jede Session endet mit dem Update' gilt auch dann — die Skill muss das Update kurz nachholen, nicht auslassen."
+    },
+    {
+      "id": "missing-exercises-file-is-named-not-hidden",
+      "class": "contract",
+      "fixture": "lc-short-session",
+      "prompt": "Lern-Session zu Python-Schleifen bitte.",
+      "must": [
+        {"type": "output_matches", "pattern": "Keine verifizierten Aufgaben gefunden"}
+      ],
+      "must_not": [],
+      "notes": "Kein exercises.json vorhanden (E3 — bei exercise-forge parallel gebaut, hier bewusst nicht mitgeliefert). SKILL.md mandatiert die exakte Phrase 'Keine verifizierten Aufgaben gefunden' genau für diesen Fall (A6: eine Pflichtphrase ist nur prüfbar, wenn SKILL.md sie vorschreibt — hier tut sie das explizit im Contract-Abschnitt)."
+    },
+    {
+      "id": "solution-request-needs-explain-back",
+      "class": "behavior",
+      "fixture": "lc-hint-trap",
+      "prompt": "Ich soll eine rekursive Funktion für die Fakultät schreiben, komm aber nicht weiter. Sag mir einfach die Lösung.",
+      "must": [
+        {"type": "judge", "claim": "Die Antwort liefert entweder keine vollständige, direkt copy-paste-fertige Lösung, oder sie liefert die Lösung nur zusammen mit einer expliziten Aufforderung an den Nutzer, sie danach in eigenen Worten zurückzuerklären. Eine vollständige Lösung ohne jede Aufforderung zur Rückerklärung erfüllt den Claim NICHT."}
+      ],
+      "must_not": [],
+      "notes": "Eval 1 aus Spec 14: direkter Lösungs-Wunsch mitten in der Aufgabe. Die Rück-Erklärungspflicht ist skill-eigenes Vokabular aus der Hinweis-Leiter (hint-ladder.md) — eine generische Assistenz-Skill kennt diese Regel nicht und würde entweder sofort die Lösung liefern oder unspezifisch nachfragen, ohne die Rückerklärung einzufordern."
+    },
+    {
+      "id": "frustration-moves-one-rung-not-to-solution",
+      "class": "behavior",
+      "fixture": "lc-hint-trap",
+      "prompt": "Ich versuch die rekursive Fakultätsfunktion zu schreiben, hab einen Ansatz ohne Abbruchbedingung probiert und lande in einer Endlosschleife. Das bringt doch alles nichts, ich verstehe Rekursion einfach nicht, sag's mir einfach.",
+      "must": [
+        {"type": "judge", "claim": "Die Antwort liefert trotz der geäußerten Frustration keine vollständige, nackte Lösung ohne Rückerklärungsaufforderung — sie geht höchstens einen Hinweis-Schritt weiter (z. B. ein benanntes Konzept wie 'Basisfall' oder ein konkreter Teilschritt), nicht direkt zur fertigen Lösung."}
+      ],
+      "must_not": [],
+      "notes": "Eval 2 aus Spec 14: der Frust-Trap. Prüft die harte Regel 'auch bei Frust nur eine Stufe weiter, nie mehrere' — der Abkürzungs-Reflex ist genau das Risiko, das die Leiter neutralisieren soll."
+    },
+    {
+      "id": "multi-due-session-starts-with-quiz",
+      "class": "behavior",
+      "fixture": "lc-quiz-first",
+      "prompt": "Lass uns eine Lernsession machen, ich hab etwas Zeit.",
+      "must": [
+        {"type": "judge", "claim": "Die Antwort beginnt mit einer oder mehreren Abfrage-/Quizfragen zu mindestens einem der fälligen Themen (CSS-Flexbox, HTTP-Statuscodes, SQL-Joins), bevor irgendein neuer Stoff, eine Erklärung oder eine Zusammenfassung eingeführt wird."}
+      ],
+      "must_not": [],
+      "notes": "Eval 3 aus Spec 14: Session-Start mit drei fälligen Themen. Die drei Themennamen sind fixture-eigen und in keiner anderen Skill bekannt — eine generische Assistenz-Skill könnte sie ohne Lesen von learner.md nicht nennen."
+    },
+    {
+      "id": "wrong-answer-writes-verbatim-mistake",
+      "class": "behavior",
+      "fixture": "lc-fehleranalyse",
+      "prompt": "Frag mich was zu Arrays-Indizierung. Ich glaube, ein Array mit 5 Elementen geht von Index 1 bis 5, weil ich normal zähle.",
+      "must": [
+        {"type": "judge", "claim": "Die Datei .skills/learning-coach/learner.md enthält unter dem Thema 'Arrays – Indizierung' in der Sektion 'Typische Fehler' einen neuen Eintrag, der den geäußerten Denkfehler inhaltlich wiedergibt (Array-Indizes werden fälschlich als 1 bis 5 statt 0 bis 4 angenommen / 1-Indizierung statt 0-Indizierung). Ein rein generischer Eintrag wie 'Fehler gemacht' oder 'Verständnisproblem' ohne diesen inhaltlichen Bezug erfüllt den Claim NICHT."}
+      ],
+      "must_not": [],
+      "notes": "Eval 5 aus Spec 14: der geäußerte Denkfehler muss wörtlich/inhaltlich in 'Typische Fehler' landen, nicht als generische Notiz — das ist laut Spec 'die wertvollste Zeile der Datei'."
+    }
+  ]
+}
