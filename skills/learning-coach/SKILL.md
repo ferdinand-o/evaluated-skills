@@ -16,14 +16,17 @@ stellen: Diese Skill lehrt durch Abruf und Hinweise, nicht durch Vorträge.
    ```
    Liefert fällige Themen samt Grad, Überfälligkeits-Status und — pro Thema — den
    Zustand der zugehörigen Aufgaben-Datei unter
-   `~/.skills/verified-research/research/<slug>.exercises.json`: **fehlt**, **leer**
-   (Array ohne Einträge) oder **strukturell unerwartet** (kein gültiges JSON-Array)
-   ergeben alle dieselbe Meldung — sag genau **„Keine verifizierten Aufgaben
-   gefunden"** und biete an, sie über exercise-forge erzeugen zu lassen. Das ist der
-   Normalfall, kein Fehler (Spec 13 wird parallel gebaut); die drei Zustände sind aus
-   Nutzersicht gleich: kein verwertbarer Aufgabenbestand. Nur wenn die Datei ein
-   nicht-leeres JSON-Array ist, gilt sie als gefunden — der Inhalt der einzelnen
-   Aufgaben wird dabei nicht geprüft (`due_topics.py::exercises_status`).
+   `~/.skills/verified-research/research/<slug>.exercises.json` (Objekt mit
+   `"exercises"`-Liste, verifiziert gegen exercise-forges `export.py`): **fehlt**,
+   **leer** (`"exercises"`-Liste ohne Einträge) oder **strukturell unerwartet**
+   (kein gültiges JSON-Objekt, oder `"exercises"` fehlt/ist keine Liste) ergeben
+   alle dieselbe Meldung — sag genau **„Keine verifizierten Aufgaben gefunden"**
+   und biete an, sie über exercise-forge erzeugen zu lassen. Das ist der
+   Normalfall, kein Fehler (Spec 13 wird parallel gebaut); die drei Zustände sind
+   aus Nutzersicht gleich: kein verwertbarer Aufgabenbestand. Nur wenn
+   `"exercises"` eine nicht-leere Liste ist, gilt die Datei als gefunden — der
+   Inhalt der einzelnen Aufgaben wird dabei nicht geprüft
+   (`due_topics.py::exercises_status`).
 2. **Abruf-Quiz zuerst** — 2 bis 4 Fragen aus dem Bestand (gern exercise-forge-Aufgaben),
    zu den fälligen Themen. Bei mehreren fälligen Themen zwischen ihnen wechseln
    (Interleaving, `references/methods.md`), nicht Thema für Thema in Blöcken. Abruf vor

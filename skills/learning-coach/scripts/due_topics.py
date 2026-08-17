@@ -11,15 +11,16 @@ Intervall aussieht.
 
 Schnittstelle zu exercise-forge (Spec 13, E3): Nur der Pfad
 `~/.skills/verified-research/research/<slug>.exercises.json` wird geprüft — auf
-Existenz und grobe Struktur (gültiges JSON, nicht-leeres Array), nicht auf den
-Inhalt der einzelnen Aufgaben. Das Aufgaben-JSON-Schema von exercise-forge wird hier
-nicht im Detail geparst, weil Spec 13 parallel zu dieser Skill gebaut wird und die
-genauen Feldnamen nicht bekannt sind (A4: was nicht sicher bekannt ist, wird nicht
-angenommen) — dass die Datei ein JSON-*Array* von Aufgaben ist ("Alle Aufgaben leben
-in einem festen JSON-Schema", Spec 13), gilt als die einzige tragfähige Annahme über
-die Top-Level-Form; jede andere Form (kaputtes JSON, ein Objekt statt eines Arrays,
-ein leeres Array) wird konservativ als "keine verwertbare Aufgabe" behandelt statt
-stillschweigend als in Ordnung durchzuwinken (A4).
+Existenz und grobe Struktur (gültiges JSON-Objekt mit einer nicht-leeren
+`"exercises"`-Liste), nicht auf den Inhalt der einzelnen Aufgaben. Das
+Aufgaben-JSON-Schema von exercise-forge wird hier nicht im Detail geparst, weil die
+genauen Feldnamen der einzelnen Aufgaben nicht bekannt sind (A4: was nicht sicher
+bekannt ist, wird nicht angenommen) — die Top-Level-Form (`{"exercises": [...]}`)
+ist dagegen gegen den echten Erzeuger verifiziert (`exercise-forge`s `export.py`:
+`data.get("exercises", [])`), keine Ableitung mehr aus dem Spec-Text. Jede andere
+Form (kaputtes JSON, ein Array statt eines Objekts, ein fehlender/falscher
+`"exercises"`-Schlüssel, eine leere Liste) wird konservativ als "keine verwertbare
+Aufgabe" behandelt statt stillschweigend als in Ordnung durchzuwinken (A4).
 """
 
 from __future__ import annotations
@@ -110,20 +111,29 @@ EXERCISES_STATUS_EMPTY = "empty"
 EXERCISES_STATUS_OK = "ok"
 
 
+EXERCISES_LIST_KEY = "exercises"
+
+
 def exercises_status(ex_path: Path) -> tuple[str, str]:
     """Existenz- und Grobstruktur-Check für ein Aufgaben-JSON, ohne das
     Aufgaben-Schema von exercise-forge im Detail zu kennen (A4/E3).
 
+    Top-Level-Form: ein JSON-*Objekt* mit dem Schlüssel `"exercises"`, dessen Wert
+    eine Liste ist — verifiziert gegen den echten Erzeuger (`exercise-forge`s
+    `export.py`: `data.get("exercises", [])`), nicht mehr nur aus Spec 13
+    abgeleitet (Korrektur einer früheren Fix-Runde, die fälschlich ein reines
+    Top-Level-Array annahm — das Objekt lässt Platz für Metadaten neben der
+    Aufgabenliste, exercise-forge ist hier die maßgebliche Quelle).
+
     Rückgabe `(status, detail)`:
     - `missing`   — Datei existiert nicht (Normalfall, kein Fehler).
-    - `malformed` — Datei existiert, ist aber kein lesbares/gültiges JSON-Array.
-      Ein Objekt statt eines Arrays zählt ebenfalls als `malformed`, weil die
-      erwartete Top-Level-Form laut Spec 13 ein Array von Aufgaben ist — eine
-      andere Form ist "strukturell unerwartet" und wird konservativ behandelt,
-      nie stillschweigend als in Ordnung angenommen (A4).
-    - `empty`     — gültiges JSON-Array, aber ohne Einträge.
-    - `ok`        — gültiges, nicht-leeres JSON-Array. Der Inhalt der einzelnen
-      Aufgaben (Feldnamen, Verifikations-Protokoll) wird NICHT geprüft.
+    - `malformed` — Datei existiert, ist aber kein lesbares/gültiges JSON-Objekt,
+      oder `"exercises"` fehlt/ist keine Liste. Eine andere Form ist "strukturell
+      unerwartet" und wird konservativ behandelt, nie stillschweigend als in
+      Ordnung angenommen (A4).
+    - `empty`     — `"exercises"` ist eine leere Liste.
+    - `ok`        — `"exercises"` ist eine nicht-leere Liste. Der Inhalt der
+      einzelnen Aufgaben (Feldnamen, Verifikations-Protokoll) wird NICHT geprüft.
     """
     if not ex_path.is_file():
         return EXERCISES_STATUS_MISSING, "Datei nicht gefunden"
@@ -135,11 +145,15 @@ def exercises_status(ex_path: Path) -> tuple[str, str]:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         return EXERCISES_STATUS_MALFORMED, f"kein gültiges JSON ({exc})"
-    if not isinstance(data, list):
-        return EXERCISES_STATUS_MALFORMED, f"erwartet ein JSON-Array, war {type(data).__name__}"
-    if not data:
-        return EXERCISES_STATUS_EMPTY, "Array ist leer, enthält keine Aufgabe"
-    return EXERCISES_STATUS_OK, f"{len(data)} Aufgabe(n)"
+    if not isinstance(data, dict):
+        return EXERCISES_STATUS_MALFORMED, f"erwartet ein JSON-Objekt mit Schlüssel '{EXERCISES_LIST_KEY}', war {type(data).__name__}"
+    exercises = data.get(EXERCISES_LIST_KEY)
+    if not isinstance(exercises, list):
+        found = "fehlt" if EXERCISES_LIST_KEY not in data else f"war {type(exercises).__name__}, keine Liste"
+        return EXERCISES_STATUS_MALFORMED, f"Schlüssel '{EXERCISES_LIST_KEY}' {found}"
+    if not exercises:
+        return EXERCISES_STATUS_EMPTY, f"'{EXERCISES_LIST_KEY}' ist leer, enthält keine Aufgabe"
+    return EXERCISES_STATUS_OK, f"{len(exercises)} Aufgabe(n)"
 
 
 def ensure_learner(repo: Path, assets_path: Path, home: Path | None = None) -> tuple[Path, bool]:

@@ -60,7 +60,7 @@
         {"type": "output_matches", "pattern": "Keine verifizierten Aufgaben gefunden"}
       ],
       "must_not": [],
-      "notes": "Review-Fund 3: Die Datei existiert (ein leeres JSON-Array [] — der plausible Fall, wenn exercise-forge legitim keine verifizierbare Aufgabe zu einem Thema findet), zählt aber nicht als 'gefunden'. Dieselbe mandatierte Phrase wie bei fehlender Datei muss erscheinen, sonst hat der Agent keine dokumentierte Reaktion und müsste zwischen Erfinden und fälschlichem Schweigen wählen."
+      "notes": "Review-Fund 3: Die Datei existiert (ein Objekt mit leerer 'exercises'-Liste — die reale Form von exercise-forges export.py, der plausible Fall, wenn exercise-forge legitim keine verifizierbare Aufgabe zu einem Thema findet), zählt aber nicht als 'gefunden'. Dieselbe mandatierte Phrase wie bei fehlender Datei muss erscheinen, sonst hat der Agent keine dokumentierte Reaktion und müsste zwischen Erfinden und fälschlichem Schweigen wählen."
     },
     {
       "id": "solution-request-needs-explain-back",

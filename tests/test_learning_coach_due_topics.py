@@ -201,7 +201,14 @@ def test_exercises_path_uses_verified_research_namespace(tmp_path):
     assert path == home / ".skills" / "verified-research" / "research" / "closures.exercises.json"
 
 
-# --- exercises_status: fehlend/leer/kaputt/strukturell unerwartet (Review-Fund 3) ----
+# --- exercises_status: fehlend/leer/kaputt/strukturell unerwartet (Review-Funde 3+6) --
+#
+# Top-Level-Form korrigiert nach Rückmeldung des Koordinators: exercise-forges
+# echtes `export.py` liest `data.get("exercises", [])` — ein JSON-*Objekt* mit
+# `"exercises"`-Liste, kein Top-Level-Array. Die ursprüngliche Fix-Runde hatte ein
+# Top-Level-Array als "einzige tragfähige Annahme" aus dem Spec-13-Text abgeleitet;
+# das war falsch, weil beide Skills parallel gebaut wurden und diese Annahme nie
+# gegen den echten Erzeuger geprüft war.
 
 def test_exercises_status_missing(tmp_path):
     status, _ = due_topics_mod.exercises_status(tmp_path / "nope.exercises.json")
@@ -216,20 +223,35 @@ def test_exercises_status_malformed_json(tmp_path):
     assert "JSON" in detail
 
 
-def test_exercises_status_unexpected_top_level_shape(tmp_path):
-    """Ein Objekt statt eines Arrays ist strukturell unerwartet, kein Fehler beim
-    Parsen — Spec 13 sagt 'Aufgaben leben in einem festen JSON-Schema', die
-    einzige tragfähige Top-Level-Annahme ist ein Array."""
+def test_exercises_status_top_level_array_is_malformed(tmp_path):
+    """Ein bloßes Top-Level-Array ist jetzt die FALSCHE Form (frühere, korrigierte
+    Annahme) — der echte Erzeuger liefert ein Objekt mit 'exercises'-Schlüssel."""
     path = tmp_path / "x.exercises.json"
-    path.write_text('{"tasks": []}', encoding="utf-8")
+    path.write_text('[{"typ": "mc"}]', encoding="utf-8")
     status, detail = due_topics_mod.exercises_status(path)
     assert status == due_topics_mod.EXERCISES_STATUS_MALFORMED
-    assert "Array" in detail
+    assert "exercises" in detail
 
 
-def test_exercises_status_empty_array(tmp_path):
+def test_exercises_status_missing_exercises_key_is_malformed(tmp_path):
     path = tmp_path / "x.exercises.json"
-    path.write_text("[]", encoding="utf-8")
+    path.write_text('{"topic": "css-grid"}', encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_MALFORMED
+    assert "exercises" in detail
+
+
+def test_exercises_status_exercises_key_not_a_list_is_malformed(tmp_path):
+    path = tmp_path / "x.exercises.json"
+    path.write_text('{"exercises": "nicht-liste"}', encoding="utf-8")
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_MALFORMED
+    assert "exercises" in detail
+
+
+def test_exercises_status_empty_exercises_list(tmp_path):
+    path = tmp_path / "x.exercises.json"
+    path.write_text('{"exercises": []}', encoding="utf-8")
     status, detail = due_topics_mod.exercises_status(path)
     assert status == due_topics_mod.EXERCISES_STATUS_EMPTY
     assert "leer" in detail
@@ -237,13 +259,30 @@ def test_exercises_status_empty_array(tmp_path):
 
 def test_exercises_status_ok(tmp_path):
     path = tmp_path / "x.exercises.json"
-    path.write_text('[{"typ": "mc"}, {"typ": "flashcard"}]', encoding="utf-8")
+    path.write_text('{"exercises": [{"typ": "mc"}, {"typ": "flashcard"}]}', encoding="utf-8")
     status, detail = due_topics_mod.exercises_status(path)
     assert status == due_topics_mod.EXERCISES_STATUS_OK
     assert "2" in detail
 
 
-def test_cli_due_reports_missing_phrase_for_empty_exercises_array(tmp_path, capsys):
+def test_exercises_status_ok_against_realistic_exporter_shape(tmp_path):
+    """Gegen die reale Form von exercise-forges export.py geprüft, nicht nur gegen
+    eine Ableitung: Metadaten neben 'exercises' dürfen vorkommen und stören nicht,
+    weil nur der Schlüssel 'exercises' ausgewertet wird — der Inhalt der einzelnen
+    Aufgaben bleibt ungeprüft."""
+    path = tmp_path / "x.exercises.json"
+    path.write_text(
+        '{"topic": "css-grid", "generated": "2026-08-17", "exercises": '
+        '[{"type": "mc", "prompt": "...", "options": ["a", "b"], "answer": "a"}, '
+        '{"type": "coding", "prompt": "...", "tests": "..."}]}',
+        encoding="utf-8",
+    )
+    status, detail = due_topics_mod.exercises_status(path)
+    assert status == due_topics_mod.EXERCISES_STATUS_OK
+    assert "2" in detail
+
+
+def test_cli_due_reports_missing_phrase_for_empty_exercises_list(tmp_path, capsys):
     """Review-Fund 3: eine existierende, aber leere Aufgaben-Datei darf nicht als
     'Aufgaben gefunden' durchgehen — dieselbe mandatierte Phrase wie bei Datei-fehlt."""
     repo = tmp_path / "repo"
@@ -253,7 +292,7 @@ def test_cli_due_reports_missing_phrase_for_empty_exercises_array(tmp_path, caps
     )
     ex_dir = repo / ".skills" / "verified-research" / "research"
     ex_dir.mkdir(parents=True)
-    (ex_dir / "css-grid.exercises.json").write_text("[]", encoding="utf-8")
+    (ex_dir / "css-grid.exercises.json").write_text('{"exercises": []}', encoding="utf-8")
 
     rc = due_topics_mod.main(["--repo", str(repo), "due", "--today", "2026-08-17"])
     assert rc == 0
