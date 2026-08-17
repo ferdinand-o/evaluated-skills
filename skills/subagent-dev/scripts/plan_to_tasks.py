@@ -79,6 +79,28 @@ class GateResult:
 # --------------------------------------------------------------------------
 
 
+def _mask_fenced_blocks(text: str) -> str:
+    """Blende Zeilen innerhalb von ```-Codezäunen aus (gleiche Länge, gleiche
+    Zeilenzahl, damit alle Offsets im Rest des Parsers gültig bleiben).
+
+    Ein Plan, der (wie dieser hier) Beispiel-Pläne als Codeblock zitiert, hätte
+    sonst verschachtelte `### Task N:`-, `**Files:**`- oder `- [ ]`-Zeilen, die
+    der Parser für echte Plan-Struktur hält. Ohne Maskierung wäre das ein
+    stiller Fehlschlag (doppelte Task-IDs oder falsch geparste Sektionen),
+    keine Fehlermeldung — genau der Fall, den A4 verbietet.
+    """
+    lines = text.split("\n")
+    in_fence = False
+    out: list[str] = []
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            out.append(line)
+            in_fence = not in_fence
+            continue
+        out.append(" " * len(line) if in_fence else line)
+    return "\n".join(out)
+
+
 def _section(block: str, start_marker: str, end_markers: tuple[str, ...]) -> str:
     """Text zwischen `start_marker` und dem nächsten der `end_markers` (oder Blockende)."""
     start = block.find(start_marker)
@@ -127,7 +149,11 @@ def parse_plan(text: str) -> PlanDoc:
     Wirft `PlanParseError`, wenn kein einziger `### Task N:`-Header gefunden
     wird — ein leerer Task-Zerlegung wäre sonst ein stiller Erfolg über einem
     Plan, den der Parser gar nicht verstanden hat (Vorab-Entscheidung A4).
+
+    Zitierte Beispiel-Pläne in ```-Codeblöcken (wie in diesem Plan selbst)
+    werden vor jeder Struktur-Erkennung ausmaskiert — siehe `_mask_fenced_blocks`.
     """
+    text = _mask_fenced_blocks(text)
     headers = list(TASK_HEADER_RE.finditer(text))
     if not headers:
         raise PlanParseError(
@@ -144,6 +170,9 @@ def parse_plan(text: str) -> PlanDoc:
             if pos != -1:
                 gc_end = min(gc_end, pos)
         global_constraints = text[gc_start:gc_end].strip()
+        # Die eigene "## Global Constraints"-Überschrift wird nicht mitkopiert —
+        # render_task_file setzt bereits eine eigene Überschrift darüber.
+        global_constraints = global_constraints[len("## Global Constraints"):].strip("\n")
 
     tasks: list[PlanTask] = []
     for i, header in enumerate(headers):

@@ -87,6 +87,12 @@ def test_parse_plan_strips_line_ranges_from_files():
     assert task4.files[0].raw == "config/settings.py:10-20"
 
 
+def test_parse_plan_global_constraints_excludes_its_own_heading():
+    doc = ptt.parse_plan(SAMPLE_PLAN)
+    assert not doc.global_constraints.startswith("#")
+    assert doc.global_constraints.startswith("- Alles auf Deutsch.")
+
+
 def test_parse_plan_captures_steps_and_interfaces():
     doc = ptt.parse_plan(SAMPLE_PLAN)
     task2 = doc.tasks[1]
@@ -146,6 +152,22 @@ def test_parse_plan_rejects_duplicate_task_ids():
     dup = SAMPLE_PLAN + "\n### Task 1: Doppelt\n\n**Files:**\n- Create: `x.py`\n"
     with pytest.raises(ptt.PlanParseError):
         ptt.parse_plan(dup)
+
+
+def test_parse_plan_ignores_task_headers_inside_fenced_code():
+    """Ein Plan, der (wie dieser hier) einen Beispiel-Plan als Codeblock
+    zitiert, darf die zitierten '### Task N:'-Header nicht als echte Struktur
+    lesen — sonst kollidieren Task-IDs oder Files:/Steps: werden verfälscht."""
+    plan = SAMPLE_PLAN.replace(
+        "- [ ] **Step 1: Write the failing test**\n\n- [ ] **Step 2: Implement**",
+        "- [ ] **Step 1: Write the failing test**\n\n"
+        "```python\nZITAT = '''\n### Task 1: Geister-Task\n\n"
+        "**Files:**\n- Create: `geist.py`\n'''\n```\n\n"
+        "- [ ] **Step 2: Implement**",
+    )
+    doc = ptt.parse_plan(plan)
+    assert [t.id for t in doc.tasks] == [1, 2, 3, 4]
+    assert doc.tasks[0].files[0].path == "src/parser.py"
 
 
 def test_gate_verdict_at_least_three_singletons_is_parallel():
