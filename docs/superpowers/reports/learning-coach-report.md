@@ -31,14 +31,14 @@ skills/learning-coach/
 │   ├── hint-ladder.md              (vier Stufen, Formulierungen je Aufgabentyp, Anti-Kollaps)
 │   └── methods.md                  (Abrufübung, Spacing-Tabelle, Fehleranalyse, Interleaving)
 ├── assets/learner-template.md      (Bootstrap-Vorlage mit Kopfzeile)
-└── scripts/due_topics.py           (Tier 1, 37 Unit-Tests)
-evals/learning-coach/evals.json     (9 Evals: 5 contract, 4 behavior — nach Fix-Runde)
+└── scripts/due_topics.py           (Tier 1, 40 Unit-Tests)
+evals/learning-coach/evals.json     (9 Evals: 5 contract, 4 behavior — nach Fix-Runden)
 evals/fixtures/lc-*/                (6 Fixtures, alle mit .skills/learning-coach/learner.md)
 tests/test_learning_coach_due_topics.py
 docs/superpowers/plans/2026-08-17-learning-coach.md
 ```
 
-37 neue Unit-Tests, alle grün. Gesamtsuite: **183 von 183 bestanden** (146 bestehende
+40 neue Unit-Tests, alle grün. Gesamtsuite: **186 von 186 bestanden** (146 bestehende
 + 37 neue).
 
 ## Fix-Runde (unabhängiger Review)
@@ -81,6 +81,33 @@ fünfte, als Anmerkung eingestufte Beobachtung dokumentiert statt behoben:
 Fixes 1/2 sowie die verbleibende Unschärfe aus Fund 3 (Top-Level-Form-Annahme) und
 die unbehobene Anmerkung (Fund 5) festhält.
 
+## Fix-Runde 2 — Schnittstelle gegen den echten Erzeuger geprüft
+
+Die in Fix-Runde 1 dokumentierte Unschärfe (Top-Level-Form von `*.exercises.json`
+eine Ableitung aus Spec 13, nicht bestätigt) war berechtigt: Der Koordinator prüfte
+sie gegen `exercise-forge`s tatsächlichen Code (`export.py:254`,
+`data.get("exercises", [])`) und fand einen echten Defekt. Die angenommene
+Top-Level-Form war falsch — der reale Erzeuger schreibt ein JSON-**Objekt** mit
+`"exercises"`-Liste, kein Top-Level-Array. Mit der ursprünglichen Annahme hätte
+`due_topics.py` **jede** real erzeugte Aufgabendatei als `malformed` gemeldet und
+den Nutzer fälschlich vor kaputten Daten gewarnt, die in Ordnung sind.
+
+Weder ich noch der Autor von exercise-forge konnten das beim parallelen Bauen sehen
+— beide Testsuiten liefen grün, weil jede gegen ihre eigene Annahme prüfte. Der Fix
+gehört laut Koordinator zu `learning-coach` (die bessere Form mit Metadaten-Spielraum
+bleibt bei exercise-forge): `exercises_status()` erwartet jetzt ein Objekt mit
+`"exercises"`-Schlüssel, dessen Wert eine Liste ist; fehlt der Schlüssel oder ist er
+keine Liste, bleibt es `malformed` (die konservative A4-Haltung selbst war richtig,
+nur die angenommene Form falsch). Der Inhalt der einzelnen Aufgaben-Objekte bleibt
+weiterhin ungeprüft — das war nie der strittige Punkt.
+
+Sechs Tests zu `exercises_status()` ersetzt/ergänzt (u. a. ein Test mit einer
+realistischen Exporter-Form inklusive Metadaten-Feldern neben `"exercises"`), die
+Fixture `lc-broken-exercises` und der zugehörige Eval
+`empty-exercises-file-is-named-not-hidden` auf die korrigierte Form umgestellt.
+`due_topics.py` manuell gegen die korrigierte Fixture verifiziert (siehe
+„Testergebnis").
+
 ## E1 — `due_topics.py` als Tier 1
 
 Nur Stdlib (`argparse`, `re`, `shutil`, `dataclasses`, `datetime`, `pathlib`). Zwei
@@ -117,13 +144,15 @@ eigene `## <slug>: <Name>`-Sektionen in einer flachen Struktur.
 `due_topics.py` verlässt sich **ausschließlich** auf den Pfad
 `~/.skills/verified-research/research/<slug>.exercises.json` (projektlokal
 überschreibbar nach demselben Muster) und prüft Existenz **und grobe Struktur**
-(`exercises_status()`, nachgerüstet in der Fix-Runde — siehe unten): fehlend, leer
-(gültiges Array ohne Einträge) und strukturell unerwartet (kein gültiges JSON-Array)
-ergeben alle dieselbe Reaktion. Der Inhalt der einzelnen Aufgaben wird nicht geparst,
-weil die genauen Feldnamen des Aufgaben-Schemas von exercise-forge nicht bekannt sind
-(A4: was nicht sicher bekannt ist, wird nicht angenommen) — die einzige Annahme ist
-die Top-Level-Form (Array), aus Spec 13 abgeleitet, nicht wörtlich zitiert (siehe
-`docs/known-limits.md`, Abschnitt „learning-coach"). In jedem der drei
+(`exercises_status()`, nachgerüstet in Fix-Runde 1, Top-Level-Form in Fix-Runde 2
+korrigiert — siehe oben): fehlend, leer (`"exercises"`-Liste ohne Einträge) und
+strukturell unerwartet (kein gültiges JSON-Objekt, oder `"exercises"` fehlt/ist
+keine Liste) ergeben alle dieselbe Reaktion. Der Inhalt der einzelnen Aufgaben wird
+nicht geparst, weil die genauen Feldnamen des Aufgaben-Schemas von exercise-forge
+nicht bekannt sind (A4: was nicht sicher bekannt ist, wird nicht angenommen) — die
+Top-Level-Form (`{"exercises": [...]}`) ist dagegen gegen den echten Erzeuger
+verifiziert (`export.py:254`, `data.get("exercises", [])`), keine Ableitung mehr
+(siehe `docs/known-limits.md`, Abschnitt „learning-coach"). In jedem der drei
 Nicht-Erfolgsfälle meldet die Skill wörtlich **„Keine verifizierten Aufgaben
 gefunden"** und schlägt vor, exercise-forge aufzurufen — als SKILL.md-Contract
 mandatiert, damit der zugehörige Eval mechanisch (`output_matches`, kein Judge)
@@ -201,11 +230,12 @@ Datei ändern, ist beim Zusammenführen der Branches ein trivialer Merge-Konflik
 ## Testergebnis
 
 ```
-183 passed in 3.05s
+186 passed in 3.18s
 ```
 
-(146 ursprünglich bestehende Tests + 37 neue für `due_topics.py`, davon 6 aus der
-Fix-Runde für `exercises_status()`, keine Regression.)
+(146 ursprünglich bestehende Tests + 40 neue für `due_topics.py`, davon 9 aus den
+beiden Fix-Runden für `exercises_status()` — 6 aus Runde 1, netto 3 weitere aus
+Runde 2 nach der Korrektur der Top-Level-Form — keine Regression.)
 
 ## Offene Sorgen
 
@@ -215,8 +245,14 @@ Fix-Runde für `exercises_status()`, keine Regression.)
   Update-Pflicht, exakte Phrase) einen echten Agenten tatsächlich lenkt, ist nicht
   gezeigt, nur plausibilisiert — das gilt insbesondere für die beiden in der
   Fix-Runde umgebauten Evals, die noch nie gegen einen echten Agenten liefen.
-- Die Top-Level-Form-Annahme in `exercises_status()` (JSON-Array) ist eine eigene
-  Ableitung, keine bestätigte Spec-13-Vorgabe — siehe `docs/known-limits.md`.
+- Die Top-Level-Form von `exercises_status()` ist jetzt gegen `exercise-forge`s
+  echten Code verifiziert (`export.py:254`, siehe Fix-Runde 2), nicht mehr nur
+  eine Ableitung aus Spec 13 — das war der eine echte Defekt in der vorherigen
+  Fassung. Der Inhalt der einzelnen Aufgaben-Objekte innerhalb von `"exercises"`
+  bleibt weiterhin ungeprüft (bewusst, A4); sollte sich diese innere Form später
+  als für `learner.md`/die Session relevant erweisen (z. B. Bloom-Ebene fürs
+  gezielte Anfordern „eine Stufe schwerer"), ist das ein separater, noch nicht
+  abgesicherter Punkt.
 - Doppelte Themen-Slugs bleiben unaufgelöst (Anmerkung, bewusst nicht behoben).
 - Die Schnittstelle zu exercise-forge (Spec 13) ist nur über den dokumentierten Pfad
   und Existenzprüfung abgesichert — sobald Spec 13 fertig ist, lohnt ein Integrations-

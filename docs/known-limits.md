@@ -153,16 +153,22 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   in `evals/learning-coach/evals.json` umgesetzt, aber wie der Rest der Skill
   **nicht** gegen einen echten Agenten gelaufen — die Korrektheit der neuen
   Prompts/Claims ist plausibilisiert, nicht gezeigt.
-- **Aufgaben-Datei-Status kennt nur die Top-Level-Form „JSON-Array".**
-  `due_topics.py::exercises_status()` behandelt jede Nicht-Array-Form (z. B.
-  `{"tasks": [...]}`) als `malformed`, obwohl Spec 13 die genaue Top-Level-Form
-  nicht festlegt — nur „Alle Aufgaben leben in einem festen JSON-Schema". Das ist
-  eine eigene, konservative Annahme dieser Implementierung (ein Array ist die
-  nächstliegende Form für „mehrere Aufgaben zu einem Thema"), keine bestätigte
-  Spec-13-Vorgabe. Sobald exercise-forge (parallel gebaut) sein tatsächliches
-  Schema festlegt, muss dieser Punkt gegen die reale Ausgabe geprüft werden —
-  liegt die Top-Level-Form anders, meldet `due_topics.py` fälschlich „Keine
-  verifizierten Aufgaben gefunden" für eine tatsächlich befüllte Datei.
+- **Aufgaben-Datei-Status: Top-Level-Form korrigiert, jetzt gegen den echten
+  Erzeuger verifiziert.** Eine frühere Fix-Runde hatte `exercises_status()` auf
+  ein Top-Level-JSON-*Array* ausgelegt, abgeleitet aus dem Spec-13-Text („Alle
+  Aufgaben leben in einem festen JSON-Schema") — keine bestätigte Vorgabe, nur
+  eine Ableitung, weil `learning-coach` und `exercise-forge` parallel gebaut
+  wurden und die Testsuiten beider Seiten jeweils nur gegen die eigene Annahme
+  grün liefen. Der Koordinator prüfte das nach der gemeldeten Sorge gegen den
+  echten Code (`exercise-forge`s `export.py`: `data.get("exercises", [])`) und
+  fand: die reale Form ist ein JSON-**Objekt** mit `"exercises"`-Liste, kein
+  Array. Mit der ursprünglichen Annahme hätte `due_topics.py` **jede** real von
+  exercise-forge erzeugte Aufgabendatei als `malformed` gemeldet. Korrigiert:
+  `exercises_status()` erwartet jetzt ein Objekt mit `"exercises"`-Schlüssel;
+  fehlt der Schlüssel oder ist sein Wert keine Liste, bleibt es `malformed`.
+  Bleibt als Grenze: der Inhalt der einzelnen Aufgaben-Objekte innerhalb von
+  `"exercises"` ist weiterhin ungeprüft (bewusst, A4) — nur die Top-Level-Form
+  ist jetzt gegen echten Code statt gegen eine Textableitung abgesichert.
 - **Doppelte Themen-Slugs in `learner.md` werden erkannt, aber nicht aufgelöst.**
   `parse_learner()` warnt bei doppeltem Slug, behält aber beide Sektionen. Weder
   `due_topics.py` noch `SKILL.md` legen fest, welche der beiden Sektionen ein
