@@ -44,8 +44,8 @@ Vier Bereiche sind hier sichtbar: `src.api` (Fassade), `src.domain.services`
   Persistenzschicht kennt die Domaenenklasse zurueck. Keine Seite ist unabhaengig
   testbar. Empfehlung: `audit()` sollte `user_id: str` statt `User` annehmen, dann
   entfaellt die Rueckkante.
-- Keine Ausreisser bei Fan-in/Fan-out (Schwellen: Default 10/10, keine `layers.json`
-  vorhanden - Schichtverletzungen sind entsprechend ungeprueft, nicht sauber).
+- Keine Ausreisser bei Fan-in/Fan-out (Schwellen: Default 10/10).
+- **Schichtverletzungen:** ungeprüft (keine layers.json gefunden).
 
 ## Klassen
 
@@ -56,5 +56,5 @@ keinen zusaetzlichen Erkenntniswert gegenueber der Modulebene.
 ---
 
 <!-- architecture-map:graph-hashes
-{"module": {"command": "python .claude/skills/architecture-map/scripts/extract_py.py --root . --level module --out .skills/cache/architecture-map/service-module.json", "graph_hash": "6fd5226f670cb2c04447fc60a95f7b9c490cfe620601e08b719d83932d9eb1a4"}}
+{"module": {"command": "python .claude/skills/architecture-map/scripts/extract_py.py --root . --level module --out .skills/cache/architecture-map/service-module.json", "graph_hash": "8072db01ca8f58a65265445fb2970b0ff5daee7186e517e9d67a8e6cbb804c0c", "external": []}}
 -->
