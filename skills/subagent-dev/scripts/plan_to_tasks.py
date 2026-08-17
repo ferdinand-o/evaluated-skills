@@ -29,6 +29,11 @@ PARALLEL_THRESHOLD = 3
 
 TASK_HEADER_RE = re.compile(r"^### Task (\d+):\s*(.+?)\s*$", re.MULTILINE)
 FILE_LINE_RE = re.compile(r"^-\s*(?:Create|Modify|Test|Delete):\s*`([^`]+)`", re.MULTILINE)
+RENAME_LINE_RE = re.compile(r"^-\s*Rename:\s*`([^`]+)`\s*->\s*`([^`]+)`", re.MULTILINE)
+# Jede Bullet-Zeile im Files:-Block — dient als Sicherheitsnetz: Was hier eine
+# Zeile mehr zählt als FILE_LINE_RE/RENAME_LINE_RE zusammen erkannt haben, ist
+# eine Zeile, deren Vokabular der Parser nicht kennt (Fix D2).
+BULLET_LINE_RE = re.compile(r"^-\s*.+$", re.MULTILINE)
 LINE_RANGE_RE = re.compile(r"^(?P<path>.+?)(?::\d+(?:-\d+)?)?$")
 STEP_RE = re.compile(r"^-\s*\[[ xX]\]\s*\*\*(Step \d+:[^*]*)\*\*", re.MULTILINE)
 # Backtick-Symbol mit Klammern (Funktion/Methode) — Name vor der ersten "(".
@@ -37,6 +42,11 @@ CALLABLE_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)\(([^)]*)\)")
 # Dateipfad ist (keine "/", keine bekannte Dateiendung).
 BARE_SYMBOL_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)`")
 FILE_LIKE_SUFFIXES = (".py", ".md", ".json", ".yaml", ".yml", ".txt", ".sh")
+# "Consumes:"/"Produces:" ohne Backtick-Symbol, aber auch keine echte Prosa —
+# der explizite Leerfall, den der Plan selbst so benennt.
+NOTHING_NEW_RE = re.compile(r"^\(?nichts neues\)?\.?$", re.IGNORECASE)
+# Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
+GLOB_CHARS = frozenset("*?[")
 
 
 class PlanParseError(ValueError):
@@ -57,6 +67,7 @@ class PlanTask:
     files_unknown: bool
     consumes: str
     produces: str
+    interfaces_unknown: bool
     steps: list[str]
 
 
@@ -115,17 +126,58 @@ def _section(block: str, start_marker: str, end_markers: tuple[str, ...]) -> str
     return block[start:end].strip("\n")
 
 
+def _strip_range(raw: str) -> str:
+    match = LINE_RANGE_RE.match(raw)
+    return match.group("path") if match else raw
+
+
 def _parse_files(block: str) -> tuple[list[FileRef], bool]:
+    """Files:-Block parsen. `files_unknown=True`, sobald auch nur eine Bullet-
+    Zeile im Block keinem bekannten Muster entspricht (Fix D2) — nicht nur bei
+    einem komplett leeren Block. Eine Zeile, die der Plan-Autor mit eigenem
+    Vokabular schreibt (z. B. ein selbst erfundenes `Rename:`, ein Tippfehler),
+    verschwindet sonst spurlos statt die Task als unsicher zu markieren.
+    """
     files_text = _section(block, "**Files:**", ("**Interfaces:**", "\n- [ ]", "\n- [x]", "\n- [X]"))
+
     refs: list[FileRef] = []
+    matched_lines = 0
+
     for raw in FILE_LINE_RE.findall(files_text):
-        match = LINE_RANGE_RE.match(raw)
-        path = match.group("path") if match else raw
-        refs.append(FileRef(raw=raw, path=path))
-    return refs, len(refs) == 0
+        refs.append(FileRef(raw=raw, path=_strip_range(raw)))
+        matched_lines += 1
+
+    for old_raw, new_raw in RENAME_LINE_RE.findall(files_text):
+        # Ein Rename betrifft zwei Pfade — beide gehören in die Allowlist und
+        # in die Überlappungsprüfung; wer die alte ODER die neue Datei anfasst,
+        # kollidiert mit diesem Task.
+        refs.append(FileRef(raw=old_raw, path=_strip_range(old_raw)))
+        refs.append(FileRef(raw=new_raw, path=_strip_range(new_raw)))
+        matched_lines += 1
+
+    total_lines = len(BULLET_LINE_RE.findall(files_text))
+    unparsed_lines_exist = matched_lines < total_lines
+    files_unknown = len(refs) == 0 or unparsed_lines_exist
+    return refs, files_unknown
 
 
-def _parse_interfaces(block: str) -> tuple[str, str]:
+def _has_unrecognized_prose(text: str) -> bool:
+    """True, wenn `text` etwas außer Backtick-Symbolen oder dem expliziten
+    Leerfall "nichts Neues" enthält — Prosa, aus der `extract_produced_symbols`
+    kein Symbol ziehen kann, aber die trotzdem eine echte Abhängigkeit benennen
+    könnte (Fix D3). Enthält der Text ein Backtick, gilt er als geparst, auch
+    wenn drumherum Prosa steht — sonst wäre "Consumes: `parse()` aus Task 1"
+    fälschlich unbekannt, obwohl das Symbol explizit genannt und erkannt wird.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if NOTHING_NEW_RE.match(stripped):
+        return False
+    return "`" not in stripped
+
+
+def _parse_interfaces(block: str) -> tuple[str, str, bool]:
     text = _section(block, "**Interfaces:**", ("\n- [ ]", "\n- [x]", "\n- [X]"))
     consumes = ""
     produces = ""
@@ -136,7 +188,8 @@ def _parse_interfaces(block: str) -> tuple[str, str]:
         consumes = text[consumes_start + len("- Consumes:"):end].strip()
     if produces_start != -1:
         produces = text[produces_start + len("- Produces:"):].strip()
-    return consumes, produces
+    interfaces_unknown = _has_unrecognized_prose(consumes) or _has_unrecognized_prose(produces)
+    return consumes, produces, interfaces_unknown
 
 
 def _parse_steps(block: str) -> list[str]:
@@ -182,11 +235,12 @@ def parse_plan(text: str) -> PlanDoc:
         task_id = int(header.group(1))
         title = header.group(2)
         files, files_unknown = _parse_files(block)
-        consumes, produces = _parse_interfaces(block)
+        consumes, produces, interfaces_unknown = _parse_interfaces(block)
         steps = _parse_steps(block)
         tasks.append(PlanTask(
             id=task_id, title=title, files=files, files_unknown=files_unknown,
-            consumes=consumes, produces=produces, steps=steps,
+            consumes=consumes, produces=produces, interfaces_unknown=interfaces_unknown,
+            steps=steps,
         ))
 
     seen: set[int] = set()
@@ -203,16 +257,45 @@ def parse_plan(text: str) -> PlanDoc:
 # --------------------------------------------------------------------------
 
 
-def _normalize(path: str) -> PurePosixPath:
-    return PurePosixPath(path.strip().rstrip("/"))
+def _normalize_parts(path: str) -> tuple[str, ...]:
+    """Pfad-Segmente für den Überlappungsvergleich: Backslashes zu Slashes
+    (Windows-Schreibweise, D2), kleingeschrieben (Groß-/Kleinschreibungs-
+    Drift zwischen zwei Plan-Autoren, D2), führendes `/` entfernt — ein
+    absoluter Pfad wird dadurch mit einem relativen vergleichbar, siehe
+    `_paths_overlap`s Suffix-Prüfung.
+    """
+    normalized = path.strip().rstrip("/").replace("\\", "/").lower()
+    return PurePosixPath(normalized).parts
+
+
+def _glob_root(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """Der konkrete Präfix eines Pfads vor dem ersten Glob-Segment.
+
+    `src/**/*.py` und `src/*.py` liefern beide `("src",)`: Ohne Dateisystem-
+    Zugriff kann nicht sicher ausgeschlossen werden, was ein Glob trifft —
+    konservativ gilt deshalb sein ganzer Wurzel-Ordner als betroffen (B2).
+    """
+    root: list[str] = []
+    for part in parts:
+        if any(c in part for c in GLOB_CHARS):
+            break
+        root.append(part)
+    return tuple(root)
 
 
 def _paths_overlap(a: str, b: str) -> bool:
-    pa, pb = _normalize(a).parts, _normalize(b).parts
+    pa, pb = _normalize_parts(a), _normalize_parts(b)
+    if any(c in seg for seg in pa for c in GLOB_CHARS):
+        pa = _glob_root(pa)
+    if any(c in seg for seg in pb for c in GLOB_CHARS):
+        pb = _glob_root(pb)
     if not pa or not pb:
         return False
     shorter, longer = (pa, pb) if len(pa) <= len(pb) else (pb, pa)
-    return longer[: len(shorter)] == shorter
+    # Verzeichnis-Präfix (eine Task nennt einen Ordner, die andere eine Datei
+    # darin) ODER Suffix (ein absoluter Pfad endet auf denselben relativen
+    # Pfad wie die andere Task) — beide Richtungen zählen als Überlappung.
+    return longer[: len(shorter)] == shorter or longer[len(longer) - len(shorter):] == shorter
 
 
 def extract_produced_symbols(text: str) -> list[tuple[str, int | None]]:
@@ -263,7 +346,13 @@ def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
                         break
 
             if not reason:
-                if _interface_dependency(ta, tb) or _interface_dependency(tb, ta):
+                if ta.interfaces_unknown or tb.interfaces_unknown:
+                    # Prosa ohne Backtick-Symbol in Consumes:/Produces: könnte eine
+                    # echte Abhängigkeit benennen, die der Parser nicht lesen kann
+                    # (Fix D3) — konservativ überlappt eine solche Task mit jeder
+                    # anderen, statt stillschweigend "keine Überlappung" zu urteilen.
+                    reason = True
+                elif _interface_dependency(ta, tb) or _interface_dependency(tb, ta):
                     reason = True
 
             if reason:
@@ -315,17 +404,17 @@ def gate_verdict(tasks: list[PlanTask], overlap: dict[int, set[int]]) -> GateRes
     if len(singletons) >= PARALLEL_THRESHOLD:
         blocked = [tid for c in multi for tid in c]
         reasoning = (
-            f"{len(singletons)} Tasks ohne jede Datei- oder Interface-Überlappung "
+            f"{len(singletons)} Tasks ohne erkannte Datei- oder Interface-Überlappung "
             f"(Tasks {singletons}) — ab der Schwelle von {PARALLEL_THRESHOLD} lohnt "
             "sich Parallelisierung. "
         )
         if blocked:
             reasoning += (
-                f"Tasks {blocked} überlappen mit mindestens einer anderen Task und "
-                "bleiben sequenziell bzw. im Hauptkontext."
+                f"Tasks {blocked} überlappen erkennbar mit mindestens einer anderen "
+                "Task und bleiben sequenziell bzw. im Hauptkontext."
             )
         else:
-            reasoning += "Keine der übrigen Tasks überlappt."
+            reasoning += "Keine der geprüften Datei- oder Interface-Signale zeigt eine Überlappung."
         return GateResult(
             verdict="parallel", parallel_group=sorted(singletons), reasoning=reasoning,
             components=components,
@@ -337,22 +426,24 @@ def gate_verdict(tasks: list[PlanTask], overlap: dict[int, set[int]]) -> GateRes
         # Parallel-Schwelle. Sequenzieller Dispatch bleibt sinnvoll, nur eben
         # nicht gleichzeitig.
         reasoning = (
-            f"Nur {len(singletons)} von {len(task_ids)} Tasks sind überlappungsfrei — "
-            f"das liegt unter der Schwelle von {PARALLEL_THRESHOLD} parallel-fähigen "
-            f"Paketen. Tasks {[tid for c in multi for tid in c]} sind über Datei- oder "
-            "Interface-Überlappung gekoppelt und müssen in dieser Reihenfolge laufen — "
-            "sequenzieller Dispatch statt Parallelisierung."
+            f"Nur {len(singletons)} von {len(task_ids)} Tasks sind ohne erkannte "
+            f"Überlappung — das liegt unter der Schwelle von {PARALLEL_THRESHOLD} "
+            f"parallel-fähigen Paketen. Tasks {[tid for c in multi for tid in c]} sind "
+            "über eine erkannte Datei- oder Interface-Überlappung gekoppelt (oder als "
+            "unsicher markiert, siehe files_unknown/interfaces_unknown) und müssen in "
+            "dieser Reihenfolge laufen — sequenzieller Dispatch statt Parallelisierung."
         )
         return GateResult(verdict="sequential", parallel_group=[], reasoning=reasoning, components=components)
 
-    # Alle Tasks sind zwar überlappungsfrei (jede für sich parallel-sicher),
-    # aber es sind zu wenige, um den Dispatch-Overhead zu rechtfertigen — und
-    # nichts zwingt eine Reihenfolge. Delegation lohnt sich hier nicht.
+    # Alle Tasks sind zwar ohne erkannte Überlappung (jede für sich parallel-
+    # sicher), aber es sind zu wenige, um den Dispatch-Overhead zu
+    # rechtfertigen — und nichts zwingt eine Reihenfolge. Delegation lohnt
+    # sich hier nicht.
     reasoning = (
-        f"{len(singletons)} Tasks, alle ohne Datei- oder Interface-Überlappung — "
-        f"das liegt unter der Schwelle von {PARALLEL_THRESHOLD} parallel-fähigen "
-        "Paketen, und nichts erzwingt eine Reihenfolge. Delegation lohnt sich hier "
-        "nicht; im Hauptkontext oder ohne Subagenten erledigen."
+        f"{len(singletons)} Tasks, keine mit erkannter Datei- oder Interface-"
+        f"Überlappung — das liegt unter der Schwelle von {PARALLEL_THRESHOLD} "
+        "parallel-fähigen Paketen, und nichts erzwingt eine Reihenfolge. Delegation "
+        "lohnt sich hier nicht; im Hauptkontext oder ohne Subagenten erledigen."
     )
     return GateResult(verdict="no-delegate", parallel_group=[], reasoning=reasoning, components=components)
 
@@ -431,7 +522,10 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
         },
         "plan": plan_path,
         "tasks": [
-            {"id": t.id, "title": t.title, "files": [f.path for f in t.files], "files_unknown": t.files_unknown}
+            {
+                "id": t.id, "title": t.title, "files": [f.path for f in t.files],
+                "files_unknown": t.files_unknown, "interfaces_unknown": t.interfaces_unknown,
+            }
             for t in doc.tasks
         ],
         "overlap": {str(k): sorted(v) for k, v in overlap.items()},
@@ -468,10 +562,27 @@ def _git(worktree: Path, *args: str) -> str:
 
 def check_allowlist(worktree: Path, base_ref: str, allowlist: list[str]) -> list[str]:
     """Geänderte Dateien (committed seit `base_ref` und uncommittete), die außerhalb
-    der Allowlist liegen — exakte oder Verzeichnis-Präfix-Treffer zählen als erlaubt."""
+    der Allowlist liegen — exakte, Verzeichnis-Präfix- oder Suffix-Treffer
+    (siehe `_paths_overlap`) zählen als erlaubt."""
     committed = _git(worktree, "diff", "--name-only", f"{base_ref}...HEAD").splitlines()
     dirty = _git(worktree, "status", "--porcelain").splitlines()
-    dirty_paths = [line[3:].strip() for line in dirty if line.strip()]
+
+    dirty_paths: list[str] = []
+    for line in dirty:
+        if not line.strip():
+            continue
+        body = line[3:].strip()
+        if " -> " in body:
+            # `git status --porcelain` schreibt eine (auch nur staged, nicht
+            # committete) Umbenennung als "alt.py -> neu.py" in einer Zeile
+            # (L3). Ungeteilt übernommen wäre das ein Pfad, der weder alt noch
+            # neu ist und mit keinem Allowlist-Eintrag matchen kann — ein
+            # Fehlalarm gegen einen Task, der sich an seine Allowlist hielt.
+            old_path, _, new_path = body.partition(" -> ")
+            dirty_paths.append(old_path.strip())
+            dirty_paths.append(new_path.strip())
+        else:
+            dirty_paths.append(body)
 
     changed = sorted({*committed, *dirty_paths} - {""})
     return [path for path in changed if not any(_paths_overlap(path, allowed) for allowed in allowlist)]
@@ -482,8 +593,17 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple[st
 
     Nie ein Import — fremder Code aus einem gerade dispatchten Agenten wird
     ausschließlich statisch gelesen (Vorab-Entscheidung A3).
+
+    `ast.walk` kennt keinen Scope — zwei gleichnamige, fachlich unabhängige
+    Definitionen (Top-Level-Funktion + verschachtelte Hilfsfunktion, oder
+    gleichnamige Methoden zweier Klassen) sind über den ganzen Baum hinweg
+    nicht unterscheidbar. Statt die zuletzt gefundene Definition stillschweigend
+    gewinnen zu lassen (L2), werden alle Arities gesammelt: Passt mindestens
+    eine zur erwarteten, gilt das Symbol als vorhanden; passt keine, aber es
+    gibt mehrere unterschiedliche Definitionen, ist das Ergebnis `ambiguous`
+    statt eines geratenen PASS oder FAIL.
     """
-    found: dict[str, int] = {}
+    found: dict[str, list[int]] = {}
     for relpath in allowlist:
         path = worktree / relpath
         if not path.is_file():
@@ -497,25 +617,39 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple[st
                 args = node.args.args
                 if args and args[0].arg in ("self", "cls"):
                     args = args[1:]
-                found[node.name] = len(args)
+                found.setdefault(node.name, []).append(len(args))
             elif isinstance(node, ast.ClassDef):
-                found[node.name] = -1  # -1: keine Arity, nur Präsenz
+                found.setdefault(node.name, []).append(-1)  # -1: keine Arity, nur Präsenz
 
     results: list[dict] = []
     for name, expected_arity in produces:
         if name not in found:
             results.append({"name": name, "status": "missing", "detail": "in keiner Allowlist-Datei gefunden"})
             continue
-        actual = found[name]
-        if expected_arity is None or actual == -1:
-            results.append({"name": name, "status": "present", "detail": f"gefunden (Arity ungeprüft)"})
-        elif actual != expected_arity:
+        arities = found[name]
+        distinct = sorted(set(arities))
+        if expected_arity is None or -1 in distinct:
+            results.append({"name": name, "status": "present", "detail": "gefunden (Arity ungeprüft)"})
+        elif expected_arity in distinct:
+            note = "" if len(distinct) == 1 else f"; weitere Definitionen mit Arities {distinct}"
             results.append({
-                "name": name, "status": "arity_mismatch",
-                "detail": f"erwartet {expected_arity} Parameter, gefunden {actual}",
+                "name": name, "status": "present",
+                "detail": f"gefunden mit {expected_arity} Parametern{note}",
+            })
+        elif len(distinct) > 1:
+            results.append({
+                "name": name, "status": "ambiguous",
+                "detail": (
+                    f"{len(distinct)} unterschiedliche Definitionen mit den Arities {distinct} "
+                    f"gefunden, keine davon {expected_arity} — nicht eindeutig, welche maßgeblich "
+                    "ist (kein Scope-Abgleich ohne Import, Vorab-Entscheidung A3)"
+                ),
             })
         else:
-            results.append({"name": name, "status": "present", "detail": f"gefunden mit {actual} Parametern"})
+            results.append({
+                "name": name, "status": "arity_mismatch",
+                "detail": f"erwartet {expected_arity} Parameter, gefunden {distinct[0]}",
+            })
     return results
 
 
@@ -566,17 +700,34 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     allowlist = block["allowlist"]
     produces = [(p["name"], p["arity"]) for p in block["produces"]]
 
-    violations = check_allowlist(worktree, args.base, allowlist) if args.base else []
+    # Fix D1: Ohne --base wird die Allowlist-Prüfung nicht "bestanden", sondern
+    # übersprungen — und ein übersprungenes Gate meldet nie stillschweigend
+    # Erfolg (Spec 00 §3, Sichtbarkeits-Regel). `allowlist_checked=False` macht
+    # das sichtbar; das Gesamtverdikt kann dann höchstens "unverified" sein,
+    # nie "pass" — es sei denn, ein anderer Teil (Produces) ist bereits
+    # eindeutig gescheitert, dann bleibt es ehrlich "fail".
+    allowlist_checked = bool(args.base)
+    violations = check_allowlist(worktree, args.base, allowlist) if allowlist_checked else []
     produce_results = check_produces(worktree, allowlist, produces)
+    produces_ok = all(r["status"] == "present" for r in produce_results)
 
-    ok = not violations and all(r["status"] == "present" for r in produce_results)
+    if violations or not produces_ok:
+        verdict = "fail"
+    elif not allowlist_checked:
+        verdict = "unverified"
+    else:
+        verdict = "pass"
+    ok = verdict == "pass"
 
-    print(f"Allowlist-Verstöße: {len(violations)}")
-    for v in violations:
-        print(f"  außerhalb der Allowlist: {v}")
+    if allowlist_checked:
+        print(f"Allowlist-Verstöße: {len(violations)}")
+        for v in violations:
+            print(f"  außerhalb der Allowlist: {v}")
+    else:
+        print("Allowlist-Prüfung: ÜBERSPRUNGEN (--base fehlt) — nicht geprüft, nicht bestanden")
     for r in produce_results:
         print(f"  {r['name']}: {r['status']} — {r['detail']}")
-    print("Verdikt: PASS" if ok else "Verdikt: FAIL")
+    print(f"Verdikt: {verdict.upper()}")
 
     if args.out:
         out_path = Path(args.out)
@@ -593,8 +744,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             },
             "task_file": str(task_file),
             "worktree": str(worktree),
+            "allowlist_checked": allowlist_checked,
             "allowlist_violations": violations,
             "produces": produce_results,
+            "verdict": verdict,
             "ok": ok,
         }
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -616,7 +769,14 @@ def main(argv: list[str] | None = None) -> int:
     ver = sub.add_parser("verify", help="Allowlist + Produces-Signaturen gegen einen Worktree prüfen")
     ver.add_argument("--task-file", required=True)
     ver.add_argument("--worktree", required=True)
-    ver.add_argument("--base", help="Basis-Revision für git diff (weglassen prüft nur Produces)")
+    ver.add_argument(
+        "--base",
+        help=(
+            "Basis-Revision für git diff. Ohne --base wird die Allowlist NICHT geprüft "
+            "(nicht stillschweigend als bestanden gewertet) — das Gesamtverdikt ist dann "
+            "höchstens 'unverified', nie 'pass' (Fix D1)."
+        ),
+    )
     ver.add_argument("--out", help="Verify-Ergebnis zusätzlich als JSON-Artefakt schreiben (z. B. .skills/cache/tasks/verify-task-1.json)")
     ver.set_defaults(func=_cmd_verify)
 
