@@ -2,8 +2,9 @@
 
 # Implementierungsbericht: architecture-map (Spec 10)
 
-Branch `feat/architecture-map`, Basis `specs/skill-foundation` (0831fb7). Elf Commits,
-227 von 227 Tests grün (146 Bestand + 81 neu).
+Branch `feat/architecture-map`, Basis `specs/skill-foundation` (0831fb7). Ursprünglich
+zwölf Commits, 227/227 Tests grün. Nach einer unabhängigen Review-Runde (siehe
+Abschnitt „Fix-Runde" am Ende) fünfzehn Commits, 243/243 Tests grün.
 
 ## Was gebaut wurde
 
@@ -179,11 +180,10 @@ Schichtverletzung in `layered-service` korrekt
   eine Ableitung vorschlägt (SKILL.md Schritt 3 sagt "anbieten", nicht "automatisch
   tun" — im echten Gespräch bräuchte das noch eine konkrete Ableitungslogik, die hier
   nicht gebaut wurde, nur die Anweisung, danach zu fragen).
-- **Klassenebene löst Basisklassen nur über den einfachen Namen innerhalb derselben
-  `--files`-Menge auf** (keine Modul-qualifizierte Auflösung). Zwei gleichnamige
-  Klassen in unterschiedlichen, gleichzeitig gewählten Hotspot-Dateien würden
-  fälschlich verknüpft. Für die typische Nutzung (wenige, bewusst gewählte Hotspots)
-  ist das Risiko klein, aber nicht null.
+- ~~Klassenebene löst Basisklassen nur über den einfachen Namen auf, zwei gleichnamige
+  Klassen würden fälschlich verknüpft~~ — **behoben in der Fix-Runde (Review-Anmerkung
+  A1):** `extract_classes()` bricht jetzt mit `ExtractError` ab, wenn ein mehrdeutiger
+  Name tatsächlich als Basisklasse referenziert wird, statt eine falsche Kante zu raten.
 - **`drift_check.py` regeneriert per `subprocess`, nicht in-process** — das ist
   langsamer als nötig, aber die einzige Möglichkeit, `sys.argv[0]`-basierte
   Selbstauskunft konsistent zu halten (siehe Design-Entscheidung oben). Bei sehr
@@ -197,3 +197,74 @@ Schichtverletzung in `layered-service` korrekt
   Skripte gegen die Fixtures. Ob ein echter Subagent die SKILL.md-Anweisungen korrekt
   in die erwarteten Artefaktpfade übersetzt (insbesondere den Footer-Block korrekt
   von Hand zusammenbaut), ist ungeprüft.
+
+## Fix-Runde (unabhängiges Review)
+
+Ein unabhängiger Reviewer fand 3 Defekte, 3 Lücken, 2 Anmerkungen
+(`/tmp/.../scratchpad/review-architecture-map.md`). Alle acht wurden bearbeitet.
+
+**Defekte:**
+
+- **D1 — kein Eval prüfte die eiserne Regel ("generiert, nie von Hand gezeichnet").**
+  Die drei content-only Contract-Evals bestanden auch bei einem handgezeichneten
+  Mermaid-Diagramm mit den richtigen Wörtern. Fix: alle drei tragen jetzt zwei
+  zusätzliche `file_matches`-Assertions auf den `%%`-Erzeugungskommando-Header im
+  Mermaid-Block und den `<!-- architecture-map:graph-hashes -->`-Footer — beides kann
+  keine fremde Skill und kein zufälliger Text erzeugen (Antwort auf die
+  Kontaminationsfrage aus A6).
+- **D2 — `graph_hash()` ignorierte `external`.** Eine neue/entfernte externe
+  Abhängigkeit änderte weder `nodes` noch `edges`, blieb also für den Drift-Check
+  unsichtbar, obwohl sie die Kontext-Ebene betrifft. Fix: `graph_hash()` hasht jetzt
+  auch `external`; `diff_graph()` bekam `external_added`/`external_removed`, gespeist
+  aus einem neuen `external`-Feld im Footer (da `external` nie ins Mermaid-Diagramm
+  gezeichnet wird und `to_mermaid.parse()` es folglich nicht zurückliefern kann). Per
+  End-to-End-Test verifiziert: nur eine neue externe Abhängigkeit hinzugefügt, `nodes`/
+  `edges` identisch → `status: "drift"` mit `external_added: ["requests"]`.
+- **D3 — Modul-ID-Kollisionen wurden in `discover_modules()` stillschweigend
+  überschrieben.** `src/widgets.ts` + `src/widgets/index.ts` (oder `a/b.py` +
+  `a.b.py`) lieferten beide dieselbe ID; welche Datei gewinnt, hing von
+  `sorted(rglob(...))` ab — ein ganzer Knoten samt Kanten konnte spurlos verschwinden,
+  ohne dass der A4-Nullresultat-Schutz griff. Fix: eine Kollision ist jetzt ein harter
+  `ExtractError`, in Python wie TypeScript, mit Test für beide Sprachen.
+
+**Lücken:**
+
+- **L1 — der `layers.json`-fehlt-Fall war narrativ ungetestet.** `analyze_graph.py`
+  unterschied `null`/`[]` sauber im Befund-JSON, aber ob „ungeprüft" auch tatsächlich
+  im für Menschen bestimmten `ARCHITECTURE.md` ankommt, hing komplett von freier
+  Textgenerierung ab. Fix: neue Funktion `layers_summary()` liefert einen kanonischen
+  Satz pro Fall ("ungeprüft (keine layers.json gefunden)" / "geprüft: keine
+  Schichtverletzungen gefunden" / "geprüft: N Schichtverletzung(en) gefunden");
+  SKILL.md verlangt die wörtliche Übernahme. Zwei neue Eval-Assertions prüfen beide
+  Fälle sprachlich getrennt (`(?i)ungeprüft` bei `cyclic-imports`, `(?<!un)geprüft` bei
+  `layered-service`).
+- **L2 — der zugesagte Kurzschluss-Test für `drift_check.py` fehlte.** Der Plan
+  versprach einen Spy/Zähler-Test dafür, dass bei Hash-Treffer weder `diff_graph()`
+  noch `to_mermaid.parse()` aufgerufen werden; die gelieferte Testdatei prüfte nur das
+  Endergebnis. Fix: `test_check_short_circuits_diff_when_hash_matches` patcht beide
+  Funktionen mit Zählern und beweist, dass sie bei `status: "unchanged"` nie aufgerufen
+  werden.
+- **L3 — explizite `.js`-Importe aus `.ts`-Quellen (ESM/`nodenext`-Konvention) waren
+  nicht dokumentiert und nicht aufgelöst.** `'./foo.js'` erfüllte
+  `target.endswith(SUFFIXES)` und lieferte ausschließlich `foo.js` als Kandidat, nie
+  `foo.ts` — ein verbreitetes, kein exotisches TS/ESM-Muster. Fix:
+  `_relative_candidates()` probiert bei einer geschriebenen Extension jetzt zuerst sie
+  selbst, dann die übrigen `SUFFIXES` am selben Pfadstamm.
+
+**Anmerkungen:**
+
+- **A1 — Klassennamen-Kollision bei mehreren Hotspot-Dateien.** Siehe oben, jetzt ein
+  harter `ExtractError`, aber nur wenn der mehrdeutige Name tatsächlich als Basis
+  referenziert wird — zwei gleichnamige, nie verknüpfte Klassen bleiben erlaubt.
+- **A2 — `must_not` in Eval 5 war durch das gleichzeitige `file_unchanged` wirkungslos.**
+  Ersatzlos gestrichen.
+
+**Ergebnis:** 243/243 Tests grün (227 vor der Fix-Runde, +16 neue über
+`test_architecture_map_{drift_check,extract_py,extract_ts,analyze_graph}.py`).
+`evals/architecture-map/evals.json` erneut gegen `evalkit.schema.load_evals()`
+validiert (5 Evals, keine Schema-Fehler), Evals nicht ausgeführt (wie beauftragt).
+`docs/known-limits.md` um einen `## architecture-map`-Abschnitt mit den nach der
+Fix-Runde bewusst verbliebenen Grenzen ergänzt (Kollision blockiert ganz statt
+teilweise, `external`-Diff ist best-effort bei fehlendem Footer-Feld, `layers_summary`
+bleibt G1/Selbstauskunft, Provenienz-Marker erschweren Fälschung statt sie
+kryptografisch auszuschließen, `.js`-Fix deckt nur den Geschwister-Extension-Fall ab).
