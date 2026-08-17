@@ -114,8 +114,14 @@ def test_render_markdown_marks_unverified_exercise_visibly():
 
 
 def test_render_markdown_never_marks_suspicious_as_verified():
+    """Regression A1: die ursprüngliche Assertion prüfte den Substring
+    'card-01 [geprüft]', der wegen des echten Headerformats
+    ('### {id} — {stem} {marker}') nie auftreten kann — sie wäre auch bei
+    einem kaputten _status_marker nie fehlgeschlagen. '[geprüft]' darf im
+    gesamten Dokument nirgends auftauchen, wenn die einzige Aufgabe
+    'suspicious' ist."""
     md = export.render_markdown("t", [CARD])
-    assert "card-01 [geprüft]" not in md
+    assert "[geprüft]" not in md
     assert "[UNGEPRÜFT" in md
 
 
@@ -199,3 +205,65 @@ def test_main_missing_exercises_file_is_reported(tmp_path, capsys):
     rc = export.main(["--exercises", str(tmp_path / "nope.json"), "--out-dir", str(tmp_path / "out")])
     assert rc != 0
     assert "nicht gefunden" in capsys.readouterr().err
+
+
+# --- D1: eine von Hand geschriebene Verifikation wird nicht mehr geglaubt --------
+
+HAND_WRITTEN_VERIFIED = {
+    "status": "verified", "method": "sieht_plausibel_aus", "detail": "kurz überflogen", "checked_at": None,
+}
+REAL_METHOD_NO_TIMESTAMP = {
+    "status": "verified", "method": "blind_solve_mc", "detail": "wirkt korrekt", "checked_at": None,
+}
+
+
+def test_has_verified_provenance_true_for_real_blind_gate_result():
+    assert export.has_verified_provenance(VERIFIED) is True
+
+
+def test_has_verified_provenance_false_for_unknown_method():
+    assert export.has_verified_provenance(HAND_WRITTEN_VERIFIED) is False
+
+
+def test_has_verified_provenance_false_without_checked_at():
+    assert export.has_verified_provenance(REAL_METHOD_NO_TIMESTAMP) is False
+
+
+def test_hand_written_verified_is_not_excluded_but_rendered_as_ungeprueft():
+    """D1: eine erfundene 'verified'-Behauptung darf die Aufgabe nicht aus dem
+    Export werfen (sie bleibt strukturell gültig — Stamm, Optionen etc. sind
+    da), aber sie darf nie als [geprüft] erscheinen."""
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    assert export.validate_exercise(faked) == []  # strukturell weiterhin gültig
+    md = export.render_markdown("t", [faked])
+    assert "[geprüft]" not in md
+    assert "[UNGEPRÜFT" in md
+    assert "ohne nachvollziehbaren Blind-Gate-Lauf" in md
+
+
+def test_hand_written_verified_without_checked_at_is_also_downgraded():
+    faked = dict(MC, verification=REAL_METHOD_NO_TIMESTAMP)
+    md = export.render_markdown("t", [faked])
+    assert "[geprüft]" not in md
+    assert "[UNGEPRÜFT" in md
+
+
+def test_hand_written_verified_gets_unverified_tag_in_csv():
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    csv_text = export.render_anki_csv([faked])
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    assert "unverified" in rows[1][2]
+    assert "verified" not in rows[1][2].split()  # nicht als eigenständiges Tag-Wort
+
+
+def test_main_exports_hand_faked_exercise_as_ungeprueft_not_excluded(tmp_path, capsys):
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    exercises_path = tmp_path / "topic.exercises.json"
+    exercises_path.write_text(json.dumps({"topic": "t", "exercises": [faked]}), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    rc = export.main(["--exercises", str(exercises_path), "--out-dir", str(out_dir)])
+    assert rc == 0
+    md = (out_dir / "t.md").read_text(encoding="utf-8")
+    assert "mc-01" in md  # exportiert, nicht ausgeschlossen
+    assert "[geprüft]" not in md  # aber nie als geprüft ausgewiesen

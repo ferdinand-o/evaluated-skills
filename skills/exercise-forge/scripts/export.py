@@ -23,6 +23,12 @@ KNOWN_TYPES = {"multiple_choice", "open_question", "coding", "flashcard"}
 DIFFICULTY_LABELS = {"leicht", "mittel", "schwer"}
 TRANSFER_VALUES = {"near", "far"}
 VERIFICATION_STATUSES = {"verified", "suspicious", "unverified"}
+# Die einzigen 'method'-Werte, die verify_blind.py/run_coding.py tatsächlich
+# schreiben, wenn das Blind-Gate wirklich lief (Rulings D4, Review-Befund D1).
+# 'not_run' ist der Startzustand einer frisch erzeugten, noch ungeprüften
+# Aufgabe — real, aber kein Prüfnachweis.
+REAL_VERIFICATION_METHODS = {"blind_solve_mc", "blind_solve_open", "blind_solve_coding", "blind_check_flashcard"}
+ALL_VERIFICATION_METHODS = REAL_VERIFICATION_METHODS | {"not_run"}
 
 
 # --- Pfad (dupliziert aus verify_blind.py — Skripte bleiben eigenständig, Rulings A3) --
@@ -105,18 +111,46 @@ def validate_exercise(exercise: dict) -> list[str]:
 
 # --- Statusmarkierung (nie stillschweigend 'geprüft') -----------------------------
 
-def _status_marker(exercise: dict) -> str:
+def has_verified_provenance(verification: dict) -> bool:
+    """True nur, wenn `method` eine echte Blind-Gate-Methode ist UND `checked_at`
+    gesetzt ist — Spuren, die ausschließlich ein echter `verify_blind.py`-Lauf
+    hinterlässt. Ein von Hand ins Aufgaben-JSON geschriebenes
+    `"status": "verified"` erzeugt genau diese Spuren nicht (Review-Befund D1:
+    'eine von Hand geschriebene Verifikation wird geglaubt') — `method` bliebe
+    entweder `not_run`/unbekannt oder `checked_at` fehlte."""
+    return verification.get("method") in REAL_VERIFICATION_METHODS and bool(verification.get("checked_at"))
+
+
+def _effective_status(exercise: dict) -> tuple[str, str]:
+    """(status, detail) nach Herkunftsprüfung. `verified`/`suspicious` ohne
+    belastbare Spur (siehe `has_verified_provenance`) werden für die Ausgabe auf
+    `unverified` zurückgestuft — die Aufgabe wird trotzdem exportiert, nur eben
+    sichtbar als ungeprüft, nicht ausgeschlossen (D1: 'wird als ungeprüft
+    exportiert, nicht stillschweigend als geprüft')."""
     verification = exercise.get("verification") or {}
-    if verification.get("status") == "verified":
+    status = verification.get("status")
+    if status not in VERIFICATION_STATUSES:
+        status = "unverified"
+    detail = verification.get("detail") or "Blind-Gate noch nicht gelaufen"
+    if status in ("verified", "suspicious") and not has_verified_provenance(verification):
+        return "unverified", (
+            f"Status '{status}' ohne nachvollziehbaren Blind-Gate-Lauf "
+            f"(method/checked_at fehlen oder unbekannt) — als ungeprüft behandelt. "
+            f"Ursprünglicher Vermerk: {detail}"
+        )
+    return status, detail
+
+
+def _status_marker(exercise: dict) -> str:
+    status, detail = _effective_status(exercise)
+    if status == "verified":
         return "[geprüft]"
-    reason = verification.get("detail") or "Blind-Gate noch nicht gelaufen"
-    return f"[UNGEPRÜFT: {reason}]"
+    return f"[UNGEPRÜFT: {detail}]"
 
 
 def _tag_status(exercise: dict) -> str:
-    verification = exercise.get("verification") or {}
-    status = verification.get("status")
-    return status if status in VERIFICATION_STATUSES else "unverified"
+    status, _ = _effective_status(exercise)
+    return status
 
 
 # --- Markdown ---------------------------------------------------------------------

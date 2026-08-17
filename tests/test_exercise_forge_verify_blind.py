@@ -144,6 +144,25 @@ def test_verify_open_unparsable_grading_is_unverified(tmp_path):
     assert "parsebar" in result["detail"]
 
 
+def test_verify_open_empty_criteria_is_unverified_not_verified(tmp_path):
+    """Regression D2: all([]) ist True in Python — ohne Vorabprüfung würde eine
+    Aufgabe ohne ein einziges Kriterium den (leeren) Abgleich 'bestehen' und
+    als 'verified' gelten, obwohl nichts geprüft wurde. Kein CLI-Aufruf sollte
+    dafür nötig sein — ein fehlendes CLI würde sonst fälschlich 'nicht
+    erreichbar' statt der eigentlichen Ursache melden."""
+    empty_criteria = dict(OPEN_EXERCISE, criteria=[])
+    result = vb.verify_open(empty_criteria, tmp_path, cli=str(tmp_path / "does-not-exist"))
+    assert result["status"] == "unverified"
+    assert "leer" in result["detail"]
+
+
+def test_verify_open_missing_criteria_field_is_unverified():
+    without_criteria = {"id": "open-02", "type": "open_question", "stem": "Frage ohne Kriterien?"}
+    result = vb.verify_open(without_criteria, Path("."), cli="does-not-matter")
+    assert result["status"] == "unverified"
+    assert "leer" in result["detail"]
+
+
 # --- Flashcard protocol -----------------------------------------------------
 
 CARD_EXERCISE = {
@@ -230,6 +249,57 @@ def test_main_missing_exercises_file_is_reported(tmp_path, capsys):
     rc = vb.main(["--exercises", str(tmp_path / "nope.json"), "--id", "x"])
     assert rc != 0
     assert "nicht gefunden" in capsys.readouterr().err
+
+
+def test_main_all_survives_one_malformed_exercise_and_keeps_the_rest(tmp_path):
+    """Regression L2: eine MC-Option ohne 'text' wirft in verify_mc ein
+    KeyError. Ohne Fang bricht main() vor save_exercises() ab und die bereits
+    berechneten Urteile für die anderen Aufgaben im selben Batch gehen
+    verloren. Der Batch muss die malformte Aufgabe stattdessen benannt als
+    unverified markieren und mit den übrigen weiterlaufen."""
+    malformed = {
+        "id": "mc-broken", "type": "multiple_choice", "stem": "Kaputte Optionen?",
+        "options": [{"correct": True}, {"correct": False}],  # kein 'text'
+        "verification": {"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None},
+    }
+    healthy = dict(MC_EXERCISE, verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    path = tmp_path / "topic.exercises.json"
+    vb.save_exercises(path, {"topic": "topic", "exercises": [malformed, healthy]})
+
+    cli = fake_cli(tmp_path, 'echo "ANTWORT: B"\n')
+    rc = vb.main(["--exercises", str(path), "--all", "--cli", cli])
+    assert rc == 0
+
+    written = vb.load_exercises(path)
+    by_id = {e["id"]: e for e in written["exercises"]}
+    assert by_id["mc-broken"]["verification"]["status"] == "unverified"
+    assert "KeyError" in by_id["mc-broken"]["verification"]["detail"] or "text" in by_id["mc-broken"]["verification"]["detail"]
+    assert by_id["mc-01"]["verification"]["status"] == "verified"  # nicht mitgerissen
+
+
+def test_main_saves_incrementally_not_only_at_the_end(tmp_path, monkeypatch):
+    """Ein Absturz mitten im Batch darf bereits berechnete Urteile nicht
+    verwerfen — save_exercises() muss nach jeder Aufgabe laufen, nicht erst am
+    Schluss."""
+    save_calls = []
+    original_save = vb.save_exercises
+
+    def counting_save(path, data):
+        save_calls.append(len(data["exercises"]))
+        original_save(path, data)
+
+    monkeypatch.setattr(vb, "save_exercises", counting_save)
+
+    ex1 = dict(MC_EXERCISE, id="mc-a", verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    ex2 = dict(MC_EXERCISE, id="mc-b", verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    path = tmp_path / "topic.exercises.json"
+    vb.save_exercises(path, {"topic": "topic", "exercises": [ex1, ex2]})
+    save_calls.clear()
+
+    cli = fake_cli(tmp_path, 'echo "ANTWORT: B"\n')
+    vb.main(["--exercises", str(path), "--all", "--cli", cli])
+
+    assert len(save_calls) >= 2  # mindestens einmal pro Aufgabe, nicht nur am Ende
 
 
 def test_main_unknown_id_is_reported(tmp_path, capsys):

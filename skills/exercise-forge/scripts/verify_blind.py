@@ -200,6 +200,12 @@ def verify_open(exercise: dict, cwd: Path, *, cli: str = "claude", timeout: int 
     stem = exercise["stem"]
     criteria = exercise.get("criteria") or []
 
+    if not criteria:
+        # all([]) ist True — ohne diese Vorabprüfung würde eine Aufgabe ohne
+        # ein einziges Kriterium den Abgleich mit einer leeren Liste bestehen
+        # und als 'verified' gelten, obwohl nichts geprüft wurde (D2).
+        return _unverified("blind_solve_open", "Kriterienliste ist leer - kein Abgleich möglich, Aufgabe unvollständig")
+
     blind = run_agent(build_open_prompt(stem), cwd, cli=cli, timeout=timeout)
     if blind.exit_code != 0:
         return _unverified("blind_solve_open", f"Blind-Löser nicht erreichbar: {blind.stderr.strip()[:200]}")
@@ -429,12 +435,24 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as td:
         cwd = Path(td)
         for exercise in targets:
-            verdict = verify_one(exercise, cwd, cli=args.cli, timeout=args.timeout)
+            try:
+                verdict = verify_one(exercise, cwd, cli=args.cli, timeout=args.timeout)
+            except Exception as exc:  # noqa: BLE001 — eine malformte Aufgabe darf den
+                # Batch nie mitreißen: ohne diesen Fang würde ein KeyError (z. B. eine
+                # MC-Option ohne 'text') das Skript vor save_exercises() abbrechen und
+                # die bereits berechneten Urteile der übrigen Aufgaben verwerfen (L2).
+                verdict = _unverified(
+                    "not_run", f"Blind-Gate-Aufruf fehlgeschlagen ({type(exc).__name__}): {exc}"
+                )
             exercise["verification"] = verdict
             checked += 1
             print(f"{exercise.get('id')}: {verdict['status']} ({verdict['method']}) — {verdict['detail']}")
+            # Nach jeder Aufgabe sichern, nicht erst am Ende der Schleife — ein
+            # Abbruch später im Batch (Timeout von außen, SIGKILL) darf bereits
+            # geprüfte Urteile nicht mehr verwerfen können als bis hierhin ohnehin.
+            save_exercises(path, data)
 
-    save_exercises(path, data)
+    save_exercises(path, data)  # deckt auch den Fall targets == [] ab (Schleife lief nie)
     print(f"{checked} Aufgabe(n) geprüft -> {path}")
     return 0
 
