@@ -203,9 +203,21 @@ def _format_report(result: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ARCHITECTURE.md gegen den aktuellen Code auf Drift prüfen")
-    parser.add_argument("--doc", type=Path, required=True)
-    parser.add_argument("--cwd", type=Path, help="Arbeitsverzeichnis für die Extraktions-Kommandos (Default: Verzeichnis von --doc)")
+    parser.add_argument("--doc", type=Path, help="Drift-Check-Modus: bestehendes ARCHITECTURE.md prüfen")
+    parser.add_argument("--graph", type=Path, help="Hash-Modus: nur den graph_hash für ein Graph-JSON ausgeben (zum Bauen des Footer-Blocks)")
+    parser.add_argument("--cwd", type=Path, help="Arbeitsverzeichnis für die Extraktions-Kommandos (Default: aktuelles Arbeitsverzeichnis)")
     args = parser.parse_args(argv)
+
+    if args.graph and args.doc:
+        print("--doc und --graph schließen sich aus", file=sys.stderr)
+        return 1
+    if args.graph:
+        graph = json.loads(args.graph.read_text(encoding="utf-8"))
+        print(graph_hash(graph))
+        return 0
+    if not args.doc:
+        print("entweder --doc (Drift-Check) oder --graph (Hash ausgeben) angeben", file=sys.stderr)
+        return 1
 
     try:
         result = check(args.doc, cwd=args.cwd)

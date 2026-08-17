@@ -139,6 +139,21 @@ def test_check_reports_drift_with_edge_diff_when_code_changed(tmp_path):
     assert "c" in level["diff"]["nodes_added"]
 
 
+def test_main_print_hash_mode(tmp_path, capsys):
+    graph = make_graph(["a", "b"], [("a", "b")])
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+    rc = drift_check.main(["--graph", str(graph_path)])
+    assert rc == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == drift_check.graph_hash(graph)
+
+
+def test_main_rejects_doc_and_graph_together(tmp_path):
+    rc = drift_check.main(["--doc", str(tmp_path / "x.md"), "--graph", str(tmp_path / "g.json")])
+    assert rc == 1
+
+
 def test_main_exit_code_reflects_drift(tmp_path, capsys):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
