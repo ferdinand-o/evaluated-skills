@@ -121,11 +121,24 @@ def test_overlap_graph_flags_interface_dependency():
     assert 2 in overlap[1]
 
 
-def test_gate_verdict_below_threshold_is_no_delegate():
+def test_gate_verdict_coupled_pair_below_threshold_is_sequential():
     tasks = [t for t in ptt.parse_plan(SAMPLE_PLAN).tasks if t.id in (1, 2)]
     overlap = {1: {2}, 2: {1}}
     result = ptt.gate_verdict(tasks, overlap)
-    assert result.verdict in ("no-delegate", "sequential")
+    assert result.verdict == "sequential"
+    assert result.parallel_group == []
+    assert result.reasoning
+
+
+def test_gate_verdict_disjoint_pair_below_threshold_is_no_delegate():
+    """Der Anti-Zeremonie-Fall: zwei völlig unabhängige Tasks sind unter der
+    Schwelle keinen Dispatch-Overhead wert — anders als ein gekoppeltes Paar,
+    das trotzdem sequenziell dispatcht werden würde."""
+    tasks = [t for t in ptt.parse_plan(SAMPLE_PLAN).tasks if t.id in (3, 4)]
+    overlap = {3: set(), 4: set()}
+    result = ptt.gate_verdict(tasks, overlap)
+    assert result.verdict == "no-delegate"
+    assert result.parallel_group == []
     assert result.reasoning
 
 

@@ -331,21 +331,30 @@ def gate_verdict(tasks: list[PlanTask], overlap: dict[int, set[int]]) -> GateRes
             components=components,
         )
 
-    if singletons or multi:
+    if multi:
+        # Mindestens ein Paar Tasks ist über Datei oder Interface gekoppelt —
+        # diese Kopplung erzwingt eine Reihenfolge, unabhängig von der
+        # Parallel-Schwelle. Sequenzieller Dispatch bleibt sinnvoll, nur eben
+        # nicht gleichzeitig.
         reasoning = (
             f"Nur {len(singletons)} von {len(task_ids)} Tasks sind überlappungsfrei — "
             f"das liegt unter der Schwelle von {PARALLEL_THRESHOLD} parallel-fähigen "
-            "Paketen, der Overhead lohnt sich nicht. Alle Tasks bleiben sequenziell."
+            f"Paketen. Tasks {[tid for c in multi for tid in c]} sind über Datei- oder "
+            "Interface-Überlappung gekoppelt und müssen in dieser Reihenfolge laufen — "
+            "sequenzieller Dispatch statt Parallelisierung."
         )
-        return GateResult(
-            verdict="sequential" if len(task_ids) >= 2 else "no-delegate",
-            parallel_group=[], reasoning=reasoning, components=components,
-        )
+        return GateResult(verdict="sequential", parallel_group=[], reasoning=reasoning, components=components)
 
-    return GateResult(
-        verdict="no-delegate", parallel_group=[],
-        reasoning="Keine Überlappungsdaten auswertbar.", components=components,
+    # Alle Tasks sind zwar überlappungsfrei (jede für sich parallel-sicher),
+    # aber es sind zu wenige, um den Dispatch-Overhead zu rechtfertigen — und
+    # nichts zwingt eine Reihenfolge. Delegation lohnt sich hier nicht.
+    reasoning = (
+        f"{len(singletons)} Tasks, alle ohne Datei- oder Interface-Überlappung — "
+        f"das liegt unter der Schwelle von {PARALLEL_THRESHOLD} parallel-fähigen "
+        "Paketen, und nichts erzwingt eine Reihenfolge. Delegation lohnt sich hier "
+        "nicht; im Hauptkontext oder ohne Subagenten erledigen."
     )
+    return GateResult(verdict="no-delegate", parallel_group=[], reasoning=reasoning, components=components)
 
 
 # --------------------------------------------------------------------------
