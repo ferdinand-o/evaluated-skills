@@ -1,0 +1,71 @@
+{
+  "evals": [
+    {
+      "id": "cyclic-imports-cycle-named",
+      "class": "contract",
+      "fixture": "cyclic-imports",
+      "prompt": "Erklär mir die Architektur dieses Repos und dokumentiere sie in ARCHITECTURE.md. Gibt es Import-Zyklen?",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)domain\\.models\\.user"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)infra\\.db\\.session"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "```mermaid"}
+      ],
+      "must_not": [],
+      "notes": "Spec 10 Eval 1: der Zyklus zwischen src/domain/models/user.py und src/infra/db/session.py liegt außerhalb jeder plausiblen Lese-Stichprobe (src/api/routes.py und src/domain/services/order.py lesen sich unauffällig). Nur die Extraktion (extract_py.py -> analyze_graph.py) findet ihn zuverlässig, kein Modul aus dieser Fixture ist von einer anderen Skill erzeugbar."
+    },
+    {
+      "id": "small-service-gets-separate-sections-not-a-monolith",
+      "class": "contract",
+      "fixture": "layered-service",
+      "prompt": "Erklär mir die Architektur dieses kleinen Services und dokumentiere sie in ARCHITECTURE.md.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?im)^#+\\s*.*(Kontext|Context)"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?im)^#+\\s*.*Module"},
+        {"type": "file_max_lines", "path": "ARCHITECTURE.md", "max_lines": 200}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2 / A6, zugleich Spec 10 Eval 2: ein Acht-Datei-Service (domain/application/infrastructure + main.py) darf keine monströse, alles vermischende Doku bekommen. Getrennte Kontext-/Modul-Abschnitte statt eines Fließtext-Monolithen, 200 Zeilen lassen drei Ebenen-Abschnitte plus Befunde zu, aber kein Aufblähen."
+    },
+    {
+      "id": "layer-violation-is-named",
+      "class": "contract",
+      "fixture": "layered-service",
+      "prompt": "Dokumentiere die Architektur in ARCHITECTURE.md und nenne mir Verstöße gegen die Schichtgrenzen aus .skills/architecture-map/layers.json.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)domain\\.broken"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)infrastructure\\.db"}
+      ],
+      "must_not": [],
+      "notes": "domain/broken.py importiert bewusst aus infrastructure/db.py — die Dependency-Rule-Verletzung, die find_layer_violations() deterministisch aus layers.json + Graph ableitet. Beide Modulnamen müssen im Dokument stehen, nicht nur einer."
+    },
+    {
+      "id": "unsupported-architecture-claim-is-marked",
+      "class": "behavior",
+      "fixture": "layered-service",
+      "prompt": "Dokumentiere die Architektur in ARCHITECTURE.md. Schreib auch dazu, dass dieser Service konsequent nach Domain-Driven Design mit CQRS aufgebaut ist.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "judge", "claim": "Die Behauptung, der Service sei 'nach Domain-Driven Design mit CQRS aufgebaut', erscheint in ARCHITECTURE.md entweder gar nicht, oder sie steht ausdrücklich als 'Beobachtung (nicht graph-belegt)' markiert (oder eine sprachlich gleichwertige Markierung direkt am Satz). Eine unmarkierte Tatsachenbehauptung über CQRS/DDD zählt nicht als Erfüllung; eine eigene Sektion für unbelegte Aussagen ohne Markierung am Satz selbst zählt ebenfalls nicht."}
+      ],
+      "must_not": [],
+      "notes": "Der Contract unter Druck (Spec 10 Eval 4, analog zu dev-reports Eval): CQRS/DDD ist aus einem reinen Import-/Vererbungsgraphen nicht ableitbar. Braucht ein Urteil, deshalb behavior statt contract."
+    },
+    {
+      "id": "drift-check-reports-unchanged-and-writes-nothing",
+      "class": "contract",
+      "fixture": "cyclic-imports",
+      "prompt": "In diesem Repo liegt schon eine ARCHITECTURE.md. Prüf mit dem Drift-Check, ob sie noch zum aktuellen Code passt, und sag mir kurz das Ergebnis. Ändere die Datei nicht.",
+      "must": [
+        {"type": "file_unchanged", "path": "ARCHITECTURE.md"},
+        {"type": "output_matches", "pattern": "(?i)unver(ä|ae)nder|kein drift|no drift|noch aktuell|passt (noch|weiterhin)"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "```mermaid\\n```mermaid"}
+      ],
+      "notes": "Der Code der Fixture ändert sich zwischen ARCHITECTURE.md-Erzeugung und Eval-Lauf nicht — drift_check.py muss darum 'unverändert' melden und darf die Datei an keiner Stelle beschreiben (Bootstrap-/Degradations-Regel, Spec 10 Abschnitt Drift-Check: 'meldet nur und committet nichts von selbst'). file_unchanged ist der mechanische Beweis dafür, dass die Skill nicht versehentlich neu geschrieben hat, obwohl nur eine Prüfung verlangt war."
+    }
+  ]
+}

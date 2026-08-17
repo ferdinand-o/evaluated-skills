@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Drei-Schichten-Python-Service (domain/application/infrastructure) mit einer bewussten Schichtverletzung (domain/broken.py importiert aus infrastructure/) und einem toten Modul (infrastructure/unused_helper.py, kein Fan-in, kein Entry-Pattern). layers.json liegt unter .skills/architecture-map/."
+}
