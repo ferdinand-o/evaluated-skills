@@ -1,12 +1,14 @@
 import json
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import load_script
+from conftest import REPO_ROOT, load_script
 
 vb = load_script("skills/exercise-forge/scripts/verify_blind.py")
+RUN_CODING_PATH = REPO_ROOT / "skills" / "exercise-forge" / "scripts" / "run_coding.py"
 
 
 def fake_cli(tmp_path: Path, body: str, name: str = "fake-claude") -> str:
@@ -236,3 +238,61 @@ def test_main_unknown_id_is_reported(tmp_path, capsys):
     rc = vb.main(["--exercises", str(path), "--id", "does-not-exist"])
     assert rc != 0
     assert "nicht gefunden" in capsys.readouterr().err
+
+
+# --- Coding: verify_blind.py bindet run_coding.py an ---------------------------
+
+CODING_EXERCISE = {
+    "id": "code-01",
+    "type": "coding",
+    "stem": "Schreibe eine Funktion add(a, b), die die Summe liefert.",
+    "model_solution": "def add(a, b):\n    return a + b\n",
+    "test_suite": "from solution import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n",
+}
+
+
+def fake_cli_heredoc(tmp_path: Path, content: str, name: str = "fake-claude-hd") -> str:
+    """Wie fake_cli, aber über ein Heredoc — echte Zeilenumbrüche und Backticks
+    im Inhalt bleiben erhalten (ein einfaches `echo "…\\n…"` liefert nur den
+    literalen Zwei-Zeichen-String `\\n`, keinen echten Zeilenumbruch)."""
+    body = "cat <<'FAKE_CLI_EOF'\n" + content + "\nFAKE_CLI_EOF\n"
+    return fake_cli(tmp_path, body, name=name)
+
+
+CODE_FENCE_RESPONSE = "```python\ndef add(a, b):\n    return a + b\n```"
+
+
+def test_extract_code_block_finds_python_fence():
+    text = "Hier ist mein Code:\n" + CODE_FENCE_RESPONSE + "\nFertig."
+    code = vb.extract_code_block(text)
+    assert "return a + b" in code
+
+
+def test_extract_code_block_none_without_fence():
+    assert vb.extract_code_block("kein Code hier") is None
+
+
+def test_verify_coding_task_correct_blind_solution_is_verified(tmp_path):
+    cli = fake_cli_heredoc(tmp_path, CODE_FENCE_RESPONSE)
+    result = vb.verify_coding_task(
+        CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
+    )
+    assert result["status"] == "verified"
+
+
+def test_verify_coding_task_no_code_block_is_unverified(tmp_path):
+    cli = fake_cli(tmp_path, 'echo "Ich weiss es nicht."\n')
+    result = vb.verify_coding_task(
+        CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
+    )
+    assert result["status"] == "unverified"
+    assert "Codeblock" in result["detail"]
+
+
+def test_verify_one_dispatches_coding(tmp_path):
+    cli = fake_cli_heredoc(tmp_path, CODE_FENCE_RESPONSE)
+    result = vb.verify_one(
+        CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
+    )
+    assert result["status"] == "verified"
+    assert result["method"] == "blind_solve_coding"
