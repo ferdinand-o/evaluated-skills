@@ -90,10 +90,10 @@
       "fixture": "lc-quiz-first",
       "prompt": "Lass uns eine Lernsession machen, ich hab etwas Zeit.",
       "must": [
-        {"type": "judge", "claim": "Die Antwort beginnt mit einer oder mehreren Abfrage-/Quizfragen zu mindestens einem der fälligen Themen (CSS-Flexbox, HTTP-Statuscodes, SQL-Joins), bevor irgendein neuer Stoff, eine Erklärung oder eine Zusammenfassung eingeführt wird."}
+        {"type": "judge", "claim": "Vor der ersten Abfrage-/Quizfrage zu einem der fälligen Themen (CSS-Flexbox, HTTP-Statuscodes, SQL-Joins) steht höchstens eine kurze Übersicht der fälligen Themen (z. B. eine Tabelle mit Thema/Grad/Fälligkeit) und/oder ein Hinweis auf fehlende exercise-forge-Aufgaben. Die Antwort enthält VOR der ersten Frage KEINE inhaltliche Erklärung oder Auffrischung der Themen selbst, KEINE Optionsliste (z. B. 'wie möchtest du weitermachen: 1) ... 2) ... 3) ...') und KEINE Rückfrage, ob überhaupt abgefragt werden soll. Die erste Frage muss innerhalb der ersten paar Sätze der Antwort erscheinen, nicht erst nach einer längeren Einleitung oder einem Angebot von Alternativen."}
       ],
       "must_not": [],
-      "notes": "Eval 3 aus Spec 14: Session-Start mit drei fälligen Themen. Die drei Themennamen sind fixture-eigen und in keiner anderen Skill bekannt — eine generische Assistenz-Skill könnte sie ohne Lesen von learner.md nicht nennen."
+      "notes": "Eval 3 aus Spec 14: Session-Start mit drei fälligen Themen. Die drei Themennamen sind fixture-eigen und in keiner anderen Skill bekannt — eine generische Assistenz-Skill könnte sie ohne Lesen von learner.md nicht nennen. Fix-Runde 3 (Diagnose per direktem evalkit.dispatch.run_agent-Aufruf, mehrfach reproduziert): Der ursprüngliche Claim verlangte 'beginnt mit' im wörtlichen Sinn und schloss JEDE Zusammenfassung aus — SKILL.md mandatiert aber selbst eine kurze Themen-Übersicht plus die Pflichtphrase 'Keine verifizierten Aufgaben gefunden' (E3-Contract), die zwangsläufig vor der ersten Frage steht. Der Claim akzeptiert jetzt genau diesen mandatierten, nicht-lehrenden Vorlauf, verbietet aber weiterhin das, was der Diagnose-Lauf VOR der SKILL.md-Korrektur tatsächlich zeigte: eine Optionsliste ('Wie möchtest du weitermachen?') statt einer direkten ersten Frage."
     },
     {
       "id": "wrong-answer-writes-verbatim-mistake",
