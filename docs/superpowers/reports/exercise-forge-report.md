@@ -159,6 +159,31 @@ Alle fünf Punkte wurden bearbeitet — der Reviewer stufte keinen als „lassen
 wenn er es nicht verdient" ein, also gibt es hier keinen zurückgewiesenen
 Befund zu begründen.
 
+## Fix-Runde 2 (echter Eval-Lauf, zusammengesetzte Judge-Claims)
+
+Der Koordinator fuhr die sechs Evals danach real gegen `run_evals.py`. Vier
+bestanden zuverlässig: `single-flashcard-stays-single`,
+`twenty-cards-stay-atomic`, `overspecified-coding-tests-are-flagged`,
+`one-step-harder-changes-the-vector-not-just-wording` — D1 und D2 sind damit
+mittelbar bestätigt (die Coding-Fixture braucht ein funktionierendes,
+un-rationalisiertes Blind-Gate, um überhaupt grün zu werden). Zwei Evals
+(`mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`)
+fielen bei identischem Commit und identischer Fixture über zwei Läufe
+abwechselnd rot/grün — keine kaputte Eval, sondern eine Eigenschaft ihrer
+Bauform: Beide Judge-Claims verlangten drei Bedingungen in einem Satz
+(Gate ausgeführt, Konflikt benannt, nicht `verified`); eine Kette aus drei
+Gliedern kippt schon, wenn eines wackelt, und welches Glied wackelt,
+variiert zwischen Läufen. Fix: „Gate ausgeführt" und „nicht `verified`" sind
+im Aufgaben-JSON direkt sichtbar und wurden zu mechanischen Assertionen
+(`file_matches` auf das `method`-Feld bzw. `must_not` auf `"status":
+"verified"`); nur „Konflikt sichtbar benannt" bleibt Judge-Claim, jetzt als
+einzige, einzeln entscheidbare Bedingung. Die generelle Beobachtung —
+zusammengesetzte Judge-Claims sind unzuverlässig, unabhängig von der Skill —
+steht jetzt in `docs/known-limits.md` unter „Judge". Die beiden geänderten
+Evals wurden nach der Zerlegung nicht erneut gegen einen echten Agenten
+gefahren (nur schema-validiert); die vier bestätigten Evals wurden nicht
+verändert.
+
 ## Bekannte Grenzen (analog zu `docs/known-limits.md`)
 
 - **Kein drittes Urteil über „valide Begründung" bei MC-Distraktoren** (siehe
@@ -179,12 +204,14 @@ Befund zu begründen.
   Grundwahrscheinlichkeit trotzdem `suspicious` auslösen (der Blind-Löser rät
   falsch, ohne dass am Distraktor etwas kaputt ist) — von einem echten Befund
   nicht unterscheidbar, ohne die Begründung selbst zu lesen (siehe L1).
-- **Die Evals sind ungelaufen.** Die sechs Fixtures wurden von Hand geprüft,
-  wo mechanisch möglich (der Überspezifizierte-Tests-Fall in
-  `exercise-forge-coding-overspecified` wurde direkt gegen `run_coding.py`
-  verifiziert — siehe Commit-Historie), aber kein Eval wurde je über
-  `run_evals.py` gegen einen echten Agenten gefahren. Ob die Judge-Claims in
-  der Praxis trennscharf genug formuliert sind, ist unbewiesen.
+- **Vier der sechs Evals sind gegen einen echten Agenten bestätigt** (siehe
+  Fix-Runde 2), **die beiden zerlegten Evals seit ihrer Änderung nicht erneut.**
+  `mc-distractor-trap-is-caught` und `narrow-criteria-on-open-question-are-flagged`
+  wurden nach dem Zusammengesetzte-Claims-Fund umgebaut, aber nur
+  schema-validiert (`evalkit.schema.load_evals()`), nicht erneut über
+  `run_evals.py` gefahren. Ob die jetzt atomaren Judge-Claims tatsächlich
+  stabiler sind, ist plausibel (die Kettenursache ist behoben), aber noch
+  nicht empirisch bestätigt.
 - **`verify_blind.py` läuft den Blind-Löser in einem leeren Temp-Verzeichnis**,
   nicht in einer vollständig isolierten Prozessumgebung — dieselbe Grenze wie
   bei `evalkit.dispatch.run_agent` (siehe `docs/known-limits.md`, Abschnitt
@@ -240,9 +267,13 @@ Zieldateiname ohne Glob-Unterstützung deterministisch bleibt.
 - `brief-common.md` fehlte (siehe oben) — falls die Datei eigentlich existieren
   sollte, sind mir möglicherweise Fehlerklassen oder Arbeitsweise-Vorgaben
   entgangen, die dort und nirgends sonst standen.
-- Die sechs Evals sind nie gegen einen echten Agenten gelaufen; die
-  Judge-Claims könnten in der Praxis zu großzügig oder zu streng ausfallen —
-  das lässt sich erst mit einem echten `run_evals.py`-Lauf zeigen.
+- Vier von sechs Evals sind gegen einen echten Agenten bestätigt; die beiden
+  zerlegten (`mc-distractor-trap-is-caught`,
+  `narrow-criteria-on-open-question-are-flagged`) wurden seit dem Umbau nicht
+  erneut gefahren — bin nicht sicher, ob die verbliebenen Judge-Claims in der
+  Praxis wirklich stabiler sind oder nur die eine bekannte Fehlerquelle
+  (zusammengesetzte Bedingungen) beseitigt wurde, während eine andere
+  unentdeckt bleibt.
 - Die Herkunftsprüfung aus D1 ist strukturell, nicht kryptographisch (siehe
   Bekannte Grenzen) — eine vorsätzliche Fälschung von `method`/`checked_at`
   bliebe unentdeckt. Das war mit den Mitteln dieser Skill (Tier 1, kein

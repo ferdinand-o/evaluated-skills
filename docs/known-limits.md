@@ -86,6 +86,27 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## Judge
 
+- **Zusammengesetzte Claims (mehrere Bedingungen in einem Satz verkettet)
+  sind unzuverlässig — eine Eigenschaft der Kette, kein Einzelfall.** Bei
+  `exercise-forge` bestanden zwei Judge-Claims, die je drei Bedingungen in
+  einem Satz verlangten (etwa „Gate lief UND Konflikt wurde benannt UND
+  Aufgabe ist nicht verified"), bei identischem Commit und identischer
+  Fixture in zwei aufeinanderfolgenden `run_evals.py`-Läufen abwechselnd rot
+  und grün — Lauf 1 verwarf Claim A und akzeptierte Claim B, Lauf 2 genau
+  umgekehrt. Sieht der Judge zwei von drei Bedingungen erfüllt und die dritte
+  nicht eindeutig, verneint er den ganzen Claim; bei einer Drei-Glieder-Kette
+  genügt ein wackliges Glied, um alles zu kippen, und welches Glied gerade
+  wackelt, variiert zwischen Läufen — genau das Bild von zwei Evals, die im
+  Wechsel fallen. Der Fix: jede Bedingung als eigener, einzeln entscheidbarer
+  Claim (oder, wo mechanisch prüfbar, als mechanische Assertion statt Judge —
+  „Aufgabe X ist nicht als verified ausgewiesen" steht im Artefakt und
+  braucht kein Urteil). Drei einzeln geprüfte Bedingungen sind dabei strenger
+  als eine Kette, die schon an ihrer eigenen Länge scheitert: ein Fehlschlag
+  benennt jetzt, welches Glied fehlte, statt nur „irgendetwas stimmte nicht".
+  Diese Beobachtung gilt für jede Skill, die Judge-Claims formuliert, nicht
+  nur für `exercise-forge` — siehe `evals/exercise-forge/evals.json`
+  (`mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`)
+  für ein durchgeführtes Beispiel der Zerlegung.
 - **Urteile werden über exakte Claim-String-Gleichheit zugeordnet.**
   `evalkit.judge.judge()` matcht die Antwort des Judge-Agenten gegen die
   Behauptungen aus der `evals.json` per `dict`-Lookup auf dem wörtlichen
@@ -158,11 +179,23 @@ dieser Runde als Grenze bleibt, statt behoben zu werden:
   Assertion-Primitiven nicht mechanisch prüfbar** — weder im Skill-Code noch im
   Eval-Harness gibt es ein Primitiv, das Kartenzahl oder Inhaltsbündelung zählt
   (dieselbe Grenze wie „Negative Strukturprüfung fehlt" oben). Der Eval
-  `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab, ungelaufen.
-- **Alle sechs Evals unter `evals/exercise-forge/evals.json` sind ungelaufen.**
-  Nur die Schema-Validität (`evalkit.schema.load_evals()`) und einzelne mechanische
-  Bausteine (z. B. die Überspezifizierte-Tests-Fixture direkt gegen `run_coding.py`)
-  wurden geprüft — kein Eval lief je über `run_evals.py` gegen einen echten Agenten.
+  `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab.
+- **Zwei der ursprünglich sechs Judge-Claims waren zusammengesetzt und
+  dadurch unzuverlässig — siehe der neue Punkt im Abschnitt „Judge" oben.**
+  `mc-distractor-trap-is-caught` und `narrow-criteria-on-open-question-are-flagged`
+  verlangten je drei Bedingungen in einem Satz und fielen bei identischem
+  Commit und identischer Fixture in zwei Läufen abwechselnd rot/grün. Beide
+  wurden in je eine mechanische Prüfung „Gate lief" (`method`-Feld im
+  Aufgaben-JSON), eine mechanische Prüfung „nicht verified" (`must_not` auf
+  `"status": "verified"`) und einen einzigen, einzeln entscheidbaren
+  Judge-Claim „Konflikt sichtbar benannt" zerlegt.
+- **Ein echter `run_evals.py`-Lauf hat vier der sechs Evals bestätigt**
+  (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
+  `overspecified-coding-tests-are-flagged`,
+  `one-step-harder-changes-the-vector-not-just-wording`) — die beiden
+  zerlegten Evals wurden danach geändert und seither nicht erneut gegen einen
+  echten Agenten gefahren; ihre neue, atomare Fassung ist nur schema-validiert
+  (`evalkit.schema.load_evals()`), nicht erneut ausgeführt.
 
 ## Verweise
 

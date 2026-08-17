@@ -35,13 +35,16 @@
       "prompt": "Prüfe im Aufgaben-JSON zum Thema 'algorithms' die Multiple-Choice-Aufgabe mc-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
       "must": [
         {"type": "file_exists", "path": ".skills/verified-research/research/algorithms.exercises.json"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/algorithms.exercises.json", "pattern": "\"method\": \"blind_solve_mc\""},
         {
           "type": "judge",
-          "claim": "Der Agent führt das Blind-Gate für mc-01 aus (verify_blind.py) und behandelt einen Blind-Löser-Treffer auf den Distraktor 'O(n) — Best Case bei früher Terminierung' als Hinweis auf eine kaputte oder mehrdeutige Option — er schärft/ersetzt den Distraktor, oder erklärt/markiert das Problem sichtbar — statt die Aufgabe unverändert als 'verified' auszuweisen, ohne den Konflikt zu erwähnen."
+          "claim": "Das Ergebnis — die Antwort des Agenten oder der 'detail'-Text von mc-01 im Aufgaben-JSON — benennt sichtbar, dass der vom Blind-Löser gewählte Distraktor ('O(n) — Best Case bei früher Terminierung') ein Problem ist (mehrdeutig, kaputt, oder zu präzisieren), nicht nur, dass irgendein Status gesetzt wurde."
         }
       ],
-      "must_not": [],
-      "notes": "Eval 1 aus Spec 13 §Approach. Der Distraktor ist absichtlich als Best-Case-Komplexität von Bubble Sort mit früher Terminierung valide begründbar — ein Blind-Löser mit dieser Begründung deckt den Fehler auf, das Gate selbst entscheidet mechanisch (verify_blind.verify_mc), aber ob der Agent das Ergebnis danach richtig behandelt, braucht ein Urteil."
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/verified-research/research/algorithms.exercises.json", "pattern": "\"status\": \"verified\""}
+      ],
+      "notes": "Eval 1 aus Spec 13 §Approach. Der Distraktor ist absichtlich als Best-Case-Komplexität von Bubble Sort mit früher Terminierung valide begründbar — ein Blind-Löser mit dieser Begründung deckt den Fehler auf, das Gate selbst entscheidet mechanisch (verify_blind.verify_mc). Ursprünglich ein einziger zusammengesetzter Judge-Claim ('Gate lief UND Konflikt benannt UND nicht verified') — in zwei echten Läufen abwechselnd rot/grün bei identischem Commit und identischer Fixture, weil eine Drei-Bedingungen-Kette schon an einem wackligen Glied kippt (siehe docs/known-limits.md). Jetzt drei einzeln entscheidbare Assertionen: 'Gate lief' und 'nicht verified' sind im Aufgaben-JSON mechanisch nachweisbar und brauchen kein Urteil; nur 'Konflikt sichtbar benannt' bleibt als einzige, einzelne Bedingung beim Judge."
     },
     {
       "id": "overspecified-coding-tests-are-flagged",
@@ -65,13 +68,16 @@
       "prompt": "Prüfe im Aufgaben-JSON zum Thema 'python-basics' die offene Frage open-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
       "must": [
         {"type": "file_exists", "path": ".skills/verified-research/research/python-basics.exercises.json"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/python-basics.exercises.json", "pattern": "\"method\": \"blind_solve_open\""},
         {
           "type": "judge",
-          "claim": "Erfüllt eine fachlich korrekte, deutschsprachige Blind-Antwort (z. B. mit 'unveränderlich' statt dem wörtlich verlangten 'immutable') ein Kriterium nicht, weil das Kriterium zu eng an eine bestimmte Wortwahl statt an den Sachverhalt gebunden ist, erkennt der Agent das als Kriterien-Problem und lockert/präzisiert das Kriterium, statt die Aufgabe unverändert als 'verified' auszuweisen."
+          "claim": "Das Ergebnis — die Antwort des Agenten oder der 'detail'-Text von open-01 im Aufgaben-JSON — benennt sichtbar, dass mindestens ein Kriterium zu eng an eine bestimmte Wortwahl (das wörtlich verlangte 'immutable') statt an den Sachverhalt gebunden ist, nicht nur, dass irgendein Status gesetzt wurde."
         }
       ],
-      "must_not": [],
-      "notes": "Eval 3 aus Spec 13 §Approach."
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/verified-research/research/python-basics.exercises.json", "pattern": "\"status\": \"verified\""}
+      ],
+      "notes": "Eval 3 aus Spec 13 §Approach. Ursprünglich ein einziger zusammengesetzter Judge-Claim ('Gate lief UND Kriterien-Problem benannt UND nicht verified') — in zwei echten Läufen abwechselnd rot/grün bei identischem Commit und identischer Fixture (gemeinsam mit mc-distractor-trap-is-caught beobachtet, siehe dort und docs/known-limits.md). Jetzt drei einzeln entscheidbare Assertionen: 'Gate lief' und 'nicht verified' sind im Aufgaben-JSON mechanisch nachweisbar; nur 'Kriterien-Problem sichtbar benannt' bleibt als einzige, einzelne Bedingung beim Judge."
     },
     {
       "id": "one-step-harder-changes-the-vector-not-just-wording",
