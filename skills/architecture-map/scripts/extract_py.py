@@ -245,10 +245,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Extraktion gescheitert: {exc}", file=sys.stderr)
         return 1
 
+    # sys.argv[0] statt eines hartkodierten Pfads: die Skill kann unter
+    # `skills/architecture-map/` (dieses Repo) oder `.claude/skills/architecture-map/`
+    # (Standard-Installation, z. B. im Eval-Harness) liegen. drift_check.py führt dieses
+    # Kommando später erneut aus — ein falscher hartkodierter Pfad wäre dort nicht nur
+    # eine kosmetische Ungenauigkeit, sondern ein Fehlschlag beim Regenerieren.
     graph["_meta"] = {
         "skill": "architecture-map",
         "schema": SCHEMA_VERSION,
-        "generated": "python skills/architecture-map/scripts/extract_py.py " + " ".join(command_parts) + f" --out {args.out}",
+        "generated": f"python {sys.argv[0]} " + " ".join(command_parts) + f" --out {args.out}",
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(graph, indent=2, ensure_ascii=False), encoding="utf-8")

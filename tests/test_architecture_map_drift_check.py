@@ -91,9 +91,18 @@ def _write_py_project(root, a_imports_b=True):
 
 
 def _build_and_write_module_doc(project_dir, cache_out):
-    extract_py = load_script("skills/architecture-map/scripts/extract_py.py")
-    rc = extract_py.main(["--root", str(project_dir), "--out", str(cache_out)])
-    assert rc == 0
+    """Baut den ersten Graph-Stand über eine echte `python skills/.../extract_py.py`-
+    Subprocess-Invokation (nicht `extract_py.main()` in-process) — die aufgezeichnete
+    `_meta.generated`-Kette nutzt `sys.argv[0]` und muss deshalb genauso entstehen, wie
+    `drift_check.regenerate_graph()` sie später erneut ausführt."""
+    import subprocess
+
+    cmd = [
+        "python", "skills/architecture-map/scripts/extract_py.py",
+        "--root", str(project_dir), "--level", "module", "--out", str(cache_out),
+    ]
+    completed = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
     graph = json.loads(cache_out.read_text(encoding="utf-8"))
     block = to_mermaid.render(graph)
     footer = {"module": {"command": graph["_meta"]["generated"], "graph_hash": drift_check.graph_hash(graph)}}
