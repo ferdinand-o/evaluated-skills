@@ -32,12 +32,14 @@ kein Fehlschlag.
 5. **Abnahme (zweistufig):**
    ```bash
    python skills/subagent-dev/scripts/plan_to_tasks.py verify \
-     --task-file .skills/cache/tasks/task-3-x.md --worktree <pfad> --base <commit-vor-dispatch>
+     --task-file .skills/cache/tasks/task-3-x.md --worktree <pfad> --base <commit-vor-dispatch> \
+     --out .skills/cache/tasks/verify-task-3.json
    ```
    Mechanisch zuerst: Allowlist eingehalten (`git diff`/`git status` gegen die
    Task-Datei) und deklarierte `Produces`-Signaturen per `ast` vorhanden
    (Name + Arity, nie Typ — Stdlib prüft keine Typen ohne Import, und
-   importiert wird fremder Code hier nie). Erst danach `/code-review` im
+   importiert wird fremder Code hier nie). `--out` schreibt das Ergebnis
+   zusätzlich als Artefakt, nicht nur auf stdout. Erst danach `/code-review` im
    Selbst-Modus gegen die Task-Datei als Soll. Fixes im selben Worktree,
    max. 2 Runden, dann Eskalation an den Nutzer.
 6. **Merge:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem Merge.

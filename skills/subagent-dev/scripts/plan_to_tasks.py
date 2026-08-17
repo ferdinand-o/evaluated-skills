@@ -577,6 +577,29 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     for r in produce_results:
         print(f"  {r['name']}: {r['status']} — {r['detail']}")
     print("Verdikt: PASS" if ok else "Verdikt: FAIL")
+
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "_meta": {
+                "skill": "subagent-dev",
+                "schema": SCHEMA_VERSION,
+                "generated": (
+                    f"python skills/subagent-dev/scripts/plan_to_tasks.py verify "
+                    f"--task-file {args.task_file} --worktree {args.worktree}"
+                    + (f" --base {args.base}" if args.base else "")
+                ),
+            },
+            "task_file": str(task_file),
+            "worktree": str(worktree),
+            "allowlist_violations": violations,
+            "produces": produce_results,
+            "ok": ok,
+        }
+        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Verify-Ergebnis geschrieben -> {out_path}")
+
     return 0 if ok else 1
 
 
@@ -594,6 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     ver.add_argument("--task-file", required=True)
     ver.add_argument("--worktree", required=True)
     ver.add_argument("--base", help="Basis-Revision für git diff (weglassen prüft nur Produces)")
+    ver.add_argument("--out", help="Verify-Ergebnis zusätzlich als JSON-Artefakt schreiben (z. B. .skills/cache/tasks/verify-task-1.json)")
     ver.set_defaults(func=_cmd_verify)
 
     args = parser.parse_args(argv)

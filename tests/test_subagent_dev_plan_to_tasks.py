@@ -381,6 +381,31 @@ def test_main_verify_reports_violation(tmp_path):
     assert code == 1
 
 
+def test_main_verify_writes_json_artifact_when_out_given(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "parser.py").write_text("def parse(line, extra):\n    return {}\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_parser.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "base")
+
+    doc = ptt.parse_plan(SAMPLE_PLAN)
+    task_dir = tmp_path.parent / "tasks-out-artifact"
+    ptt.write_tasks(doc, "plan.md", task_dir)
+    task_file = task_dir / "task-1-parser.md"
+    out_path = tmp_path.parent / "verify-out" / "task-1.json"
+
+    code = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(tmp_path), "--out", str(out_path)])
+    assert code == 1
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["_meta"]["skill"] == "subagent-dev"
+    assert payload["ok"] is False
+    assert payload["produces"][0]["status"] == "arity_mismatch"
+
+
 def test_main_verify_passes_when_clean(tmp_path):
     git(tmp_path, "init", "--quiet", "--initial-branch=main")
     git(tmp_path, "config", "user.email", "t@example.invalid")
