@@ -1,0 +1,37 @@
+"""Strukturprüfung der exercise-forge-evals.json. Läuft keine Evals — kein
+Agentenlauf, keine claude-CLI-Aufrufe. Prüft nur, dass evalkit.schema.load_evals()
+die Datei fehlerfrei akzeptiert (Rulings: Evals werden geschrieben, nicht
+ausgeführt)."""
+
+from pathlib import Path
+
+from evalkit.schema import load_evals
+
+EVALS_PATH = Path(__file__).resolve().parent.parent / "evals" / "exercise-forge" / "evals.json"
+
+
+def test_evals_file_loads_without_schema_error():
+    evals = load_evals(EVALS_PATH)
+    assert len(evals) == 5
+
+
+def test_at_least_one_contract_level_anti_ceremony_eval_exists():
+    """Spec 00 §2 Pflicht: mindestens ein Anti-Zeremonie-Eval."""
+    evals = load_evals(EVALS_PATH)
+    contract_evals = [e for e in evals if e.eval_class == "contract"]
+    assert contract_evals
+    assert any("anti" in e.id.lower() or "single" in e.id.lower() or "stays" in e.id.lower() for e in contract_evals)
+
+
+def test_every_eval_has_a_fixture():
+    """Jeder exercise-forge-Eval hängt an einem eigenen Fixture-Workspace,
+    nicht am leeren Standard-Workspace ohne Projektüberschreibung."""
+    evals = load_evals(EVALS_PATH)
+    assert all(e.fixture for e in evals)
+
+
+def test_fixtures_referenced_by_evals_exist_on_disk():
+    evals = load_evals(EVALS_PATH)
+    fixtures_root = EVALS_PATH.parent.parent / "fixtures"
+    for ev in evals:
+        assert (fixtures_root / ev.fixture / "fixture.json").is_file(), ev.fixture

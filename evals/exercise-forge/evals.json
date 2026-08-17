@@ -1,0 +1,77 @@
+{
+  "evals": [
+    {
+      "id": "single-flashcard-stays-single",
+      "class": "contract",
+      "fixture": "exercise-forge-empty",
+      "prompt": "Erstelle eine einzelne Karteikarte (Flashcard) zum Thema 'python-basics': Was ist eine Liste in Python? Lege sie im Aufgaben-JSON ab.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/python-basics.exercises.json"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/python-basics.exercises.json", "pattern": "(?i)liste"},
+        {"type": "file_max_lines", "path": ".skills/verified-research/research/python-basics.exercises.json", "max_lines": 50}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract: Eine Ein-Karten-Anfrage darf kein Kartenset erzeugen. 50 Zeilen lassen eine Karte im Pretty-JSON (inkl. _meta, difficulty-, verification-Objekt) zu, keine zwanzig."
+    },
+    {
+      "id": "mc-distractor-trap-is-caught",
+      "class": "behavior",
+      "fixture": "exercise-forge-mc-broken-distractor",
+      "prompt": "Prüfe im Aufgaben-JSON zum Thema 'algorithms' die Multiple-Choice-Aufgabe mc-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/algorithms.exercises.json"},
+        {
+          "type": "judge",
+          "claim": "Der Agent führt das Blind-Gate für mc-01 aus (verify_blind.py) und behandelt einen Blind-Löser-Treffer auf den Distraktor 'O(n) — Best Case bei früher Terminierung' als Hinweis auf eine kaputte oder mehrdeutige Option — er schärft/ersetzt den Distraktor, oder erklärt/markiert das Problem sichtbar — statt die Aufgabe unverändert als 'verified' auszuweisen, ohne den Konflikt zu erwähnen."
+        }
+      ],
+      "must_not": [],
+      "notes": "Eval 1 aus Spec 13 §Approach. Der Distraktor ist absichtlich als Best-Case-Komplexität von Bubble Sort mit früher Terminierung valide begründbar — ein Blind-Löser mit dieser Begründung deckt den Fehler auf, das Gate selbst entscheidet mechanisch (verify_blind.verify_mc), aber ob der Agent das Ergebnis danach richtig behandelt, braucht ein Urteil."
+    },
+    {
+      "id": "overspecified-coding-tests-are-flagged",
+      "class": "behavior",
+      "fixture": "exercise-forge-coding-overspecified",
+      "prompt": "Prüfe im Aufgaben-JSON zum Thema 'sorting' die Coding-Aufgabe code-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/sorting.exercises.json"},
+        {
+          "type": "judge",
+          "claim": "Fällt eine mechanisch korrekte Blind-Lösung (z. B. eine kürzere Implementierung, die dasselbe Verhalten zeigt) an einem Test, der eine Implementierungsdetail statt Verhalten prüft (hier: eine geforderte 'for'-Schleife im Quelltext), erkennt und benennt der Agent das als überspezifizierten Test, statt die Aufgabe unverändert als 'verified' auszuweisen."
+        }
+      ],
+      "must_not": [],
+      "notes": "Eval 2 aus Spec 13 §Approach. `test_uses_explicit_loop` in der Fixture prüft ein Implementierungsdetail (siehe test_verify_coding_overspecified_tests_flags_suspicious in tests/test_exercise_forge_run_coding.py — dasselbe Muster, dort bereits mechanisch gegen run_coding.py bestätigt)."
+    },
+    {
+      "id": "narrow-criteria-on-open-question-are-flagged",
+      "class": "behavior",
+      "fixture": "exercise-forge-open-narrow-criteria",
+      "prompt": "Prüfe im Aufgaben-JSON zum Thema 'python-basics' die offene Frage open-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/python-basics.exercises.json"},
+        {
+          "type": "judge",
+          "claim": "Erfüllt eine fachlich korrekte, deutschsprachige Blind-Antwort (z. B. mit 'unveränderlich' statt dem wörtlich verlangten 'immutable') ein Kriterium nicht, weil das Kriterium zu eng an eine bestimmte Wortwahl statt an den Sachverhalt gebunden ist, erkennt der Agent das als Kriterien-Problem und lockert/präzisiert das Kriterium, statt die Aufgabe unverändert als 'verified' auszuweisen."
+        }
+      ],
+      "must_not": [],
+      "notes": "Eval 3 aus Spec 13 §Approach."
+    },
+    {
+      "id": "one-step-harder-changes-the-vector-not-just-wording",
+      "class": "behavior",
+      "fixture": "exercise-forge-mc-broken-distractor",
+      "prompt": "Erzeuge im Thema 'algorithms' zur bestehenden Aufgabe mc-01 eine neue Variante, die eine Stufe schwerer ist, und lege sie als neue Aufgabe im selben Aufgaben-JSON ab.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/algorithms.exercises.json"},
+        {
+          "type": "judge",
+          "claim": "Die neue Aufgabe unterscheidet sich von mc-01 nachvollziehbar in mindestens einer Schwierigkeits-Achse aus difficulty.md (mehr Lösungsschritte, mehr vorausgesetztes Wissen in 'prerequisites', oder 'transfer' von 'near' auf 'far') — nicht nur im Wortlaut des Aufgabenstamms bei unveränderten difficulty-Werten."
+        }
+      ],
+      "must_not": [],
+      "notes": "Eval 5 aus Spec 13 §Approach. Nutzt dieselbe Fixture wie der Distraktor-Eval (eigenes, unabhängiges Kriterium — die Fixture bringt nur eine bestehende mc-01 mit, die als Referenzpunkt für 'eine Stufe schwerer' dient)."
+    }
+  ]
+}

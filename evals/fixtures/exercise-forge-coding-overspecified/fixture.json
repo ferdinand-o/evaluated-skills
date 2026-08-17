@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Projekt mit vorbereiteter sorting.exercises.json: code-01 prüft neben dem Verhalten auch eine Implementierungsdetail (explizite for-Schleife im Quelltext) — der Überspezifizierte-Tests-Eval aus Spec 13."
+}
