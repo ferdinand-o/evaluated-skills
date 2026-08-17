@@ -36,6 +36,13 @@ def discover_modules(root: Path) -> dict[str, Path]:
 
     Ausgeschlossene Verzeichnisnamen werden komplett übersprungen, auch tief
     verschachtelt (z. B. `src/.venv/lib/...`).
+
+    Review-Defekt D3: zwei physisch verschiedene Dateien können auf dieselbe
+    Modul-ID abbilden (z. B. `a/b.py` und `a.b.py` im Wurzelverzeichnis liefern
+    beide `a.b`). Ein `dict`, das die zweite Datei stillschweigend über die erste
+    schreibt, verliert einen ganzen Knoten samt seiner Kanten unbemerkt — kein
+    Exit-2 greift, weil `edges`/`external` meist trotzdem nicht leer sind. Eine
+    Kollision ist deshalb ein harter Fehler, kein still aufgelöster Konflikt.
     """
     modules: dict[str, Path] = {}
     if not root.is_dir():
@@ -43,7 +50,14 @@ def discover_modules(root: Path) -> dict[str, Path]:
     for path in sorted(root.rglob("*.py")):
         if any(part in EXCLUDED_DIR_NAMES for part in path.relative_to(root).parts[:-1]):
             continue
-        modules[module_id_for(path, root)] = path
+        module_id = module_id_for(path, root)
+        if module_id in modules and modules[module_id] != path:
+            raise ExtractError(
+                f"Modul-ID-Kollision: sowohl {modules[module_id].relative_to(root)} als auch "
+                f"{path.relative_to(root)} ergeben die ID {module_id!r} — welche Datei gemeint "
+                "ist, lässt sich nicht sicher entscheiden"
+            )
+        modules[module_id] = path
     return modules
 
 
@@ -184,9 +198,17 @@ def extract_classes(files: list[Path], root: Path) -> dict:
     innerhalb derselben Dateimenge aufgelöst — Basisklassen außerhalb der gewählten
     Dateien (z. B. `Exception`, `BaseModel`) bleiben unverknüpft. Das ist eine bewusste
     Grenze der Hotspot-Beschränkung, keine Fehlfunktion.
+
+    Review-Anmerkung A1: Trägt derselbe Name innerhalb der gewählten Dateimenge zwei
+    verschiedene Klassen (z. B. je eine `Config`-Klasse in zwei unabhängigen
+    Hotspot-Dateien) und wird dieser Name als Basisklasse referenziert, ist nicht
+    sicher entscheidbar, welche gemeint ist — eine stillschweigend geratene Kante
+    verletzt den Contract ("jede Struktur-Behauptung ist graph-belegt") ohne jede
+    Fehlermeldung. Ein solcher Fall bricht die Extraktion hart ab, statt zu raten.
+    Zwei gleichnamige, nie als Basis referenzierte Klassen bleiben dagegen erlaubt.
     """
     nodes: list[dict] = []
-    class_by_name: dict[str, str] = {}
+    name_occurrences: dict[str, list[str]] = {}
     per_file_classes: dict[Path, list[ast.ClassDef]] = {}
 
     for file in files:
@@ -200,7 +222,7 @@ def extract_classes(files: list[Path], root: Path) -> dict:
         for cls in classes:
             class_id = f"{module_id}.{cls.name}"
             nodes.append({"id": class_id, "path": file.relative_to(root).as_posix(), "kind": "class"})
-            class_by_name[cls.name] = class_id
+            name_occurrences.setdefault(cls.name, []).append(class_id)
 
     edges: set[tuple[str, str]] = set()
     for file, classes in per_file_classes.items():
@@ -209,9 +231,18 @@ def extract_classes(files: list[Path], root: Path) -> dict:
             class_id = f"{module_id}.{cls.name}"
             for base in cls.bases:
                 base_name = _base_name(base)
-                target = class_by_name.get(base_name) if base_name else None
-                if target and target != class_id:
-                    edges.add((class_id, target))
+                if not base_name:
+                    continue
+                occurrences = name_occurrences.get(base_name, [])
+                if len(occurrences) > 1:
+                    raise ExtractError(
+                        f"Klassenname {base_name!r} ist unter den gewählten Hotspot-Dateien mehrfach "
+                        f"vergeben ({', '.join(occurrences)}) und wird von {class_id} als Basisklasse "
+                        "referenziert — welche gemeint ist, lässt sich ohne Modul-Qualifizierung nicht "
+                        "sicher entscheiden"
+                    )
+                if len(occurrences) == 1 and occurrences[0] != class_id:
+                    edges.add((class_id, occurrences[0]))
 
     return {
         "language": "python",

@@ -37,6 +37,16 @@ def test_graph_hash_changes_with_edges():
     assert drift_check.graph_hash(g1) != drift_check.graph_hash(g2)
 
 
+def test_graph_hash_changes_with_external():
+    """Review-Defekt D2: eine neue/entfernte externe Abhängigkeit ändert nodes/edges
+    nicht, ist aber Teil der Kontext-Ebene — der Hash muss trotzdem reagieren."""
+    g1 = make_graph(["a"], [])
+    g2 = make_graph(["a"], [])
+    g1["external"] = []
+    g2["external"] = ["requests"]
+    assert drift_check.graph_hash(g1) != drift_check.graph_hash(g2)
+
+
 def test_read_footer_parses_json_block():
     text = doc_with_footer("```mermaid\nfoo\n```\n", {"module": {"command": "x", "graph_hash": "h"}})
     footer = drift_check.read_footer(text)
@@ -73,6 +83,23 @@ def test_diff_graph_reports_added_and_removed():
     assert diff["nodes_removed"] == ["b"]
     assert diff["edges_added"] == [("a", "c")]
     assert diff["edges_removed"] == [("a", "b")]
+    assert diff["external_added"] == []
+    assert diff["external_removed"] == []
+
+
+def test_diff_graph_reports_external_added_and_removed():
+    new_graph = make_graph(["a"], [])
+    new_graph["external"] = ["requests", "yaml"]
+    diff = drift_check.diff_graph({"a"}, set(), new_graph, old_external=["yaml"])
+    assert diff["external_added"] == ["requests"]
+    assert diff["external_removed"] == []
+
+
+def test_diff_graph_missing_old_external_defaults_to_empty():
+    new_graph = make_graph(["a"], [])
+    new_graph["external"] = ["requests"]
+    diff = drift_check.diff_graph({"a"}, set(), new_graph)
+    assert diff["external_added"] == ["requests"]
 
 
 def test_check_raises_without_footer(tmp_path):
@@ -105,7 +132,13 @@ def _build_and_write_module_doc(project_dir, cache_out):
     assert completed.returncode == 0, completed.stderr
     graph = json.loads(cache_out.read_text(encoding="utf-8"))
     block = to_mermaid.render(graph)
-    footer = {"module": {"command": graph["_meta"]["generated"], "graph_hash": drift_check.graph_hash(graph)}}
+    footer = {
+        "module": {
+            "command": graph["_meta"]["generated"],
+            "graph_hash": drift_check.graph_hash(graph),
+            "external": graph["external"],
+        }
+    }
     return block, footer
 
 
@@ -146,6 +179,54 @@ def test_check_reports_drift_with_edge_diff_when_code_changed(tmp_path):
     assert level["status"] == "drift"
     assert level["diff"]["edges_removed"] == [("a", "b")]
     assert "c" in level["diff"]["nodes_added"]
+
+
+def test_check_reports_drift_when_only_external_changes(tmp_path):
+    """Review-Defekt D2, End-to-End: nodes/edges bleiben identisch, nur eine neue
+    externe Abhängigkeit kommt hinzu — der Drift-Check darf das nicht als
+    'unverändert' durchwinken."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    _write_py_project(project_dir)
+    cache_out = tmp_path / "graph.json"
+    block, footer = _build_and_write_module_doc(project_dir, cache_out)
+
+    doc = project_dir / "ARCHITECTURE.md"
+    doc.write_text(doc_with_footer(block, footer), encoding="utf-8")
+
+    (project_dir / "a.py").write_text("from b import x\nimport requests\n", encoding="utf-8")
+
+    result = drift_check.check(doc, cwd=REPO_ROOT)
+    assert result["any_drift"] is True
+    level = result["levels"]["module"]
+    assert level["status"] == "drift"
+    assert level["diff"]["nodes_added"] == []
+    assert level["diff"]["nodes_removed"] == []
+    assert level["diff"]["edges_added"] == []
+    assert level["diff"]["edges_removed"] == []
+    assert level["diff"]["external_added"] == ["requests"]
+
+
+def test_check_short_circuits_diff_when_hash_matches(tmp_path, monkeypatch):
+    """Plan-Zusage (L2): kein Drift heißt auch kein Parsen/Diffen — der Kurzschluss
+    in `check()` wird über Spies statt nur über das Endergebnis geprüft."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    _write_py_project(project_dir)
+    cache_out = tmp_path / "graph.json"
+    block, footer = _build_and_write_module_doc(project_dir, cache_out)
+    doc = project_dir / "ARCHITECTURE.md"
+    doc.write_text(doc_with_footer(block, footer), encoding="utf-8")
+
+    diff_calls = []
+    parse_calls = []
+    monkeypatch.setattr(drift_check, "diff_graph", lambda *a, **k: diff_calls.append(1))
+    monkeypatch.setattr(drift_check.to_mermaid, "parse", lambda *a, **k: parse_calls.append(1))
+
+    result = drift_check.check(doc, cwd=REPO_ROOT)
+    assert result["levels"]["module"]["status"] == "unchanged"
+    assert diff_calls == []
+    assert parse_calls == []
 
 
 def test_main_print_hash_mode(tmp_path, capsys):

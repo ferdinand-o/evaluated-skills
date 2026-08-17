@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from conftest import load_script
 
 extract_ts = load_script("skills/architecture-map/scripts/extract_ts.py")
@@ -34,6 +36,15 @@ def test_discover_modules_skips_installed_skill_under_claude_dir(tmp_path):
     write(tmp_path, ".claude/skills/architecture-map/scripts/extract_ts.py", "")
     known = extract_ts.discover_modules(tmp_path)
     assert set(known) == {"src.a"}
+
+
+def test_discover_modules_raises_on_barrel_index_collision(tmp_path):
+    """Review-Defekt D3: src/widgets.ts und src/widgets/index.ts liefern beide die
+    ID 'src.widgets' — ein realistischer Barrel-Fall, darf nicht still verlieren."""
+    write(tmp_path, "src/widgets.ts", "")
+    write(tmp_path, "src/widgets/index.ts", "")
+    with pytest.raises(extract_ts.ExtractError, match="Kollision"):
+        extract_ts.discover_modules(tmp_path)
 
 
 def test_extract_specifiers_named_import(tmp_path):
@@ -90,6 +101,24 @@ def test_resolve_specifier_parent_dir(tmp_path):
     known = {"src/util.ts": "src.util"}
     target = extract_ts.resolve_specifier(tmp_path / "src" / "sub" / "m.ts", "../util", tmp_path, known)
     assert target == "src.util"
+
+
+def test_resolve_specifier_js_extension_resolves_to_ts_source(tmp_path):
+    """Review-Lücke L3: nodenext-ESM-Konvention, `.js`-Import einer `.ts`-Quelle."""
+    write(tmp_path, "src/foo.ts", "")
+    known = {"src/foo.ts": "src.foo"}
+    target = extract_ts.resolve_specifier(tmp_path / "src" / "m.ts", "./foo.js", tmp_path, known)
+    assert target == "src.foo"
+
+
+def test_resolve_specifier_written_extension_still_preferred_when_it_exists(tmp_path):
+    """Die geschriebene Extension gewinnt weiterhin, wenn sie tatsächlich existiert —
+    Geschwister-Extensionen sind nur ein Rückfall, keine Umgehung."""
+    write(tmp_path, "src/foo.js", "")
+    write(tmp_path, "src/foo.ts", "")
+    known = {"src/foo.js": "src.foo.js", "src/foo.ts": "src.foo.ts"}
+    target = extract_ts.resolve_specifier(tmp_path / "src" / "m.ts", "./foo.js", tmp_path, known)
+    assert target == "src.foo.js"
 
 
 def test_resolve_specifier_unresolvable_returns_none(tmp_path):

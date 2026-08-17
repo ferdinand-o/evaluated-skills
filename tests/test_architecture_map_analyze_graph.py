@@ -123,6 +123,36 @@ def test_analyze_reports_used_layers_config_status():
     assert findings["layer_violations"] == []
 
 
+def test_layers_summary_missing_config_says_ungeprueft():
+    text = analyze_graph.layers_summary(None)
+    assert "ungeprüft" in text
+
+
+def test_layers_summary_used_no_violations_says_geprueft_without_un_prefix():
+    text = analyze_graph.layers_summary([])
+    assert "geprüft" in text
+    assert "ungeprüft" not in text
+
+
+def test_layers_summary_used_with_violations_names_the_count():
+    text = analyze_graph.layers_summary([{"from": "a", "to": "b"}])
+    assert "geprüft" in text
+    assert "ungeprüft" not in text
+    assert "1" in text
+
+
+def test_analyze_includes_layers_summary_missing_case():
+    graph = make_graph(["a"], [])
+    findings = analyze_graph.analyze(graph, None)
+    assert findings["layers_summary"] == "ungeprüft (keine layers.json gefunden)"
+
+
+def test_analyze_includes_layers_summary_used_case():
+    graph = make_graph(["a"], [])
+    findings = analyze_graph.analyze(graph, LAYERS_CFG)
+    assert findings["layers_summary"] == "geprüft: keine Schichtverletzungen gefunden"
+
+
 def test_main_writes_findings(tmp_path):
     graph = make_graph(["a", "b"], [("a", "b"), ("b", "a")])
     graph_path = tmp_path / "graph.json"

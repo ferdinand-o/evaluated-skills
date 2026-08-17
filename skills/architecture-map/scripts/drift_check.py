@@ -39,10 +39,17 @@ class DriftCheckError(RuntimeError):
 
 def graph_hash(graph: dict) -> str:
     """sha256 über kanonisiertes Graph-JSON, ohne `_meta` — sonst ändert sich der
-    Hash bei jedem Lauf allein durch das im Kommando enthaltene `--out`/Zeitstempel."""
+    Hash bei jedem Lauf allein durch das im Kommando enthaltene `--out`/Zeitstempel.
+
+    `external` fließt bewusst mit ein (Fix-Runde, Review-Defekt D2): eine neue oder
+    entfernte externe Abhängigkeit ändert weder `nodes` noch `edges`, ist aber genau
+    die Kontext-Ebene (`references/c4-levels.md`), über die die Narration eine
+    Aussage trifft — ohne `external` im Hash bliebe so eine Änderung für den
+    Drift-Check unsichtbar, während `ARCHITECTURE.md`s Kontext-Abschnitt veraltet."""
     nodes = sorted(n["id"] for n in graph.get("nodes", []))
     edges = sorted((e["from"], e["to"]) for e in graph.get("edges", []))
-    payload = json.dumps({"nodes": nodes, "edges": edges}, sort_keys=True)
+    external = sorted(graph.get("external", []))
+    payload = json.dumps({"nodes": nodes, "edges": edges, "external": external}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -70,14 +77,25 @@ def read_mermaid_blocks(text: str) -> dict[str, str]:
     return blocks
 
 
-def diff_graph(old_nodes: set[str], old_edges: set[tuple[str, str]], new_graph: dict) -> dict:
+def diff_graph(
+    old_nodes: set[str], old_edges: set[tuple[str, str]], new_graph: dict, old_external: set[str] | None = None
+) -> dict:
+    """`old_external` kommt aus dem Footer (`entry["external"]`), nicht aus dem
+    Mermaid-Block — externe Pakete werden nie ins Diagramm gezeichnet (nur die
+    Kontext-Prosa nennt sie), `to_mermaid.parse()` kann sie also nicht zurückliefern.
+    Fehlt der Footer-Eintrag (älteres Dokument vor dieser Fix-Runde), wird `external`
+    best-effort als leer behandelt statt zu raten."""
     new_nodes = {n["id"] for n in new_graph.get("nodes", [])}
     new_edges = {(e["from"], e["to"]) for e in new_graph.get("edges", [])}
+    new_external = set(new_graph.get("external", []))
+    old_external = set(old_external or ())
     return {
         "nodes_added": sorted(new_nodes - old_nodes),
         "nodes_removed": sorted(old_nodes - new_nodes),
         "edges_added": sorted(new_edges - old_edges),
         "edges_removed": sorted(old_edges - new_edges),
+        "external_added": sorted(new_external - old_external),
+        "external_removed": sorted(old_external - new_external),
     }
 
 
@@ -169,7 +187,8 @@ def check(architecture_md_path: Path, cwd: Path | None = None) -> dict:
             }
             continue
         old_nodes, old_edges = to_mermaid.parse(old_block)
-        results[level_key] = {"status": "drift", "diff": diff_graph(old_nodes, old_edges, new_graph)}
+        old_external = entry.get("external", [])
+        results[level_key] = {"status": "drift", "diff": diff_graph(old_nodes, old_edges, new_graph, old_external)}
 
     return {"any_drift": any_drift, "levels": results}
 
@@ -188,7 +207,8 @@ def _format_report(result: dict) -> str:
             else:
                 lines.append(
                     f"{level}: DRIFT — Knoten +{len(diff['nodes_added'])}/-{len(diff['nodes_removed'])}, "
-                    f"Kanten +{len(diff['edges_added'])}/-{len(diff['edges_removed'])}"
+                    f"Kanten +{len(diff['edges_added'])}/-{len(diff['edges_removed'])}, "
+                    f"extern +{len(diff['external_added'])}/-{len(diff['external_removed'])}"
                 )
                 for node in diff["nodes_added"]:
                     lines.append(f"    + Knoten {node}")
@@ -198,6 +218,10 @@ def _format_report(result: dict) -> str:
                     lines.append(f"    + Kante {frm} -> {to}")
                 for frm, to in diff["edges_removed"]:
                     lines.append(f"    - Kante {frm} -> {to}")
+                for pkg in diff["external_added"]:
+                    lines.append(f"    + extern {pkg}")
+                for pkg in diff["external_removed"]:
+                    lines.append(f"    - extern {pkg}")
     return "\n".join(lines)
 
 

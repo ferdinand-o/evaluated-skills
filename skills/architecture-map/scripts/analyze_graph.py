@@ -156,13 +156,31 @@ def find_dead_modules(graph: dict, entry_patterns: tuple[str, ...] = DEFAULT_ENT
     return sorted(dead)
 
 
+def layers_summary(layer_violations: list[dict] | None) -> str:
+    """Ein Satz, den die Narration wörtlich übernimmt (Review-Lücke L1): `null` vs.
+    `[]` ist im Befund-JSON sauber unterschieden, aber ob das auch im für Menschen
+    bestimmten `ARCHITECTURE.md` als **"ungeprüft"** ankommt statt implizit als
+    "sauber" durchzugehen, hing bisher komplett von freier Textgenerierung ab. Ein
+    kanonischer Satz pro Fall macht den Unterschied sprachlich unübersehbar:
+    "ungeprüft" erscheint ausschließlich im fehlenden-Konfiguration-Fall, "geprüft"
+    (ohne "un"-Präfix) ausschließlich in den beiden anderen.
+    """
+    if layer_violations is None:
+        return "ungeprüft (keine layers.json gefunden)"
+    if not layer_violations:
+        return "geprüft: keine Schichtverletzungen gefunden"
+    return f"geprüft: {len(layer_violations)} Schichtverletzung(en) gefunden"
+
+
 def analyze(graph: dict, layers_cfg: dict | None = None) -> dict:
+    violations = find_layer_violations(graph, layers_cfg)
     return {
         "cycles": find_cycles(graph),
         "outliers": find_outliers(graph, layers_cfg),
-        "layer_violations": find_layer_violations(graph, layers_cfg),
+        "layer_violations": violations,
         "dead_modules": find_dead_modules(graph),
         "layers_config_status": "used" if layers_cfg else "missing",
+        "layers_summary": layers_summary(violations),
     }
 
 

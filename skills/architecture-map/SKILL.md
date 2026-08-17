@@ -37,8 +37,12 @@ Regelverstoß, kein Stilmittel.
    siehe unten) steuert Schichtverletzungen und Ausreißer-Schwellen. Fehlt sie, frag
    einmal nach oder biete an, sie aus der Verzeichnisstruktur abzuleiten — leg sie nie
    ungefragt an (Bootstrap-Regel, Spec 00 §1). Ohne sie läuft die Analyse trotzdem,
-   meldet aber `layer_violations: null` — das heißt „ungeprüft", nicht „sauber", und
-   gehört so in die Narration.
+   meldet aber `layer_violations: null` — das heißt „ungeprüft", nicht „sauber".
+   `analyze_graph.py`s Befund-JSON trägt dafür `layers_summary`, einen fertigen Satz
+   ("ungeprüft (keine layers.json gefunden)" / "geprüft: keine Schichtverletzungen
+   gefunden" / "geprüft: N Schichtverletzung(en) gefunden") — **übernimm ihn wörtlich**
+   in die Befunde-Sektion, statt selbst zu formulieren. Das ist der Unterschied
+   zwischen „niemand hat hingesehen" und „geprüft, für gesund befunden".
 4. **Analysieren:**
    ```bash
    python skills/architecture-map/scripts/analyze_graph.py \
@@ -60,11 +64,13 @@ Regelverstoß, kein Stilmittel.
    ```
 7. **`ARCHITECTURE.md` schreiben:** drei getrennte Abschnitte (Kontext/Module/Klassen,
    siehe `references/c4-levels.md`), Narration nach `references/narration.md`, Befunde
-   nach `references/finding-catalog.md` mit Einschätzung je Befund, und am Ende ein
-   Footer-Block, den `drift_check.py` später liest:
+   nach `references/finding-catalog.md` mit Einschätzung je Befund (die
+   Schichtverletzungs-Zeile ist `layers_summary` wörtlich, siehe Schritt 3), und am Ende
+   ein Footer-Block, den `drift_check.py` später liest — `external` gehört mit rein,
+   sonst bleibt eine geänderte externe Abhängigkeit für den Drift-Check unsichtbar:
    ```
    <!-- architecture-map:graph-hashes
-   {"module": {"command": "<_meta.generated aus dem Graph-JSON>", "graph_hash": "<via --graph berechnet>"}}
+   {"module": {"command": "<_meta.generated aus dem Graph-JSON>", "graph_hash": "<via --graph berechnet>", "external": ["<external aus dem Graph-JSON>"]}}
    -->
    ```
    Hash je Ebene: `python skills/architecture-map/scripts/drift_check.py --graph <graph.json>`.
@@ -98,7 +104,13 @@ gemeldete Verletzung.
   stiller Erfolg — dann root/files prüfen, nicht weiterschreiben.
 - `drift_check.py` schreibt nie auf `ARCHITECTURE.md`. Es meldet Abweichungen; die
   Aktualisierung bleibt ein bewusster, von dir ausgeführter Schritt.
-- Klassenebene nur für explizit gewählte Hotspot-Dateien.
+- Klassenebene nur für explizit gewählte Hotspot-Dateien; zwei gleichnamige Klassen
+  in verschiedenen Hotspot-Dateien, die als Basis referenziert werden, bricht
+  `extract_py.py` hart ab statt eine falsche Kante zu raten.
+- Der Footer-Hash geht über `nodes`, `edges` **und** `external` — eine neue oder
+  entfernte externe Abhängigkeit ist Drift, auch ohne neue interne Kante.
+- Fehlt `layers.json`, steht das als „ungeprüft" (`layers_summary`) im Dokument, nie
+  als stillschweigende Leere, die wie „sauber" aussieht.
 
 ## Anti-Rationalisierung
 

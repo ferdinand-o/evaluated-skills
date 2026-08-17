@@ -14,6 +14,10 @@ Bedingung, die Ungenauigkeit klar zu benennen:
   bekannte Fehlerquelle.
 - **Keine Klassenebene für TypeScript in v1** (Out of scope, siehe SKILL.md).
 
+Explizite `.js`-Endungen bei Importen aus `.ts`-Quellen (`"moduleResolution":
+"nodenext"`-Konvention) werden über Geschwister-Extensionen aufgelöst — das war eine
+gemeldete Lücke (Review-Runde, L3) und ist jetzt behandelt, keine offene Grenze mehr.
+
 Diese Datei ist bewusst als "erprobt, aber ungenau" markiert, nie als vollwertiger
 Ersatz für einen echten Parser.
 """
@@ -46,7 +50,14 @@ DYNAMIC_IMPORT_RE = re.compile(r"""\bimport\(\s*['"]([^'"]+)['"]\s*\)""")
 
 
 def discover_modules(root: Path) -> dict[str, Path]:
-    """Alle TS/TSX/JS/JSX-Dateien unter `root`, als Modul-ID -> Dateipfad."""
+    """Alle TS/TSX/JS/JSX-Dateien unter `root`, als Modul-ID -> Dateipfad.
+
+    Review-Defekt D3: `src/widgets.ts` und `src/widgets/index.ts` liefern beide die
+    ID `src.widgets` (`index.<ext>` wird auf den Verzeichnisnamen reduziert) — ein
+    realistischer Barrel-Fall, kein Konstrukt. Ein `dict`, das stillschweigend die
+    später gefundene Datei gewinnen lässt, verliert einen ganzen Knoten samt seiner
+    Kanten unbemerkt. Eine Kollision ist deshalb ein harter Fehler.
+    """
     modules: dict[str, Path] = {}
     if not root.is_dir():
         return modules
@@ -55,7 +66,14 @@ def discover_modules(root: Path) -> dict[str, Path]:
             continue
         if any(part in EXCLUDED_DIR_NAMES for part in path.relative_to(root).parts[:-1]):
             continue
-        modules[module_id_for(path, root)] = path
+        module_id = module_id_for(path, root)
+        if module_id in modules and modules[module_id] != path:
+            raise ExtractError(
+                f"Modul-ID-Kollision: sowohl {modules[module_id].relative_to(root)} als auch "
+                f"{path.relative_to(root)} ergeben die ID {module_id!r} — welche Datei gemeint "
+                "ist, lässt sich nicht sicher entscheiden"
+            )
+        modules[module_id] = path
     return modules
 
 
@@ -91,13 +109,25 @@ def extract_specifiers(text: str) -> list[str]:
 def _relative_candidates(importer_path: Path, specifier: str, root: Path) -> list[str]:
     """Mögliche relative Pfade (als Posix-String relativ zu `root`) für einen
     relativen Spezifizierer, spezifischste zuerst: mit Extension direkt, sonst
-    Datei-mit-Extension und `index.<ext>` im Verzeichnis (Node-Resolution-Konvention)."""
+    Datei-mit-Extension und `index.<ext>` im Verzeichnis (Node-Resolution-Konvention).
+
+    Review-Lücke L3: trägt der Spezifizierer bereits eine Extension, wird sie zuerst
+    probiert, aber nicht mehr exklusiv — moderne TS/ESM-Projekte
+    (`"moduleResolution": "nodenext"`) importieren aus `.ts`-Quellen ausdrücklich mit
+    `.js`-Endung (`import { x } from './foo.js'`, obwohl die Quelle `foo.ts` heißt;
+    Node verlangt das zur Laufzeit für ESM-Auflösung). Ohne Geschwister-Extensionen
+    als Rückfall wäre `./foo.js` grundsätzlich unauflösbar, sobald nur `foo.ts`
+    existiert — ein verbreitetes, kein exotisches Muster.
+    """
     importer_rel = importer_path.relative_to(root).as_posix()
     base_dir = posixpath.dirname(importer_rel)
     target = posixpath.normpath(posixpath.join(base_dir, specifier))
 
-    if target.endswith(SUFFIXES):
-        return [target]
+    matched_ext = next((ext for ext in SUFFIXES if target.endswith(ext)), None)
+    if matched_ext:
+        stem = target[: -len(matched_ext)]
+        sibling_exts = [matched_ext] + [ext for ext in SUFFIXES if ext != matched_ext]
+        return [stem + ext for ext in sibling_exts]
     return [target + ext for ext in SUFFIXES] + [f"{target}/index{ext}" for ext in SUFFIXES]
 
 

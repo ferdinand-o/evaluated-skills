@@ -32,6 +32,15 @@ def test_discover_modules_skips_excluded_dirs(tmp_path):
     assert set(known) == {"src.a"}
 
 
+def test_discover_modules_raises_on_module_id_collision(tmp_path):
+    """Review-Defekt D3: a/b.py und a.b.py liefern beide die ID 'a.b' — das darf
+    nicht still aufgelöst werden, sondern muss als Fehler auffallen."""
+    write(tmp_path, "a/b.py", "")
+    write(tmp_path, "a.b.py", "")
+    with pytest.raises(extract_py.ExtractError, match="Kollision"):
+        extract_py.discover_modules(tmp_path)
+
+
 def test_discover_modules_skips_installed_skill_under_claude_dir(tmp_path):
     """`--root .` scannt auch installierte Skills selbst, wenn sie nicht
     ausgeschlossen werden — `.claude/skills/architecture-map/scripts/*.py` gehört
@@ -141,6 +150,29 @@ def test_extract_classes_multiple_inheritance(tmp_path):
     edges = {(e["from"], e["to"]) for e in graph["edges"]}
     assert ("m.C", "m.A") in edges
     assert ("m.C", "m.B") in edges
+
+
+def test_extract_classes_raises_on_ambiguous_base_name_across_files(tmp_path):
+    """Review-Anmerkung A1: zwei Hotspot-Dateien haben je eine 'Config'-Klasse, eine
+    dritte Klasse erbt von 'Config' — nicht sicher auflösbar, muss hart abbrechen."""
+    write(tmp_path, "a.py", "class Config:\n    pass\n")
+    write(tmp_path, "b.py", "class Config:\n    pass\n")
+    write(tmp_path, "c.py", "from a import Config\n\n\nclass Sub(Config):\n    pass\n")
+    with pytest.raises(extract_py.ExtractError, match="Config"):
+        extract_py.extract_classes(
+            [tmp_path / "a.py", tmp_path / "b.py", tmp_path / "c.py"], tmp_path
+        )
+
+
+def test_extract_classes_same_name_without_reference_is_allowed(tmp_path):
+    """Zwei gleichnamige, nie referenzierte Klassen sind kein Fehler — die Ambiguität
+    wird nie ausgenutzt."""
+    write(tmp_path, "a.py", "class Config:\n    pass\n")
+    write(tmp_path, "b.py", "class Config:\n    pass\n")
+    graph = extract_py.extract_classes([tmp_path / "a.py", tmp_path / "b.py"], tmp_path)
+    ids = {n["id"] for n in graph["nodes"]}
+    assert ids == {"a.Config", "b.Config"}
+    assert graph["edges"] == []
 
 
 def test_extract_classes_external_base_is_not_linked(tmp_path):
