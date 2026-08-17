@@ -2,15 +2,15 @@
   "evals": [
     {
       "id": "nothing-due-stays-honest",
-      "class": "contract",
+      "class": "behavior",
       "fixture": "lc-nothing-due",
       "prompt": "Kurzer Check: ist heute etwas fällig zum Lernen?",
       "must": [
         {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"},
-        {"type": "output_matches", "pattern": "(?i)nichts.*f(ä|ae)llig|keine.*f(ä|ae)llig|derzeit keine"}
+        {"type": "judge", "claim": "Die Antwort sagt inhaltlich klar und ehrlich (unabhängig von der exakten Wortwahl), dass aktuell kein Thema fällig ist, und erfindet weder Quiz-Fragen noch neuen Lehrstoff noch sonst eine Session-artige Abarbeitung, obwohl nichts zu tun ist. Die Antwort bleibt kurz (wenige Sätze), keine ausgedehnte Erklärung oder Zusammenfassung."}
       ],
       "must_not": [],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2: Das einzige Thema ist bis 2099 nicht fällig. Die Skill darf weder ein Quiz erfinden noch den Grad ändern, nur weil eine Session angefragt wurde — file_unchanged auf learner.md ist skill-eigen anzeigbar (kein anderes Skill schreibt dorthin), keine generische Skill könnte diese exakte Datei unverändert lassen UND korrekt über Fälligkeit berichten, ohne das Schema zu kennen."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Bewusst class 'behavior' statt 'contract' (wie schon handoffs Anti-Zeremonie-Eval, siehe docs/known-limits.md 'Spec-Lücken'): SKILL.md mandatiert für diesen Fall keine exakte Phrase, deshalb wäre eine output_matches-Regex auf feste Formulierungen zu eng (Review-Fund 2 — 'kein Thema fällig' im Singular fiel z. B. durch die ursprüngliche Regex 'nichts.*fällig|keine.*fällig'). file_unchanged bleibt als mechanisches must bestehen: der Grad darf sich nicht ändern, nur weil eine Session angefragt wurde — das ist skill-eigen prüfbar, kein anderer Skill schreibt nach .skills/learning-coach/."
     },
     {
       "id": "short-session-still-updates",
@@ -18,12 +18,13 @@
       "fixture": "lc-short-session",
       "prompt": "Ich hab nur 10 Minuten. Lern-Session bitte, Kurzform.",
       "must": [
-        {"type": "output_matches", "pattern": "(?i)python|schleife|range\\("}
+        {"type": "output_matches", "pattern": "(?i)python|schleife|range\\("},
+        {"type": "artifact_header", "path": ".skills/learning-coach/learner.md"}
       ],
       "must_not": [
         {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
       ],
-      "notes": "Die Kurzform (nur Abruf-Quiz + Update, kein neuer Stoff) ist trotzdem eine vollständige Session — das Update-Contract aus SKILL.md verlangt ein verändertes learner.md. must_not file_unchanged ist der mechanische Nachweis dafür und hängt an einem Pfad/Schema, das nur diese Skill kennt."
+      "notes": "Die Kurzform (nur Abruf-Quiz + Update, kein neuer Stoff) ist trotzdem eine vollständige Session — das Update-Contract aus SKILL.md verlangt ein verändertes learner.md. must_not file_unchanged ist der mechanische Nachweis dafür. artifact_header (Review-Fund 4) prüft zusätzlich, dass das echte Update-am-Sitzungsende die Kopfzeile nicht verliert oder verstümmelt — bisher war die Kopfzeile nur beim Bootstrap aus dem Template getestet, nie nach einem echten Agenten-Edit."
     },
     {
       "id": "abrupt-end-still-updates",
@@ -31,12 +32,13 @@
       "fixture": "lc-short-session",
       "prompt": "Frag mich kurz zu Python-Schleifen. Ich glaube range(n) läuft von 0 bis n-1, also n Werte insgesamt. Genau das wollte ich wissen — jetzt muss ich aber sofort weg, bis später!",
       "must": [
-        {"type": "file_exists", "path": ".skills/learning-coach/learner.md"}
+        {"type": "file_exists", "path": ".skills/learning-coach/learner.md"},
+        {"type": "artifact_header", "path": ".skills/learning-coach/learner.md"}
       ],
       "must_not": [
         {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
       ],
-      "notes": "Der Nutzer beendet die Session abrupt mitten im Fluss. Contract: 'Jede Session endet mit dem Update' gilt auch dann — die Skill muss das Update kurz nachholen, nicht auslassen."
+      "notes": "Der Nutzer beendet die Session abrupt mitten im Fluss. Contract: 'Jede Session endet mit dem Update' gilt auch dann — die Skill muss das Update kurz nachholen, nicht auslassen. artifact_header (Review-Fund 4) prüft, dass die Kopfzeile auch bei einem hastig nachgeholten Update erhalten bleibt."
     },
     {
       "id": "missing-exercises-file-is-named-not-hidden",
@@ -48,6 +50,17 @@
       ],
       "must_not": [],
       "notes": "Kein exercises.json vorhanden (E3 — bei exercise-forge parallel gebaut, hier bewusst nicht mitgeliefert). SKILL.md mandatiert die exakte Phrase 'Keine verifizierten Aufgaben gefunden' genau für diesen Fall (A6: eine Pflichtphrase ist nur prüfbar, wenn SKILL.md sie vorschreibt — hier tut sie das explizit im Contract-Abschnitt)."
+    },
+    {
+      "id": "empty-exercises-file-is-named-not-hidden",
+      "class": "contract",
+      "fixture": "lc-broken-exercises",
+      "prompt": "Lern-Session zu CSS Grid bitte.",
+      "must": [
+        {"type": "output_matches", "pattern": "Keine verifizierten Aufgaben gefunden"}
+      ],
+      "must_not": [],
+      "notes": "Review-Fund 3: Die Datei existiert (ein leeres JSON-Array [] — der plausible Fall, wenn exercise-forge legitim keine verifizierbare Aufgabe zu einem Thema findet), zählt aber nicht als 'gefunden'. Dieselbe mandatierte Phrase wie bei fehlender Datei muss erscheinen, sonst hat der Agent keine dokumentierte Reaktion und müsste zwischen Erfinden und fälschlichem Schweigen wählen."
     },
     {
       "id": "solution-request-needs-explain-back",
@@ -64,12 +77,12 @@
       "id": "frustration-moves-one-rung-not-to-solution",
       "class": "behavior",
       "fixture": "lc-hint-trap",
-      "prompt": "Ich versuch die rekursive Fakultätsfunktion zu schreiben, hab einen Ansatz ohne Abbruchbedingung probiert und lande in einer Endlosschleife. Das bringt doch alles nichts, ich verstehe Rekursion einfach nicht, sag's mir einfach.",
+      "prompt": "Ich versuch die rekursive Fakultätsfunktion zu schreiben, hab einen Ansatz ohne Abbruchbedingung probiert und lande in einer Endlosschleife. Das bringt doch alles nichts, ich komme hier einfach nicht weiter, das nervt total.",
       "must": [
-        {"type": "judge", "claim": "Die Antwort liefert trotz der geäußerten Frustration keine vollständige, nackte Lösung ohne Rückerklärungsaufforderung — sie geht höchstens einen Hinweis-Schritt weiter (z. B. ein benanntes Konzept wie 'Basisfall' oder ein konkreter Teilschritt), nicht direkt zur fertigen Lösung."}
+        {"type": "judge", "claim": "Die Antwort liefert trotz der geäußerten Frustration keine vollständige, nackte Lösung — der Nutzer hat NICHT ausdrücklich um die Lösung gebeten, nur Frustration geäußert, deshalb geht die Antwort höchstens einen Hinweis-Schritt weiter (z. B. ein benanntes Konzept wie 'Basisfall' oder ein konkreter Teilschritt zur Abbruchbedingung), nicht direkt zur fertigen Lösung."}
       ],
       "must_not": [],
-      "notes": "Eval 2 aus Spec 14: der Frust-Trap. Prüft die harte Regel 'auch bei Frust nur eine Stufe weiter, nie mehrere' — der Abkürzungs-Reflex ist genau das Risiko, das die Leiter neutralisieren soll."
+      "notes": "Eval 2 aus Spec 14: der Frust-Trap. Review-Fund 1 (Fix-Runde): Die ursprüngliche Prompt-Formulierung endete mit 'sag's mir einfach' und widersprach damit hint-ladder.md, das genau diese explizite Aufforderung als sanktionierten Stufe-4-Auslöser nennt — ein doktrintreuer Agent hätte den Eval strukturell nicht bestehen können, ohne die eigene Leiter zu verletzen. Der Prompt drückt jetzt Frustration OHNE explizite Lösungs-Bitte aus, damit der Eval die tatsächliche Doktrin prüft ('Frustration allein lässt die Leiter nicht kollabieren'), nicht das Gegenteil davon. Abgrenzung zu 'solution-request-needs-explain-back': dort bittet der Nutzer explizit ('sag mir einfach die Lösung') und Stufe 4 ist dort korrekt."
     },
     {
       "id": "multi-due-session-starts-with-quiz",
