@@ -83,9 +83,25 @@ ein drittes Werkzeug `handoff.md` automatisiert parst (ein Dashboard, ein
 weiterer Skill, ein CI-Schritt), kippt die Begründung, und die Datei braucht
 die Kopfzeile wie jedes andere Artefakt dieser Sammlung.
 
+## Begründete Ausnahme: die Anki-CSV von `exercise-forge`
+
+`skills/exercise-forge/scripts/export.py` schreibt neben dem
+Markdown-Übungsblatt (mit regulärer Kopfzeile) eine Anki-CSV — bewusst **ohne**
+Kopfzeile. Anki interpretiert Zeilen, die mit `#` beginnen, als
+Import-Direktiven (`#separator:comma`, `#html:true`, `#columns:…`); eine
+Kommentar-Kopfzeile nach dieser Konvention läge in genau diesem Namensraum und
+könnte den Import stören oder von Anki fehlinterpretiert werden. Die CSV hat
+nur einen Konsumenten — den Anki-Import des Menschen, der die Datei erzeugt
+hat — und der braucht keine Schema-Version, um die Datei zu verstehen.
+
+Diese Ausnahme gilt nur, solange es bei diesem einen Konsumenten bleibt.
+Parst ein automatisiertes Werkzeug diese CSV künftig maschinell, braucht sie
+eine andere Lösung (z. B. eine begleitende `.meta.json`-Datei), keine
+`#`-Kopfzeile.
+
 **Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben) —
-`handoff` ist die einzige gebaute Skill, die davon abweicht, und tut das aus
-einem dokumentierten Grund, nicht weil die Kopf-Regel optional wäre. Wer eine
-neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält, dokumentiert
-sie hier nach demselben Muster, statt sich stillschweigend auf den Präzedenzfall
-zu berufen.
+`handoff` und die Anki-CSV von `exercise-forge` sind die einzigen gebauten
+Ausnahmen, und beide tun das aus einem dokumentierten Grund, nicht weil die
+Kopf-Regel optional wäre. Wer eine neue Skill baut und eine ähnliche Ausnahme
+für gerechtfertigt hält, dokumentiert sie hier nach demselben Muster, statt
+sich stillschweigend auf einen Präzedenzfall zu berufen.
