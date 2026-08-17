@@ -200,10 +200,13 @@ Original-IDs und Kanten zurück (Rundreise-Test).
   aus `layers_cfg.get("thresholds", {"fan_in": 10, "fan_out": 10})` (Default, falls keine
   Konfiguration vorhanden — degradiert sichtbar, siehe unten).
 - `find_layer_violations(graph: dict, layers_cfg: dict) -> list[dict]` — `layers_cfg`
-  bildet Pfadpräfix → Schicht-Index; eine Kante, die von einer höheren zu einer
-  niedrigeren erlaubten Richtung zeigt (Konfiguration legt Erlaubte Richtung fest, z. B.
-  `"order": ["domain", "application", "infrastructure"]`, Abhängigkeiten dürfen nur nach
-  rechts zeigen), wird gemeldet.
+  bildet Pfadpräfix → Schicht-Index über `"order"`, **von innen nach außen** sortiert
+  (z. B. `"order": ["domain", "application", "infrastructure"]`, Index 0 = innerste
+  Schicht). Erlaubt ist nur eine Kante von einer äußeren zu einer inneren oder
+  gleichen Schicht (höherer oder gleicher Index → niedrigerer Index); eine Kante, die
+  nach außen zeigt (niedrigerer Index → höherer Index, z. B. `domain` importiert aus
+  `infrastructure`), ist die gemeldete Schichtverletzung — das ist die konventionelle
+  Dependency Rule, nicht willkürlich gewählt.
 - `find_dead_modules(graph: dict, entry_patterns: list[str]) -> list[str]` — Fan-in 0 und
   kein Treffer gegen `entry_patterns` (Default `["__main__", "main", "cli"]`).
 - `analyze(graph: dict, layers_cfg: dict | None) -> dict` — Befund-JSON:
