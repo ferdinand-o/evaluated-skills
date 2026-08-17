@@ -87,26 +87,44 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 ## Judge
 
 - **Zusammengesetzte Claims (mehrere Bedingungen in einem Satz verkettet)
-  sind unzuverlässig — eine Eigenschaft der Kette, kein Einzelfall.** Bei
-  `exercise-forge` bestanden zwei Judge-Claims, die je drei Bedingungen in
+  sind unzuverlässig — eine Eigenschaft der Kette, kein Einzelfall — und sie
+  können echte Defekte verdecken, nicht nur Rauschen erzeugen.** Bei
+  `exercise-forge` bestanden drei Judge-Claims, die je drei Bedingungen in
   einem Satz verlangten (etwa „Gate lief UND Konflikt wurde benannt UND
   Aufgabe ist nicht verified"), bei identischem Commit und identischer
-  Fixture in zwei aufeinanderfolgenden `run_evals.py`-Läufen abwechselnd rot
-  und grün — Lauf 1 verwarf Claim A und akzeptierte Claim B, Lauf 2 genau
-  umgekehrt. Sieht der Judge zwei von drei Bedingungen erfüllt und die dritte
-  nicht eindeutig, verneint er den ganzen Claim; bei einer Drei-Glieder-Kette
-  genügt ein wackliges Glied, um alles zu kippen, und welches Glied gerade
-  wackelt, variiert zwischen Läufen — genau das Bild von zwei Evals, die im
-  Wechsel fallen. Der Fix: jede Bedingung als eigener, einzeln entscheidbarer
-  Claim (oder, wo mechanisch prüfbar, als mechanische Assertion statt Judge —
-  „Aufgabe X ist nicht als verified ausgewiesen" steht im Artefakt und
-  braucht kein Urteil). Drei einzeln geprüfte Bedingungen sind dabei strenger
-  als eine Kette, die schon an ihrer eigenen Länge scheitert: ein Fehlschlag
-  benennt jetzt, welches Glied fehlte, statt nur „irgendetwas stimmte nicht".
-  Diese Beobachtung gilt für jede Skill, die Judge-Claims formuliert, nicht
-  nur für `exercise-forge` — siehe `evals/exercise-forge/evals.json`
-  (`mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`)
-  für ein durchgeführtes Beispiel der Zerlegung.
+  Fixture über mehrere `run_evals.py`-Läufe hinweg abwechselnd rot und grün —
+  Lauf 1 verwarf Claim A und akzeptierte Claim B, Lauf 2 genau umgekehrt.
+  Sieht der Judge zwei von drei Bedingungen erfüllt und die dritte nicht
+  eindeutig, verneint er den ganzen Claim; bei einer Drei-Glieder-Kette genügt
+  ein wackliges Glied, um alles zu kippen, und welches Glied gerade wackelt,
+  variiert zwischen Läufen.
+  **Der schärfere Befund kam erst nach der Zerlegung:** Sobald „Gate lief"
+  und „Aufgabe ist nicht verified" als eigene, mechanische Assertionen dastanden
+  (statt Teil derselben Judge-Kette zu sein), fielen zwei der drei Evals an
+  genau der mechanischen „nicht verified"-Assertion — mechanisch, nicht als
+  Judge-Urteil. Der Grund: `status` blieb `verified`, obwohl das Blind-Gate
+  einen Konflikt gefunden und (laut vorherigen, noch zusammengesetzten Läufen)
+  auch benannt hatte. In der verketteten Fassung hatte der Judge diesen
+  Widerspruch **überstimmt** — er sah „Konflikt benannt" erfüllt, urteilte
+  wohlwollend über die Kette als Ganzes, und der eigentliche Defekt (ein
+  gefundener Konflikt, der den Status nicht erreichte) blieb hinter grünen
+  Einzelläufen verborgen, bis die Kette in Einzelteile zerlegt war. Eine
+  zusammengesetzte Prüfung ist damit nicht nur unzuverlässiger als drei
+  einzelne — sie kann *milder* sein als die Summe ihrer Teile, weil der Judge
+  bei überwiegender Erfüllung eher nachsichtig als strikt urteilt. Der Fix:
+  jede Bedingung als eigener, einzeln entscheidbarer Claim (oder, wo
+  mechanisch prüfbar, als mechanische Assertion statt Judge — „Aufgabe X ist
+  nicht als verified ausgewiesen" steht im Artefakt und braucht kein Urteil).
+  Drei einzeln geprüfte Bedingungen sind dabei strenger als eine Kette, die
+  schon an ihrer eigenen Länge scheitert: ein Fehlschlag benennt jetzt, welches
+  Glied fehlte, statt nur „irgendetwas stimmte nicht" — und genau das machte
+  den verdeckten Defekt erst sichtbar. Diese Beobachtung gilt für jede Skill,
+  die Judge-Claims formuliert, nicht nur für `exercise-forge` — siehe
+  `evals/exercise-forge/evals.json` (`mc-distractor-trap-is-caught`,
+  `narrow-criteria-on-open-question-are-flagged`,
+  `overspecified-coding-tests-are-flagged`) für ein durchgeführtes Beispiel
+  der Zerlegung, und den `exercise-forge`-Abschnitt unten für den damit
+  aufgedeckten Skill-Defekt selbst.
 - **Urteile werden über exakte Claim-String-Gleichheit zugeordnet.**
   `evalkit.judge.judge()` matcht die Antwort des Judge-Agenten gegen die
   Behauptungen aus der `evals.json` per `dict`-Lookup auf dem wörtlichen
@@ -151,11 +169,13 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## exercise-forge
 
-Ein unabhängiger Review (siehe `docs/superpowers/reports/exercise-forge-report.md`,
-Abschnitt „Fix-Runde") fand zwei Defekte, die inzwischen behoben sind (`export.py`
-glaubte eine von Hand geschriebene `"status": "verified"`; `verify_open` verifizierte
-Aufgaben mit leerer `criteria`-Liste, weil `all([])` in Python `True` ist). Was aus
-dieser Runde als Grenze bleibt, statt behoben zu werden:
+Drei Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
+Runde 1: ein unabhängiger Review fand zwei Defekte, die inzwischen behoben sind
+(`export.py` glaubte eine von Hand geschriebene `"status": "verified"`;
+`verify_open` verifizierte Aufgaben mit leerer `criteria`-Liste, weil `all([])`
+in Python `True` ist). Runde 2: zusammengesetzte Judge-Claims zerlegt. Runde 3:
+die Zerlegung deckte einen dritten, echten Defekt auf (unten). Was aus diesen
+Runden als Grenze bleibt, statt behoben zu werden:
 
 - **Die Herkunftsprüfung für `verified`/`suspicious` ist strukturell, nicht
   kryptographisch.** `export.has_verified_provenance()` verlangt `method` aus dem
@@ -180,22 +200,61 @@ dieser Runde als Grenze bleibt, statt behoben zu werden:
   Eval-Harness gibt es ein Primitiv, das Kartenzahl oder Inhaltsbündelung zählt
   (dieselbe Grenze wie „Negative Strukturprüfung fehlt" oben). Der Eval
   `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab.
-- **Zwei der ursprünglich sechs Judge-Claims waren zusammengesetzt und
+- **Echter Defekt, von der Zerlegung aufgedeckt: `status` kann `verified`
+  bleiben, obwohl das Blind-Gate einen Konflikt gefunden hat.** Nach der
+  Zerlegung der drei zusammengesetzten Judge-Claims (siehe Abschnitt „Judge"
+  oben) fielen `mc-distractor-trap-is-caught` und
+  `narrow-criteria-on-open-question-are-flagged` in einem echten
+  `run_evals.py`-Lauf **mechanisch** an der neuen `must_not`-Assertion
+  (`"status": "verified"` stand im Aufgaben-JSON, obwohl die Fixture absichtlich
+  einen Konflikt enthält); `overspecified-coding-tests-are-flagged` fiel im
+  selben Lauf noch als Ganzes am (damals noch zusammengesetzten) Judge-Claim,
+  vermutlich aus demselben Grund. `verify_mc`, `verify_open` und
+  `run_coding.verify_coding` schreiben nachweislich nie selbst `verified` für
+  einen erkannten Konflikt (siehe die entsprechenden Unit-Tests) — der
+  Verdacht, den die Fix-Runde nicht bestätigen konnte, aber auch nicht
+  ausschließen kann, weil `evalkit` keine Transcripts persistiert (siehe
+  Abschnitt „Betrieb" oben): Der Konflikt wurde in der Antwort *gemeldet*
+  (weshalb frühere, zusammengesetzte Judge-Läufe „Konflikt benannt" bejahten),
+  aber `verification.status` wurde davon nicht *berührt* — vermutlich, weil
+  eine Session nach dem Melden den Status von Hand auf `verified` gesetzt hat,
+  statt ihn aus einem erneuten `verify_blind.py`-Lauf zu übernehmen. Melden
+  und Markieren sind im Code derselbe Schritt (`main()` schreibt exakt das
+  `verdict`-Objekt, das es auch druckt — kein Divergenzpunkt im Skript selbst,
+  siehe `skills/exercise-forge/scripts/verify_blind.py`), aber nichts hindert
+  eine Session daran, `verification` direkt mit einem Editor-Werkzeug zu
+  überschreiben und dabei `method`/`checked_at` eines früheren echten Laufs
+  wiederzuverwenden — `export.has_verified_provenance()` (siehe oben) würde
+  das nicht einmal erkennen, weil sie nur prüft, *dass* `method`/`checked_at`
+  vorhanden sind, nicht, dass sie zum aktuellen `status` passen.
+  **Fix in dieser Runde:** `SKILL.md` verbietet das jetzt explizit und an der
+  Stelle, an der die Versuchung entsteht (Schritt 5: „Melden ersetzt nicht
+  Markieren", neue Anti-Rationalisierungs-Zeile). Das ist ein G1-Fix
+  (Selbstauskunft, Spec 00 §4) — er verlangt es, erzwingt es aber nicht
+  mechanisch. Ein G2/G3-Fix (ein Skript oder Hook, der eine `verification`-
+  Änderung ohne begleitenden Skriptlauf verhindert oder erkennt) wurde nicht
+  gebaut; die Herkunftsprüfung aus `export.has_verified_provenance()` schützt
+  nur die *gerenderten* Artefakte (Markdown/CSV), nicht die Quelle selbst — die
+  Aufgaben-JSON hat am Schreibpfad keine mechanische Verteidigung, nur am
+  Lesepfad von `export.py`.
+- **Drei der ursprünglich sechs Judge-Claims waren zusammengesetzt und
   dadurch unzuverlässig — siehe der neue Punkt im Abschnitt „Judge" oben.**
-  `mc-distractor-trap-is-caught` und `narrow-criteria-on-open-question-are-flagged`
-  verlangten je drei Bedingungen in einem Satz und fielen bei identischem
-  Commit und identischer Fixture in zwei Läufen abwechselnd rot/grün. Beide
-  wurden in je eine mechanische Prüfung „Gate lief" (`method`-Feld im
-  Aufgaben-JSON), eine mechanische Prüfung „nicht verified" (`must_not` auf
-  `"status": "verified"`) und einen einzigen, einzeln entscheidbaren
-  Judge-Claim „Konflikt sichtbar benannt" zerlegt.
-- **Ein echter `run_evals.py`-Lauf hat vier der sechs Evals bestätigt**
+  `mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`
+  und `overspecified-coding-tests-are-flagged` verlangten je drei Bedingungen
+  in einem Satz. Alle drei wurden in je eine mechanische Prüfung „Gate lief"
+  (`method`-Feld im Aufgaben-JSON), eine mechanische Prüfung „nicht verified"
+  (`must_not` auf `"status": "verified"`) und einen einzigen, einzeln
+  entscheidbaren Judge-Claim „Konflikt sichtbar benannt" zerlegt.
+- **Drei der sechs Evals sind gegen einen echten Agenten bestätigt**
   (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
-  `overspecified-coding-tests-are-flagged`,
-  `one-step-harder-changes-the-vector-not-just-wording`) — die beiden
-  zerlegten Evals wurden danach geändert und seither nicht erneut gegen einen
-  echten Agenten gefahren; ihre neue, atomare Fassung ist nur schema-validiert
-  (`evalkit.schema.load_evals()`), nicht erneut ausgeführt.
+  `one-step-harder-changes-the-vector-not-just-wording`) — die drei
+  zerlegten Evals decken jetzt den oben beschriebenen echten Defekt auf und
+  sind seit der SKILL.md-Änderung (Fix in dieser Runde) nicht erneut gegen
+  einen echten Agenten gefahren worden; ihre neue Fassung ist nur
+  schema-validiert (`evalkit.schema.load_evals()`), nicht erneut ausgeführt.
+  Ob die SKILL.md-Doktrin allein reicht, um den Defekt zuverlässig zu
+  vermeiden, ist damit unbewiesen — plausibel, aber ein G1-Fix ohne
+  mechanische Durchsetzung bleibt ein Versprechen, kein Beweis.
 
 ## Verweise
 

@@ -35,9 +35,13 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
    `detail`-Feld und beurteile selbst, ob sie trägt (das Gate markiert nur den
    Verdacht, es urteilt nicht — siehe Contract unten). Trägt sie: Distraktor
    schärfen (MC), Kriterium lockern (offene Frage), Test entschärfen (Coding)
-   oder Vorderseite präzisieren (Flashcard), dann erneut prüfen. Trägt sie
-   nicht (nur falsch geraten): erneut prüfen reicht, ohne etwas zu ändern —
-   nie die Musterlösung ändern, nur weil der Blind-Löser abwich.
+   oder Vorderseite präzisieren (Flashcard), **dann `verify_blind.py` erneut
+   aufrufen** — nicht "nochmal überlegen", sondern der Skriptaufruf selbst.
+   Trägt sie nicht (nur falsch geraten): derselbe erneute Skriptaufruf reicht,
+   ohne etwas an der Aufgabe zu ändern — nie die Musterlösung ändern, nur weil
+   der Blind-Löser abwich. **Bis zu diesem erneuten Aufruf bleibt `status`
+   unverändert `suspicious`.** Du erklärst den Fund in deiner Antwort — das
+   ändert `status` nicht mit; nur ein Skriptlauf tut das (siehe Contract).
 6. **Export:**
    ```bash
    python skills/exercise-forge/scripts/export.py --exercises <pfad> --out-dir docs/exercises
@@ -57,6 +61,15 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
   echter Lauf hinterlässt); fehlt eine davon, wird die Aufgabe beim Export
   sichtbar auf ungeprüft zurückgestuft — sie verschwindet nicht, sie verliert
   nur das `[geprüft]`.
+- **Melden ersetzt nicht Markieren.** `verification` schreibst du nie selbst,
+  auch nicht nachdem du einen Fund erklärt hast. Der Skriptaufruf, der den
+  Fund meldet (Konsolen-Ausgabe, `detail`-Feld), ist derselbe Aufruf, der
+  `status` schreibt — beides kommt aus demselben `verdict`-Objekt, es gibt
+  keinen Weg, das eine ohne das andere zu tun. Endet eine Antwort mit „das
+  Problem X wurde gefunden" bei gleichzeitig `status: verified` im
+  Aufgaben-JSON, ist etwas falsch gelaufen — dann hast du `status` von Hand
+  gesetzt statt ihn aus einem Skriptlauf zu übernehmen, und das korrigierst du,
+  bevor du die Aufgabe als fertig meldest.
 - Eine Aufgabe ohne Prüfnachweis (oder mit `suspicious`, oder mit einer
   unbelegten `verified`-Behauptung) wird als ungeprüft exportiert, nicht
   stillschweigend als geprüft.
@@ -85,6 +98,7 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
 | „Zehn Aufgaben auf einmal sparen Prüfzeit" | Ungeprüfte Menge ist kein Wert; das Gate skaliert mit. |
 | „Schwierig heißt: klingt kompliziert" | Der Vektor entscheidet, nicht der Klang. |
 | „pytest fehlt, ich sag einfach 'verified'" | Fehlende Werkzeuge sind ein benannter Befund, nie ein stilles Bestehen. |
+| „Ich hab den Fund doch erklärt, das reicht" | Melden ersetzt nicht Markieren. Nur ein Skriptlauf ändert `status` — deine Erklärung allein tut es nicht. |
 
 ## Abgrenzung
 

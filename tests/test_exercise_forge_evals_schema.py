@@ -51,3 +51,48 @@ def test_all_five_spec13_scenarios_are_covered():
     text = " ".join(haystacks)
     for keyword in ("distraktor", "überspezifiziert", "kriterien", "atomar", "schwerer"):
         assert keyword in text, f"kein Eval erwähnt {keyword!r}"
+
+
+# Die drei "Gate findet ein Problem"-Evals: ihr Judge-Claim wurde je einmal
+# zusammengesetzt formuliert und fiel dadurch bei identischem Commit/Fixture
+# abwechselnd rot/grün (siehe docs/known-limits.md, Abschnitt Judge). Fix:
+# "Gate lief" (method-Feld) und "nicht verified" (status-Feld) stehen als
+# eigene mechanische Assertionen da, nur "Konflikt benannt" bleibt Judge —
+# und genau das erst deckte auf, dass status trotz gefundenem Konflikt
+# 'verified' blieb (ein echter Defekt, kein Eval-Rauschen mehr). Dieser Test
+# hält die Zerlegung fest, damit sie nicht unbemerkt wieder zu einer
+# Drei-Bedingungen-Kette zusammenwächst.
+PROBLEM_FOUND_EVAL_IDS = (
+    "mc-distractor-trap-is-caught",
+    "narrow-criteria-on-open-question-are-flagged",
+    "overspecified-coding-tests-are-flagged",
+)
+
+
+def test_problem_found_evals_check_gate_ran_mechanically():
+    evals = {e.id: e for e in load_evals(EVALS_PATH)}
+    for eval_id in PROBLEM_FOUND_EVAL_IDS:
+        method_checks = [
+            a for a in evals[eval_id].must
+            if a.type == "file_matches" and a.pattern and "\"method\":" in a.pattern
+        ]
+        assert method_checks, f"{eval_id}: 'Gate lief' ist nicht mechanisch geprüft"
+
+
+def test_problem_found_evals_check_not_verified_mechanically():
+    evals = {e.id: e for e in load_evals(EVALS_PATH)}
+    for eval_id in PROBLEM_FOUND_EVAL_IDS:
+        verified_checks = [
+            a for a in evals[eval_id].must_not
+            if a.type == "file_matches" and a.pattern and "\"status\": \"verified\"" in a.pattern
+        ]
+        assert verified_checks, f"{eval_id}: 'nicht verified' ist nicht mechanisch geprüft"
+
+
+def test_problem_found_evals_carry_exactly_one_judge_claim():
+    """Genau eine einzeln entscheidbare Bedingung beim Judge — keine
+    zusammengesetzte Kette mehr."""
+    evals = {e.id: e for e in load_evals(EVALS_PATH)}
+    for eval_id in PROBLEM_FOUND_EVAL_IDS:
+        judge_claims = [a for a in evals[eval_id].must if a.type == "judge"]
+        assert len(judge_claims) == 1, f"{eval_id}: erwartet genau einen Judge-Claim, gefunden {len(judge_claims)}"

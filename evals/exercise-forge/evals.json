@@ -53,13 +53,16 @@
       "prompt": "Prüfe im Aufgaben-JSON zum Thema 'sorting' die Coding-Aufgabe code-01 mit dem Blind-Gate (verify_blind.py) und behandle das Ergebnis nach der SKILL.md.",
       "must": [
         {"type": "file_exists", "path": ".skills/verified-research/research/sorting.exercises.json"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/sorting.exercises.json", "pattern": "\"method\": \"blind_solve_coding\""},
         {
           "type": "judge",
-          "claim": "Fällt eine mechanisch korrekte Blind-Lösung (z. B. eine kürzere Implementierung, die dasselbe Verhalten zeigt) an einem Test, der eine Implementierungsdetail statt Verhalten prüft (hier: eine geforderte 'for'-Schleife im Quelltext), erkennt und benennt der Agent das als überspezifizierten Test, statt die Aufgabe unverändert als 'verified' auszuweisen."
+          "claim": "Das Ergebnis — die Antwort des Agenten oder der 'detail'-Text von code-01 im Aufgaben-JSON — benennt sichtbar einen überspezifizierten Test als Ursache (die Blind-Lösung scheiterte an der geforderten 'for'-Schleife im Quelltext, nicht an fehlerhaftem Verhalten), nicht nur, dass irgendein Status gesetzt wurde."
         }
       ],
-      "must_not": [],
-      "notes": "Eval 2 aus Spec 13 §Approach. `test_uses_explicit_loop` in der Fixture prüft ein Implementierungsdetail (siehe test_verify_coding_overspecified_tests_flags_suspicious in tests/test_exercise_forge_run_coding.py — dasselbe Muster, dort bereits mechanisch gegen run_coding.py bestätigt)."
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/verified-research/research/sorting.exercises.json", "pattern": "\"status\": \"verified\""}
+      ],
+      "notes": "Eval 2 aus Spec 13 §Approach. `test_uses_explicit_loop` in der Fixture prüft ein Implementierungsdetail (siehe test_verify_coding_overspecified_tests_flags_suspicious in tests/test_exercise_forge_run_coding.py — dasselbe Muster, dort bereits mechanisch gegen run_coding.py bestätigt). Ursprünglich derselbe Ketten-Fehler wie bei den beiden anderen zerlegten Evals (siehe dort und docs/known-limits.md) — nach der Zerlegung deckte die neue must_not-Assertion denselben echten Defekt auf: status blieb 'verified', obwohl das Gate ein Problem fand. Jetzt drei einzeln entscheidbare Assertionen wie bei mc-distractor-trap-is-caught."
     },
     {
       "id": "narrow-criteria-on-open-question-are-flagged",
