@@ -32,6 +32,16 @@ def test_discover_modules_skips_excluded_dirs(tmp_path):
     assert set(known) == {"src.a"}
 
 
+def test_discover_modules_skips_installed_skill_under_claude_dir(tmp_path):
+    """`--root .` scannt auch installierte Skills selbst, wenn sie nicht
+    ausgeschlossen werden — `.claude/skills/architecture-map/scripts/*.py` gehört
+    nicht zur analysierten Codebase, egal ob das Repo selbst analysiert wird."""
+    write(tmp_path, "app.py", "")
+    write(tmp_path, ".claude/skills/architecture-map/scripts/extract_py.py", "")
+    known = extract_py.discover_modules(tmp_path)
+    assert set(known) == {"app"}
+
+
 def test_extract_imports_finds_plain_and_from(tmp_path):
     path = write(tmp_path, "m.py", "import os\nfrom pkg import a, b\n")
     found = extract_py.extract_imports(path)

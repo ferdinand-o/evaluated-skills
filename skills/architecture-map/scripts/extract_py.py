@@ -21,7 +21,10 @@ import sys
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-EXCLUDED_DIR_NAMES = {".git", "__pycache__", "node_modules", ".venv", "venv", ".skills", ".mypy_cache", ".pytest_cache"}
+EXCLUDED_DIR_NAMES = {
+    ".git", "__pycache__", "node_modules", ".venv", "venv", ".skills", ".claude",
+    ".mypy_cache", ".pytest_cache",
+}
 
 
 class ExtractError(RuntimeError):

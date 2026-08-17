@@ -29,6 +29,13 @@ def test_discover_modules_skips_node_modules(tmp_path):
     assert set(known) == {"src.a"}
 
 
+def test_discover_modules_skips_installed_skill_under_claude_dir(tmp_path):
+    write(tmp_path, "src/a.ts", "")
+    write(tmp_path, ".claude/skills/architecture-map/scripts/extract_ts.py", "")
+    known = extract_ts.discover_modules(tmp_path)
+    assert set(known) == {"src.a"}
+
+
 def test_extract_specifiers_named_import(tmp_path):
     specs = extract_ts.extract_specifiers("import { a } from './a';\n")
     assert specs == ["./a"]

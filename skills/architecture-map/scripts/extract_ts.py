@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-EXCLUDED_DIR_NAMES = {".git", "node_modules", "dist", "build", ".next", "coverage", ".skills"}
+EXCLUDED_DIR_NAMES = {".git", "node_modules", "dist", "build", ".next", "coverage", ".skills", ".claude"}
 SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 
 
