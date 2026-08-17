@@ -1,0 +1,13 @@
+{
+  "git": true,
+  "description": "Vier unabhaengige Tasks (Gate-Verdikt parallel) plus ein bereits dispatchtes Task-1-Ergebnis mit abweichender Produces-Signatur.",
+  "commits": [
+    {
+      "message": "docs: Plan mit vier unabhaengigen Tasks",
+      "touch": {
+        "docs/superpowers/plans/disjoint-batch.md": "# Disjoint Batch Plan\n\n**Goal:** Vier unabhaengige Bausteine einer Batch-Pipeline.\n\n## Global Constraints\n\n- Testfixture fuer subagent-dev.\n\n---\n\n### Task 1: Batch-Parser\n\n**Files:**\n- Create: `src/batch.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces:\n  - `batch_parse(items: list, mode: str) -> dict`\n\n- [ ] **Step 1: Implement batch_parse**\n\n### Task 2: Batch-Writer\n\n**Files:**\n- Create: `src/writer.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement writer**\n\n### Task 3: Batch-Validator\n\n**Files:**\n- Create: `src/validator.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement validator**\n\n### Task 4: Batch-CLI\n\n**Files:**\n- Create: `src/cli.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement CLI**\n",
+        "dispatched-task-1/src/batch.py": "def batch_parse(items):\n    \"\"\"Abweichung von der Task-1-Signatur: 'mode' fehlt.\"\"\"\n    return {\"items\": items}\n"
+      }
+    }
+  ]
+}

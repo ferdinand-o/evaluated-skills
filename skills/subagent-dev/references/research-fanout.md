@@ -5,7 +5,7 @@ großen Codebase oder eine Frage, deren Rohmaterial (Dutzende Dateien, ein
 langer Log, viele Suchtreffer) den Hauptkontext fluten würde, wenn du sie
 selbst liest. Anders als bei Implementierungs-Tasks gibt es hier keinen
 `Files:`-Block und keine Überlappungsmatrix — Recherche-Agents schreiben
-nichts, sie liefern zurück.
+keinen Produktivcode, sie liefern zurück.
 
 **Qualifiziert sich unabhängig vom Gate.** `plan_to_tasks.py` prüft Files-
 Überlappung; ein Recherche-Fan-out hat keine Files zum Überlappen. Die
@@ -40,6 +40,17 @@ Jeder Recherche-Agent liefert **destillierte Daten, nie einen Prosa-Aufsatz**:
 - **Kein Roh-Dump.** Ein Recherche-Agent, der ganze Dateien zitiert statt sie
   zu verdichten, hat die Aufgabe verfehlt — das Symptom, das Fan-out lösen
   sollte, kehrt sonst im Rückgabewert zurück.
+
+## Als Artefakt festhalten
+
+Wenn der Nutzer die Findings über die Antwort hinaus braucht (zum
+Nachschlagen, für einen Folgeschritt, oder weil mehrere Recherche-Agenten
+zusammengeführt werden), schreib das Rückgabe-Schema zusätzlich als Datei
+nach `.skills/cache/tasks/research-<slug>.md` (Ephemera, Spec 00 §1) statt es
+nur im Chat zu belassen — dann liest der Hauptkontext beim Synthetisieren nur
+diese destillierte Datei, nie die durchsuchten Rohdateien erneut. `<slug>`
+kommt aus der Recherche-Frage; nennt der Nutzer einen konkreten Dateinamen,
+gilt der.
 
 ## Synthese-Disziplin
 
