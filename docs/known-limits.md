@@ -128,6 +128,42 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## exercise-forge
+
+Ein unabhängiger Review (siehe `docs/superpowers/reports/exercise-forge-report.md`,
+Abschnitt „Fix-Runde") fand zwei Defekte, die inzwischen behoben sind (`export.py`
+glaubte eine von Hand geschriebene `"status": "verified"`; `verify_open` verifizierte
+Aufgaben mit leerer `criteria`-Liste, weil `all([])` in Python `True` ist). Was aus
+dieser Runde als Grenze bleibt, statt behoben zu werden:
+
+- **Die Herkunftsprüfung für `verified`/`suspicious` ist strukturell, nicht
+  kryptographisch.** `export.has_verified_provenance()` verlangt `method` aus dem
+  echten, von `verify_blind.py`/`run_coding.py` erzeugten Methodenset plus ein
+  gesetztes `checked_at`. Beides lässt sich mit hinreichend Sorgfalt von Hand
+  nachbilden (`"method": "blind_solve_mc", "checked_at": "2026-01-01T00:00:00Z"`,
+  ohne je einen Blind-Lauf gestartet zu haben) — die Prüfung erschwert eine
+  unbeabsichtigte Rationalisierung erheblich, verhindert aber keine vorsätzliche
+  Fälschung. Eine Signatur oder ein Audit-Log wäre der nächste Schritt, wurde hier
+  nicht gebaut.
+- **Das MC-Blind-Gate markiert jede Fehlwahl identisch als `suspicious`, ohne die
+  Begründungsqualität zu bewerten.** Ein einzelner, stochastischer Blind-Löser-Lauf
+  ohne Retry oder Mehrheitsvotum: ein funktionierender, absichtlich schwieriger
+  Distraktor kann mit einer gewissen Grundwahrscheinlichkeit trotzdem `suspicious`
+  auslösen, weil der Blind-Löser einfach falsch geraten hat — von einem echten
+  Befund nicht mechanisch unterscheidbar, nur durch Lesen der zitierten Begründung.
+  `SKILL.md`s Contract wurde in der Fix-Runde auf genau diese Grenze zurückgezogen
+  (vorher versprach er implizit ein Urteil über „valide Begründung", das der Code
+  nie gefällt hat).
+- **Karten-Atomarität („eine Information pro Karte") ist mit den vorhandenen
+  Assertion-Primitiven nicht mechanisch prüfbar** — weder im Skill-Code noch im
+  Eval-Harness gibt es ein Primitiv, das Kartenzahl oder Inhaltsbündelung zählt
+  (dieselbe Grenze wie „Negative Strukturprüfung fehlt" oben). Der Eval
+  `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab, ungelaufen.
+- **Alle sechs Evals unter `evals/exercise-forge/evals.json` sind ungelaufen.**
+  Nur die Schema-Validität (`evalkit.schema.load_evals()`) und einzelne mechanische
+  Bausteine (z. B. die Überspezifizierte-Tests-Fixture direkt gegen `run_coding.py`)
+  wurden geprüft — kein Eval lief je über `run_evals.py` gegen einen echten Agenten.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·

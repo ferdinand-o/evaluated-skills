@@ -12,7 +12,7 @@ EVALS_PATH = Path(__file__).resolve().parent.parent / "evals" / "exercise-forge"
 
 def test_evals_file_loads_without_schema_error():
     evals = load_evals(EVALS_PATH)
-    assert len(evals) == 5
+    assert len(evals) == 6
 
 
 def test_at_least_one_contract_level_anti_ceremony_eval_exists():
@@ -35,3 +35,19 @@ def test_fixtures_referenced_by_evals_exist_on_disk():
     fixtures_root = EVALS_PATH.parent.parent / "fixtures"
     for ev in evals:
         assert (fixtures_root / ev.fixture / "fixture.json").is_file(), ev.fixture
+
+
+def test_all_five_spec13_scenarios_are_covered():
+    """Regression L3: Plan und Bericht behaupteten 'fünf Evals aus Spec 13
+    §Approach', tatsächlich fehlte Szenario 4 (Karten-Atomarität bei '20
+    Karten zu X') ersatzlos. Diese fünf Stichworte müssen je einen Eval haben,
+    zusätzlich zum verpflichtenden Anti-Zeremonie-Eval aus Spec 00 §2 — macht
+    sechs Evals insgesamt (siehe test_evals_file_loads_without_schema_error)."""
+    evals = load_evals(EVALS_PATH)
+    haystacks = []
+    for ev in evals:
+        claims = " ".join(a.claim or "" for a in (*ev.must, *ev.must_not))
+        haystacks.append(f"{ev.prompt} {ev.notes} {claims}".lower())
+    text = " ".join(haystacks)
+    for keyword in ("distraktor", "überspezifiziert", "kriterien", "atomar", "schwerer"):
+        assert keyword in text, f"kein Eval erwähnt {keyword!r}"

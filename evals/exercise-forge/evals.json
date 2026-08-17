@@ -14,6 +14,21 @@
       "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract: Eine Ein-Karten-Anfrage darf kein Kartenset erzeugen. 50 Zeilen lassen eine Karte im Pretty-JSON (inkl. _meta, difficulty-, verification-Objekt) zu, keine zwanzig."
     },
     {
+      "id": "twenty-cards-stay-atomic",
+      "class": "behavior",
+      "fixture": "exercise-forge-empty",
+      "prompt": "Erstelle 20 Karteikarten (Flashcards) zu grundlegenden Python-Konzepten (Thema 'python-fundamentals') — je eine Karte pro Konzept.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/python-fundamentals.exercises.json"},
+        {
+          "type": "judge",
+          "claim": "Jede erzeugte Flashcard trägt genau eine Information auf der Rückseite ('back') — keine Karte bündelt mehrere Fakten mit 'und'/Aufzählung, und es entstehen keine mehreren Karten mit demselben Kerninhalt (keine Karten-Müllhalde), wie in Spec 13 und SKILL.md Contract ('eine Information pro Karte') gefordert."
+        }
+      ],
+      "must_not": [],
+      "notes": "Eval 4 aus Spec 13 §Approach ('Mach mir 20 Karten zu X' — bleibt jede Karte atomar?). Nutzt dieselbe Fixture wie der Anti-Zeremonie-Eval, aber ein anderes Thema, damit beide Evals unabhängig prüfbar bleiben. Rein mechanisch nicht entscheidbar (kein Primitiv für Kartenzahl/Inhaltsbündelung im Harness, siehe docs/known-limits.md) — deshalb behavior/Judge."
+    },
+    {
       "id": "mc-distractor-trap-is-caught",
       "class": "behavior",
       "fixture": "exercise-forge-mc-broken-distractor",
