@@ -83,20 +83,27 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _make_verification(status: str, method: str, detail: str) -> dict:
-    return {"status": status, "method": method, "detail": detail, "checked_at": _now_iso()}
+def _make_verification(status: str, method: str, detail: str, protocol: dict | None = None) -> dict:
+    """`protocol` trägt die Rohdaten, aus denen `status` sich ergibt (z. B.
+    `chosen_index` bei MC) — das ist, was `export.derive_status_from_protocol()`
+    beim Rendern statt des `status`-Worts nachrechnet (Fix-Runde 4: Ableiten
+    statt Validieren, Spec 00 §4 G2). `status` bleibt trotzdem gesetzt, für
+    Menschen, die die Rohdatei lesen, und für `main()`s eigene Entscheidungen
+    (Konsolenausgabe, `--all`-Filter) — es ist nur nicht mehr die einzige
+    Quelle, der ein Konsument vertraut."""
+    return {"status": status, "method": method, "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
 
 
-def _verified(method: str, detail: str) -> dict:
-    return _make_verification("verified", method, detail)
+def _verified(method: str, detail: str, protocol: dict | None = None) -> dict:
+    return _make_verification("verified", method, detail, protocol)
 
 
-def _suspicious(method: str, detail: str) -> dict:
-    return _make_verification("suspicious", method, detail)
+def _suspicious(method: str, detail: str, protocol: dict | None = None) -> dict:
+    return _make_verification("suspicious", method, detail, protocol)
 
 
-def _unverified(method: str, detail: str) -> dict:
-    return _make_verification("unverified", method, detail)
+def _unverified(method: str, detail: str, protocol: dict | None = None) -> dict:
+    return _make_verification("unverified", method, detail, protocol)
 
 
 def _find_json_object(text: str, required_key: str) -> dict | None:
@@ -161,11 +168,13 @@ def verify_mc(exercise: dict, cwd: Path, *, cli: str = "claude", timeout: int = 
         return _unverified("blind_solve_mc", f"Blind-Löser nannte Option {letter}, es gibt nur {len(options)} Optionen")
 
     chosen = options[index]
+    protocol = {"chosen_index": index}
     if chosen.get("correct"):
-        return _verified("blind_solve_mc", f"Blind-Löser wählte korrekt (Option {letter}).")
+        return _verified("blind_solve_mc", f"Blind-Löser wählte korrekt (Option {letter}).", protocol)
     return _suspicious(
         "blind_solve_mc",
         f"Blind-Löser wählte Distraktor {letter} ('{chosen.get('text')}'). Begründung: {result.stdout.strip()[:300]}",
+        protocol,
     )
 
 
@@ -223,19 +232,23 @@ def verify_open(exercise: dict, cwd: Path, *, cli: str = "claude", timeout: int 
     if not isinstance(met, list) or len(met) != len(criteria) or not isinstance(plausible, bool):
         return _unverified("blind_solve_open", "Bewertungs-JSON hat unerwartete Form")
 
+    protocol = {"criteria_met": met, "answer_is_plausible": plausible}
+
     if not plausible:
         return _unverified(
             "blind_solve_open",
             f"Blind-Antwort nicht plausibel genug für ein Urteil: {verdict.get('why', '')}",
+            protocol,
         )
 
     if all(met):
-        return _verified("blind_solve_open", "Blind-Antwort erfüllt alle Kriterien.")
+        return _verified("blind_solve_open", "Blind-Antwort erfüllt alle Kriterien.", protocol)
 
     unmet = [i + 1 for i, ok in enumerate(met) if not ok]
     return _suspicious(
         "blind_solve_open",
         f"Plausible Blind-Antwort erfüllt Kriterium/-ien {unmet} nicht — vermutlich zu eng. {verdict.get('why', '')}",
+        protocol,
     )
 
 
@@ -278,11 +291,13 @@ def verify_flashcard(exercise: dict, cwd: Path, *, cli: str = "claude", timeout:
     if verdict is None or not isinstance(verdict.get("matches"), bool):
         return _unverified("blind_check_flashcard", "Bewertungs-Antwort nicht parsebar")
 
+    protocol = {"matches": verdict["matches"]}
     if verdict["matches"]:
-        return _verified("blind_check_flashcard", "Blind-Antwort trifft die Rückseite.")
+        return _verified("blind_check_flashcard", "Blind-Antwort trifft die Rückseite.", protocol)
     return _suspicious(
         "blind_check_flashcard",
         f"Blind-Antwort weicht von der Rückseite ab — Vorderseite vermutlich mehrdeutig. {verdict.get('why', '')}",
+        protocol,
     )
 
 

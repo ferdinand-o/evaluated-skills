@@ -72,6 +72,7 @@ def test_verify_mc_correct_choice_is_verified(tmp_path):
     assert result["status"] == "verified"
     assert result["method"] == "blind_solve_mc"
     assert result["checked_at"]
+    assert result["protocol"] == {"chosen_index": 1}  # Option B, "3", correct: true
 
 
 def test_verify_mc_distractor_choice_is_suspicious(tmp_path):
@@ -79,6 +80,7 @@ def test_verify_mc_distractor_choice_is_suspicious(tmp_path):
     result = vb.verify_mc(MC_EXERCISE, tmp_path, cli=cli)
     assert result["status"] == "suspicious"
     assert "A" in result["detail"] or "2" in result["detail"]
+    assert result["protocol"] == {"chosen_index": 0}  # Option A, "2", correct: false
 
 
 def test_verify_mc_unparsable_answer_is_unverified(tmp_path):
@@ -119,6 +121,7 @@ def test_verify_open_all_criteria_met_is_verified(tmp_path):
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
     assert result["status"] == "verified"
     assert result["method"] == "blind_solve_open"
+    assert result["protocol"] == {"criteria_met": [True, True], "answer_is_plausible": True}
 
 
 def test_verify_open_unmet_criterion_on_plausible_answer_is_suspicious(tmp_path):
@@ -127,6 +130,7 @@ def test_verify_open_unmet_criterion_on_plausible_answer_is_suspicious(tmp_path)
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
     assert result["status"] == "suspicious"
     assert "eng" in result["detail"]
+    assert result["protocol"] == {"criteria_met": [True, False], "answer_is_plausible": True}
 
 
 def test_verify_open_implausible_answer_is_unverified(tmp_path):
@@ -179,6 +183,7 @@ def test_verify_flashcard_matching_answer_is_verified(tmp_path):
     result = vb.verify_flashcard(CARD_EXERCISE, tmp_path, cli=cli)
     assert result["status"] == "verified"
     assert result["method"] == "blind_check_flashcard"
+    assert result["protocol"] == {"matches": True}
 
 
 def test_verify_flashcard_diverging_answer_is_suspicious(tmp_path):
@@ -187,6 +192,7 @@ def test_verify_flashcard_diverging_answer_is_suspicious(tmp_path):
     result = vb.verify_flashcard(CARD_EXERCISE, tmp_path, cli=cli)
     assert result["status"] == "suspicious"
     assert "mehrdeutig" in result["detail"]
+    assert result["protocol"] == {"matches": False}
 
 
 # --- verify_one dispatch -----------------------------------------------------

@@ -89,17 +89,34 @@ Verstehen → Multiple Choice, Anwenden/Analysieren → offene Frage oder Coding
   "status": "verified" | "suspicious" | "unverified",
   "method": "blind_solve_mc" | "blind_solve_open" | "blind_solve_coding" | "blind_check_flashcard" | "not_run",
   "detail": "ein bis zwei Sätze, mit Zitat der Blind-Begründung bei suspicious",
-  "checked_at": "ISO-Datum oder null"
+  "checked_at": "ISO-Datum oder null",
+  "protocol": { /* typspezifisch, siehe unten, oder null */ }
 }
 ```
 
-`status: verified` entsteht **ausschließlich** durch `verify_blind.py` (bzw.
-`run_coding.py` für Coding). Eine neu erzeugte Aufgabe trägt
-`{"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null}`.
+`status: verified` soll **ausschließlich** durch `verify_blind.py` (bzw.
+`run_coding.py` für Coding) entstehen. Eine neu erzeugte Aufgabe trägt
+`{"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}`.
 
-**Von Hand `"status": "verified"` einzutragen bringt nichts.** `export.py`
-prüft die Herkunft: Nur `status: verified`/`suspicious` **mit** einem der vier
-echten `method`-Werte oben (nicht `not_run`) **und** gesetztem `checked_at`
-gilt als belegt. Fehlt eines davon, exportiert `export.py` die Aufgabe trotzdem
-— aber sichtbar als `[UNGEPRÜFT: …]`, nie als `[geprüft]`. Der einzige Weg zu
-`[geprüft]` bleibt ein echter Lauf von `verify_blind.py`.
+**`status` von Hand zu setzen hat keine Wirkung mehr — das Feld wird beim
+Export gar nicht gelesen (Fix-Runde 4).** Eine reine Selbstauskunft-Doktrin
+("schreib `status` nie selbst") wurde ausprobiert und reichte nachweislich
+nicht: In drei echten Läufen setzte eine Session `status: "verified"`, nachdem
+sie einen vom Gate gefundenen Konflikt bereits gemeldet hatte. `export.py`
+verlässt sich deshalb nicht mehr auf `status`, sondern berechnet den
+angezeigten Status aus `protocol` — den Rohdaten des Blind-Laufs — und den
+Aufgabendaten selbst neu (`derive_status_from_protocol()`):
+
+| Typ | `protocol`-Feld | Ableitung |
+| --- | --- | --- |
+| `multiple_choice` | `{"chosen_index": int}` | `verified`, wenn `options[chosen_index].correct == true` ist — nachgerechnet gegen die Optionen der Aufgabe, nicht behauptet |
+| `open_question` | `{"criteria_met": [bool, …], "answer_is_plausible": bool}` | `verified`, wenn `answer_is_plausible` und alle `criteria_met` wahr sind |
+| `flashcard` | `{"matches": bool}` | `verified`, wenn `matches` wahr ist |
+| `coding` | `{"model_passed": bool, "blind_passed": bool}` | `verified`, wenn beide wahr sind |
+
+Ein `status: "verified"` neben einem `protocol`, das etwas anderes zeigt (oder
+neben fehlendem `protocol`), wird beim Export ignoriert — `[geprüft]` entsteht
+ausschließlich, wenn das Protokoll es hergibt. `status` bleibt trotzdem im
+Objekt: für Menschen, die die Rohdatei überfliegen, und für `verify_blind.py`s
+eigene Entscheidungen (Konsolenausgabe, `--all`-Filter) — nur ist es nicht
+mehr die Quelle, der `export.py` vertraut.

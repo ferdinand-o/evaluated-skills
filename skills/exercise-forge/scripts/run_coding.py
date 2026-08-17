@@ -62,8 +62,11 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _verdict(status: str, detail: str) -> dict:
-    return {"status": status, "method": "blind_solve_coding", "detail": detail, "checked_at": _now_iso()}
+def _verdict(status: str, detail: str, protocol: dict | None = None) -> dict:
+    """`protocol` trägt die rohen Testergebnisse (`model_passed`/`blind_passed`)
+    — das ist, was `export.derive_status_from_protocol()` beim Rendern statt
+    des `status`-Worts nachrechnet (Fix-Runde 4: Ableiten statt Validieren)."""
+    return {"status": status, "method": "blind_solve_coding", "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
 
 
 def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = sys.executable) -> dict:
@@ -77,18 +80,26 @@ def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = s
     with tempfile.TemporaryDirectory() as td:
         model_result = run_pytest_against(exercise["model_solution"], exercise["test_suite"], Path(td) / "model", python=python)
     if not model_result["passed"]:
-        return _verdict("unverified", f"Musterlösung fällt durch eigene Tests - Aufgabe fehlerhaft: {model_result['detail']}")
+        return _verdict(
+            "unverified", f"Musterlösung fällt durch eigene Tests - Aufgabe fehlerhaft: {model_result['detail']}",
+            {"model_passed": False},
+        )
 
     if blind_solution is None:
-        return _verdict("unverified", "Musterlösung besteht die Tests, aber keine Blind-Lösung übergeben - Blind-Gate unvollständig")
+        return _verdict(
+            "unverified", "Musterlösung besteht die Tests, aber keine Blind-Lösung übergeben - Blind-Gate unvollständig",
+            {"model_passed": True},
+        )
 
     with tempfile.TemporaryDirectory() as td:
         blind_result = run_pytest_against(blind_solution, exercise["test_suite"], Path(td) / "blind", python=python)
+    protocol = {"model_passed": True, "blind_passed": blind_result["passed"]}
     if blind_result["passed"]:
-        return _verdict("verified", "Musterlösung und Blind-Lösung bestehen beide die Tests.")
+        return _verdict("verified", "Musterlösung und Blind-Lösung bestehen beide die Tests.", protocol)
     return _verdict(
         "suspicious",
         f"Blind-Lösung fällt durch, obwohl Musterlösung besteht - Tests könnten überspezifiziert sein: {blind_result['detail']}",
+        protocol,
     )
 
 

@@ -53,6 +53,7 @@ def test_verify_coding_both_pass_is_verified():
     result = rc.verify_coding(CODING_EXERCISE, "def add(a, b):\n    return a + b\n")
     assert result["status"] == "verified"
     assert result["method"] == "blind_solve_coding"
+    assert result["protocol"] == {"model_passed": True, "blind_passed": True}
 
 
 def test_verify_coding_model_fails_is_unverified():
@@ -60,6 +61,7 @@ def test_verify_coding_model_fails_is_unverified():
     result = rc.verify_coding(broken, "def add(a, b):\n    return a + b\n")
     assert result["status"] == "unverified"
     assert "Musterlösung" in result["detail"]
+    assert result["protocol"] == {"model_passed": False}
 
 
 def test_verify_coding_overspecified_tests_flags_suspicious():
@@ -77,6 +79,7 @@ def test_verify_coding_overspecified_tests_flags_suspicious():
     result = rc.verify_coding(overspecified, blind)
     assert result["status"] == "suspicious"
     assert "überspezifiziert" in result["detail"]
+    assert result["protocol"] == {"model_passed": True, "blind_passed": False}
 
 
 def test_verify_coding_without_blind_solution_is_unverified():

@@ -169,30 +169,24 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
 
 ## exercise-forge
 
-Drei Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
+Vier Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
 Runde 1: ein unabhängiger Review fand zwei Defekte, die inzwischen behoben sind
 (`export.py` glaubte eine von Hand geschriebene `"status": "verified"`;
 `verify_open` verifizierte Aufgaben mit leerer `criteria`-Liste, weil `all([])`
 in Python `True` ist). Runde 2: zusammengesetzte Judge-Claims zerlegt. Runde 3:
-die Zerlegung deckte einen dritten, echten Defekt auf (unten). Was aus diesen
-Runden als Grenze bleibt, statt behoben zu werden:
+die Zerlegung deckte einen dritten, echten Defekt auf — ein G1-Doktrin-Fix
+(SKILL.md verbietet Hand-Edits) wurde versucht. Runde 4: ein zweiter echter
+Lauf zeigte, dass die Doktrin allein nicht reichte; gebaut wurde stattdessen
+ein G2-Mechanismus (`status` wird beim Export abgeleitet, nicht gelesen —
+unten). Was aus diesen Runden als Grenze bleibt, statt behoben zu werden:
 
-- **Die Herkunftsprüfung für `verified`/`suspicious` ist strukturell, nicht
-  kryptographisch.** `export.has_verified_provenance()` verlangt `method` aus dem
-  echten, von `verify_blind.py`/`run_coding.py` erzeugten Methodenset plus ein
-  gesetztes `checked_at`. Beides lässt sich mit hinreichend Sorgfalt von Hand
-  nachbilden (`"method": "blind_solve_mc", "checked_at": "2026-01-01T00:00:00Z"`,
-  ohne je einen Blind-Lauf gestartet zu haben) — die Prüfung erschwert eine
-  unbeabsichtigte Rationalisierung erheblich, verhindert aber keine vorsätzliche
-  Fälschung. Eine Signatur oder ein Audit-Log wäre der nächste Schritt, wurde hier
-  nicht gebaut.
 - **Das MC-Blind-Gate markiert jede Fehlwahl identisch als `suspicious`, ohne die
   Begründungsqualität zu bewerten.** Ein einzelner, stochastischer Blind-Löser-Lauf
   ohne Retry oder Mehrheitsvotum: ein funktionierender, absichtlich schwieriger
   Distraktor kann mit einer gewissen Grundwahrscheinlichkeit trotzdem `suspicious`
   auslösen, weil der Blind-Löser einfach falsch geraten hat — von einem echten
   Befund nicht mechanisch unterscheidbar, nur durch Lesen der zitierten Begründung.
-  `SKILL.md`s Contract wurde in der Fix-Runde auf genau diese Grenze zurückgezogen
+  `SKILL.md`s Contract wurde in Fix-Runde 1 auf genau diese Grenze zurückgezogen
   (vorher versprach er implizit ein Urteil über „valide Begründung", das der Code
   nie gefällt hat).
 - **Karten-Atomarität („eine Information pro Karte") ist mit den vorhandenen
@@ -200,43 +194,45 @@ Runden als Grenze bleibt, statt behoben zu werden:
   Eval-Harness gibt es ein Primitiv, das Kartenzahl oder Inhaltsbündelung zählt
   (dieselbe Grenze wie „Negative Strukturprüfung fehlt" oben). Der Eval
   `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab.
-- **Echter Defekt, von der Zerlegung aufgedeckt: `status` kann `verified`
-  bleiben, obwohl das Blind-Gate einen Konflikt gefunden hat.** Nach der
-  Zerlegung der drei zusammengesetzten Judge-Claims (siehe Abschnitt „Judge"
-  oben) fielen `mc-distractor-trap-is-caught` und
-  `narrow-criteria-on-open-question-are-flagged` in einem echten
-  `run_evals.py`-Lauf **mechanisch** an der neuen `must_not`-Assertion
-  (`"status": "verified"` stand im Aufgaben-JSON, obwohl die Fixture absichtlich
-  einen Konflikt enthält); `overspecified-coding-tests-are-flagged` fiel im
-  selben Lauf noch als Ganzes am (damals noch zusammengesetzten) Judge-Claim,
-  vermutlich aus demselben Grund. `verify_mc`, `verify_open` und
-  `run_coding.verify_coding` schreiben nachweislich nie selbst `verified` für
-  einen erkannten Konflikt (siehe die entsprechenden Unit-Tests) — der
-  Verdacht, den die Fix-Runde nicht bestätigen konnte, aber auch nicht
-  ausschließen kann, weil `evalkit` keine Transcripts persistiert (siehe
-  Abschnitt „Betrieb" oben): Der Konflikt wurde in der Antwort *gemeldet*
-  (weshalb frühere, zusammengesetzte Judge-Läufe „Konflikt benannt" bejahten),
-  aber `verification.status` wurde davon nicht *berührt* — vermutlich, weil
-  eine Session nach dem Melden den Status von Hand auf `verified` gesetzt hat,
-  statt ihn aus einem erneuten `verify_blind.py`-Lauf zu übernehmen. Melden
-  und Markieren sind im Code derselbe Schritt (`main()` schreibt exakt das
-  `verdict`-Objekt, das es auch druckt — kein Divergenzpunkt im Skript selbst,
-  siehe `skills/exercise-forge/scripts/verify_blind.py`), aber nichts hindert
-  eine Session daran, `verification` direkt mit einem Editor-Werkzeug zu
-  überschreiben und dabei `method`/`checked_at` eines früheren echten Laufs
-  wiederzuverwenden — `export.has_verified_provenance()` (siehe oben) würde
-  das nicht einmal erkennen, weil sie nur prüft, *dass* `method`/`checked_at`
-  vorhanden sind, nicht, dass sie zum aktuellen `status` passen.
-  **Fix in dieser Runde:** `SKILL.md` verbietet das jetzt explizit und an der
-  Stelle, an der die Versuchung entsteht (Schritt 5: „Melden ersetzt nicht
-  Markieren", neue Anti-Rationalisierungs-Zeile). Das ist ein G1-Fix
-  (Selbstauskunft, Spec 00 §4) — er verlangt es, erzwingt es aber nicht
-  mechanisch. Ein G2/G3-Fix (ein Skript oder Hook, der eine `verification`-
-  Änderung ohne begleitenden Skriptlauf verhindert oder erkennt) wurde nicht
-  gebaut; die Herkunftsprüfung aus `export.has_verified_provenance()` schützt
-  nur die *gerenderten* Artefakte (Markdown/CSV), nicht die Quelle selbst — die
-  Aufgaben-JSON hat am Schreibpfad keine mechanische Verteidigung, nur am
-  Lesepfad von `export.py`.
+- **G1-Doktrin gegen Hand-editiertes `verification` wurde ausprobiert und
+  gemessen für unzureichend befunden — deshalb jetzt G2.** Nach der
+  Zerlegung der drei zusammengesetzten Judge-Claims (Fix-Runde 3) fielen
+  `mc-distractor-trap-is-caught` und `narrow-criteria-on-open-question-are-flagged`
+  in einem echten `run_evals.py`-Lauf **mechanisch** an der neuen
+  `must_not`-Assertion (`"status": "verified"` stand im Aufgaben-JSON, obwohl
+  die Fixture absichtlich einen Konflikt enthält); `overspecified-coding-tests-are-flagged`
+  fiel im selben Lauf noch als Ganzes am (damals noch zusammengesetzten)
+  Judge-Claim. Fix-Runde 3 reagierte mit einer verschärften SKILL.md-Doktrin
+  („Melden ersetzt nicht Markieren", G1, Selbstauskunft) — **und ein zweiter
+  echter `run_evals.py`-Lauf zeigte danach: alle drei Evals fielen immer noch,
+  an derselben `must_not`-Assertion.** Die Doktrin allein trug nicht; das ist
+  jetzt gemessen, nicht vermutet. Nach Spec 00 §4 gehört an eine Stelle, an
+  der eine G1-Selbstauskunft nachweislich versagt, ein G2-Mechanismus.
+  **Fix-Runde 4 baut G2, und zwar die stärkere der zwei möglichen Fassungen
+  (Ableiten statt Validieren):** `export.py` liest `verification.status` beim
+  Rendern nicht mehr. Jeder Blind-Lauf schreibt jetzt zusätzlich
+  `verification.protocol` — die Rohdaten des Vergleichs (z. B. `chosen_index`
+  bei MC, `criteria_met` bei offenen Fragen, `model_passed`/`blind_passed`
+  bei Coding). `export.derive_status_from_protocol()` berechnet den
+  angezeigten Status ausschließlich aus diesem Protokoll, neu gegen die
+  Aufgabendaten (Optionen, Kriterien) geprüft — ein von Hand gesetztes
+  `status: verified` hat dadurch keine Wirkung mehr auf `[geprüft]`, egal ob
+  `method`/`checked_at` echt aussehen oder nicht: das Protokoll entscheidet,
+  das Wort wird gar nicht gelesen. Die alte `has_verified_provenance()`
+  (Fix-Runde 1) prüfte nur *Vorhandensein* von `method`/`checked_at`, nicht
+  *Stimmigkeit* mit `status` — genau diese Lücke war die wahrscheinlichste
+  Erklärung für das gemessene Versagen der Doktrin und ist mit der Ableitung
+  geschlossen. **Was auch damit nicht geschlossen ist:** `protocol` selbst
+  bleibt eine JSON-Datei, die ein Editor-Werkzeug ändern kann. Wer nicht nur
+  `status`, sondern auch ein vollständig konsistentes `protocol` von Hand
+  fälscht (bei MC z. B. `chosen_index` auf die tatsächlich korrekte Option
+  setzen), bekommt weiterhin `[geprüft]` — das ist aber eine deutlich
+  aufwändigere, gezieltere Fälschung als ein einzelnes Wort zu ändern, und sie
+  fällt bei MC/offenen Fragen zusätzlich gegen die Aufgabendaten selbst auf
+  (die Optionen/Kriterien müssten mitgefälscht werden, was `validate_exercise()`
+  an anderer Stelle wieder einschränkt). Eine Signatur oder ein Audit-Log, das
+  `protocol` kryptographisch an den tatsächlichen Lauf bindet, wäre der
+  nächste Schritt und wurde nicht gebaut.
 - **Drei der ursprünglich sechs Judge-Claims waren zusammengesetzt und
   dadurch unzuverlässig — siehe der neue Punkt im Abschnitt „Judge" oben.**
   `mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`
@@ -245,16 +241,17 @@ Runden als Grenze bleibt, statt behoben zu werden:
   (`method`-Feld im Aufgaben-JSON), eine mechanische Prüfung „nicht verified"
   (`must_not` auf `"status": "verified"`) und einen einzigen, einzeln
   entscheidbaren Judge-Claim „Konflikt sichtbar benannt" zerlegt.
-- **Drei der sechs Evals sind gegen einen echten Agenten bestätigt**
+- **Vier der sechs Evals sind gegen einen echten Agenten bestätigt**
   (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
-  `one-step-harder-changes-the-vector-not-just-wording`) — die drei
-  zerlegten Evals decken jetzt den oben beschriebenen echten Defekt auf und
-  sind seit der SKILL.md-Änderung (Fix in dieser Runde) nicht erneut gegen
-  einen echten Agenten gefahren worden; ihre neue Fassung ist nur
-  schema-validiert (`evalkit.schema.load_evals()`), nicht erneut ausgeführt.
-  Ob die SKILL.md-Doktrin allein reicht, um den Defekt zuverlässig zu
-  vermeiden, ist damit unbewiesen — plausibel, aber ein G1-Fix ohne
-  mechanische Durchsetzung bleibt ein Versprechen, kein Beweis.
+  `one-step-harder-changes-the-vector-not-just-wording`, sowie die
+  Zerlegung selbst über zwei Läufe hinweg). Die drei „Gate findet ein
+  Problem"-Evals sind seit dem G2-Fix (Fix-Runde 4, Ableiten statt
+  Validieren) nicht erneut gegen einen echten Agenten gefahren worden — nur
+  schema-validiert. Anders als nach Fix-Runde 3 ist die Erwartung diesmal
+  nicht mehr „eine Doktrin, die hoffentlich reicht", sondern ein mechanischer
+  Ausschluss (`status` wird gar nicht gelesen) — aber auch ein G2-Mechanismus
+  ist erst bewiesen, wenn er gegen einen echten Lauf bestanden hat, nicht
+  vorher.
 
 ## Verweise
 

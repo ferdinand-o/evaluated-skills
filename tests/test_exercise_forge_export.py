@@ -7,16 +7,36 @@ from conftest import load_script
 export = load_script("skills/exercise-forge/scripts/export.py")
 
 DIFFICULTY = {"steps": 1, "prerequisites": [], "transfer": "near", "label": "leicht"}
-VERIFIED = {"status": "verified", "method": "blind_solve_mc", "detail": "Blind-Löser wählte korrekt.", "checked_at": "2026-08-17T10:00:00Z"}
-UNVERIFIED = {"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": None}
-SUSPICIOUS = {"status": "suspicious", "method": "blind_check_flashcard", "detail": "Antwort weicht ab.", "checked_at": "2026-08-17T10:00:00Z"}
+
+# Fix-Runde 4: 'verified'/'suspicious' entstehen jetzt ausschließlich aus
+# `verification.protocol` (derive_status_from_protocol), nie aus dem
+# gespeicherten `status`-Wort. Jede Fixture hier trägt deshalb ein zu ihrem
+# Typ und zu ihrem Status passendes Protokoll — reines "status: verified"
+# ohne stimmiges Protokoll reicht nicht mehr, das ist genau der Punkt.
+MC_VERIFIED = {
+    "status": "verified", "method": "blind_solve_mc", "detail": "Blind-Löser wählte korrekt.",
+    "checked_at": "2026-08-17T10:00:00Z", "protocol": {"chosen_index": 1},  # Option B ("3") ist correct: true
+}
+OPEN_UNVERIFIED = {
+    "status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen",
+    "checked_at": None, "protocol": None,
+}
+CODING_VERIFIED = {
+    "status": "verified", "method": "blind_solve_coding",
+    "detail": "Musterlösung und Blind-Lösung bestehen beide die Tests.",
+    "checked_at": "2026-08-17T10:00:00Z", "protocol": {"model_passed": True, "blind_passed": True},
+}
+CARD_SUSPICIOUS = {
+    "status": "suspicious", "method": "blind_check_flashcard", "detail": "Antwort weicht ab.",
+    "checked_at": "2026-08-17T10:00:00Z", "protocol": {"matches": False},
+}
 
 MC = {
     "id": "mc-01", "type": "multiple_choice", "learning_objective": "len() verstehen",
     "bloom_level": "verstehen", "difficulty": DIFFICULTY,
     "stem": "Was liefert len([1,2,3])?",
     "options": [{"text": "2", "correct": False}, {"text": "3", "correct": True}],
-    "verification": VERIFIED,
+    "verification": MC_VERIFIED,
 }
 OPEN = {
     "id": "open-01", "type": "open_question", "learning_objective": "Liste vs Tupel",
@@ -24,7 +44,7 @@ OPEN = {
     "stem": "Unterschied Liste/Tupel?",
     "model_solution": "Listen sind veraenderbar, Tupel nicht.",
     "criteria": ["Nennt Mutability"],
-    "verification": UNVERIFIED,
+    "verification": OPEN_UNVERIFIED,
 }
 CODING = {
     "id": "code-01", "type": "coding", "learning_objective": "Addition schreiben",
@@ -32,14 +52,14 @@ CODING = {
     "stem": "Schreibe add(a, b).",
     "model_solution": "def add(a, b):\n    return a + b\n",
     "test_suite": "from solution import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n",
-    "verification": VERIFIED,
+    "verification": CODING_VERIFIED,
 }
 CARD = {
     "id": "card-01", "type": "flashcard", "learning_objective": "Hauptstadt kennen",
     "bloom_level": "erinnern", "difficulty": DIFFICULTY,
     "stem": "Hauptstadt von Frankreich?",
     "front": "Hauptstadt von Frankreich?", "back": "Paris",
-    "verification": SUSPICIOUS,
+    "verification": CARD_SUSPICIOUS,
 }
 
 ALL_EXERCISES = [MC, OPEN, CODING, CARD]
@@ -207,38 +227,149 @@ def test_main_missing_exercises_file_is_reported(tmp_path, capsys):
     assert "nicht gefunden" in capsys.readouterr().err
 
 
-# --- D1: eine von Hand geschriebene Verifikation wird nicht mehr geglaubt --------
+# --- Fix-Runde 4: status wird abgeleitet, nie gelesen --------------------------
+#
+# D1 (Fix-Runde 1) prüfte nur, dass method/checked_at *vorhanden* sind — das
+# reichte nicht (Fix-Runde 3, mit drei echten Eval-Läufen gemessen): eine
+# Session kann ein 'status: verified' neben method/checked_at eines echten,
+# aber ANDEREN (z. B. 'suspicious') Laufs schreiben, und die alte Prüfung hätte
+# das nicht bemerkt. Der Fix in dieser Runde liest 'status' beim Rendern
+# überhaupt nicht mehr — der angezeigte Status kommt ausschließlich aus
+# `derive_status_from_protocol()`. Die Tests hier decken beide Richtungen ab:
+# ein erfundenes 'verified' neben einem Protokoll, das etwas anderes zeigt,
+# UND das Fehlen jedes Protokolls.
 
-HAND_WRITTEN_VERIFIED = {
-    "status": "verified", "method": "sieht_plausibel_aus", "detail": "kurz überflogen", "checked_at": None,
+HAND_WRITTEN_VERIFIED_NO_PROTOCOL = {
+    "status": "verified", "method": "sieht_plausibel_aus", "detail": "kurz überflogen",
+    "checked_at": None, "protocol": None,
 }
 REAL_METHOD_NO_TIMESTAMP = {
-    "status": "verified", "method": "blind_solve_mc", "detail": "wirkt korrekt", "checked_at": None,
+    "status": "verified", "method": "blind_solve_mc", "detail": "wirkt korrekt",
+    "checked_at": None, "protocol": {"chosen_index": 1},
+}
+# Der eigentliche Fix-Runde-3-Fall: method/checked_at sehen echt aus (stammen
+# von einem tatsächlichen Lauf), aber das Protokoll hält einen Konflikt fest
+# (Option A ist NICHT 'correct') — nur 'status' wurde von Hand auf 'verified'
+# gedreht.
+STATUS_CONTRADICTS_PROTOCOL = {
+    "status": "verified", "method": "blind_solve_mc",
+    "detail": "Blind-Löser wählte Distraktor A ('2'). Begründung: ...",
+    "checked_at": "2026-08-17T10:00:00Z", "protocol": {"chosen_index": 0},  # Option A, "2", correct: false
 }
 
 
-def test_has_verified_provenance_true_for_real_blind_gate_result():
-    assert export.has_verified_provenance(VERIFIED) is True
+def test_derive_status_verified_when_protocol_confirms_correct_choice():
+    status, _ = export.derive_status_from_protocol(MC)
+    assert status == "verified"
 
 
-def test_has_verified_provenance_false_for_unknown_method():
-    assert export.has_verified_provenance(HAND_WRITTEN_VERIFIED) is False
+def test_derive_status_ignores_status_word_entirely():
+    """Der Kern von Fix-Runde 4: 'status' wird nicht gelesen. Ein Objekt mit
+    status: 'unverified', aber einem Protokoll, das eindeutig 'verified'
+    zeigt, ergibt trotzdem 'verified' — die Ableitung ist die einzige Quelle."""
+    inverted = dict(MC_VERIFIED, status="unverified")
+    exercise = dict(MC, verification=inverted)
+    status, _ = export.derive_status_from_protocol(exercise)
+    assert status == "verified"
 
 
-def test_has_verified_provenance_false_without_checked_at():
-    assert export.has_verified_provenance(REAL_METHOD_NO_TIMESTAMP) is False
+def test_derive_status_verified_claim_next_to_conflicting_protocol_is_suspicious():
+    """Der gemessene Fix-Runde-3-Defekt, direkt nachgestellt: status: 'verified'
+    neben einem Protokoll, das eine Distraktor-Wahl festhält — die Ableitung
+    hält sich ans Protokoll, nicht ans Wort."""
+    exercise = dict(MC, verification=STATUS_CONTRADICTS_PROTOCOL)
+    status, detail = export.derive_status_from_protocol(exercise)
+    assert status == "suspicious"
+    assert "nicht als korrekt markiert" in detail
+
+
+def test_derive_status_open_question_verified_claim_next_to_unmet_criterion_is_suspicious():
+    faked = dict(
+        OPEN,
+        verification={
+            "status": "verified", "method": "blind_solve_open", "detail": "sieht gut aus",
+            "checked_at": "2026-08-17T10:00:00Z",
+            "protocol": {"criteria_met": [False], "answer_is_plausible": True},
+        },
+    )
+    status, detail = export.derive_status_from_protocol(faked)
+    assert status == "suspicious"
+    assert "nicht" in detail
+
+
+def test_derive_status_coding_verified_claim_next_to_failed_blind_solution_is_suspicious():
+    faked = dict(
+        CODING,
+        verification={
+            "status": "verified", "method": "blind_solve_coding", "detail": "sieht gut aus",
+            "checked_at": "2026-08-17T10:00:00Z",
+            "protocol": {"model_passed": True, "blind_passed": False},
+        },
+    )
+    status, detail = export.derive_status_from_protocol(faked)
+    assert status == "suspicious"
+    assert "nicht" in detail
+
+
+def test_derive_status_flashcard_verified_claim_next_to_non_matching_protocol_is_suspicious():
+    faked = dict(
+        CARD,
+        verification={
+            "status": "verified", "method": "blind_check_flashcard", "detail": "sieht gut aus",
+            "checked_at": "2026-08-17T10:00:00Z",
+            "protocol": {"matches": False},
+        },
+    )
+    status, detail = export.derive_status_from_protocol(faked)
+    assert status == "suspicious"
+    assert "weicht" in detail
+
+
+def test_derive_status_unverified_for_unknown_method():
+    exercise = dict(MC, verification=HAND_WRITTEN_VERIFIED_NO_PROTOCOL)
+    status, detail = export.derive_status_from_protocol(exercise)
+    assert status == "unverified"
+    assert "sieht_plausibel_aus" in detail
+
+
+def test_derive_status_unverified_for_fresh_not_run_exercise():
+    fresh = dict(MC, verification={"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": None, "protocol": None})
+    status, detail = export.derive_status_from_protocol(fresh)
+    assert status == "unverified"
+    assert detail == "Blind-Gate noch nicht gelaufen"
+
+
+def test_derive_status_unverified_without_checked_at_even_with_protocol():
+    exercise = dict(MC, verification=REAL_METHOD_NO_TIMESTAMP)
+    status, _ = export.derive_status_from_protocol(exercise)
+    assert status == "unverified"
 
 
 def test_hand_written_verified_is_not_excluded_but_rendered_as_ungeprueft():
-    """D1: eine erfundene 'verified'-Behauptung darf die Aufgabe nicht aus dem
+    """Eine erfundene 'verified'-Behauptung darf die Aufgabe nicht aus dem
     Export werfen (sie bleibt strukturell gültig — Stamm, Optionen etc. sind
     da), aber sie darf nie als [geprüft] erscheinen."""
-    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED_NO_PROTOCOL)
     assert export.validate_exercise(faked) == []  # strukturell weiterhin gültig
     md = export.render_markdown("t", [faked])
     assert "[geprüft]" not in md
     assert "[UNGEPRÜFT" in md
-    assert "ohne nachvollziehbaren Blind-Gate-Lauf" in md
+
+
+def test_status_next_to_conflicting_protocol_never_renders_as_geprueft():
+    """Die vom Koordinator explizit verlangte Deckung: ein von Hand auf
+    'verified' gesetzter Status neben einem 'suspicious'-Protokoll darf
+    nirgends als geprüft erscheinen — weder im Markdown-Blatt noch in der
+    Anki-CSV."""
+    faked = dict(MC, verification=STATUS_CONTRADICTS_PROTOCOL)
+    md = export.render_markdown("t", [faked])
+    assert "[geprüft]" not in md
+    assert "[UNGEPRÜFT" in md
+
+    csv_text = export.render_anki_csv([faked])
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    assert "verified" not in rows[1][2].split()
+    assert "suspicious" in rows[1][2]
 
 
 def test_hand_written_verified_without_checked_at_is_also_downgraded():
@@ -249,7 +380,7 @@ def test_hand_written_verified_without_checked_at_is_also_downgraded():
 
 
 def test_hand_written_verified_gets_unverified_tag_in_csv():
-    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED_NO_PROTOCOL)
     csv_text = export.render_anki_csv([faked])
     rows = list(csv.reader(io.StringIO(csv_text)))
     assert "unverified" in rows[1][2]
@@ -257,7 +388,7 @@ def test_hand_written_verified_gets_unverified_tag_in_csv():
 
 
 def test_main_exports_hand_faked_exercise_as_ungeprueft_not_excluded(tmp_path, capsys):
-    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED)
+    faked = dict(MC, verification=HAND_WRITTEN_VERIFIED_NO_PROTOCOL)
     exercises_path = tmp_path / "topic.exercises.json"
     exercises_path.write_text(json.dumps({"topic": "t", "exercises": [faked]}), encoding="utf-8")
     out_dir = tmp_path / "out"

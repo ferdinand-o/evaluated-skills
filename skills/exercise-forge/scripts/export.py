@@ -109,47 +109,113 @@ def validate_exercise(exercise: dict) -> list[str]:
     return problems
 
 
-# --- Statusmarkierung (nie stillschweigend 'geprüft') -----------------------------
+# --- Statusmarkierung: Ableiten statt Validieren (Fix-Runde 4) --------------------
+#
+# Ein gemessener Defekt, nicht nur eine theoretische Lücke: Eine Doktrin allein
+# ("status: verified entsteht ausschließlich durch das Blind-Gate", SKILL.md)
+# wurde ausprobiert und reichte nicht — ein Agent setzte `status: "verified"`
+# von Hand, nachdem er einen vom Gate gefundenen Konflikt bereits gemeldet
+# hatte (drei echte Eval-Läufe, siehe docs/known-limits.md). Die vorherige
+# Herkunftsprüfung (`method`/`checked_at` vorhanden) hätte das nicht gefangen,
+# wenn `method`/`checked_at` von einem früheren, echten Lauf unverändert
+# übernommen wurden — sie prüfte *Vorhandensein*, nicht *Stimmigkeit* mit dem
+# aktuellen `status`.
+#
+# Der Fix: `status` wird beim Rendern nie gelesen. Der angezeigte Status wird
+# stattdessen aus `verification.protocol` — den Rohdaten, die `verify_blind.py`/
+# `run_coding.py` bei einem echten Lauf mitschreiben — und den Aufgabendaten
+# selbst (Options, Kriterien) neu berechnet. Ein von Hand auf `verified`
+# gesetztes `status`-Wort hat dadurch schlicht keine Wirkung mehr: Es wird für
+# die Anzeige gar nicht angesehen.
 
-def has_verified_provenance(verification: dict) -> bool:
-    """True nur, wenn `method` eine echte Blind-Gate-Methode ist UND `checked_at`
-    gesetzt ist — Spuren, die ausschließlich ein echter `verify_blind.py`-Lauf
-    hinterlässt. Ein von Hand ins Aufgaben-JSON geschriebenes
-    `"status": "verified"` erzeugt genau diese Spuren nicht (Review-Befund D1:
-    'eine von Hand geschriebene Verifikation wird geglaubt') — `method` bliebe
-    entweder `not_run`/unbekannt oder `checked_at` fehlte."""
-    return verification.get("method") in REAL_VERIFICATION_METHODS and bool(verification.get("checked_at"))
-
-
-def _effective_status(exercise: dict) -> tuple[str, str]:
-    """(status, detail) nach Herkunftsprüfung. `verified`/`suspicious` ohne
-    belastbare Spur (siehe `has_verified_provenance`) werden für die Ausgabe auf
-    `unverified` zurückgestuft — die Aufgabe wird trotzdem exportiert, nur eben
-    sichtbar als ungeprüft, nicht ausgeschlossen (D1: 'wird als ungeprüft
-    exportiert, nicht stillschweigend als geprüft')."""
+def derive_status_from_protocol(exercise: dict) -> tuple[str, str]:
+    """(status, detail) — berechnet aus `verification.protocol`, nie aus dem
+    gespeicherten `verification.status`. Fehlt ein vollständiges, zum
+    Aufgabentyp passendes Protokoll, ist das Ergebnis `unverified` — dieselbe
+    A4-Regel wie überall sonst in dieser Skill: nicht sicher erkannt heißt nie
+    'in Ordnung'."""
     verification = exercise.get("verification") or {}
-    status = verification.get("status")
-    if status not in VERIFICATION_STATUSES:
-        status = "unverified"
-    detail = verification.get("detail") or "Blind-Gate noch nicht gelaufen"
-    if status in ("verified", "suspicious") and not has_verified_provenance(verification):
+    method = verification.get("method")
+    checked_at = verification.get("checked_at")
+    protocol = verification.get("protocol")
+    ex_type = exercise.get("type")
+
+    if method == "not_run" or method is None:
+        # Normalfall: frisch erzeugte, noch nicht geprüfte Aufgabe. Der
+        # ursprüngliche `detail`-Text ist hier unbedenklich (er entscheidet
+        # nichts über 'geprüft'), also darf er als freundliche Meldung
+        # durchgereicht werden.
+        return "unverified", verification.get("detail") or "Blind-Gate noch nicht gelaufen"
+
+    if method not in REAL_VERIFICATION_METHODS:
+        return "unverified", f"'{method}' ist keine der vom Blind-Gate erzeugten Methoden — kein Prüfnachweis"
+
+    if not checked_at or not isinstance(protocol, dict):
+        # method sieht nach einem echten Lauf aus, aber checked_at/protocol
+        # fehlen oder sind unvollständig — das ist der verdächtigere Fall
+        # (ein Teil-Hand-Edit), nicht einfach "noch nicht geprüft".
         return "unverified", (
-            f"Status '{status}' ohne nachvollziehbaren Blind-Gate-Lauf "
-            f"(method/checked_at fehlen oder unbekannt) — als ungeprüft behandelt. "
-            f"Ursprünglicher Vermerk: {detail}"
+            f"method {method!r} sieht nach einem echten Lauf aus, aber checked_at "
+            "und/oder protocol fehlen oder sind unvollständig — kein vollständiger Prüfnachweis"
         )
-    return status, detail
+
+    if ex_type == "multiple_choice" and method == "blind_solve_mc":
+        options = exercise.get("options")
+        chosen_index = protocol.get("chosen_index")
+        if not isinstance(options, list) or not isinstance(chosen_index, int) or not (0 <= chosen_index < len(options)):
+            return "unverified", "Protokoll verweist auf keine gültige Option der Aufgabe"
+        chosen = options[chosen_index]
+        letter = LETTERS[chosen_index] if chosen_index < len(LETTERS) else str(chosen_index)
+        if chosen.get("correct"):
+            return "verified", f"Blind-Löser wählte laut Protokoll die als korrekt markierte Option {letter}."
+        return "suspicious", f"Blind-Löser wählte laut Protokoll Option {letter} — nicht als korrekt markiert."
+
+    if ex_type == "open_question" and method == "blind_solve_open":
+        criteria = exercise.get("criteria") or []
+        met = protocol.get("criteria_met")
+        plausible = protocol.get("answer_is_plausible")
+        if not criteria or not isinstance(met, list) or len(met) != len(criteria) or not isinstance(plausible, bool):
+            return "unverified", "Protokoll passt nicht zur Kriterienliste der Aufgabe"
+        if not plausible:
+            return "unverified", "Blind-Antwort war laut Protokoll nicht plausibel genug für ein Urteil"
+        if all(met):
+            return "verified", "Blind-Antwort erfüllt laut Protokoll alle Kriterien."
+        unmet = [i + 1 for i, ok in enumerate(met) if not ok]
+        return "suspicious", f"Blind-Antwort erfüllt laut Protokoll Kriterium/-ien {unmet} nicht."
+
+    if ex_type == "flashcard" and method == "blind_check_flashcard":
+        matches = protocol.get("matches")
+        if not isinstance(matches, bool):
+            return "unverified", "Protokoll enthält kein 'matches'-Feld"
+        if matches:
+            return "verified", "Blind-Antwort trifft laut Protokoll die Rückseite."
+        return "suspicious", "Blind-Antwort weicht laut Protokoll von der Rückseite ab."
+
+    if ex_type == "coding" and method == "blind_solve_coding":
+        model_passed = protocol.get("model_passed")
+        blind_passed = protocol.get("blind_passed")
+        if not isinstance(model_passed, bool):
+            return "unverified", "Protokoll enthält kein Testergebnis für die Musterlösung"
+        if not model_passed:
+            return "unverified", "Musterlösung besteht laut Protokoll die eigenen Tests nicht"
+        if not isinstance(blind_passed, bool):
+            return "unverified", "Protokoll enthält kein Testergebnis für die Blind-Lösung"
+        if blind_passed:
+            return "verified", "Musterlösung und Blind-Lösung bestehen laut Protokoll beide die Tests."
+        return "suspicious", "Blind-Lösung besteht laut Protokoll nicht, obwohl die Musterlösung besteht."
+
+    return "unverified", f"Methode {method!r} passt nicht zum Aufgabentyp {ex_type!r}"
 
 
 def _status_marker(exercise: dict) -> str:
-    status, detail = _effective_status(exercise)
+    status, detail = derive_status_from_protocol(exercise)
     if status == "verified":
         return "[geprüft]"
     return f"[UNGEPRÜFT: {detail}]"
 
 
 def _tag_status(exercise: dict) -> str:
-    status, _ = _effective_status(exercise)
+    status, _ = derive_status_from_protocol(exercise)
     return status
 
 

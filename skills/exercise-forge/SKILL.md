@@ -55,21 +55,26 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
 
 - **Blind-Verifikation ist Pflicht-Gate, keine Ausnahme.** Jede Aufgabe im
   Export trägt ein `verification`-Objekt. `status: verified` soll ausschließlich
-  durch das Blind-Gate entstehen — und `export.py` glaubt eine von Hand
-  geschriebene Behauptung nicht: Es prüft, ob `method` einer der echten
-  Blind-Gate-Werte ist und `checked_at` gesetzt ist (Spuren, die nur ein
-  echter Lauf hinterlässt); fehlt eine davon, wird die Aufgabe beim Export
-  sichtbar auf ungeprüft zurückgestuft — sie verschwindet nicht, sie verliert
-  nur das `[geprüft]`.
-- **Melden ersetzt nicht Markieren.** `verification` schreibst du nie selbst,
-  auch nicht nachdem du einen Fund erklärt hast. Der Skriptaufruf, der den
-  Fund meldet (Konsolen-Ausgabe, `detail`-Feld), ist derselbe Aufruf, der
-  `status` schreibt — beides kommt aus demselben `verdict`-Objekt, es gibt
-  keinen Weg, das eine ohne das andere zu tun. Endet eine Antwort mit „das
-  Problem X wurde gefunden" bei gleichzeitig `status: verified` im
-  Aufgaben-JSON, ist etwas falsch gelaufen — dann hast du `status` von Hand
-  gesetzt statt ihn aus einem Skriptlauf zu übernehmen, und das korrigierst du,
-  bevor du die Aufgabe als fertig meldest.
+  durch das Blind-Gate entstehen.
+- **`[geprüft]` wird abgeleitet, nicht behauptet — das ist der eigentliche
+  Schutz, nicht nur eine Regel.** Eine reine Doktrin ("schreib `status` nie
+  selbst") wurde ausprobiert und hat gemessen nicht gereicht: In drei echten
+  Läufen setzte eine Session `status: "verified"`, nachdem sie einen vom Gate
+  gefundenen Konflikt bereits gemeldet hatte. Seit Fix-Runde 4 liest
+  `export.py` `status` deshalb beim Rendern gar nicht mehr — es berechnet den
+  angezeigten Status aus `verification.protocol` (den Rohdaten des
+  Blind-Laufs: welche Option gewählt wurde, welche Kriterien erfüllt waren,
+  ob Muster- und Blind-Lösung bestanden — siehe `task-schemas.md`) neu gegen
+  die Aufgabendaten selbst. Ein von Hand gesetztes `status: verified` neben
+  einem Protokoll, das etwas anderes zeigt (oder neben fehlendem Protokoll),
+  hat dadurch keine Wirkung — `[geprüft]` entsteht nur, wenn die Ableitung es
+  hergibt.
+- **Melden ersetzt nicht Markieren — das bleibt richtig, ist aber nicht mehr
+  der einzige Schutz.** `verification` schreibst du nie selbst, auch nicht
+  nachdem du einen Fund erklärt hast. Diese Regel gilt weiter (G1,
+  Selbstauskunft), aber sie ist jetzt Verstärkung, nicht Verteidigungslinie —
+  die Ableitung oben (G2, mechanisch) fängt den Fall auch, wenn du sie
+  vergisst.
 - Eine Aufgabe ohne Prüfnachweis (oder mit `suspicious`, oder mit einer
   unbelegten `verified`-Behauptung) wird als ungeprüft exportiert, nicht
   stillschweigend als geprüft.

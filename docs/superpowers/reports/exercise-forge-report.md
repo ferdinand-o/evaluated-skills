@@ -32,10 +32,10 @@ auslösen. `tests/test_exercise_forge_evals_schema.py` prüft nur, dass
 Fix-Runde unten — die ursprüngliche Fassung behauptete „fünf Evals aus Spec
 13", deckte aber nur vier der fünf Spec-13-Szenarien ab).
 
-77 Unit-Tests über vier Testdateien (`test_exercise_forge_verify_blind.py`,
+84 Unit-Tests über vier Testdateien (`test_exercise_forge_verify_blind.py`,
 `test_exercise_forge_run_coding.py`, `test_exercise_forge_export.py`,
-`test_exercise_forge_evals_schema.py`, Stand nach Fix-Runde 3) plus eine
-Korrektur an `tests/conftest.py` (siehe unten). Gesamte Suite: **223 von 223
+`test_exercise_forge_evals_schema.py`, Stand nach Fix-Runde 4) plus eine
+Korrektur an `tests/conftest.py` (siehe unten). Gesamte Suite: **230 von 230
 Tests grün** (`.venv/bin/pytest -q`).
 
 ## Eigene Design-Entscheidungen (nicht aus Spec 13 oder den Rulings ableitbar)
@@ -251,45 +251,117 @@ unverhältnismäßig gegenüber dem Aufwand, entscheide aber gern anders, wenn
 gewünscht. Das ist eine eigene Design-Entscheidung dieser Runde, keine aus
 Spec 13 oder den Rulings ableitbare.
 
+**Korrektur in Fix-Runde 4: Diese Abwägung war falsch, und zwar gemessen,
+nicht nur im Rückblick.** Ein zweiter echter `run_evals.py`-Lauf zeigte: die
+G1-Doktrin allein reichte nicht — alle drei „Gate findet ein Problem"-Evals
+fielen weiterhin an derselben `must_not`-Assertion. Siehe Fix-Runde 4 unten.
+
+## Fix-Runde 4 (G1 gemessen unzureichend — G2 gebaut: Ableiten statt Validieren)
+
+Der Koordinator fuhr den Bestätigungslauf nach Fix-Runde 3. Ergebnis: alle
+drei „Gate findet ein Problem"-Evals fielen weiterhin an `must_not: "status":
+"verified"` — `mc-distractor-trap-is-caught`,
+`overspecified-coding-tests-are-flagged`,
+`narrow-criteria-on-open-question-are-flagged`. Die verschärfte SKILL.md-
+Doktrin aus Fix-Runde 3 („Melden ersetzt nicht Markieren", expliziter
+Rerun-Befehl, neue Anti-Rationalisierungs-Zeile) trug nicht. Das ist der
+Unterschied zwischen G1 und G2 aus Spec 00 §4 in der Praxis: eine
+Selbstauskunft wurde ausprobiert und hat gemessen versagt — an dieser Stelle
+gehört jetzt ein mechanischer Schutz, keine bessere Formulierung.
+
+**Gebaute Fassung: die stärkere von zwei angebotenen — Ableiten statt
+Validieren.** Statt `status` beim Export gegen `method`/`checked_at` zu
+validieren und bei Inkonsistenz zu korrigieren, liest `export.py` `status`
+jetzt **überhaupt nicht mehr**. Jeder Blind-Lauf (`verify_mc`, `verify_open`,
+`verify_flashcard`, `run_coding.verify_coding`) schreibt zusätzlich zu
+`status`/`method`/`detail`/`checked_at` ein `protocol`-Objekt mit den
+Rohdaten des Vergleichs:
+
+| Typ | `protocol` |
+| --- | --- |
+| `multiple_choice` | `{"chosen_index": int}` |
+| `open_question` | `{"criteria_met": [bool, …], "answer_is_plausible": bool}` |
+| `flashcard` | `{"matches": bool}` |
+| `coding` | `{"model_passed": bool, "blind_passed": bool}` |
+
+`export.derive_status_from_protocol(exercise)` berechnet den angezeigten
+Status ausschließlich aus diesem Protokoll — bei MC/offenen Fragen sogar
+gegen die Aufgabendaten selbst nachgerechnet (`options[chosen_index].correct`,
+`len(criteria)`), nicht nur gegen die im Protokoll behaupteten Werte. `status`
+bleibt im Objekt stehen (für Menschen, die die Rohdatei lesen, und für
+`verify_blind.py`s eigene `--all`-Filterung), aber `export.py` vertraut ihm
+nicht mehr. Ein von Hand gesetztes `status: "verified"` — egal ob daneben
+`method`/`checked_at` echt aussehen — hat dadurch keine Wirkung mehr auf
+`[geprüft]`: Um das zu erreichen, müsste jemand das komplette `protocol`
+konsistent fälschen, nicht nur ein Wort ändern.
+
+**Migration:** `_verified`/`_suspicious`/`_unverified` (`verify_blind.py`) und
+`_verdict` (`run_coding.py`) bekamen einen `protocol`-Parameter; alle vier
+Blind-Verfahren übergeben ihn jetzt. `has_verified_provenance()` (Fix-Runde 1)
+wurde durch `derive_status_from_protocol()` ersetzt — die alte Funktion prüfte
+nur *Vorhandensein* von `method`/`checked_at`, nicht *Stimmigkeit* mit
+`status`, was genau die Lücke war, die den Fix-Runde-3-Defekt erst ermöglichte.
+
+**Tests:** 13 neue/geänderte Assertionen. Für jeden der vier Typen ein
+Protokoll-Inhalts-Check bei `verify_blind.py`/`run_coding.py` (z. B.
+`result["protocol"] == {"chosen_index": 1}`), und in `export.py`s Tests die
+vom Koordinator explizit verlangte Deckung für alle vier Typen: ein von Hand
+auf `verified` gesetzter Status neben einem Protokoll, das einen Konflikt
+zeigt, ergibt nie `[geprüft]` — weder im Markdown noch mit dem Tag `verified`
+in der Anki-CSV (`test_status_next_to_conflicting_protocol_never_renders_as_geprueft`
+und die drei analogen Tests für offene Fragen, Coding, Flashcard). Ein
+zusätzlicher Test (`test_derive_status_ignores_status_word_entirely`) macht
+das Prinzip explizit: Selbst ein `status: "unverified"` neben einem
+eindeutig positiven Protokoll ergibt `verified` — die Ableitung ist die
+einzige Quelle, in beide Richtungen.
+
+**Was weiterhin offen ist:** `protocol` selbst bleibt eine editierbare
+JSON-Datei. Eine vollständig konsistente Fälschung (auch `chosen_index` auf
+die tatsächlich korrekte Option setzen) bekäme weiterhin `[geprüft]` — das
+ist aber eine erheblich aufwändigere, gezieltere Fälschung als ein Wort zu
+ändern, und bei MC/offenen Fragen zusätzlich an die echten Aufgabendaten
+gebunden. Eine Signatur oder ein Audit-Log, das den Lauf kryptographisch an
+das Protokoll bindet, wäre der nächste Schritt und wurde nicht gebaut (siehe
+`docs/known-limits.md`).
+
 ## Bekannte Grenzen (analog zu `docs/known-limits.md`)
 
 - **Kein drittes Urteil über „valide Begründung" bei MC-Distraktoren** (siehe
   Entscheidung 5 oben, L1) — `suspicious` ist eine Warnung zur menschlichen
   Durchsicht, kein Beweis, dass der Distraktor kaputt ist. Der Contract
   verspricht das seit der Fix-Runde auch nicht mehr.
-- **Die Herkunftsprüfung aus D1 ist strukturell, nicht kryptographisch — und
-  prüft `method`/`checked_at` nicht gegen den aktuellen `status`.**
-  `has_verified_provenance()` verlangt `method` aus dem echten Methodenset und
-  ein gesetztes `checked_at`, aber beide könnten von einem früheren, echten
-  Lauf mit einem *anderen* Status stammen: Eine Session könnte einen echten
-  `suspicious`-Datensatz nehmen und nur das Wort `status` auf `verified`
-  ändern, `method`/`checked_at` unangetastet — die Prüfung sähe „echte
-  Herkunft" und würde es nicht bemerken. Genau dieses Muster ist die
-  plausibelste Erklärung für den in Fix-Runde 3 gefundenen Defekt (siehe
-  dort). Eine Signatur oder ein Audit-Log, das `status` an den konkreten Lauf
-  bindet, wäre der nächste Schritt, wurde hier nicht gebaut.
+- **`status` wird beim Export abgeleitet, nicht validiert — G2 statt G1
+  (Fix-Runde 4).** Ein G1-Doktrin-Fix (Fix-Runde 3, „Melden ersetzt nicht
+  Markieren") wurde gegen einen echten Agenten gemessen und reichte nicht:
+  alle drei „Gate findet ein Problem"-Evals fielen danach weiterhin an
+  `must_not: "status": "verified"`. `export.derive_status_from_protocol()`
+  liest `status` seither beim Rendern gar nicht mehr — der angezeigte Status
+  kommt ausschließlich aus `verification.protocol` (den Rohdaten des
+  Blind-Laufs), neu gegen die Aufgabendaten berechnet. Ein von Hand
+  gesetztes `status: verified` hat dadurch keine Wirkung mehr auf
+  `[geprüft]`, unabhängig davon, ob `method`/`checked_at` echt aussehen.
+- **Die Ableitung schließt die alte D1-Lücke (Vorhandensein statt Stimmigkeit),
+  bleibt aber selbst nicht kryptographisch.** `protocol` ist weiterhin eine
+  editierbare JSON-Datei; eine vollständig konsistente Fälschung (auch
+  `chosen_index` o. Ä. passend mitfälschen) bekäme weiterhin `[geprüft]` —
+  eine erheblich aufwändigere, gezieltere Fälschung als ein Wort zu ändern,
+  aber keine kryptographische Unmöglichkeit. Eine Signatur oder ein Audit-Log
+  wäre der nächste Schritt, wurde nicht gebaut.
 - **Blind-Gate ist ein Einzel-Stichprobenlauf ohne Retry oder Mehrheitsvotum.**
   Jeder Aufruf ist ein einzelner `claude -p`-Lauf; ein funktionierender,
   absichtlich schwieriger Distraktor kann mit einer gewissen
   Grundwahrscheinlichkeit trotzdem `suspicious` auslösen (der Blind-Löser rät
   falsch, ohne dass am Distraktor etwas kaputt ist) — von einem echten Befund
   nicht unterscheidbar, ohne die Begründung selbst zu lesen (siehe L1).
-- **Kein mechanischer Schutz gegen Hand-Editieren von `verification`.**
-  `SKILL.md` verbietet es jetzt explizit und an der Versuchungsstelle
-  (Fix-Runde 3, „Melden ersetzt nicht Markieren"), aber das ist ein G1-Fix
-  (Selbstauskunft) — nichts im Code verhindert oder erkennt einen direkten
-  Edit auf `verification.status`, der nicht aus einem `verify_blind.py`-
-  Lauf stammt. Ein G2-Skript oder ein G3-Hook wäre nach Spec 00 §4 der
-  nächste Schritt, wurde bewusst nicht gebaut (siehe Fix-Runde 3).
-- **Drei der sechs Evals sind gegen einen echten Agenten bestätigt**
+- **Vier der sechs Evals sind gegen einen echten Agenten bestätigt**
   (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
-  `one-step-harder-changes-the-vector-not-just-wording`, siehe Fix-Runde 3).
-  Die drei „Gate findet ein Problem"-Evals (`mc-distractor-trap-is-caught`,
-  `narrow-criteria-on-open-question-are-flagged`,
-  `overspecified-coding-tests-are-flagged`) sind seit ihrer Zerlegung nur
-  schema-validiert, nicht erneut über `run_evals.py` gefahren — sie sind
-  gerade die Evals, die den Fix-Runde-3-Defekt aufdecken sollen, also die mit
-  dem größten Interesse an einer echten Bestätigung.
+  `one-step-harder-changes-the-vector-not-just-wording`, sowie mittelbar der
+  Zerlegungsprozess selbst über zwei Läufe). Die drei „Gate findet ein
+  Problem"-Evals sind seit dem G2-Fix (Fix-Runde 4) nur schema-validiert,
+  nicht erneut über `run_evals.py` gefahren — genau die Evals, die den
+  Defekt aufdecken sollen, haben damit noch keine Bestätigung, dass der
+  mechanische Fix wirklich trägt (im Unterschied zu Fix-Runde 3 ist der
+  Fix diesmal aber ein Ausschluss, kein Versprechen).
 - **`verify_blind.py` läuft den Blind-Löser in einem leeren Temp-Verzeichnis**,
   nicht in einer vollständig isolierten Prozessumgebung — dieselbe Grenze wie
   bei `evalkit.dispatch.run_agent` (siehe `docs/known-limits.md`, Abschnitt
@@ -337,7 +409,7 @@ Zieldateiname ohne Glob-Unterstützung deterministisch bleibt.
 
 ```
 .venv/bin/pytest -q
-223 passed
+230 passed
 ```
 
 ## Offene Sorgen
@@ -345,20 +417,19 @@ Zieldateiname ohne Glob-Unterstützung deterministisch bleibt.
 - `brief-common.md` fehlte (siehe oben) — falls die Datei eigentlich existieren
   sollte, sind mir möglicherweise Fehlerklassen oder Arbeitsweise-Vorgaben
   entgangen, die dort und nirgends sonst standen.
-- Drei von sechs Evals sind gegen einen echten Agenten bestätigt; die drei
-  „Gate findet ein Problem"-Evals wurden seit ihrer Zerlegung nicht erneut
-  gefahren. Der SKILL.md-Fix aus Fix-Runde 3 ist plausibel, aber ungeprüft —
-  ob er das Hand-Editieren von `verification` in der Praxis wirklich
-  verhindert, oder ob eine Session die neue Doktrin genauso übergeht wie die
-  alte implizite, weiß ich nicht. Das ist die größte offene Frage dieser
-  gesamten Skill: ein G1-Fix für ein Problem, das eigentlich einen G2/G3-Fix
-  verdient hätte, den ich bewusst nicht gebaut habe (Abwägung in Fix-Runde 3).
-- Die Herkunftsprüfung aus D1 ist strukturell, nicht kryptographisch, und
-  prüft `method`/`checked_at` nicht gegen den aktuellen `status` (siehe
-  Bekannte Grenzen und Fix-Runde 3) — eine Session, die nur das `status`-Wort
-  in einem echten, älteren Datensatz ändert, bliebe unentdeckt. Das war mit
-  den Mitteln dieser Skill (Tier 1, kein Signatur-/Audit-Mechanismus) nicht
-  wirtschaftlich zu schließen.
+- Vier von sechs Evals sind gegen einen echten Agenten bestätigt; die drei
+  „Gate findet ein Problem"-Evals wurden seit dem G2-Fix (Fix-Runde 4, Ableiten
+  statt Validieren) nicht erneut gefahren. Anders als bei Fix-Runde 3 ist mein
+  Vertrauen diesmal nicht in eine Doktrin gesetzt, die ein Agent befolgen
+  muss, sondern in einen Ausschluss, den `export.py` mechanisch erzwingt
+  (`status` wird gar nicht gelesen) — trotzdem bleibt es ein Versprechen ohne
+  echten Bestätigungslauf, bis der Koordinator ihn fährt.
+- `protocol` selbst ist weiterhin eine editierbare JSON-Datei ohne
+  kryptographische Bindung an den tatsächlichen Lauf (siehe Bekannte Grenzen
+  und Fix-Runde 4) — eine vollständig konsistente Fälschung bekäme weiterhin
+  `[geprüft]`. Das war mit den Mitteln dieser Skill (Tier 1, kein
+  Signatur-/Audit-Mechanismus) nicht wirtschaftlich zu schließen, und die
+  Hürde dafür ist jetzt deutlich höher als ein einzelnes Wort zu ändern.
 - Der Glob-Pfad-Fix aus dem Eval-Harness ist auf dieser Basis nicht vorhanden;
   sollte `feat/dev-report` vor `exercise-forge` gemergt werden, könnten die
   hartkodierten Themennamen in den Eval-Prompts unnötig restriktiv wirken
