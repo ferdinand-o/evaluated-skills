@@ -38,10 +38,12 @@ kein Fehlschlag.
    Mechanisch zuerst: Allowlist eingehalten (`git diff`/`git status` gegen die
    Task-Datei) und deklarierte `Produces`-Signaturen per `ast` vorhanden
    (Name + Arity, nie Typ — Stdlib prüft keine Typen ohne Import, und
-   importiert wird fremder Code hier nie). `--out` schreibt das Ergebnis
-   zusätzlich als Artefakt, nicht nur auf stdout. Erst danach `/code-review` im
-   Selbst-Modus gegen die Task-Datei als Soll. Fixes im selben Worktree,
-   max. 2 Runden, dann Eskalation an den Nutzer.
+   importiert wird fremder Code hier nie). **Ohne `--base` bleibt das Verdikt
+   höchstens `unverified`, nie `pass`** — ein übersprungener Check meldet nie
+   Erfolg. `--out` schreibt das Ergebnis zusätzlich als Artefakt, nicht nur
+   auf stdout. Erst danach `/code-review` im Selbst-Modus gegen die
+   Task-Datei als Soll. Fixes im selben Worktree, max. 2 Runden, dann
+   Eskalation an den Nutzer.
 6. **Merge:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem Merge.
    Ein Interface-Bruch zwischen zwei Paketen ist ein Gate-Fehler (Überlappung
    falsch beurteilt) — als Lesson im Plan vermerken, nicht einfach fixen und
@@ -67,9 +69,17 @@ kein Fehlschlag.
 - **Schreiben außerhalb der Allowlist lässt die Abnahme scheitern** (G2, Spec
   00 §4: das Skript fällt das Urteil, der Aufruf bleibt freiwillig — ein Hook
   hilft hier nicht, weil Agents in eigenen Worktrees laufen).
-- **Überlappung ist konservativ:** unparsbare/leere `Files:`, oder ein
-  Interface-Symbol, das eine andere Task konsumiert, gilt als Abhängigkeit.
-  Im Zweifel keine Parallelisierung.
+- **Ein übersprungener Check meldet nie Erfolg.** `verify` ohne `--base`
+  liefert `unverified`, nie `pass`; `check_produces` liefert `ambiguous`
+  statt eines geratenen PASS, wenn mehrere gleichnamige Definitionen
+  existieren und keine eindeutig zur erwarteten Signatur passt.
+- **Überlappung ist konservativ:** unparsbare/leere `Files:`, eine
+  Files:-Zeile mit unbekanntem Vokabular, Prosa ohne Backtick-Symbol in
+  `Consumes:`/`Produces:`, oder ein Interface-Symbol, das eine andere Task
+  konsumiert, gilt jeweils als Abhängigkeit. Datei-Pfade werden dabei
+  Groß-/Kleinschreibungs- und Backslash-normalisiert und absolut gegen
+  relativ sowie Glob-Muster gegen ihre Wurzel verglichen. Im Zweifel keine
+  Parallelisierung.
 - **Parallel nur ab drei überlappungsfreien Paketen.**
 
 ## Anti-Rationalisierung

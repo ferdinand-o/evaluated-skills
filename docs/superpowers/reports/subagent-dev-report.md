@@ -1,9 +1,47 @@
 # Bericht: Skill `subagent-dev` (Spec 09)
 
 Branch `feat/subagent-dev`, Basis `0831fb7` (`specs/skill-foundation`).
-Acht Commits, `a689e5f` (Plan) bis zu diesem Bericht (`1da445e` zuletzt vor
-dem Bericht). 172/172 Tests grün (`.venv/bin/pytest`). `run_evals.py` nicht
-ausgeführt (Auftrag).
+Erstfassung: acht Commits, `a689e5f` (Plan) bis `a5cdfcc` (Bericht),
+172/172 Tests grün. Fix-Runde nach unabhängigem Review: siehe unten,
+192/192 Tests grün. `run_evals.py` nicht ausgeführt (Auftrag).
+
+## Fix-Runde nach Review
+
+Ein unabhängiges Review fand drei Defekte (D1–D3) und vier Lücken (L1–L4),
+alle drei Defekte reproduziert — gemeinsame Form: der Mechanismus meldete
+Sicherheit, die er nicht geprüft hatte. Alle drei Defekte behoben, mit
+Regressionstests gegen die im Review reproduzierten Fälle; zwei der vier
+Lücken (L2, L3) mitgezogen, weil sie an denselben Funktionen hingen und mit
+vertretbarem Aufwand behebbar waren; L1 und L4 bewusst nur dokumentiert.
+Details, Restrisiken und die konkrete Begründung je Punkt stehen in
+`docs/known-limits.md` unter „## subagent-dev" — hier nur die Kurzfassung:
+
+- **D1 — `verify` meldete PASS für eine übersprungene Allowlist-Prüfung.**
+  Ohne `--base` gibt es jetzt kein `"pass"`, sondern `"unverified"`.
+- **D2 — Datei-Überlappung übersah Case-Drift, absolut/relativ, Globs und
+  Umbenennungen.** Pfadvergleich normalisiert jetzt Groß-/Kleinschreibung
+  und Backslashes, vergleicht per Präfix *und* Suffix, behandelt Globs als
+  ihre Wurzel; eine `Rename:`-Zeile wird erkannt (beide Pfade in die
+  Allowlist), jede andere unerkannte `Files:`-Zeile erzwingt `files_unknown`.
+- **D3 — Interface-Überlappung hatte kein Äquivalent zu `files_unknown` und
+  behauptete aktiv „keine Überlappung", ohne gesucht zu haben.** Prosa ohne
+  Backtick-Symbol markiert die Task jetzt `interfaces_unknown` (sichtbar im
+  `gate.json`) und erzwingt Serialisierung; die Begründungstexte sprechen
+  jetzt von „erkannter" statt bloßer Überlappung.
+- **L2 (verbessert) — `check_produces` sammelt jetzt alle gleichnamigen
+  `ast`-Definitionen statt der zuletzt besuchten; `ambiguous` statt eines
+  geratenen Ergebnisses, wenn keine passt und mehrere existieren.**
+- **L3 (behoben) — `check_allowlist` teilt eine `git status`-Rename-Zeile
+  (`"alt -> neu"`) jetzt in zwei echte Pfade statt einen unmatchbaren.**
+
+Alle vier Eval-Fixtures wurden nach dem Fix erneut gegen die geänderten
+Funktionen durchgerechnet (nicht über `run_evals.py`, sondern direkt gegen
+`parse_plan`/`build_overlap_graph`/`gate_verdict`/`check_allowlist`/
+`check_produces`): Verdikte für `plan-hidden-overlap` (`sequential`),
+`plan-mini-two-tasks` (`no-delegate`) und `plan-disjoint-batch` (`parallel`,
+Gruppe `[1,2,3,4]`) sind unverändert; das Verify-Szenario aus Eval 3 liefert
+weiterhin `"ok": false` mit `arity_mismatch`, jetzt zusätzlich mit
+`"allowlist_checked": false` und `"verdict": "fail"` im Artefakt.
 
 ## Basis-Abweichung und fehlende Eingabe
 
@@ -30,7 +68,7 @@ keinem gelesenen Artefakt sichtbar ist, könnte hier fehlen.
 
 ```
 skills/subagent-dev/
-├── SKILL.md                        (97 Zeilen, ≤150-Grenze eingehalten)
+├── SKILL.md                        (107 Zeilen, ≤150-Grenze eingehalten)
 ├── references/
 │   ├── task-file.md                (Schema + Beispiel + Grenzen)
 │   ├── research-fanout.md          (Rückgabe-Schema, Artefakt-Persistenz, Synthese-Disziplin)
@@ -38,7 +76,7 @@ skills/subagent-dev/
 └── scripts/
     └── plan_to_tasks.py            (Tier 1, generate + verify)
 
-tests/test_subagent_dev_plan_to_tasks.py   (26 Tests)
+tests/test_subagent_dev_plan_to_tasks.py   (46 Tests, davon 20 aus der Fix-Runde)
 
 evals/subagent-dev/evals.json               (4 Evals: 3 contract, 1 behavior)
 evals/fixtures/plan-hidden-overlap/         (git:true, 2 Tasks, verdeckte Config-Überlappung)
@@ -103,9 +141,10 @@ keine mechanische Assertion außer über Agent-Ausgabe hätte.
 ## Bekannte Grenzen
 
 - **Interface-Überlappung ist eine Backtick-Text-Heuristik**, keine
-  semantische Analyse. Ein in Prosa ohne Backticks erwähntes Symbol wird
-  nicht erkannt; dann greift nur noch die Datei-Überlappung. Dokumentiert in
-  `references/task-file.md`.
+  semantische Analyse. Seit der Fix-Runde (D3) macht Prosa ohne Backtick-
+  Symbol die Task konservativ `interfaces_unknown` (überlappt mit allem);
+  was das nicht auffängt, sind zwei *unterschiedlich benannte* Backtick-
+  Symbole, die dieselbe Sache meinen. Dokumentiert in `references/task-file.md`.
 - **`verify` prüft Arity, nicht Typen.** Eine Signatur mit korrekter
   Parameterzahl, aber falschem Rückgabetyp, fällt nicht auf — Typprüfung
   ohne Import ist mit Stdlib-`ast` allein nicht robust genug, ein Import
@@ -136,11 +175,11 @@ Läufen statt statischer Richtwerte gespeist werden soll.
 
 ```
 .venv/bin/pytest -q
-........................................................................ [ 41%]
-........................................................................ [ 83%]
-............................                                             [100%]
-172 passed in 3.28s
+........................................................................ [ 37%]
+........................................................................ [ 75%]
+................................................                         [100%]
+192 passed in 3.33s
 ```
 
-26 davon neu für diese Skill (`tests/test_subagent_dev_plan_to_tasks.py`),
-146 bestehend und unverändert grün.
+46 davon für diese Skill (`tests/test_subagent_dev_plan_to_tasks.py`; 26 aus
+der Erstfassung, 20 aus der Fix-Runde), 146 bestehend und unverändert grün.

@@ -128,6 +128,89 @@ Grenze nennt den konkreten Fall, in dem sie beißt.
   „Vorgesetzte" auf; die Tabu-Regeln aus dem Audience-Guide haben damit keine
   Eval-Deckung und könnten unbemerkt verletzt werden.
 
+## subagent-dev
+
+Ein unabhängiges Review fand drei Defekte (D1–D3) und vier Lücken (L1–L4),
+alle drei Defekte reproduziert. Gemeinsame Form: der Mechanismus meldete
+Sicherheit, die er nicht geprüft hatte. Die drei Defekte sind behoben, mit
+Regressionstests, die die im Review reproduzierten Fälle nachbauen:
+
+- **D1 (behoben): `verify` meldete PASS für eine übersprungene Prüfung.**
+  Fehlte `--base`, wurde die Allowlist-Prüfung stillschweigend übersprungen
+  und trotzdem `"ok": true` gemeldet. Jetzt gibt es ein drittes Verdikt,
+  `unverified` — ein übersprungenes Gate meldet nie Erfolg (Spec 00 §3).
+  `"pass"` verlangt jetzt `allowlist_checked: true` und keine Verstöße.
+- **D2 (behoben): Datei-Überlappung übersah Case-Drift, absolut-vs-relativ,
+  Globs und Umbenennungen.** `_paths_overlap` normalisiert jetzt
+  Groß-/Kleinschreibung und Backslashes, vergleicht per Präfix *und* Suffix
+  (deckt absolut gegen relativ ab) und behandelt ein Glob-Muster als seinen
+  konkreten Wurzel-Ordner. Eine `Files:`-Bullet-Zeile mit unbekanntem Verb
+  (z. B. ein selbst erfundenes `Rename:`) machte die Task vorher spurlos
+  files-blind; jetzt erkennt `_parse_files` `Rename: \`alt\` -> \`neu\``
+  explizit (beide Pfade in die Allowlist) und markiert jede *andere*
+  unerkannte Zeile über ein Sicherheitsnetz als `files_unknown`, selbst wenn
+  andere Zeilen im selben Block sauber geparst wurden.
+- **D3 (behoben): Interface-Überlappung hatte kein Äquivalent zu
+  `files_unknown` und behauptete aktiv „keine Überlappung", obwohl sie nie
+  danach gesucht hatte.** `Consumes:`/`Produces:`-Text ohne Backtick-Symbol
+  und ohne den Leerfall „nichts Neues" markiert die Task jetzt
+  `interfaces_unknown` und damit überlappend mit jeder anderen — sichtbar im
+  `gate.json`-Artefakt (`interfaces_unknown`-Feld pro Task, Sichtbarkeits-
+  Regel aus Spec 00 §3). Die Begründungstexte im Gate-Urteil sprechen jetzt
+  von „erkannter" statt bloß „Überlappung", um nicht mehr zu behaupten, eine
+  Prüfung habe stattgefunden, die nur unterblieben ist.
+
+Zusätzlich mitgezogen, weil sie mit denselben Funktionen zusammenhängen und
+mit vertretbarem Aufwand behebbar waren:
+
+- **L2 (verbessert, nicht vollständig gelöst): `check_produces` verwechselte
+  gleichnamige Symbole aus unterschiedlichem Scope.** `ast.walk` kennt keinen
+  Scope; zwei unabhängige Definitionen desselben Namens (Top-Level-Funktion +
+  Hilfsfunktion, zwei Klassenmethoden) sammelt das Skript jetzt vollständig
+  statt nur die zuletzt besuchte zu behalten. Passt mindestens eine Arity zur
+  erwarteten, gilt das Symbol als `present` mit einem Hinweis auf die
+  weiteren Definitionen im Detail-Text; passt keine, aber es gibt mehrere
+  unterschiedliche, ist das Ergebnis `ambiguous` statt eines geratenen PASS
+  oder FAIL. **Restrisiko:** Es gibt weiterhin keinen echten Scope-Abgleich
+  (dafür müsste importiert werden, was diese Skill nach Vorab-Entscheidung A3
+  nie tut) — passt eine von mehreren Definitionen zufällig zur erwarteten
+  Arity, meldet `check_produces` `present`, auch wenn ausgerechnet die
+  falsche (z. B. die Top-Level-Funktion) die maßgebliche wäre.
+- **L3 (behoben): `check_allowlist` erzeugte eine Fehlmeldung bei
+  unkommittierten Umbenennungen.** `git status --porcelain` schreibt eine
+  Umbenennung als `"R  alt.py -> neu.py"`; das alte `line[3:]` schnitt nur
+  das Statuspräfix ab und behandelte den ganzen Rest als einen Pfad, der mit
+  keinem Allowlist-Eintrag matchen konnte. Jetzt wird bei `" -> "` in beide
+  Pfade aufgeteilt.
+
+Nicht in dieser Runde behoben, bewusst nur dokumentiert:
+
+- **L1: Eval 4 (`research-fanout-stays-distilled`) prüft größtenteils
+  Prompt-Befolgung, nicht die Skill.** Der Prompt buchstabiert Zielpfad und
+  Format der Findings-Datei praktisch vollständig vor; ein Agent, der die
+  Skill **nicht** benutzt (kein Fan-out, einfach selbst grep't und brav
+  formatiert), erfüllt fast alle mechanischen `must`-Assertions ohne jede
+  Skill-Logik. Einzig der `judge`-Claim zielt auf das eigentliche
+  Unterscheidungsmerkmal. Nicht behoben, weil eine Assertion, die echten
+  Subagenten-Dispatch von simuliertem Verhalten mechanisch unterscheidet,
+  ohne den Harness selbst zu erweitern (z. B. um sichtbare Subagenten-Spuren
+  im Transcript), nicht mit vertretbarem Aufwand nachrüstbar war — siehe
+  auch „Keine inhaltliche Formprüfung" oben.
+- **L4: Routing gegen die installierte Konkurrenz-Skill ist ungetestet.**
+  Alle vier Eval-Prompts nennen `subagent-dev` beim Namen; ob ein Nutzer, der
+  nur "ich habe einen Plan, was kann ich parallelisieren?" sagt, tatsächlich
+  diese Skill statt der global installierten
+  `superpowers:subagent-driven-development` bekommt, ist durch keinen Eval
+  abgedeckt. Nicht behoben — ein Routing-Eval ohne expliziten Skill-Namen im
+  Prompt ist schwerer vorherzusagen und wollte nicht blind (ohne Eval-Lauf)
+  verfasst werden.
+- **Restrisiko aus D2 (case-insensitiver Vergleich):** Zwei Pfade, die sich
+  nur in der Groß-/Kleinschreibung unterscheiden, gelten jetzt immer als
+  überlappend — auf einem case-sensitiven Dateisystem, auf dem `Config.py`
+  und `config.py` tatsächlich zwei verschiedene Dateien sein könnten, führt
+  das zu einer unnötigen Serialisierung, nie zu einem übersehenen Konflikt
+  (bewusst konservativ, B2).
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·

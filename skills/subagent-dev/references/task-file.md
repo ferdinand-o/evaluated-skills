@@ -93,10 +93,26 @@ nicht hierher:
 
 - Die Überlappungs- und Interface-Erkennung ist textbasiert (Backtick-Symbole
   in `Produces:`/`Consumes:`), keine semantische Analyse. Ein Symbol, das
-  ohne Backticks oder in freier Prosa erwähnt wird, wird nicht erkannt — dann
-  greift die konservative Regel nicht automatisch, und ein Mensch sollte die
-  Files:/Interfaces:-Blöcke des Plans selbst noch einmal prüfen, bevor er dem
-  Gate-Verdikt „parallel" folgt.
+  ohne Backticks oder in freier Prosa erwähnt wird, wird nicht als *dasselbe*
+  Symbol erkannt wie ein Backtick-Vorkommen anderswo — aber die konservative
+  Regel greift trotzdem automatisch: `Consumes:`/`Produces:`-Text ohne
+  Backtick und ohne den Leerfall „nichts Neues" macht die Task
+  `interfaces_unknown` und damit überlappend mit jeder anderen Task (Fix D3).
+  Was das nicht auffängt: zwei Backtick-Symbole mit *unterschiedlichem*
+  Wortlaut, die dieselbe Sache meinen (z. B. `parse()` vs. `parse_line()`) —
+  dort bleibt ein Mensch nötig, der die Files:/Interfaces:-Blöcke selbst noch
+  einmal liest, bevor er dem Gate-Verdikt „parallel" folgt.
+- Analog für `Files:`: Jede Bullet-Zeile im Block, die keinem bekannten Verb
+  (`Create`/`Modify`/`Test`/`Delete`/`Rename`) entspricht, macht die ganze
+  Task `files_unknown` — auch wenn andere Zeilen im selben Block sauber
+  geparst wurden. Eine `Rename: \`alt.py\` -> \`neu.py\``-Zeile wird erkannt
+  und trägt **beide** Pfade in die Allowlist.
 - Arity-Vergleich ist kein Typ-Check. `verify` prüft Namen und Parameteranzahl
   per `ast`, nie Typen — dafür müsste importiert werden, was diese Skill
-  bewusst nie tut (Vorab-Entscheidung A3).
+  bewusst nie tut (Vorab-Entscheidung A3). `ast.walk` kennt außerdem keinen
+  Scope: zwei gleichnamige, unabhängige Definitionen (Top-Level-Funktion +
+  Hilfsfunktion, oder zwei Klassenmethoden) werden nicht auseinandergehalten
+  — passt keine der gefundenen Arities zur erwarteten und gibt es mehrere
+  unterschiedliche, meldet `check_produces` `ambiguous` statt eines geratenen
+  Ergebnisses; passt mindestens eine, meldet es `present` mit einem Hinweis
+  auf die weiteren Definitionen im Detail-Text.
