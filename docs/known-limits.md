@@ -183,6 +183,33 @@ mit vertretbarem Aufwand behebbar waren:
   keinem Allowlist-Eintrag matchen konnte. Jetzt wird bei `" -> "` in beide
   Pfade aufgeteilt.
 
+## subagent-dev — Fix-Runde 2 (Bestätigungslauf)
+
+Der zentrale Bestätigungslauf nach Fix-Runde 1 bestätigte D1–D3 (drei Evals
+grün), fand aber `research-fanout-stays-distilled` weiterhin rot — nicht
+schwankend, sondern systematisch: 66 Zeilen in einem Lauf, 64 in einem
+zweiten, beide über dem Budget von 60. Nachgerechnet: Drei Funde à drei
+Zeilen (Aussage, Beleg, Konfidenz) plus Kopfzeile sind zwölf bis fünfzehn
+Zeilen — es standen also rund fünfzig Zeilen Beiwerk in der generierten
+Datei, die kein Fund waren. Der damalige `references/research-fanout.md` gab
+zwar ein Rückgabe-Schema vor, verbot aber nichts: kein Verbot einer
+Einleitung, eines Vorgehensberichts, einer Zusammenfassung der
+Zusammenfassung oder wiederholter Pfadangaben. Das Budget wurde **nicht**
+angehoben (das wäre dieselbe Fehlerklasse mit umgekehrtem Vorzeichen —
+eine Prüfung so lange verbiegen, bis sie besteht). Stattdessen wurde das
+Schema in `references/research-fanout.md` und `SKILL.md` verschärft: ein
+Fund ist genau drei Zeilen, nichts anderes steht in der Datei, mit
+expliziter Verbotsliste und einem durchgerechneten Beispiel (elf Zeilen für
+drei Funde, exakt an der Fixture aus `research-scan-target` orientiert).
+
+**Nicht direkt beobachtet:** Der tatsächliche Inhalt der überlangen
+Findings-Datei aus dem Bestätigungslauf lag diesem Fix nicht vor (der Lauf
+selbst geschah zentral, nicht in dieser Session) — die Diagnose stützt sich
+auf die Rechnung (3 Funde × 3 Zeilen ≈ 15, beobachtet 64–66) und auf die
+Lücken im vorherigen Schema, nicht auf eine Zeile-für-Zeile-Analyse der
+echten Ausgabe. Ob die Verschärfung reicht, zeigt erst der nächste
+Bestätigungslauf.
+
 Nicht in dieser Runde behoben, bewusst nur dokumentiert:
 
 - **L1: Eval 4 (`research-fanout-stays-distilled`) prüft größtenteils

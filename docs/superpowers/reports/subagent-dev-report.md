@@ -2,8 +2,36 @@
 
 Branch `feat/subagent-dev`, Basis `0831fb7` (`specs/skill-foundation`).
 Erstfassung: acht Commits, `a689e5f` (Plan) bis `a5cdfcc` (Bericht),
-172/172 Tests grün. Fix-Runde nach unabhängigem Review: siehe unten,
-192/192 Tests grün. `run_evals.py` nicht ausgeführt (Auftrag).
+172/172 Tests grün. Fix-Runde 1 nach unabhängigem Review: siehe unten,
+192/192 Tests grün, D1–D3 im zentralen Bestätigungslauf verifiziert.
+Fix-Runde 2 nach demselben Bestätigungslauf: `research-fanout-stays-distilled`
+blieb systematisch rot (66, dann 64 Zeilen gegen ein Budget von 60) — siehe
+„Fix-Runde 2" unten. `run_evals.py` nicht ausgeführt (Auftrag); beide
+Bestätigungsläufe liefen zentral, nicht in dieser Session.
+
+## Fix-Runde 2 — Findings-Datei zu lang, Budget nicht angehoben
+
+Zwei Läufe des Evals `research-fanout-stays-distilled` lieferten 66 bzw.
+64 Zeilen gegen das Limit von 60 — keine Schwankung, ein systematischer
+Überschuss. Nachgerechnet: Drei Funde (die Fixture `research-scan-target`
+enthält genau drei `TODO(security)`-Marker) à drei Zeilen (Aussage, Beleg,
+Konfidenz) plus Kopfzeile sind zwölf bis fünfzehn Zeilen — es standen also
+rund fünfzig Zeilen Beiwerk in der generierten Datei. Das Budget wurde
+**nicht** angehoben; stattdessen wurde `references/research-fanout.md` und
+`SKILL.md` verschärft: ein Fund ist genau drei Zeilen, eine explizite
+Verbotsliste (kein Vorgehensbericht, keine Wiederholung des Auftrags, keine
+Zusammenfassung der Zusammenfassung, keine wiederholten Pfadangaben, kein
+Meta-Kommentar über den Fan-out) und ein durchgerechnetes Beispiel (elf
+Zeilen für drei Funde, exakt an `research-scan-target` orientiert). Details
+in `docs/known-limits.md` unter „## subagent-dev — Fix-Runde 2".
+
+**Ehrlich benannt:** Der tatsächliche Inhalt der überlangen Findings-Datei
+aus dem Bestätigungslauf lag dieser Session nicht vor — der Lauf geschah
+zentral. Die Diagnose (Vorgehensbericht/Meta-Ebene/Wiederholung als
+wahrscheinlichste Füllung) stützt sich auf die Rechnung und auf die Lücken
+im vorherigen, unterspezifizierten Schema, nicht auf eine
+Zeile-für-Zeile-Analyse der echten Ausgabe. Ob die Verschärfung reicht, zeigt
+erst der nächste zentrale Lauf.
 
 ## Fix-Runde nach Review
 

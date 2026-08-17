@@ -15,7 +15,9 @@ das destillierte Ergebnis wiegt? Wenn ja, Fan-out.
 
 ## Rückgabe-Schema
 
-Jeder Recherche-Agent liefert **destillierte Daten, nie einen Prosa-Aufsatz**:
+Jeder Recherche-Agent liefert **destillierte Daten, nie einen Prosa-Aufsatz**.
+Das Schema ist absichtlich eng — nicht nur eine Empfehlung, ein Format, das
+nichts anderes zulässt:
 
 ```markdown
 ## Findings
@@ -27,11 +29,23 @@ Jeder Recherche-Agent liefert **destillierte Daten, nie einen Prosa-Aufsatz**:
 - <nächste Beobachtung>
   - Beleg: `pfad/zu/anderer/datei.py:10-25`
   - Konfidenz: mittel
-
-## Offene Fragen
-
-- <was die Recherche nicht klären konnte>
 ```
+
+**Nichts anderes steht in der Datei.** Kein Titel, der den Auftrag
+wiederholt; keine Einleitung ("Ich habe folgende Dateien durchsucht: …");
+kein Abschnitt zum Vorgehen oder zur Methode; keine Zusammenfassung der
+Zusammenfassung nach der Liste; keine wiederholte volle Pfadangabe außerhalb
+der Beleg-Zeile; kein Meta-Kommentar über den Fan-out selbst ("Ich habe 3
+Subagenten dispatcht, die …"). Ein Fund ist genau drei Zeilen: die
+Beobachtung, `Beleg:`, `Konfidenz:`. Eine Findings-Datei mit drei Funden ist
+zwölf bis fünfzehn Zeilen lang, nicht sechzig — jede Zeile darüber ist
+Beiwerk, das der Hauptkontext genauso wenig braucht wie das Rohmaterial, das
+der Fan-out ihm ersparen sollte.
+
+**„Offene Fragen" ist kein Pflichtabschnitt.** Nur anhängen, wenn die
+Recherche tatsächlich etwas nicht klären konnte — nie als leere oder
+pro-forma-Sektion ("keine offenen Fragen"). Fehlt er, ist die Recherche
+vollständig, und das sagt die Abwesenheit des Abschnitts bereits.
 
 - **Beleg ist ein Pfad, keine Zusammenfassung.** Der Hauptkontext bekommt die
   Fundstelle, nicht den zitierten Absatz — wer nachlesen will, liest selbst.
@@ -40,17 +54,49 @@ Jeder Recherche-Agent liefert **destillierte Daten, nie einen Prosa-Aufsatz**:
 - **Kein Roh-Dump.** Ein Recherche-Agent, der ganze Dateien zitiert statt sie
   zu verdichten, hat die Aufgabe verfehlt — das Symptom, das Fan-out lösen
   sollte, kehrt sonst im Rückgabewert zurück.
+- **Eine Datei, die zu drei Funden fünfzig Zeilen Beiwerk trägt, hat den
+  Zweck verfehlt — selbst wenn jeder einzelne Satz darin richtig ist.** Der
+  Sinn des Fan-outs ist ein schlanker Hauptkontext; Vorgehensberichte,
+  Meta-Ebenen und Wiederholungen sind selbst Rohmaterial, nur eine Stufe
+  näher an der Prosa.
+
+### Beispiel (drei Funde)
+
+Für eine Recherche über verstreute `TODO(security)`-Kommentare sieht eine
+vollständige, korrekte Findings-Datei so aus — nichts wird ergänzt:
+
+```markdown
+## Findings
+
+- `login()` validiert die Passwortstärke noch nicht.
+  - Beleg: `src/auth/login.py:2`
+  - Konfidenz: hoch
+
+- `charge()` prüft die Betragssignatur nicht vor der Ausführung.
+  - Beleg: `src/payments/charge.py:2`
+  - Konfidenz: hoch
+
+- Die Middleware begrenzt anonyme Requests nicht.
+  - Beleg: `src/api/middleware.py:2`
+  - Konfidenz: hoch
+```
+
+Das sind elf Zeilen für drei Funde. Jede zusätzliche Zeile in diesem Beispiel
+wäre bereits eine Verletzung des Schemas oben.
 
 ## Als Artefakt festhalten
 
 Wenn der Nutzer die Findings über die Antwort hinaus braucht (zum
 Nachschlagen, für einen Folgeschritt, oder weil mehrere Recherche-Agenten
-zusammengeführt werden), schreib das Rückgabe-Schema zusätzlich als Datei
-nach `.skills/cache/tasks/research-<slug>.md` (Ephemera, Spec 00 §1) statt es
-nur im Chat zu belassen — dann liest der Hauptkontext beim Synthetisieren nur
-diese destillierte Datei, nie die durchsuchten Rohdateien erneut. `<slug>`
-kommt aus der Recherche-Frage; nennt der Nutzer einen konkreten Dateinamen,
-gilt der.
+zusammengeführt werden), schreib **genau das Rückgabe-Schema oben und nichts
+zusätzlich** als Datei nach `.skills/cache/tasks/research-<slug>.md`
+(Ephemera, Spec 00 §1) statt es nur im Chat zu belassen — dann liest der
+Hauptkontext beim Synthetisieren nur diese destillierte Datei, nie die
+durchsuchten Rohdateien erneut. Die Kopfzeile aus `docs/artifact-header.md`
+zählt nicht als "zusätzlich" (sie ist die einzige erlaubte Zeile vor
+`## Findings`); jede andere Zeile vor der ersten Beobachtung ist ein
+Vorgehensbericht und gehört nicht in die Datei. `<slug>` kommt aus der
+Recherche-Frage; nennt der Nutzer einen konkreten Dateinamen, gilt der.
 
 ## Synthese-Disziplin
 

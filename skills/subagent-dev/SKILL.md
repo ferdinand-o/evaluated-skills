@@ -50,7 +50,11 @@ kein Fehlschlag.
    weiter. Details: [references/merge-protocol.md](references/merge-protocol.md).
 7. **Recherche-/Analyse-Fan-out** (großer Codebase-Scan, der den Hauptkontext
    fluten würde) läuft unabhängig vom Gate: siehe
-   [references/research-fanout.md](references/research-fanout.md).
+   [references/research-fanout.md](references/research-fanout.md). Die
+   Findings-Datei enthält **nur** Fund-Zeilen (Aussage, Beleg, Konfidenz) —
+   kein Vorgehensbericht, keine Wiederholung des Auftrags, keine
+   Zusammenfassung der Zusammenfassung. Drei Funde sind zwölf bis fünfzehn
+   Zeilen, nicht sechzig.
 
 ## Kostenrichtwerte (grobe Schätzwerte, keine Telemetrie)
 
@@ -91,6 +95,7 @@ kein Fehlschlag.
 | „Review pro Task ist zu teuer" | Ein kollidierter Merge kostet mehr als alle Reviews zusammen. |
 | „Recherche mache ich schnell selbst" | Flutet das Rohmaterial den Hauptkontext, ist Fan-out billiger. |
 | „Die zwei Tasks teilen sich ja nur eine Konfigdatei, das ist doch harmlos" | Genau das ist die Überlappung, die das Gate suchen soll. |
+| „Ich erkläre kurz, wie ich gesucht habe, das hilft beim Nachvollziehen" | Das Vorgehen gehört nicht in die Findings-Datei — sie ist für Ergebnisse, nicht für den Prozess. Eine Datei mit drei Funden und fünfzig Zeilen Beiwerk hat den Zweck des Fan-outs verfehlt, selbst wenn jeder Satz stimmt. |
 
 ## Abgrenzung
 
