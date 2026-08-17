@@ -1,5 +1,7 @@
+import json
+import stat
 import pytest
-from evalkit.judge import JudgeError, build_prompt, parse_verdict
+from evalkit.judge import JudgeError, build_prompt, judge, parse_verdict
 
 
 def test_prompt_contains_every_claim_and_the_transcript():
@@ -58,3 +60,48 @@ def test_parse_verdict_with_missing_holds_raises():
 def test_parse_verdict_with_non_boolean_holds_raises():
     with pytest.raises(JudgeError, match="holds"):
         parse_verdict('{"verdicts": [{"claim": "A", "holds": "ja"}]}')
+
+
+def fake_judge_cli(tmp_path, verdicts: dict) -> str:
+    """Ein CLI, das wie `claude -p --output-format stream-json` antwortet."""
+    event = json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": json.dumps({"verdicts": [
+            {"claim": c, "holds": h} for c, h in verdicts.items()
+        ]}, ensure_ascii=False)}]},
+    })
+    script = tmp_path / "fake-judge"
+    script.write_text("#!/bin/bash\ncat <<'EOF'\n" + event + "\nEOF\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+def test_judge_reads_the_assistant_answer_not_the_raw_stream(tmp_path):
+    """Regressionstest: judge() muss die Assistant-Antwort auswerten, nicht das Roh-Transcript.
+
+    Diese Verdrahtung war ungetestet -- test_judge.py prüfte nur build_prompt und
+    parse_verdict, beides reine Funktionen. Als der Dispatch auf stream-json umgestellt
+    wurde, las judge() weiter das rohe Ereignis-Transcript, fand darin kein 'verdicts'
+    und liess jede behavior-Eval als Harness-Fehler aus dem PASS/FAIL-Bild verschwinden.
+    Aufgefallen ist das erst in einem echten Eval-Lauf.
+    """
+    cwd = tmp_path / "judge"
+    cwd.mkdir()
+    cli = fake_judge_cli(tmp_path, {"Behauptung A": True, "Behauptung B": False})
+
+    verdicts = judge(["Behauptung A", "Behauptung B"], "transcript", "dump", cwd, cli=cli)
+
+    assert verdicts == {"Behauptung A": True, "Behauptung B": False}
+
+
+def test_judge_raises_when_a_claim_is_unjudged(tmp_path):
+    cwd = tmp_path / "judge"
+    cwd.mkdir()
+    cli = fake_judge_cli(tmp_path, {"Behauptung A": True})
+
+    with pytest.raises(JudgeError, match="nicht beurteilt"):
+        judge(["Behauptung A", "Behauptung B"], "transcript", "dump", cwd, cli=cli)
+
+
+def test_judge_without_claims_starts_no_process(tmp_path):
+    assert judge([], "transcript", "dump", tmp_path, cli="gibt-es-nicht") == {}

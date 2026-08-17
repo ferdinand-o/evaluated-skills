@@ -59,6 +59,36 @@ def current_git_head(root: Path) -> str | None:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+GLOB_CHARS = ("*", "?", "[")
+
+
+def has_glob(relpath: str) -> bool:
+    return any(ch in relpath for ch in GLOB_CHARS)
+
+
+def resolve_target(root: Path, relpath: str) -> tuple[Path | None, str]:
+    """Die zu prüfende Datei zu einem Assertion-Pfad, plus ein Label für die Meldung.
+
+    Ein Pfad darf ein Glob-Muster sein. Ohne das erzwingt jeder generierte Dateiname
+    — Datum, Slug aus Freitext — eine `behavior`-Eval mit Judge, obwohl die Eigenschaft
+    mechanisch prüfbar wäre: `debug-ledger` musste drei von vier Evals allein deshalb
+    herunterstufen, weil sein Ledger-Dateiname ein Echtzeit-Datum trägt.
+
+    Bei mehreren Treffern gewinnt der alphabetisch erste, und das Label nennt die Zahl
+    der übrigen — sonst hinge das Ergebnis unsichtbar an der Verzeichnisreihenfolge.
+    """
+    if not has_glob(relpath):
+        target = root / relpath
+        return (target if target.is_file() else None), relpath
+    matches = sorted(p for p in root.glob(relpath) if p.is_file())
+    if not matches:
+        return None, f"{relpath} (kein Treffer)"
+    label = matches[0].relative_to(root).as_posix()
+    if len(matches) > 1:
+        label = f"{label} (+{len(matches) - 1} weitere Treffer für {relpath})"
+    return matches[0], label
+
+
 def check(assertion: Assertion, root: Path, baseline: dict[str, str], output: str = "") -> AssertionResult:
     """Prüfe eine mechanische Assertion gegen den Workspace.
 
@@ -97,28 +127,30 @@ def check(assertion: Assertion, root: Path, baseline: dict[str, str], output: st
                 f"ungeeignet und nicht bloß unerfüllt"
             )
 
-    target = root / assertion.path
-    exists = target.is_file()
+    target, label = resolve_target(root, assertion.path)
+    exists = target is not None
 
     if assertion.type == "file_exists":
-        return AssertionResult(exists, f"{assertion.path} {'existiert' if exists else 'existiert nicht'}")
+        return AssertionResult(exists, f"{label} {'existiert' if exists else 'existiert nicht'}")
 
     if assertion.type == "file_absent":
-        return AssertionResult(not exists, f"{assertion.path} {'existiert (unerwünscht)' if exists else 'fehlt wie erwartet'}")
+        return AssertionResult(not exists, f"{label} {'existiert (unerwünscht)' if exists else 'fehlt wie erwartet'}")
 
     if not exists:
-        return AssertionResult(False, f"{assertion.path} existiert nicht")
+        return AssertionResult(False, f"{label} existiert nicht")
 
     if assertion.type == "file_matches":
         text = target.read_text(encoding="utf-8", errors="replace")
         hit = re.search(assertion.pattern, text, re.MULTILINE)
-        return AssertionResult(bool(hit), f"{assertion.path}: Muster {assertion.pattern!r} {'gefunden' if hit else 'nicht gefunden'}")
+        return AssertionResult(bool(hit), f"{label}: Muster {assertion.pattern!r} {'gefunden' if hit else 'nicht gefunden'}")
 
     if assertion.type == "file_max_lines":
         count = len(target.read_text(encoding="utf-8", errors="replace").splitlines())
-        return AssertionResult(count <= assertion.max_lines, f"{assertion.path}: {count} Zeilen (erlaubt {assertion.max_lines})")
+        return AssertionResult(count <= assertion.max_lines, f"{label}: {count} Zeilen (erlaubt {assertion.max_lines})")
 
     if assertion.type == "file_unchanged":
+        # Die Baseline ist nach exaktem Relativpfad verschlüsselt; ein Glob hätte hier
+        # keinen Schlüssel. Das Schema lehnt Globs für diesen Typ deshalb vorab ab.
         before = baseline.get(assertion.path)
         if before is None:
             return AssertionResult(False, f"{assertion.path}: nicht in der Baseline — vor dem Lauf existierte die Datei nicht")
@@ -129,7 +161,7 @@ def check(assertion: Assertion, root: Path, baseline: dict[str, str], output: st
         for line in target.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.strip():
                 ok = bool(ARTIFACT_HEADER_RE.match(line.strip()))
-                return AssertionResult(ok, f"{assertion.path}: Kopfzeile {'korrekt' if ok else 'fehlt oder falsch formatiert'} ({line.strip()[:60]!r})")
-        return AssertionResult(False, f"{assertion.path}: leer, keine Kopfzeile")
+                return AssertionResult(ok, f"{label}: Kopfzeile {'korrekt' if ok else 'fehlt oder falsch formatiert'} ({line.strip()[:60]!r})")
+        return AssertionResult(False, f"{label}: leer, keine Kopfzeile")
 
     raise MechanicalCheckError(f"kein Prüfpfad für Typ {assertion.type!r}")

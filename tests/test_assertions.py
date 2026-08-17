@@ -159,3 +159,52 @@ def test_file_unchanged_on_excluded_claude_path_raises_instead_of_false_red(tmp_
 def test_file_exists_on_excluded_git_path_raises(tmp_path):
     with pytest.raises(MechanicalCheckError, match=r"\.git/"):
         check(Assertion(type="file_exists", path=".git/config"), tmp_path, BASELINE)
+
+
+def test_glob_path_finds_a_generated_filename(tmp_path):
+    """Ein Glob im Pfad macht generierte Dateinamen mechanisch prüfbar.
+
+    Ohne das erzwingt jeder Dateiname mit Datum oder Freitext-Slug eine
+    behavior-Eval mit Judge, obwohl die Eigenschaft mechanisch prüfbar wäre --
+    debug-ledger musste drei von vier Evals allein deshalb herunterstufen.
+    """
+    (tmp_path / "docs" / "debugging").mkdir(parents=True)
+    (tmp_path / "docs" / "debugging" / "2026-08-16-lookup-schlaegt-fehl.md").write_text(
+        "<!-- skill: debug-ledger | schema: 1 | generated: x -->\n# Ledger\n", encoding="utf-8"
+    )
+
+    result = check(Assertion(type="file_exists", path="docs/debugging/*.md"), tmp_path, {})
+    assert result.ok
+
+    header = check(Assertion(type="artifact_header", path="docs/debugging/*.md"), tmp_path, {})
+    assert header.ok
+
+
+def test_glob_without_match_reports_no_hit(tmp_path):
+    (tmp_path / "docs").mkdir()
+    result = check(Assertion(type="file_exists", path="docs/*.md"), tmp_path, {})
+    assert not result.ok
+    assert "kein Treffer" in result.detail
+
+
+def test_glob_absent_is_satisfied_only_without_any_match(tmp_path):
+    (tmp_path / "docs").mkdir()
+    absent = check(Assertion(type="file_absent", path="docs/*.md"), tmp_path, {})
+    assert absent.ok
+
+    (tmp_path / "docs" / "irgendwas.md").write_text("x", encoding="utf-8")
+    still_absent = check(Assertion(type="file_absent", path="docs/*.md"), tmp_path, {})
+    assert not still_absent.ok
+
+
+def test_several_glob_matches_are_deterministic_and_counted(tmp_path):
+    """Sonst haenge das Ergebnis unsichtbar an der Verzeichnisreihenfolge."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "b.md").write_text("zweiter", encoding="utf-8")
+    (tmp_path / "docs" / "a.md").write_text("erster", encoding="utf-8")
+
+    result = check(Assertion(type="file_matches", path="docs/*.md", pattern="erster"), tmp_path, {})
+
+    assert result.ok
+    assert "a.md" in result.detail
+    assert "+1 weitere" in result.detail

@@ -78,6 +78,15 @@ def _parse_assertion(raw: object, where: str) -> Assertion:
             # teuren Agentenlauf, aufgefangen nur vom generischen Sicherheitsnetz.
             raise EvalSchemaError(f"{where}: 'path' muss eine Zeichenkette sein, war {type(path).__name__}")
         _reject_unsafe_path(path, where)
+        if kind == "file_unchanged" and any(ch in path for ch in ("*", "?", "[")):
+            # Die Baseline ist nach exaktem Relativpfad verschlüsselt. Ein Glob fände
+            # dort nie einen Schlüssel, und die Assertion meldete „nicht in der
+            # Baseline" statt „Muster nicht erlaubt" — ein Fehlschlag, der wie ein
+            # Befund über die Skill aussieht, aber einer über die evals.json ist.
+            raise EvalSchemaError(
+                f"{where}: Typ 'file_unchanged' verträgt kein Glob-Muster im 'path' "
+                f"(die Baseline kennt nur exakte Pfade): {path!r}"
+            )
 
     pattern = raw.get("pattern")
     if kind in _NEEDS_PATTERN:

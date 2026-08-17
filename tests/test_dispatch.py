@@ -1,8 +1,9 @@
+import json
 import os
 import stat
 from pathlib import Path
 
-from evalkit.dispatch import run_agent
+from evalkit.dispatch import assistant_text, run_agent
 
 
 def fake_cli(tmp_path: Path, body: str) -> str:
@@ -85,3 +86,51 @@ def test_process_environment_is_inherited_unmodified(tmp_path, monkeypatch):
     cli = fake_cli(tmp_path, 'echo "$HOME"\n')
     result = run_agent("p", tmp_path, cli=cli)
     assert result.stdout.strip() == "/this/is/the/callers/home"
+
+
+def test_assistant_text_collects_every_turn_in_order():
+    """Frühere Züge müssen sichtbar bleiben, nicht nur der letzte.
+
+    Mit --output-format text liefert `claude -p` auf stdout nur die letzte
+    Assistant-Nachricht. Ein Judge-Claim der Form "X, bevor Y geschieht" prüfte damit
+    einen Ausschnitt, den er für das Ganze hielt: Ein motion-landing-Eval fiel durch,
+    obwohl das geforderte Storyboard korrekt erzeugt worden war -- nur eine Runde zu früh.
+    """
+    raw = "\n".join([
+        json.dumps({"type": "system", "subtype": "init", "skills": []}),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Storyboard zuerst"}]}}),
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {}},
+            {"type": "text", "text": "dann gebaut"},
+        ]}}),
+        json.dumps({"type": "result", "result": "dann gebaut"}),
+    ])
+    assert assistant_text(raw) == "Storyboard zuerst\ndann gebaut"
+
+
+def test_assistant_text_survives_a_truncated_last_line():
+    """Ein Timeout schneidet die letzte Zeile mitten im JSON ab -- der Rest bleibt gültig."""
+    raw = (
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "brauchbar"}]}})
+        + '\n{"type": "assistant", "message": {"content": [{"type": "te'
+    )
+    assert assistant_text(raw) == "brauchbar"
+
+
+def test_assistant_text_ignores_foreign_events_and_empty_text():
+    raw = "\n".join([
+        "",
+        json.dumps({"type": "user", "message": {"content": [{"type": "text", "text": "der Prompt"}]}}),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}}),
+        json.dumps({"type": "assistant", "message": "kein Objekt"}),
+    ])
+    assert assistant_text(raw) == ""
+
+
+def test_run_agent_fills_text_from_the_stream(tmp_path):
+    """run_agent liefert die Assistant-Sicht in `text`, das Rohe bleibt in `stdout`."""
+    event = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hallo"}]}})
+    cli = fake_cli(tmp_path, f"echo '{event}'\n")
+    result = run_agent("prompt", tmp_path, cli=cli)
+    assert result.text == "hallo"
+    assert "assistant" in result.stdout
