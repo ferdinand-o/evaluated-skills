@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Projekt mit vorbereiteter algorithms.exercises.json: mc-01 hat einen Distraktor (O(n)), der als Best-Case-Komplexität von Bubble Sort mit früher Terminierung ebenfalls valide begründbar ist — der Distraktor-Fallen-Eval aus Spec 13."
+}

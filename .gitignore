@@ -1,0 +1,9 @@
+_in/
+.claude/worktrees/
+.superpowers/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.skills/cache/
+.pytest_cache/

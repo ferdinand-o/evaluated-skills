@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein fälliges Thema, dessen Aufgaben-Datei existiert, aber ein leeres JSON-Array ist — der plausible Fall, wenn exercise-forge legitim keine Aufgabe fand statt gar keine Datei zu schreiben (Review-Fund 3)."
+}

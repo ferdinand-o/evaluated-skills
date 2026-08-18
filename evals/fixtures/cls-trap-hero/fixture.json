@@ -1,0 +1,13 @@
+{
+  "git": true,
+  "description": "Landing Page mit CLS-Falle: der Hero fliegt per margin-top statt per transform ein — Layout-Sprung auf jedem Frame, verstößt gegen die NEVER-Liste von motion-landing.",
+  "commits": [
+    {
+      "message": "feat: Hero-Sektion mit CSS-Animation",
+      "touch": {
+        "index.html": "<!doctype html>\n<html lang=\"de\">\n<head>\n<meta charset=\"utf-8\">\n<title>Landing</title>\n<link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <section class=\"hero\">\n    <h1>Willkommen</h1>\n    <p>Text darunter folgt sofort im normalen Fluss.</p>\n  </section>\n  <p class=\"below\">Weiterer Inhalt darunter, der beim Einfliegen springt.</p>\n</body>\n</html>\n",
+        "styles.css": "body { margin: 0; font-family: system-ui, sans-serif; }\n\n.hero {\n  margin-top: 400px;\n  animation: fly-in 600ms ease-out forwards;\n}\n\n@keyframes fly-in {\n  from { margin-top: 400px; }\n  to { margin-top: 0; }\n}\n\n.below { padding: 2rem; }\n"
+      }
+    }
+  ]
+}

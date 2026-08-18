@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Flask-App — von extract_openapi.py strukturell nicht unterstützt (kein @app.get()/@app.post(), sondern @app.route(methods=[...])). Statische Extraktion findet dadurch null Routen. Prüft, ob rest-api-architect das sichtbar meldet und von Claude manuell ergänzte Einträge als x-verified: false markiert statt sie stillschweigend als geprüft auszugeben."
+}

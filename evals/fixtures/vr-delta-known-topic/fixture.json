@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Vorbereitete Wissensdatei plus eine neue lokale Quelle, die die offene Frage beantwortet. Prüft, ob der Delta-Lauf Bekanntes und Neues sauber trennt, statt das Thema neu aufzurollen."
+}

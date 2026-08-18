@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein fertig aussehender Spec-Entwurf mit einem validen und einem als Prosa formulierten Akzeptanzkriterium — die Contract-Falle für export_stubs.py."
+}

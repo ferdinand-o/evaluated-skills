@@ -1,0 +1,103 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-delta-no-news",
+      "class": "contract",
+      "fixture": "vr-anti-ceremony",
+      "prompt": "Thema-Slug: testkonstante. Es gibt schon eine Wissensdatei dazu unter .skills/verified-research/research/testkonstante.md. Prüf anhand von sources/primary.md, ob sich seit dem 2026-07-01 etwas am Grenzwert geändert hat, und aktualisiere die Wissensdatei nur, falls nötig. Nutze ausschließlich lokale Dateien, keine Websuche. Halt dich kurz.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/testkonstante.md"},
+        {"type": "file_max_lines", "path": ".skills/verified-research/research/testkonstante.md", "max_lines": 20},
+        {"type": "output_matches", "pattern": "(?i)keine (neuigkeiten|änderung(en)?)|kein delta|unveränder"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/verified-research/research/testkonstante.md", "pattern": "(?m)^## Neu"}
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract. Fix-Runde: delta-mode.md mandatierte ursprünglich den einen Satz 'Keine Neuigkeiten seit <Datum>' wörtlich, während die Skill inhaltlich richtig, aber mit anderer Formulierung antwortete ('Keine Änderung ... unverändert'). Die Formulierung war das Problem, nicht die Skill: delta-mode.md verlangt jetzt nur noch, dass 'nichts Neues' unmissverständlich gesagt wird, mit mehreren Beispielformulierungen; die Assertion prüft dieselbe Wortfamilie statt eines einzelnen Satzes. Könnte deep-research das auch erzeugen? Nein: deep-research kennt weder die Wissensdatei-Konvention noch einen Delta-Modus, der explizit 'nichts Neues' feststellt statt einfach zu schweigen."
+    },
+    {
+      "id": "registry-consulted-before-free-search",
+      "class": "contract",
+      "fixture": "vr-registry-hit",
+      "prompt": "Thema-Slug: internes-tool-config. Recherchiere ausschließlich anhand lokaler Dateien unter sources/ (keine Websuche): Wie heißt die Konfigurationsdatei des internen Tools laut sources/internal-tool-docs.example.md? Schau zuerst im Quellenregister unter .skills/verified-research/registry.json nach, bevor du sonst irgendwo suchst, und zitiere den gefundenen Registereintrag im Bericht.",
+      "must": [
+        {"type": "output_matches", "pattern": "Fixture-Primärdokumentation Internes Tool"},
+        {"type": "output_matches", "pattern": "\\[Tier\\s*1"},
+        {"type": "file_exists", "path": ".skills/verified-research/research/internes-tool-config.md"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/internes-tool-config.md", "pattern": "\\[Tier\\s*1"}
+      ],
+      "must_not": [],
+      "notes": "Fix-Runde: Die vierte Assertion verlangte ursprünglich den Registereintragsnamen wörtlich in der Wissensdatei — das schreibt SKILL.md nirgends vor. SKILL.md sagt 'in der Antwort an den Nutzer (der Prosa-Bericht ...) wird er als (laut Register: <name>) zitiert' und meint damit ausdrücklich die Chat-Antwort, nicht die Wissensdatei; delta-mode.mds Claim-Schema kennt nur Tier+Quelle, keinen Registernamen. Die Chat-seitige Assertion (output_matches) prüfte das bereits korrekt und bestand auch im echten Lauf. Die Datei-Assertion prüft jetzt strukturell, dass die Wissensdatei den vom Register gelieferten Tier (1) tatsächlich übernommen hat, statt eine Formulierung zu verlangen, die nie versprochen war. Der Registereintragsname ist frei erfunden und nicht erratbar — er kann nur aus .skills/verified-research/registry.json stammen. Könnte deep-research das auch erzeugen? Nein: deep-research hat kein Register, aus dem dieser exakte Name kommen könnte, und keine Tier-Tag-Syntax."
+    },
+    {
+      "id": "critical-claim-tier3-only-flagged",
+      "class": "contract",
+      "fixture": "vr-critical-tier3-only",
+      "prompt": "Thema-Slug: produkt-x-marktanteil. Kritischer Claim zu prüfen: Liegt der Marktanteil von Produkt X laut sources/blog-aggregator.md bei 42 %? Diese Zahl ist kritisch für eine Entscheidung. Schau zuerst im Quellenregister (.skills/verified-research/registry.json) nach einer besseren Tier-1/2-Quelle zu diesem Anbieter; wenn keine da ist, nutze ausschließlich sources/blog-aggregator.md. Keine Websuche.",
+      "must": [
+        {"type": "output_matches", "pattern": "Nur Sekundärquellen gefunden"},
+        {"type": "output_matches", "pattern": "\\[Tier\\s*3\\s*,\\s*kritisch\\s*,\\s*Quelle:\\s*sources/blog-aggregator\\.md\\]"}
+      ],
+      "must_not": [
+        {"type": "output_matches", "pattern": "\\[Tier\\s*[12]\\s*,\\s*kritisch"}
+      ],
+      "notes": "Das Register enthält für diesen Anbieter absichtlich keinen Treffer — der Claim muss auf Tier 3 bleiben und explizit als sekundärquellenbasiert markiert werden, statt aus Bequemlichkeit hochgestuft zu werden. Die Toleranz der Regex (\\s* statt einem festen Leerzeichen) spiegelt exakt CLAIM_RE aus spotcheck.py — sonst prüft der Eval nicht die Skill, sondern die zufällige Übereinstimmung zweier unabhängig geratener Regexe. Könnte deep-research das auch erzeugen? Nein: 'Nur Sekundärquellen gefunden' und die eckige Tier-Tag-Syntax sind verified-research-eigenes, in SKILL.md mandatiertes Vokabular, kein allgemeines Rechercheergebnis."
+    },
+    {
+      "id": "unknown-source-gets-registry-entry",
+      "class": "contract",
+      "fixture": "vr-unknown-source",
+      "prompt": "Thema-Slug: xyz-leitzins. Quelle sources/unknown-outlet.md steht nicht im Register (.skills/verified-research/registry.json). Bewerte sie nach skills/verified-research/references/rating-rubric.md, trag die Bewertung mit skills/verified-research/scripts/registry.py add ins Register ein (Begründung in der notiz), und nutze sie danach für den Fakt zum Leitzins. Nutze ausschließlich lokale Dateien, keine Websuche.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/verified-research/registry.json", "pattern": "unknown-outlet"},
+        {"type": "file_matches", "path": ".skills/verified-research/registry.json", "pattern": "\"pattern\":\\s*\"[^\"]*unknown-outlet[^\"]*\"[\\s\\S]{0,400}\"notiz\":\\s*\"[^\"]*(Primärquelle|Sekundärquelle|redaktionell|Anreizlage|Interessenkonflikt|Track Record|Aktualität)[^\"]*\""},
+        {"type": "file_exists", "path": ".skills/verified-research/research/xyz-leitzins.md"},
+        {"type": "output_matches", "pattern": "\\[Tier\\s*[1-3]"}
+      ],
+      "must_not": [],
+      "notes": "registry.py add_entry() erzwingt mechanisch, dass die notiz ein Rubrik-Kriterium nennt (RUBRIC_KEYWORDS) — die zweite Assertion prüft exakt dieses Datenformat, nicht nur, dass irgendein Text steht. Könnte deep-research das auch erzeugen? Nein: registry.json mit dem Schlüssel notiz und diesem Validierungscontract existiert nur bei verified-research."
+    },
+    {
+      "id": "fresh-topic-updates-knowledge-file",
+      "class": "contract",
+      "fixture": "vr-fresh-topic",
+      "prompt": "Thema-Slug: policenlaufzeit. Wie lang ist die Standardlaufzeit laut sources/fact.md? Nutze ausschließlich lokale Dateien, keine Websuche. Halte das Ergebnis in der Wissensdatei fest.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/verified-research/research/policenlaufzeit.md"},
+        {"type": "artifact_header", "path": ".skills/verified-research/research/policenlaufzeit.md"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/policenlaufzeit.md", "pattern": "\\[Tier\\s*[1-3]"}
+      ],
+      "must_not": [],
+      "notes": "Contract: 'Jeder Lauf endet mit Update der Wissensdatei' (SKILL.md) — geprüft am Minimalfall ohne vorherige Wissensdatei. Die Kopfzeilen-Konvention (skill: verified-research | schema: 1 | ...) ist eindeutig verified-research zugeordnet. Könnte deep-research das auch erzeugen? Nein: deep-research schreibt keine Wissensdatei unter diesem Pfad/Format."
+    },
+    {
+      "id": "delta-mode-separates-known-and-new",
+      "class": "contract",
+      "fixture": "vr-delta-known-topic",
+      "prompt": "Thema-Slug: produkt-x-preismodell. Es gibt eine Wissensdatei dazu (.skills/verified-research/research/produkt-x-preismodell.md). Seit dem letzten Stand (2026-06-01) gibt es eine neue lokale Quelle: sources/preisliste-2026-08.md — das beantwortet auch die offene Frage zur Preiserhöhung. Recherchiere nur die Differenz, nicht das ganze Thema neu, und aktualisiere die Wissensdatei entsprechend dem Delta-Modus aus references/delta-mode.md. Keine Websuche.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/verified-research/research/produkt-x-preismodell.md", "pattern": "(?m)^## Bekannt$"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/produkt-x-preismodell.md", "pattern": "(?m)^## Neu"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/produkt-x-preismodell.md", "pattern": "10 EUR"},
+        {"type": "file_matches", "path": ".skills/verified-research/research/produkt-x-preismodell.md", "pattern": "12 EUR"}
+      ],
+      "must_not": [],
+      "notes": "Die exakten Überschriften '## Bekannt' / '## Neu' sind in delta-mode.md mandatiert, nicht generisches Recherche-Vokabular. Der alte Fakt (10 EUR) muss neben dem neuen (12 EUR) erhalten bleiben — das prüft, dass nur die Differenz recherchiert wurde, nicht das ganze Thema neu. Könnte deep-research das auch erzeugen? Nein: deep-research hat keinen Delta-Modus und keine Wissensdatei, die 'Bekannt' von 'Neu' trennt."
+    },
+    {
+      "id": "spotcheck-catches-numeric-trap",
+      "class": "contract",
+      "fixture": "vr-spotcheck-trap",
+      "prompt": "Es liegt ein fertiger Recherche-Bericht vor: docs/reports/verified-research-produkt-y.md. Führ die Stichprobenprüfung mit skills/verified-research/scripts/spotcheck.py --report docs/reports/verified-research-produkt-y.md durch. Prüf jeden ausgewählten Claim gegen seine genannte lokale Quelle unter sources/ (keine Websuche) und aktualisiere den Bericht: Weicht ein Wert von der Quelle ab, ersetze sein Tag durch [VERWORFEN nach Spotcheck, Quelle: <adresse>] statt es unverändert stehen zu lassen.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/verified-research-spotcheck.json"},
+        {"type": "file_matches", "path": ".skills/cache/verified-research-spotcheck.json", "pattern": "maximale Nutzerzahl"},
+        {"type": "file_matches", "path": "docs/reports/verified-research-produkt-y.md", "pattern": "VERWORFEN nach Spotcheck"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "docs/reports/verified-research-produkt-y.md", "pattern": "beträgt 500\\. \\[Tier 1, kritisch, Quelle: sources/produkt-y-spezifikation\\.md\\]"}
+      ],
+      "notes": "Der kritische Claim (500) ist zu 100 % in der Stichprobe (spotcheck.py wählt alle kritischen Claims immer) und widerspricht der lokalen Quelle (50) — die Falle ist rein lokal, keine echte Websuche nötig. Könnte deep-research das auch erzeugen? Nein: '.skills/cache/verified-research-spotcheck.json' und die 'VERWORFEN nach Spotcheck'-Markierung existieren nur, weil verified-research spotcheck.py ausgeführt hat — deep-research hat kein solches Skript."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Kleines Python-Paket mit einem Import-Zyklus zwischen zwei weit auseinanderliegenden Modulen (src/domain/models/user.py <-> src/infra/db/session.py), umgeben von unauffälligen Fuellmodulen. Ein Reviewer, der src/api/routes.py und src/domain/services/order.py liest, würde den Zyklus nicht zufällig sehen."
+}

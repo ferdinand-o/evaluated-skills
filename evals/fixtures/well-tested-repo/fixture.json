@@ -1,0 +1,15 @@
+{
+  "git": true,
+  "description": "Kleines, sauber getestetes Python-Paket mit klaren Testkonventionen — der Anti-Zeremonie-Eval. case.py enthaelt bereits strip_punct(), noch ohne Test, weil der Eval-Prompt behauptet, die Funktion sei gerade ergaenzt worden (Review-Runde 2: ohne die echte Funktion in der Fixture untersucht der Agent zuerst die falsche Praemisse und laedt die Skill nie).",
+  "commits": [
+    {"message": "feat: slugify-Paket angelegt", "touch": {
+      "pyproject.toml": "[project]\nname = \"textkit\"\nversion = \"0.1.0\"\ndependencies = []\n\n[project.optional-dependencies]\ndev = [\"pytest\"]\n\n[project.scripts]\ntextkit = \"textkit.cli:main\"\n",
+      "src/textkit/__init__.py": "",
+      "src/textkit/case.py": "def upper_words(text):\n    return ' '.join(w.upper() for w in text.split())\n"
+    }},
+    {"message": "test: upper_words abgedeckt", "touch": {"tests/test_case.py": "from textkit.case import upper_words\n\n\ndef test_upper_words():\n    assert upper_words('a b') == 'A B'\n"}},
+    {"message": "feat: truncate ergaenzt", "touch": {"src/textkit/case.py": "def upper_words(text):\n    return ' '.join(w.upper() for w in text.split())\n\n\ndef truncate(text, length):\n    return text if len(text) <= length else text[:length] + '...'\n"}},
+    {"message": "test: truncate abgedeckt", "touch": {"tests/test_case.py": "from textkit.case import upper_words, truncate\n\n\ndef test_upper_words():\n    assert upper_words('a b') == 'A B'\n\n\ndef test_truncate():\n    assert truncate('abcdef', 3) == 'abc...'\n"}},
+    {"message": "feat: strip_punct ergaenzt, noch ungetestet", "touch": {"src/textkit/case.py": "import string\n\n\ndef upper_words(text):\n    return ' '.join(w.upper() for w in text.split())\n\n\ndef truncate(text, length):\n    return text if len(text) <= length else text[:length] + '...'\n\n\ndef strip_punct(text):\n    return text.strip(string.punctuation)\n"}}
+  ]
+}

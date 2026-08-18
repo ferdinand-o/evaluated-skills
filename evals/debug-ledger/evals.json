@@ -1,0 +1,78 @@
+{
+  "evals": [
+    {
+      "id": "masking-fix-finds-real-root-cause",
+      "class": "contract",
+      "fixture": "masking-fix",
+      "prompt": "In unserem Warenwirtschafts-Prototyp wird STOCK['widget'] manchmal negativ, obwohl reserve() nie mehr abziehen sollte, als da ist. `pytest tests/test_inventory.py` zeigt das Problem. Debugge die Ursache systematisch und schlage einen Fix vor.",
+      "must": [
+        {"type": "file_exists", "path": "docs/debugging/INDEX.md"},
+        {"type": "artifact_header", "path": "docs/debugging/INDEX.md"},
+        {"type": "file_exists", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "artifact_header", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "skill:\\s*debug-ledger"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "## Hypothesen"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)\\|\\s*(bestätigt|verworfen)\\s*\\|"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)events?\\.py"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)idempoten\\w*|zweimal|doppelt|erneut verarbeitet|retry"}
+      ],
+      "must_not": [],
+      "notes": "Eval 1 aus dem Auftrag: die naheliegende Reparatur (auf 0 klammern) maskiert einen zweiten Bug (fehlende Idempotenz in events.py). Nach der Glob-Unterstuetzung in evalkit (Commit a1417b3, uebernommen aus feat/dev-report) auf class: contract gehoben -- docs/debugging/[0-9]*.md matcht ausschliesslich neu angelegte, datierte Ledger-Dateien (nie INDEX.md, das mit 'I' beginnt). Die inhaltlichen must-Assertions verlangen zusammen: Eskalation aufs volle Schema, mindestens eine Hypothesen-Zeile mit einem Verdict aus der geschlossenen Menge Bestaetigt/Verworfen, UND eine Nennung von events.py UND ein Idempotenz-/Wiederholungs-Vokabular -- ein Agent, der nur die Symptom-Klammerung vorschlaegt, ohne events.py je zu erwaehnen, erfuellt diese Kombination nicht. Bekannte Grenze (wie bei dev-reports release-notes-filter-internals): Keyword-Regex statt Judge kann durch stark abweichende Formulierung falsch-negativ werden; siehe docs/known-limits.md."
+    },
+    {
+      "id": "typo-bug-stays-mini",
+      "class": "contract",
+      "fixture": "typo-bug",
+      "prompt": "pytest tests/test_greet.py::test_greeting schlaegt fehl: erwartet 'Hello, Welt!', bekommt 'Helo, Welt!'. Behebe das.",
+      "must": [
+        {"type": "file_exists", "path": "docs/debugging/INDEX.md"},
+        {"type": "artifact_header", "path": "docs/debugging/INDEX.md"},
+        {"type": "file_exists", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "artifact_header", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "skill:\\s*debug-ledger"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "## Hypothesen"}
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein Tippfehler-Bug darf kein volles Schema ausloesen -- keines der vier Eskalationssignale liegt vor. Reviewer-Fund (Luecke 1) behoben: die vorherige Fassung prüfte per output_matches gegen die Chat-Antwort des Agenten mit einem Muster, das u. a. 'root cause' enthielt -- allgemeines Debugging-Vokabular, das auch bei einem korrekt im Mini-Modus belassenen Fix beilaeufig faellt ('die root cause ist ein Tippfehler') und den Eval faelschlich rot gemacht haette. Die neue Fassung prueft stattdessen direkt am Ledger-Artefakt (docs/debugging/[0-9]*.md), ob '## Hypothesen' je angehaengt wurde -- unabhaengig von der Wortwahl der Chat-Antwort, mechanisch, und strenger als die alte Keyword-Regex."
+    },
+    {
+      "id": "env-var-layers-instruments-boundaries",
+      "class": "contract",
+      "fixture": "env-var-layers",
+      "prompt": "python src/layer1_entry.py bricht am Ende mit `RuntimeError: API_TOKEN missing` ab, obwohl Layer 1 den Token setzt. Debugge, an welcher Grenze er verloren geht.",
+      "must": [
+        {"type": "file_exists", "path": "docs/debugging/INDEX.md"},
+        {"type": "artifact_header", "path": "docs/debugging/INDEX.md"},
+        {"type": "file_exists", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "artifact_header", "path": "docs/debugging/[0-9]*.md"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "skill:\\s*debug-ledger"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "## Hypothesen"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)\\|\\s*(bestätigt|verworfen)\\s*\\|"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)layer\\s*2|layer2_process"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)layer\\s*3|layer3_finalize"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)API_TOKEN"},
+        {"type": "file_matches", "path": "docs/debugging/[0-9]*.md", "pattern": "(?i)environment|env\\b|child_env"}
+      ],
+      "must_not": [],
+      "notes": "Eval 3 aus dem Auftrag: Multi-Komponenten-Bug (Env-Var geht zwischen Layer 2 und 3 verloren). Nach der Glob-Unterstuetzung auf class: contract gehoben, aus demselben Grund wie Eval 1 -- die env-var-layers-Fixture bringt kein vorab vorhandenes docs/debugging/ mit, der Glob loest also eindeutig auf die eine neu angelegte Datei auf. Die must-Kombination verlangt Eskalation, eine getestete Hypothese UND die Nennung von layer2_process, layer3_finalize, API_TOKEN und Environment-Vokabular zusammen -- an Grenzen instrumentiert statt geraten wird damit mechanisch, wenn auch ueber Keyword-Naehe statt echtem Verstaendnis, geprueft."
+    },
+    {
+      "id": "archive-hit-tested-first",
+      "class": "behavior",
+      "fixture": "archived-cause",
+      "prompt": "Der Passwort-Reset (start_reset in src/auth.py) haengt manchmal endlos, wenn zwei Nutzer einen aehnlichen Namen haben -- pytest tests/test_auth.py zeigt es. Debugge die Ursache.",
+      "must": [
+        {"type": "file_matches", "path": "docs/debugging/INDEX.md", "pattern": "cache_key.*kuerzt|cache_key.*kürzt"},
+        {"type": "artifact_header", "path": "docs/debugging/INDEX.md"},
+        {"type": "file_matches", "path": "docs/debugging/INDEX.md", "pattern": "skill:\\s*debug-ledger"},
+        {"type": "file_unchanged", "path": "docs/debugging/2026-07-01-login-haengt.md"},
+        {"type": "judge", "claim": "Eine neue Ledger-Datei unter docs/debugging/ (oder ihr Evidenz-Log/Hypothesen-Abschnitt) zeigt, dass der bereits archivierte Fall aus docs/debugging/INDEX.md -- Cache-Key-Kuerzung auf 8 Zeichen -- als erste Hypothese genannt und getestet wurde, bevor eine andere Hypothese aufgestellt wurde."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die neue Ledger-Datei behandelt die Cache-Key-Kuerzung als neu entdeckte, bisher unbekannte Ursache, ohne einen Bezug zum bereits im Archiv dokumentierten Fall herzustellen."}
+      ],
+      "notes": "Eval 4 aus dem Auftrag: Phase-0-Archiv-Check. Bleibt bewusst class: behavior, anders als Eval 1 und 3: Die Fixture bringt bereits eine vorab vorhandene, datierte Ledger-Datei (docs/debugging/2026-07-01-login-haengt.md) mit. evalkit.assertions.resolve_target() waehlt bei mehreren Glob-Treffern den ALPHABETISCH ERSTEN, nicht den neuesten -- und '2026-07-01' sortiert vor jedem realistischerweise spaeteren Erzeugungsdatum. Ein file_matches/artifact_header auf docs/debugging/[0-9]*.md wuerde deshalb strukturell IMMER die alte Archiv-Datei lesen, nie die vom Agenten neu angelegte; eine mechanische Content-Pruefung der neuen Datei ist mit dieser Fixture nicht moeglich, ohne entweder das Fixture-Design zu verbiegen (Archiv in einen Unterordner verschieben, der so nicht existiert) oder ein Datum ins Muster zu hart-codieren (bricht, sobald run_evals.py an einem anderen Tag laeuft). file_unchanged auf dem bekannten Archiv-Pfad und die INDEX.md-Checks (inkl. Skill-Namen-Pruefung, Luecke 3) bleiben mechanisch; der eigentliche Phase-0-Treffer -- wurde der archivierte Fall zuerst getestet -- bleibt Judge-Terrain. \"git\": true ist Pflicht, sonst landet ein neu angelegtes Ledger ausserhalb des Workspace."
+    }
+  ]
+}

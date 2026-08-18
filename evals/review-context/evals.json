@@ -1,0 +1,60 @@
+{
+  "evals": [
+    {
+      "id": "no-soll-is-a-finding-not-a-guess",
+      "class": "contract",
+      "fixture": "review-context-no-soll",
+      "prompt": "Bereite den Review-Kontext für den letzten Commit vor (Range HEAD~1..HEAD), bevor wir /code-review darauf loslassen. Es gibt weder eine Feature-Spec noch eine PR-Beschreibung dazu — erfinde bitte keine.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/review-context.json"},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "Änderung ohne benanntes Soll ist nicht reviewbar\\."},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"source\":\\s*\"none\""}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"source\":\\s*\"commit_messages\""}
+      ],
+      "notes": "R13, der wichtigste Eval: Fehlt jedes Soll, ist das ein Befund, keine Notlage. Ein einzelner Commit im Range zählt seine eigene Subject-Zeile nicht als Soll (Tautologie-Vermeidung) — das must_not prüft genau diese Abgrenzung. Der exakte Wortlaut aus R13 ('Änderung ohne benanntes Soll ist nicht reviewbar.') ist einzigartig für review-context; /code-review selbst kennt diesen Satz nicht."
+    },
+    {
+      "id": "feature-spec-criteria-land-in-spec-compliance-package",
+      "class": "contract",
+      "fixture": "review-context-with-spec",
+      "prompt": "Bereite den Review-Kontext für den letzten Commit vor (Range HEAD~1..HEAD) — es gibt eine Feature-Spec unter docs/specs/wip/.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/review-context.json"},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"source\":\\s*\"feature_spec\""},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"then\":\\s*\"liefert add\\(\\) das Ergebnis gerundet auf 2 Nachkommastellen\""}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "Änderung ohne benanntes Soll ist nicht reviewbar"}
+      ],
+      "notes": "R13/Weiterung: Given/When/Then-Blöcke aus der Feature-Spec landen strukturiert im spec_compliance-Paket (Felder 'given'/'when'/'then', vom Skript selbst erzeugt — kein generischer Reviewer würde dieses exakte JSON-Schema treffen). Das must_not stellt sicher, dass der no_soll-Befund bei vorhandener Spec nicht fälschlich erscheint."
+    },
+    {
+      "id": "mini-diff-stays-small",
+      "class": "contract",
+      "fixture": "review-context-mini-diff",
+      "prompt": "Bereite den Review-Kontext für den letzten Commit vor (Range HEAD~1..HEAD) — es ist nur ein Tippfehler-Fix in einer Konstante.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/review-context.json"},
+        {"type": "file_max_lines", "path": ".skills/cache/review-context.json", "max_lines": 110},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"total_files\":\\s*1"}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, R14 des Auftrags: Die 50-Zeilen-Schwelle aus Spec 04 entfällt (keine Linsen-Engine, kein Subagent-Sparmodus zu steuern), aber das Kontextpaket selbst muss für einen Ein-Zeilen-Diff klein bleiben. Gemessen am realen Skript-Output für diese Fixture (79 Zeilen) mit Marge, damit der Eval nicht bei jeder kleinen Feldergänzung bricht, aber echte Aufblähung (z. B. unnötig viele Geschwisterdateien oder Aufrufer) noch fängt."
+    },
+    {
+      "id": "caller-signatures-land-in-correctness-package",
+      "class": "contract",
+      "fixture": "review-context-caller",
+      "prompt": "Bereite den Review-Kontext für den letzten Commit vor (Range HEAD~1..HEAD) — der Body von add() hat sich geändert, und add() wird an anderer Stelle aufgerufen.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/review-context.json"},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"name\":\\s*\"add\""},
+        {"type": "file_matches", "path": ".skills/cache/review-context.json", "pattern": "\"caller_signature\":\\s*\"def use_add\\(x, y\\):\""}
+      ],
+      "must_not": [],
+      "notes": "R (Weitere Entscheidungen, 'berührtes Symbol hat Aufrufer'): Die Signatur der umschließenden Funktion des Aufrufers landet im correctness-Paket, nicht nur die Aufruf-Zeile. Das Feld 'caller_signature' existiert nur in dieser Skill — /code-review liefert kein solches JSON, die Assertion kann also nicht zufällig durch die global installierte Skill erfüllt werden."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Multi-Tenant-SaaS mit durchgängigem tenant_id-Scoping. Die Anfrage 'CSV-Export für alle Bestellungen' trägt ein verstecktes Mandanten-Scope-Risiko. Trägt Eval 3 aus Spec 03."
+}

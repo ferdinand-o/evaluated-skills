@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Mechanischer Testlauf für Coding-Aufgaben in exercise-forge.
+
+Tier 2: braucht pytest im aufgerufenen Python-Interpreter. Im Eval-Workspace
+ist das nicht garantiert (Rulings D1) — fehlt pytest, meldet dieses Skript
+das benannt und markiert die Aufgabe als 'unverified', nie als 'bestanden'
+(Rulings A4, Spec 00 §3 Sichtbarkeits-Regel).
+
+Führt Musterlösung und Blind-Lösung nie per `import` aus (Rulings A3) —
+beide laufen als eigener `python -m pytest`-Subprozess in einem
+Wegwerf-Verzeichnis.
+
+Fix-Runde 5: `verification` trägt kein `status`-Feld mehr — ein gespeicherter
+Status wäre redundant zum `protocol` (`model_passed`/`blind_passed`) und war
+genau die Fehlerquelle, die Fix-Runde 3/4 in der Praxis traf. Siehe
+`verify_blind.py`s Modul-Docstring für die volle Begründung.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+DEFAULT_TIMEOUT = 60
+
+
+def pytest_available(python: str = sys.executable) -> bool:
+    try:
+        done = subprocess.run(
+            [python, "-m", "pytest", "--version"],
+            capture_output=True, text=True, timeout=DEFAULT_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def run_pytest_against(solution_code: str, test_code: str, workdir: Path, *, python: str = sys.executable) -> dict:
+    """Schreibe `solution.py` + `test_solution.py` nach `workdir` und führe
+    `python -m pytest -q` darauf aus. `test_code` muss `from solution import …`
+    verwenden (Konvention aus `references/task-schemas.md`)."""
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "solution.py").write_text(solution_code, encoding="utf-8")
+    (workdir / "test_solution.py").write_text(test_code, encoding="utf-8")
+
+    try:
+        done = subprocess.run(
+            [python, "-m", "pytest", "-q", "test_solution.py"],
+            cwd=str(workdir), capture_output=True, text=True, timeout=DEFAULT_TIMEOUT, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "detail": f"Timeout nach {DEFAULT_TIMEOUT}s"}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"passed": False, "detail": f"pytest nicht startbar: {exc}"}
+
+    tail = "\n".join((done.stdout + done.stderr).strip().splitlines()[-15:])
+    return {"passed": done.returncode == 0, "detail": tail}
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _verdict(detail: str, protocol: dict | None = None) -> dict:
+    """Kein `status`-Feld mehr (Fix-Runde 5, wie in `verify_blind.py`):
+    `protocol` trägt die rohen Testergebnisse (`model_passed`/`blind_passed`)
+    — daraus, nicht aus einem gespeicherten Wort, leitet `derive_coding_status()`
+    unten (bzw. `export.derive_status_from_protocol()`) den Status ab."""
+    return {"method": "blind_solve_coding", "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
+
+
+def derive_coding_status(protocol: dict | None) -> str:
+    """Nur für Anzeige/CLI-Ausgabe in diesem Skript — nie persistiert. Die
+    typübergreifende Fassung, die `export.py` tatsächlich zum Rendern nutzt,
+    ist `verify_blind.derive_status_from_protocol()` (dorthin dupliziert aus
+    denselben Gründen wie hier, Rulings A3).
+
+    `blind_passed` fehlt komplett, wenn keine Blind-Lösung übergeben wurde
+    (Blind-Gate unvollständig) — das ist `unverified`, nicht `suspicious`.
+    Ein bloßes `protocol.get("blind_passed")` würde beides gleich (falsy)
+    behandeln; deshalb der explizite `isinstance`-Check."""
+    if not isinstance(protocol, dict) or not protocol.get("model_passed"):
+        return "unverified"
+    blind_passed = protocol.get("blind_passed")
+    if not isinstance(blind_passed, bool):
+        return "unverified"
+    return "verified" if blind_passed else "suspicious"
+
+
+def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = sys.executable) -> dict:
+    """Wahrheitstabelle aus Spec 13: Musterlösung muss bestehen, sonst ist die
+    Aufgabe fehlerhaft. Erst danach entscheidet die Blind-Lösung — scheitert
+    sie an bestehender Musterlösung, sind die Tests verdächtig überspezifiziert,
+    nicht automatisch die Blind-Lösung falsch."""
+    if not pytest_available(python=python):
+        return _verdict("pytest nicht verfügbar - Testlauf übersprungen")
+
+    with tempfile.TemporaryDirectory() as td:
+        model_result = run_pytest_against(exercise["model_solution"], exercise["test_suite"], Path(td) / "model", python=python)
+    if not model_result["passed"]:
+        return _verdict(
+            f"Musterlösung fällt durch eigene Tests - Aufgabe fehlerhaft: {model_result['detail']}",
+            {"model_passed": False},
+        )
+
+    if blind_solution is None:
+        return _verdict(
+            "Musterlösung besteht die Tests, aber keine Blind-Lösung übergeben - Blind-Gate unvollständig",
+            {"model_passed": True},
+        )
+
+    with tempfile.TemporaryDirectory() as td:
+        blind_result = run_pytest_against(blind_solution, exercise["test_suite"], Path(td) / "blind", python=python)
+    protocol = {"model_passed": True, "blind_passed": blind_result["passed"]}
+    if blind_result["passed"]:
+        return _verdict("Musterlösung und Blind-Lösung bestehen beide die Tests.", protocol)
+    return _verdict(
+        f"Blind-Lösung fällt durch, obwohl Musterlösung besteht - Tests könnten überspezifiziert sein: {blind_result['detail']}",
+        protocol,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Testet Muster- und Blind-Lösung einer Coding-Aufgabe")
+    parser.add_argument("--exercises", type=Path, required=True)
+    parser.add_argument("--id", required=True)
+    parser.add_argument("--blind-file", type=Path, help="Datei mit der Blind-Lösung")
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--update", action="store_true", help="Ergebnis in die exercises.json zurückschreiben")
+    args = parser.parse_args(argv)
+
+    if not args.exercises.is_file():
+        print(f"Aufgaben-JSON nicht gefunden: {args.exercises}", file=sys.stderr)
+        return 2
+
+    data = json.loads(args.exercises.read_text(encoding="utf-8"))
+    exercises = data.get("exercises", [])
+    match = next((e for e in exercises if e.get("id") == args.id), None)
+    if match is None:
+        print(f"Aufgabe {args.id!r} nicht gefunden in {args.exercises}", file=sys.stderr)
+        return 2
+
+    blind_solution = args.blind_file.read_text(encoding="utf-8") if args.blind_file else None
+    verification = verify_coding(match, blind_solution, python=args.python)
+
+    if args.update:
+        match["verification"] = verification
+        args.exercises.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    status = derive_coding_status(verification.get("protocol"))
+    print(f"{args.id}: {status} — {verification['detail']}", file=sys.stderr)
+    print(json.dumps({"id": args.id, "verification": verification}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
