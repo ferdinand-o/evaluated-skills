@@ -216,6 +216,45 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 ## Judge
 
+- **Zusammengesetzte Claims (mehrere Bedingungen in einem Satz verkettet)
+  sind unzuverlässig — eine Eigenschaft der Kette, kein Einzelfall — und sie
+  können echte Defekte verdecken, nicht nur Rauschen erzeugen.** Bei
+  `exercise-forge` bestanden drei Judge-Claims, die je drei Bedingungen in
+  einem Satz verlangten (etwa „Gate lief UND Konflikt wurde benannt UND
+  Aufgabe ist nicht verified"), bei identischem Commit und identischer
+  Fixture über mehrere `run_evals.py`-Läufe hinweg abwechselnd rot und grün —
+  Lauf 1 verwarf Claim A und akzeptierte Claim B, Lauf 2 genau umgekehrt.
+  Sieht der Judge zwei von drei Bedingungen erfüllt und die dritte nicht
+  eindeutig, verneint er den ganzen Claim; bei einer Drei-Glieder-Kette genügt
+  ein wackliges Glied, um alles zu kippen, und welches Glied gerade wackelt,
+  variiert zwischen Läufen.
+  **Der schärfere Befund kam erst nach der Zerlegung:** Sobald „Gate lief"
+  und „Aufgabe ist nicht verified" als eigene, mechanische Assertionen dastanden
+  (statt Teil derselben Judge-Kette zu sein), fielen zwei der drei Evals an
+  genau der mechanischen „nicht verified"-Assertion — mechanisch, nicht als
+  Judge-Urteil. Der Grund: `status` blieb `verified`, obwohl das Blind-Gate
+  einen Konflikt gefunden und (laut vorherigen, noch zusammengesetzten Läufen)
+  auch benannt hatte. In der verketteten Fassung hatte der Judge diesen
+  Widerspruch **überstimmt** — er sah „Konflikt benannt" erfüllt, urteilte
+  wohlwollend über die Kette als Ganzes, und der eigentliche Defekt (ein
+  gefundener Konflikt, der den Status nicht erreichte) blieb hinter grünen
+  Einzelläufen verborgen, bis die Kette in Einzelteile zerlegt war. Eine
+  zusammengesetzte Prüfung ist damit nicht nur unzuverlässiger als drei
+  einzelne — sie kann *milder* sein als die Summe ihrer Teile, weil der Judge
+  bei überwiegender Erfüllung eher nachsichtig als strikt urteilt. Der Fix:
+  jede Bedingung als eigener, einzeln entscheidbarer Claim (oder, wo
+  mechanisch prüfbar, als mechanische Assertion statt Judge — „Aufgabe X ist
+  nicht als verified ausgewiesen" steht im Artefakt und braucht kein Urteil).
+  Drei einzeln geprüfte Bedingungen sind dabei strenger als eine Kette, die
+  schon an ihrer eigenen Länge scheitert: ein Fehlschlag benennt jetzt, welches
+  Glied fehlte, statt nur „irgendetwas stimmte nicht" — und genau das machte
+  den verdeckten Defekt erst sichtbar. Diese Beobachtung gilt für jede Skill,
+  die Judge-Claims formuliert, nicht nur für `exercise-forge` — siehe
+  `evals/exercise-forge/evals.json` (`mc-distractor-trap-is-caught`,
+  `narrow-criteria-on-open-question-are-flagged`,
+  `overspecified-coding-tests-are-flagged`) für ein durchgeführtes Beispiel
+  der Zerlegung, und den `exercise-forge`-Abschnitt unten für den damit
+  aufgedeckten Skill-Defekt selbst.
 - **Urteile werden über exakte Claim-String-Gleichheit zugeordnet.**
   `evalkit.judge.judge()` matcht die Antwort des Judge-Agenten gegen die
   Behauptungen aus der `evals.json` per `dict`-Lookup auf dem wörtlichen
@@ -1283,6 +1322,97 @@ offen:
   Sektion). Kein Eval deckt diesen Fall ab. Aus einem unabhängigen Review als
   Anmerkung eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst,
   das Thema verschwindet nicht), aber ein unterspezifizierter Update-Fall.
+## exercise-forge
+
+Fünf Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
+Runde 1: ein unabhängiger Review fand zwei Defekte, die inzwischen behoben sind
+(`export.py` glaubte eine von Hand geschriebene `"status": "verified"`;
+`verify_open` verifizierte Aufgaben mit leerer `criteria`-Liste, weil `all([])`
+in Python `True` ist). Runde 2: zusammengesetzte Judge-Claims zerlegt. Runde 3:
+die Zerlegung deckte einen dritten, echten Defekt auf — ein G1-Doktrin-Fix
+(SKILL.md verbietet Hand-Edits) wurde versucht. Runde 4: ein zweiter echter
+Lauf zeigte, dass die Doktrin allein nicht reichte; `export.py` wurde von
+`status` entkoppelt (Ableiten statt Validieren), aber die Prüfassertion
+(`must_not` gegen die rohe Aufgaben-JSON) fiel weiterhin — die Ableitung
+schützte nur das *Rendering*, nicht die Quelle selbst, die auch
+`learning-coach` (Zyklus 14) liest. Runde 5: das `status`-Feld wurde
+vollständig aus dem Schema entfernt — was ableitbar ist, muss nicht
+gespeichert werden, und ein redundantes, frei editierbares Feld war die
+eigentliche Fehlerquelle. Was aus diesen Runden als Grenze bleibt, statt
+behoben zu werden:
+
+- **Das MC-Blind-Gate markiert jede Fehlwahl identisch als `suspicious`, ohne die
+  Begründungsqualität zu bewerten.** Ein einzelner, stochastischer Blind-Löser-Lauf
+  ohne Retry oder Mehrheitsvotum: ein funktionierender, absichtlich schwieriger
+  Distraktor kann mit einer gewissen Grundwahrscheinlichkeit trotzdem `suspicious`
+  auslösen, weil der Blind-Löser einfach falsch geraten hat — von einem echten
+  Befund nicht mechanisch unterscheidbar, nur durch Lesen der zitierten Begründung.
+  `SKILL.md`s Contract wurde in Fix-Runde 1 auf genau diese Grenze zurückgezogen
+  (vorher versprach er implizit ein Urteil über „valide Begründung", das der Code
+  nie gefällt hat).
+- **Karten-Atomarität („eine Information pro Karte") ist mit den vorhandenen
+  Assertion-Primitiven nicht mechanisch prüfbar** — weder im Skill-Code noch im
+  Eval-Harness gibt es ein Primitiv, das Kartenzahl oder Inhaltsbündelung zählt
+  (dieselbe Grenze wie „Negative Strukturprüfung fehlt" oben). Der Eval
+  `twenty-cards-stay-atomic` deckt das deshalb nur als Judge-Claim ab.
+- **Drei zunehmend strengere Fixes für dasselbe Problem, jeder gemessen und
+  für unzureichend befunden, bevor der nächste kam.** (1, Fix-Runde 3) Eine
+  G1-Doktrin gegen Hand-editiertes `verification` („Melden ersetzt nicht
+  Markieren") — ein echter `run_evals.py`-Lauf zeigte: alle drei „Gate findet
+  ein Problem"-Evals fielen weiterhin, `"status": "verified"` stand im
+  Aufgaben-JSON trotz gefundenem und gemeldetem Konflikt. (2, Fix-Runde 4)
+  Ein G2-Mechanismus, aber nur am Lesepfad: `export.derive_status_from_protocol()`
+  berechnete den angezeigten Status aus `verification.protocol` statt aus
+  `status` — ein erneuter echter Lauf zeigte: dieselben drei Evals fielen
+  *immer noch*, weil ihre `must_not`-Assertion die **rohe Aufgaben-JSON**
+  prüft, nicht `export.py`s Rendering. Die Ableitung machte das Rendering
+  korrekt, ließ den Widerspruch aber im Artefakt selbst stehen. (3, Fix-Runde
+  5) Das `status`-Feld vollständig aus dem Schema entfernt — `verification`
+  trägt nur noch `method`/`detail`/`checked_at`/`protocol`. Ohne ein
+  `status`-Feld kann kein Wert mehr geschrieben werden, der dem Protokoll
+  widerspricht; die Fehlerklasse ist an der Quelle beseitigt, nicht nur an
+  einem Konsumenten davon. Referenzimplementierung der Ableitungsregel:
+  `export.derive_status_from_protocol()` bzw. identisch dupliziert
+  `verify_blind.derive_status_from_protocol()`; die Regel selbst steht
+  code-unabhängig in `skills/exercise-forge/references/task-schemas.md`.
+  **Was auch damit nicht geschlossen ist:** `protocol` selbst bleibt eine
+  JSON-Datei, die ein Editor-Werkzeug ändern kann. Wer ein vollständig
+  konsistentes `protocol` von Hand fälscht (bei MC z. B. `chosen_index` auf
+  die tatsächlich korrekte Option setzen), bekommt weiterhin `verified`
+  abgeleitet — eine deutlich aufwändigere, gezieltere Fälschung als ein
+  einzelnes Feld zu schreiben, und bei MC/offenen Fragen zusätzlich gegen die
+  Aufgabendaten selbst geprüft (die Optionen/Kriterien müssten mitgefälscht
+  werden, was `validate_exercise()` an anderer Stelle wieder einschränkt).
+  Eine Signatur oder ein Audit-Log, das `protocol` kryptographisch an den
+  tatsächlichen Lauf bindet, wäre der nächste Schritt und wurde nicht gebaut.
+- **`learning-coach` (Zyklus 14) muss auf das entfernte `status`-Feld
+  nachgezogen werden — sonst bricht die Schnittstelle still.** `learning-coach`
+  liest dieselben Aufgaben-JSONs und meldet unter anderem „keine verifizierten
+  Aufgaben gefunden". Jede Prüfung, die dort `exercise["verification"]["status"]`
+  erwartet, muss durch dieselbe Ableitungsregel ersetzt werden, die
+  `export.py`/`verify_blind.py` verwenden (dokumentiert in
+  `skills/exercise-forge/references/task-schemas.md`, Abschnitt
+  `verification`-Objekt). Diese Skill baut nichts an `learning-coach` — der
+  Nachzieh-Bedarf ist im Bericht dieser Skill vermerkt, zur Weitergabe an die
+  Session, die `learning-coach` baut.
+- **Drei der ursprünglich sechs Judge-Claims waren zusammengesetzt und
+  dadurch unzuverlässig — siehe der neue Punkt im Abschnitt „Judge" oben.**
+  `mc-distractor-trap-is-caught`, `narrow-criteria-on-open-question-are-flagged`
+  und `overspecified-coding-tests-are-flagged` verlangten je drei Bedingungen
+  in einem Satz. Alle drei wurden in je eine mechanische Prüfung „Gate lief"
+  (`method`-Feld im Aufgaben-JSON), eine mechanische Prüfung „nicht verified"
+  (`must_not` auf `"status": "verified"`) und einen einzigen, einzeln
+  entscheidbaren Judge-Claim „Konflikt sichtbar benannt" zerlegt.
+- **Drei der sechs Evals sind gegen einen echten Agenten bestätigt**
+  (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
+  `one-step-harder-changes-the-vector-not-just-wording`). Die drei „Gate
+  findet ein Problem"-Evals sind seit dem Fix-Runde-5-Schema-Fix (`status`
+  komplett entfernt) nicht erneut gegen einen echten Agenten gefahren worden
+  — nur schema-validiert. Zwei vorherige Fixes (Doktrin, dann Ableiten nur
+  beim Rendern) hielten der Messung jeweils nicht stand; diesmal ist der
+  Ausschluss struktureller (das Feld existiert nicht mehr, es gibt nichts
+  mehr zu widersprechen), aber auch das ist erst bewiesen, wenn ein echter
+  Lauf es bestätigt, nicht vorher.
 
 ## Verweise
 

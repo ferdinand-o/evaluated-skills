@@ -109,9 +109,26 @@ und `docs/decisions.md` tragen die reguläre Kopfzeile wie jedes andere
 Wissens-Artefakt, weil beide echte Konsumenten haben (künftige Scans lesen
 `docs/decisions.md`, ein Mensch liest den Spec-Entwurf während der Arbeit).
 
-**Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben) —
-`handoff` und die Stub-Dateien von `feature-spec` sind die einzigen
-Ausnahmen, und beide dokumentieren ihren Grund hier, statt sich
-stillschweigend auf den jeweils anderen Präzedenzfall zu berufen. Wer eine
-neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält,
-dokumentiert sie ebenso nach diesem Muster.
+## Begründete Ausnahme: die Anki-CSV von `exercise-forge`
+
+`skills/exercise-forge/scripts/export.py` schreibt neben dem
+Markdown-Übungsblatt (mit regulärer Kopfzeile) eine Anki-CSV — bewusst **ohne**
+Kopfzeile. Anki interpretiert Zeilen, die mit `#` beginnen, als
+Import-Direktiven (`#separator:comma`, `#html:true`, `#columns:…`); eine
+Kommentar-Kopfzeile nach dieser Konvention läge in genau diesem Namensraum und
+könnte den Import stören oder von Anki fehlinterpretiert werden. Die CSV hat
+nur einen Konsumenten — den Anki-Import des Menschen, der die Datei erzeugt
+hat — und der braucht keine Schema-Version, um die Datei zu verstehen.
+
+Diese Ausnahme gilt nur, solange es bei diesem einen Konsumenten bleibt.
+Parst ein automatisiertes Werkzeug diese CSV künftig maschinell, braucht sie
+eine andere Lösung (z. B. eine begleitende `.meta.json`-Datei), keine
+`#`-Kopfzeile.
+
+**Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben).
+Die drei dokumentierten Ausnahmen sind `handoff.md`, die Stub-Dateien von
+`feature-spec` und die Anki-CSV von `exercise-forge` — jede mit einem hier
+ausgeschriebenen Grund, keine davon, weil die Kopf-Regel optional wäre. Wer
+eine neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält,
+dokumentiert sie hier nach demselben Muster, statt sich stillschweigend auf
+einen Präzedenzfall zu berufen.

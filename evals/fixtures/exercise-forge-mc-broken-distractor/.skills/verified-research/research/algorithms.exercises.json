@@ -1,0 +1,21 @@
+{
+  "_meta": {"skill": "exercise-forge", "schema": 1, "generated": "von Hand für den Distraktor-Fallen-Eval angelegt"},
+  "topic": "algorithms",
+  "exercises": [
+    {
+      "id": "mc-01",
+      "type": "multiple_choice",
+      "learning_objective": "Zeitkomplexität von Bubble Sort im Worst Case benennen",
+      "bloom_level": "verstehen",
+      "difficulty": {"steps": 1, "prerequisites": ["Big-O-Notation"], "transfer": "near", "label": "leicht"},
+      "stem": "Welche Zeitkomplexität hat Bubble Sort?",
+      "options": [
+        {"text": "O(n) — Best Case bei früher Terminierung, falls die Liste bereits sortiert ist", "correct": false},
+        {"text": "O(n^2) — Worst und Average Case", "correct": true},
+        {"text": "O(n log n)", "correct": false},
+        {"text": "O(2^n)", "correct": false}
+      ],
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
+    }
+  ]
+}
