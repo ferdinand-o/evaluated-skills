@@ -651,6 +651,59 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   Agenten-Lauf gegen eine Fixture mit > 20 Aufrufern existiert nicht — der Eval-Umfang war laut
   Auftrag auf vier Evals begrenzt, und die anderen drei Ränder (kein Soll, Spec-Kriterien,
   Anti-Zeremonie) wogen dafür schwerer.
+## verified-research
+
+- **Die Quellenauswahl im echten Web bleibt ungeprüft.** Spec 12s Eval 1 verlangt eine
+  Frage, „deren Top-Suchtreffer ein SEO-Aggregator mit veralteter Zahl ist" — das hängt
+  an lebenden Suchergebnissen und wäre je nach Tagesform grün oder rot, ohne dass sich
+  an der Skill etwas geändert hat. `evals/verified-research/evals.json` prüft deshalb
+  ausschließlich den *Prozess* mit lokalen Fixtures (Register vor Suche, Tier am Claim,
+  Wissensdatei-Update, Delta-Trennung, Registereintrag, spotcheck-Fang) — nie, ob die
+  Skill in einer echten Websuche die richtige Quelle unter vielen findet. Das ist eine
+  bewusste, aber echte Lücke: Ob `verified-research` in der Praxis tatsächlich
+  Primärquellen vor SEO-Aggregatoren bevorzugt, wenn frei gesucht werden muss, ist mit
+  diesem Eval-Set nicht belegt.
+- **Verzeichnis- statt Datei-Ebene für den Projekt-Override (eigene Entscheidung, keine
+  Spec-00-Vorgabe).** Spec 00 §1 sagt für nicht projektgebundene Artefakte nur: Standard
+  ist `~/.skills/`, mit optionalem Projekt-Override — „dasselbe Muster wie persönliche
+  vs. Projekt-Skills". Sie nennt keine Bedingung dafür, *wann* der Override greift.
+  `registry.py resolve_base_dir()` prüft, ob `.skills/verified-research/` im Projekt
+  existiert (Verzeichnis-Ebene) — das ist eine eigene Entscheidung dieser
+  Implementierung, nicht Spec 00. Begründung: Ein Override auf Datei-Ebene (nur falls
+  eine gleichnamige Datei im Projekt schon existiert, wie Spec 12 es für das Register
+  nahelegt) würde bei `research/<thema>.md` nie greifen — eine neue Wissensdatei hat bei
+  ihrer ersten Recherche naturgemäß noch keine gleichnamige Vorgänger-Datei, der erste
+  Schreibzugriff ginge also immer nach `~/.skills/verified-research/` — im Eval-Harness
+  das echte Home-Verzeichnis des Aufrufers (siehe „Isolation" oben). Alle sieben
+  Fixtures legen deshalb `.skills/verified-research/registry.json` im Workspace an,
+  damit dieser Fall im Eval-Set nicht auftritt. Läuft die Skill jedoch in einem Projekt,
+  das weder `.skills/verified-research/` noch eine bestehende Wissensdatei hat,
+  entscheidet dieselbe Entscheidung, ob der allererste Lauf projektlokal oder global
+  landet — das ist eine begründete, aber selbst getroffene Auslegungsentscheidung, die
+  ein künftiger Review absegnen oder verwerfen sollte, keine aus Spec 00 zitierte Regel.
+- **Script-Pfad-Konvention ungeprüft gegen die tatsächliche Eval-Installation.**
+  `evalkit.workspace.prepare()` installiert eine Skill nach
+  `<workspace>/.claude/skills/<name>/`, aber SKILL.md (wie auch bei `dev-report`)
+  instruiert Kommandos mit dem repo-root-relativen Pfad
+  `skills/verified-research/scripts/registry.py`. Ob der Agent im echten Eval-Lauf
+  diesen Pfad findet (z. B. weil er nach einem Fehlschlag selbst nach der Datei sucht)
+  oder die Skill deshalb an allen sieben Evals scheitert, wurde nicht getestet — dieser
+  Auftrag durfte `run_evals.py` nicht ausführen. Das betrifft nicht nur diese Skill,
+  sondern denselben Pfad-Kontrakt, den `dev-report` bereits verwendet.
+- **Beschreibungs-basiertes Routing gegen `deep-research` ist unbelegt.** Die
+  Description in `SKILL.md` grenzt inhaltlich gegen `deep-research` ab (Register,
+  Tiers, Gedächtnis über frühere Läufe), aber ob das reicht, damit Claude Code bei einer
+  realistischen Nutzeranfrage tatsächlich `verified-research` statt der global
+  installierten `deep-research` wählt, ist ungetestet — kein Eval prüft
+  Skill-*Auswahl*, nur das Verhalten, nachdem eine Skill bereits aktiv ist (und die
+  Prompts benutzen absichtlich Vokabular wie „Quellenregister"/„Tier-Bewertung", das
+  die Auswahl in Richtung `verified-research` lenken soll, ohne dass das mechanisch
+  erzwungen wäre).
+- **`unknown-source-gets-registry-entry`s zweite Assertion ist positionsabhängig.**
+  Die Regex verlangt `"pattern"` vor `"notiz"` mit maximal 400 Zeichen dazwischen. Das
+  gilt für jeden Eintrag, den `registry.py add_entry()` erzeugt (Schlüsselreihenfolge
+  ist durch den Code fixiert), bricht aber, falls ein künftiger Agent das Register von
+  Hand statt über `registry.py` bearbeitet und dabei die Feldreihenfolge ändert.
 
 ## Verweise
 
@@ -658,3 +711,4 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 [Plan](superpowers/plans/2026-08-14-eval-harness.md) ·
 [Plan feature-spec](superpowers/plans/2026-08-15-feature-spec.md) ·
 [Plan motion-landing](superpowers/plans/2026-08-15-motion-landing.md)
+[Plan verified-research](superpowers/plans/2026-08-15-verified-research.md)

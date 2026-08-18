@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval spotcheck-catches-numeric-trap"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "sources/produkt-y-spezifikation.md",
+        "name": "Fixture-Primärspezifikation Produkt Y",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Produktspezifikation des Fixture-Anbieters."
+      },
+      {
+        "pattern": "sources/produkt-y-changelog.md",
+        "name": "Fixture-Changelog Produkt Y",
+        "tier": 1,
+        "notiz": "Primärquelle, offizieller Changelog des Fixture-Anbieters."
+      }
+    ]
+  },
+  "allgemein": []
+}

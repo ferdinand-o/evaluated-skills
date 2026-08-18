@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval registry-consulted-before-free-search"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "internal-tool-docs.example",
+        "name": "Fixture-Primärdokumentation Internes Tool",
+        "tier": 1,
+        "notiz": "Primärquelle, direkt vom Projektteam gepflegt, keine Interessenkonflikte, aktuell gehalten."
+      }
+    ]
+  },
+  "allgemein": []
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein vorbereiteter Bericht mit einem kritischen Claim, dessen Zahl der lokalen Quelle widerspricht (500 im Bericht vs. 50 in der Quelle). Prüft, ob spotcheck.py den Claim in die Stichprobe zieht und der Bericht danach die Abweichung markiert."
+}

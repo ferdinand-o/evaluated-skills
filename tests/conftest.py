@@ -12,10 +12,10 @@ def load_script(relpath: str):
     """Lade ein Skill-Skript als Modul, z. B. 'skills/dev-report/scripts/collect.py'.
 
     Registriert das Modul in `sys.modules`, bevor es ausgeführt wird — ohne das
-    scheitert jede Klasse, die `dataclasses` mit `frozen=True` benutzt: deren
-    Maschinerie löst `cls.__module__` über `sys.modules.get(...)` auf und trifft
-    sonst auf `None`, egal ob die Klasse überhaupt `dataclasses`-Introspektion
-    braucht.
+    scheitert jede Klasse, die `dataclasses` benutzt: deren Maschinerie liest
+    `sys.modules[cls.__module__].__dict__` und trifft sonst auf `None`. Der Import
+    stirbt dann mit "'NoneType' object has no attribute '__dict__'" — einem Fehler,
+    der wie ein Defekt im Skill-Code aussieht und nicht wie einer in diesem Helfer.
     """
     path = REPO_ROOT / relpath
     spec = importlib.util.spec_from_file_location(path.stem, path)
