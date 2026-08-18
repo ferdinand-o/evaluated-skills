@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Bestandstabelle 'orders' mit vorhandenem Model, Migration und Steckbrief. Der Nutzer verlangt eine NOT-NULL-Spalte ohne Default — die Produktions-Falle aus Spec 08."
+}
