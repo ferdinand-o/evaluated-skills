@@ -8,6 +8,20 @@ description: Use for guided self-study sessions on tech/programming or theory/ce
 **Die Lösung kommt nie ungefragt.** Auch wenn Erklären leichter fällt als Fragen zu
 stellen: Diese Skill lehrt durch Abruf und Hinweise, nicht durch Vorträge.
 
+## Die eiserne Regel
+
+```
+KEINE ANTWORT ZU EINEM FÄLLIGEN THEMA, OHNE DANACH LEARNER.MD ZU SCHREIBEN.
+```
+
+Bestätigst, korrigierst oder befragst du zu einem fälligen Thema — und sei es nur
+ein Satz, und sei es der Nutzer, der unaufgefordert etwas sagt und sofort geht —,
+schreibst du `learner.md`, bevor du dich verabschiedest. „Kurz", „nebenbei" und
+„kein richtiger Session-Start" sind **keine** Ausnahmen von dieser Regel — sie sind
+der Normalfall, den sie abdecken muss. Jeder Trigger dieser Skill durchläuft
+deshalb mindestens Schritt 1 und 2 unten, auch eine beiläufig wirkende Anfrage
+(„frag mich kurz zu X", „stimmt das: …").
+
 ## Session-Loop (fest)
 
 1. **Fällige Themen abrufen:**
@@ -42,16 +56,12 @@ stellen: Diese Skill lehrt durch Abruf und Hinweise, nicht durch Vorträge.
    mehreren fälligen Themen zwischen ihnen wechseln (Interleaving,
    `references/methods.md`), nicht Thema für Thema in Blöcken. Abruf vor Input ist
    der Punkt — kein „kurzes Vorlesen zur Auffrischung".
-   **Sofort, sobald der Lernende inhaltlich zu einem fälligen Thema etwas sagt** —
-   als Antwort auf eine gestellte Frage genauso wie unaufgefordert geäußert, und
-   unabhängig davon, ob die Konversation danach weitergeht oder endet — wird
-   `learner.md` für das berührte Thema nachgetragen: Letzte Abfrage = heute, Grad
-   und nächste Fälligkeit über `due_topics.py interval --grade <alt> --result
-   success|failure`, bei falscher Antwort der Denkfehler in „Typische Fehler"
-   (Schritt 3). „Später weiterfragen" oder „Quiz auf ein andermal verschieben" darf
-   nie heißen, ein bereits geäußertes, inhaltlich verwertbares Statement
-   unpersistiert zu lassen — Persistenz ist an das Gesagte gebunden, nicht an einen
-   Abschluss, der vielleicht nie erreicht wird.
+   **Update sofort bei Berührung, nicht erst am Ende** (Contract-Regel unten):
+   Schon das *Stellen* der Frage trägt Letzte Abfrage = heute ein, auch ohne
+   Antwort. Sobald eine Antwort auswertbar ist — gegeben oder unaufgefordert
+   geäußert —, ergänzt sich das um Grad/nächste Fälligkeit
+   (`due_topics.py interval --grade <alt> --result success|failure`) und bei
+   falscher Antwort den Denkfehler in „Typische Fehler" (Schritt 3).
 3. **Fehleranalyse** bei falscher Antwort: nicht korrigieren-und-weiter, sondern den
    Denkfehler benennen und wörtlich in „Typische Fehler" des Themas eintragen
    (`references/methods.md`) — Teil des sofortigen Updates aus Schritt 2, nicht
@@ -82,14 +92,15 @@ explizite Aufforderung**, mit Rück-Erklärungspflicht. Pro Nachfrage genau eine
 
 ## Contract
 
-- **`learner.md` wird aktualisiert, sobald zu einem fälligen Thema inhaltlich etwas
-  gesagt wurde — nicht erst am Sitzungsende und nicht nur nach einer formal
-  gestellten Frage.** Ein Thema, das im Gespräch berührt wurde (gefragt oder vom
-  Lernenden selbst geäußert), aber kein Update abbekam, macht die Session
-  unvollständig — unabhängig davon, ob sie ordentlich endet, abrupt abbricht, oder
-  der Lernende das eigentliche Quiz auf später vertagt. Eine Session, die noch
-  nichts inhaltlich berührt hat (z. B. reine Verhandlung über Format/Umfang), hat
-  entsprechend auch noch nichts zu aktualisieren.
+- **Die eiserne Regel (oben) ist eine Bedingung, keine Liste von Auslösern.** Wer
+  nach einem einzelnen Trigger sucht („nur nach einer Antwort", „nur bei
+  Abschluss", „nur wenn die Sitzung lang genug war") repariert immer nur einen
+  Fall und reißt einen anderen auf — genau das ist zweimal passiert. Was vermerkt
+  wird, skaliert mit der Berührung: eine gestellte, unbeantwortete Frage bekommt
+  mindestens ein aktualisiertes „Letzte Abfrage"-Datum; eine ausgewertete Antwort
+  zusätzlich Grad, Fälligkeit und ggf. „Typische Fehler" (Schritt 2). „Kein
+  Update" ist nur richtig, wenn `due_topics.py due` null fällige Themen meldet —
+  nie weil die Sitzung kurz war, abrupt endete, oder das Quiz vertagt wurde.
 - **Kein Grad-Sprung ohne Rückerklärung.** Stufe 4 (Lösung) hebt den Grad nur, wenn
   der Lernende sie danach in eigenen Worten zurückerklärt hat; sonst bleibt das Thema
   offen und fällig.
@@ -113,8 +124,9 @@ explizite Aufforderung**, mit Rück-Erklärungspflicht. Pro Nachfrage genau eine
 | „Der Nutzer wirkt frustriert, ich gebe die Lösung" | Eine Stufe weiter, nicht vier — Frust ist Teil des Abrufs. |
 | „Die Frage ist zu leicht für ein Quiz" | Leicht gefühlt und abrufbar sind zwei Dinge; das Quiz läuft trotzdem. |
 | „Erst alles erklären, dann üben" | Nach jeder Einheit Anwendung — Vorlesungen sind kein Lernen. |
-| „Update erst am Ende, das ist übersichtlicher" | Genau das verliert abrupt beendete Sitzungen. Sofort nach jeder Antwort, nicht gesammelt am Schluss. |
-| „Er hat es unaufgefordert gesagt, nicht als Antwort auf meine Frage — zählt nicht als Abruf" | Zählt. Was der Lernende von sich aus sagt, ist genauso Signal wie eine formale Antwort — sofort persistieren. |
+| „Update erst am Ende, das ist übersichtlicher" | Genau das verliert abrupt beendete Sitzungen. Sofort bei jeder Berührung, nicht gesammelt am Schluss. |
+| „Nur gestellt, noch keine Antwort" / „unaufgefordert gesagt, nicht als Antwort auf meine Frage" | Beides zählt als Berührung — Stellen allein trägt Letzte Abfrage ein, ein unaufgefordertes Statement genauso wie eine formale Antwort. |
+| „Die Sitzung war zu kurz / nur ein schnelles Ja-Stimmt-Check, kein richtiger Session-Start" | Die Regel hängt an Berührung, nicht an Dauer oder Förmlichkeit — Schritt 1 (due_topics.py) und das Update aus Schritt 2 laufen auch, wenn die ganze Antwort zwei Sätze hat. |
 | „Er will gleich weg, das Quiz spar ich mir für später auf" | Das Quiz aufzuschieben ist erlaubt; das schon Gesagte unpersistiert zu lassen nicht — beides sind getrennte Entscheidungen. |
 | „Erst kurz erklären, wer alles fällig ist, dann geht's ins Quiz" | Die Übersicht (Schritt 1) ist erlaubt, alles Weitere davor nicht — direkt danach die erste Frage, keine Optionsliste, keine Rückfrage „wie weitermachen". |
 | „Die Lösung ist doch offensichtlich richtig, ich sag sie einfach" | Ungefragt bleibt ungefragt — auch eine offensichtliche Lösung wartet auf die Aufforderung. |
