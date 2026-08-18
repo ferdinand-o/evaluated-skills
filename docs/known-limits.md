@@ -1109,6 +1109,53 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   und `config.py` tatsächlich zwei verschiedene Dateien sein könnten, führt
   das zu einer unnötigen Serialisierung, nie zu einem übersehenen Konflikt
   (bewusst konservativ, B2).
+## architecture-map
+
+Nach der ersten Review-Runde (3 Defekte, 3 Lücken, 2 Anmerkungen behoben — siehe
+`docs/superpowers/reports/architecture-map-report.md`) bleiben diese Grenzen bewusst
+offen:
+
+- **Eine ID-Kollision blockiert die ganze Extraktion, nicht nur den betroffenen
+  Knoten.** `discover_modules()` (Python wie TS) bricht mit `ExtractError` ab, sobald
+  zwei Dateien auf dieselbe Modul-ID abbilden (z. B. `a/b.py` und `a.b.py`, oder
+  `src/widgets.ts` und `src/widgets/index.ts`) — bewusst so, weil ein still gewählter
+  Gewinner einen ganzen Knoten samt Kanten unbemerkt verschwinden ließe (Review-Defekt
+  D3). Der Preis: eine einzelne, harmlose Kollision irgendwo in einer sehr großen
+  Codebase verhindert die Extraktion des gesamten `--root`, es gibt keinen Teil-Erfolg.
+  Dasselbe gilt für `extract_classes()` bei mehrdeutig referenzierten Basisklassen-
+  Namen über mehrere Hotspot-Dateien hinweg (Review-Anmerkung A1) — dort nur für die
+  jeweils gemeinsam übergebene `--files`-Menge, nicht global.
+- **`external` im Drift-Footer ist optional-defensiv, nicht erzwungen.**
+  `diff_graph()` liest `entry.get("external", [])` — ein Footer-Eintrag, der (von Hand
+  oder durch ein älteres Dokument vor der Review-Fix-Runde) kein `external`-Feld trägt,
+  liefert für die externe Abhängigkeitsmenge stillschweigend „keine Änderung", auch
+  wenn sich real etwas geändert hat. Der Hash selbst (`graph_hash()`) erkennt die
+  Änderung weiterhin zuverlässig (er hasht `graph["external"]` direkt aus der frischen
+  Extraktion, nicht aus dem Footer) — nur der **Diff-Text** für externe Pakete kann bei
+  einem unvollständigen alten Footer leer bleiben, während `status: "drift"` korrekt
+  gemeldet wird.
+- **`layers_summary` ist eine Textempfehlung (G1), keine erzwungene Ausgabe (G2/G3).**
+  `analyze_graph.py` liefert den kanonischen Satz, SKILL.md verlangt die wörtliche
+  Übernahme — nichts im Mechanismus verhindert, dass ein Agent ihn umformuliert oder
+  wegkürzt. Die beiden Evals `cyclic-imports-cycle-named` (erwartet „ungeprüft") und
+  `layer-violation-is-named` (erwartet „geprüft" ohne „un"-Präfix) sind der einzige
+  Schutz, und sie decken nur die zwei gebauten Fixtures ab, nicht jede denkbare
+  Formulierungsabweichung.
+- **Provenienz-Marker-Assertions erschweren Fälschung, verhindern sie nicht
+  kryptografisch.** Die Evals prüfen auf den exakten `%% skill: architecture-map |
+  schema: N | generated: ...`-Kommentar und den `<!-- architecture-map:graph-hashes
+  -->`-Block (Review-Defekt D1) — ein Agent, der SKILL.md liest und diese Marker
+  wortgetreu von Hand nachbaut (inklusive eines plausibel aussehenden 64-stelligen
+  Hex-Strings als `graph_hash`), bestünde die Contract-Evals trotzdem. Der Drift-Check
+  würde eine falsch berechnete `graph_hash` beim nächsten echten Lauf aufdecken
+  (Hash-Mismatch), aber das ist ein späterer, separater Schritt — kein Teil dieser
+  drei Contract-Evals.
+- **`.js`-Import-Auflösung (Review-Lücke L3) deckt nur den Geschwister-Extension-Fall
+  ab.** `_relative_candidates()` probiert bei einer geschriebenen Extension jetzt auch
+  die anderen `SUFFIXES` am selben Pfadstamm — das löst `./foo.js` gegen eine
+  existierende `foo.ts`. Tsconfig-Pfad-Aliase, Barrel-Re-Exports und eine echte
+  `rootDir`/`outDir`-Trennung (kompilierter Pfad zeigt auf ein anderes Verzeichnis als
+  die Quelle) bleiben unverändert außerhalb der Reichweite dieser Tier-1-Textsuche.
 
 ## Verweise
 
@@ -1117,3 +1164,4 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
 [Plan feature-spec](superpowers/plans/2026-08-15-feature-spec.md) ·
 [Plan motion-landing](superpowers/plans/2026-08-15-motion-landing.md)
 [Plan verified-research](superpowers/plans/2026-08-15-verified-research.md)
+[architecture-map-Plan](superpowers/plans/2026-08-17-architecture-map.md)

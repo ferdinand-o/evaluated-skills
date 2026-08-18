@@ -1,0 +1,9 @@
+{
+  "order": ["domain", "application", "infrastructure"],
+  "layers": {
+    "domain": "domain/",
+    "application": "application/",
+    "infrastructure": "infrastructure/"
+  },
+  "thresholds": {"fan_in": 10, "fan_out": 10}
+}
