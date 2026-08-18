@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Drei-Layer-Prozesskette. API_TOKEN wird in Layer 1 gesetzt, geht aber beim Aufruf von Layer 2 nach Layer 3 verloren, weil Layer 2 dem Subprozess ein neues, unvollstaendiges Environment mitgibt."
+}

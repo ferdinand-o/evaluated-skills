@@ -119,6 +119,27 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   `git|code|projekt|handoff|anlegen|erstellen|übergabe` prüft, fällt bei einer
   legitimen Rückfrage durch, die keines dieser Wörter benutzt. Inhärente Grenze
   des Ansatzes, kein Implementierungsfehler.
+- **Behoben (Commit `a1417b3`): Assertion-Pfade dürfen Glob-Muster sein.**
+  `file_exists`/`file_matches`/`file_max_lines`/`artifact_header` lösen `path`
+  jetzt über `Path.glob()` auf, wenn er `*`/`?`/`[` enthält — Skills, deren
+  Artefaktname aus Freitext plus Laufzeitdatum entsteht (z. B. `debug-ledger`s
+  `new_ledger.py`), können ihn damit mechanisch statt per `judge` prüfen
+  (`docs/debugging/[0-9]*.md` trifft jede datierte Ledger-Datei, nie
+  `INDEX.md`). `file_unchanged` lehnt Globs ab, weil die Baseline nur exakte
+  Pfade kennt.
+- **Restlücke am selben Primitiv: „alphabetisch erster Treffer" ist nicht
+  „neuester Treffer".** Bei mehreren Glob-Treffern liest `resolve_target()` für
+  `file_matches`/`artifact_header`/`file_max_lines` immer den alphabetisch
+  ersten — sinnvoll für Determinismus, aber falsch, wenn eine Fixture bereits
+  eine Datei mitbringt, deren Name vor jedem neu erzeugten Namen sortiert.
+  Konkreter Fall: `evals/debug-ledger/evals.json`s `archive-hit-tested-first`
+  bringt ein Archiv mit vorab vorhandener `docs/debugging/2026-07-01-…-haengt.md`
+  mit; ein vom Agenten neu angelegtes Ledger trägt zwangsläufig ein späteres
+  Datum und sortiert danach. `file_matches` auf `docs/debugging/[0-9]*.md`
+  würde deshalb strukturell **immer** die alte Archiv-Datei lesen, nie die neue
+  — der Eval bliebe bei `class: behavior` und einem `judge`-Claim für den
+  Ledger-Inhalt. Es gibt kein Primitiv für „neuester Treffer" oder „Treffer
+  außer Pfad X".
 
 ## Betrieb
 
