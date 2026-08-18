@@ -192,7 +192,11 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   Konvention. `handoff`s Anti-Zeremonie-Eval
   (`anti-ceremony-invents-nothing`) liegt außerdem in der Klasse `behavior`,
   läuft also nicht im billigen `--class contract`-Routine-Gate mit, obwohl gerade
-  dieser Eval typischerweise bei jeder Änderung laufen sollte.
+  dieser Eval typischerweise bei jeder Änderung laufen sollte. `learning-coach`s
+  Anti-Zeremonie-Eval (`nothing-due-stays-honest`) liegt aus demselben Grund
+  ebenfalls in `behavior` (siehe unten, Abschnitt „learning-coach") — SKILL.md
+  mandatiert für den „nichts fällig"-Fall keine exakte Phrase, eine rein
+  mechanische `output_matches`-Regex wäre also zwangsläufig zu eng.
 
 ## Fixtures
 
@@ -1156,6 +1160,129 @@ offen:
   existierende `foo.ts`. Tsconfig-Pfad-Aliase, Barrel-Re-Exports und eine echte
   `rootDir`/`outDir`-Trennung (kompilierter Pfad zeigt auf ein anderes Verzeichnis als
   die Quelle) bleiben unverändert außerhalb der Reichweite dieser Tier-1-Textsuche.
+## learning-coach
+
+- **Fix-Runde 1 (vor jedem echten Agentenlauf, per Review):** Ein unabhängiger
+  Review fand vor der ersten Ausführung von `run_evals.py` zwei strukturelle
+  Fehler in `evals/learning-coach/evals.json`: (1)
+  `frustration-moves-one-rung-not-to-solution` verlangte anhand eines Prompts,
+  der mit „sag's mir einfach" endete, dass die Skill *nicht* zur Lösung geht —
+  `hint-ladder.md` nennt genau diese Formulierung aber als sanktionierten
+  Auslöser für Stufe 4. Behoben, indem der Prompt Frustration ohne explizite
+  Lösungs-Bitte formuliert. (2) Der Pflicht-Anti-Zeremonie-Eval
+  `nothing-due-stays-honest` prüfte mit einer zu engen `output_matches`-Regex
+  (Assertion-Vokabular-Grenze oben) — behoben durch Umstellung auf
+  `class: behavior` mit Judge-Claim.
+- **Fix-Runde 2 (Schnittstelle gegen den echten Erzeuger geprüft):**
+  `due_topics.py::exercises_status()` hatte ein Top-Level-JSON-*Array* für
+  `*.exercises.json` angenommen, abgeleitet aus dem Spec-13-Text, nicht
+  bestätigt — `learning-coach` und `exercise-forge` wurden parallel gebaut, jede
+  Testsuite lief nur gegen die eigene Annahme grün. Der Koordinator prüfte
+  gegen den echten Code (`exercise-forge`s `export.py`: `data.get("exercises",
+  [])`) und fand: die reale Form ist ein JSON-**Objekt** mit
+  `"exercises"`-Liste. Mit der ursprünglichen Annahme hätte `due_topics.py`
+  **jede** real erzeugte Aufgabendatei als `malformed` gemeldet. Korrigiert.
+- **Fix-Runde 3 (erste echte Agentenläufe — zwei reproduzierte Defekte):**
+  Der Koordinator ließ `evals/learning-coach/evals.json` gegen echte
+  Agentenläufe laufen (ich selbst durfte das für die Diagnose nachvollziehen,
+  siehe unten). Zwei Evals fielen in zwei aufeinanderfolgenden Läufen identisch:
+  1. `abrupt-end-still-updates` (mechanisch, `file_unchanged`-Prüfung auf
+     `learner.md`): Bei einem abrupten Sitzungsende schrieb die Skill nichts.
+     Ursache, per direktem `evalkit.dispatch.run_agent`-Aufruf reproduziert: Der
+     Contract band das Update an einen „Abschluss"-Schritt und an eine formal
+     *gestellte* Abruf-Frage — ein vom Lernenden **unaufgefordert** geäußertes,
+     inhaltlich verwertbares Statement („ich glaube range(n) läuft von 0 bis
+     n-1") triggerte den Update-Mechanismus nicht, der Agent bestätigte nur
+     kurz und verabschiedete sich. Behoben: SKILL.md bindet die Persistenz jetzt
+     an jedes inhaltliche Statement zu einem fälligen Thema, unabhängig davon,
+     ob es auf eine gestellte Frage antwortet oder unaufgefordert kommt, und
+     unabhängig vom Sitzungsende.
+  2. `multi-due-session-starts-with-quiz` (Judge): Der erste Diagnoselauf zeigte
+     einen echten Skill-Defekt — die Skill blockierte den gesamten Abruf-Schritt,
+     wenn keine exercise-forge-Aufgaben vorlagen, und bot stattdessen eine
+     Optionsliste („Wie möchtest du weitermachen?") an, statt selbst zu
+     quizzen. Ursache: Der Contract-Satz „Aufgaben stammen aus exercise-forge,
+     nie aus eigener Erfindung" wurde vom Agenten so gelesen, dass er auch die
+     eigene, offene Abruf-Frage verbietet, wenn keine formale Aufgabe existiert
+     — SKILL.md unterschied das nicht klar genug. Behoben, mit einer expliziten
+     zweiten Quiz-Quelle (eigene offene Abruf-Fragen aus Thema/„Typische
+     Fehler", falls keine exercise-forge-Aufgaben vorliegen) und einer klaren
+     Abgrenzung „formale, als verifiziert ausgegebene Aufgabe" vs. „eigene
+     Gesprächsfrage". Nach dieser Korrektur blieb ein *zweiter*, kleinerer
+     Defekt: Die Skill quizzt jetzt korrekt, aber SKILL.md mandatiert selbst
+     eine kurze Themen-Übersicht plus die Pflichtphrase „Keine verifizierten
+     Aufgaben gefunden" vor der ersten Frage (E3-Contract) — der ursprüngliche
+     Judge-Claim verlangte aber „beginnt mit" im wörtlichen Sinn und schloss
+     jede Zusammenfassung aus. Das war ein Claim-Problem, kein Skill-Defekt:
+     Der Claim wurde angepasst, um genau diesen mandatierten, nicht-lehrenden
+     Vorlauf zu akzeptieren, verbietet aber weiterhin Optionslisten und
+     inhaltliche Erklärungen vor der ersten Frage.
+
+  **Für die Diagnose wurde `evalkit/` von `feat/dev-report` übernommen**
+  (`assertions.py`, `dispatch.py`, `judge.py`, `runner.py`, `schema.py`,
+  `workspace.py`, plus die zugehörigen Harness-Unit-Tests) — der Stand in
+  diesem Branch war sonst älter und hätte an einer bekannten Grenze
+  diagnostiziert: `--output-format text` liefert nur die *letzte*
+  Assistant-Nachricht, ein mehrzügiges Tool-Use-Gespräch (wie ein
+  Lern-Session-Start mit `due_topics.py`-Aufruf) wäre für den Judge nur
+  teilweise sichtbar gewesen. Beide Diagnosen liefen über den neuen
+  `assistant_text()`-Pfad (alle Assistant-Züge in Reihenfolge). Nicht
+  ausgeschlossen: dass ein Teil der ursprünglich gemeldeten Fehlschläge
+  tatsächlich auf diese Harness-Grenze zurückging statt auf die beiden hier
+  behobenen Skill-Defekte — beide Ursachen wurden aber unabhängig voneinander
+  bestätigt (Defekt 1 durch reproduzierten Dateizustand, Defekt 2 durch
+  reproduzierten Antworttext mit Optionsliste), nicht nur vermutet.
+- **Fix-Runde 3 war unvollständig: der Auslöser wurde ersetzt, nicht
+  erweitert.** Der Fix in Runde 3 band die Persistenz an „jedes inhaltliche
+  Statement zu einem fälligen Thema" — das reparierte `abrupt-end-still-updates`
+  (dreimal grün), riss aber `short-session-still-updates` auf: Reproduziert,
+  zweimal, gleicher Commit — bei der Kurzform-Anfrage („Ich hab nur 10 Minuten.
+  Lern-Session bitte, Kurzform.") gab es in einem Ein-Zug-Austausch gar kein
+  „inhaltliches Statement" im engen Sinn, nur eine gestellte Frage ohne Antwort,
+  also blieb `learner.md` unverändert. Vorher `abrupt-end` rot, `short-session`
+  grün; nach dem Fix umgekehrt — derselbe Fehler wie beim ersten Mal (E4-Regel
+  „ein einzelner Auslöser repariert einen Fall und reißt einen anderen auf"),
+  nur an einer anderen Stelle.
+- **Fix-Runde 4 — Regel von der Zusage her formuliert, nicht vom Auslöser.**
+  Die drei Persistenz-Evals (`nothing-due-stays-honest`,
+  `short-session-still-updates`, `abrupt-end-still-updates`) beschreiben
+  zusammen eine einzige Bedingung: `learner.md` wird aktualisiert, sobald die
+  Sitzung ein fälliges Thema *in irgendeiner Form* berührt hat — eine gestellte
+  Frage genügt bereits, eine beantwortete erst recht, ebenso ein
+  unaufgefordertes Statement. Der Umfang des Eintrags skaliert mit der
+  Berührung (eine gestellte, unbeantwortete Frage bekommt mindestens ein
+  aktualisiertes „Letzte Abfrage"-Datum); „kein Update" bleibt nur für den
+  Fall richtig, den `nothing-due-stays-honest` prüft (wirklich nichts fällig).
+  SKILL.md trägt die Regel jetzt als eiserne Regel direkt nach der Kernaussage
+  (Codeblock-Imperativ, nach dem Muster von `dev-report`s „KEIN SATZ ÜBER DAS
+  PROJEKT, BEVOR collect.py GELAUFEN IST.") — eine Formulierung mitten in
+  Schritt 2 allein hatte für den Kurzform-Fall nicht genügt. **Alle drei Evals
+  gemeinsam** (ein Lauf, nicht nacheinander) liefen danach synchron im
+  Vordergrund grün. Eine einzelne frühere Stichprobe (asynchron, vor der
+  finalen Bestätigung) zeigte `nothing-due-stays-honest` einmal rot — der
+  Agent hängte eine Randbemerkung zu einem verdächtig weit in der Zukunft
+  liegenden Fälligkeitsdatum plus ein Freiwilligkeits-Angebot an, was die im
+  Claim geforderte Kürze verletzte. Das ist keine Persistenz-Frage (die Datei
+  blieb korrekt unverändert) und nicht Gegenstand dieser Fix-Runde — als
+  eigener, unbehobener Befund unten festgehalten, nicht in die Persistenzregel
+  eingearbeitet.
+- **Verbleibender, unbehobener Befund:** `nothing-due-stays-honest` kann bei
+  Gelegenheit ausführlicher antworten als „wenige Sätze" (z. B. mit einer
+  Anmerkung zu einem auffälligen Fälligkeitsdatum plus einem Angebot, freiwillig
+  zu quizzen) — inhaltlich korrekt und `learner.md` bleibt unangetastet, aber
+  der Judge-Claim verlangt ausdrücklich Kürze. SKILL.md enthält bislang keine
+  explizite Kürze-Anweisung für genau diesen Fall (nur „keine Pflicht-Session
+  herbeireden"); nicht behoben, weil außerhalb des Scopes dieser Fix-Runde
+  (Persistenz-Trigger) und weil `SKILL.md` an der 150-Zeilen-Grenze aus Spec 00
+  §5 liegt.
+- **Doppelte Themen-Slugs in `learner.md` werden erkannt, aber nicht aufgelöst.**
+  `parse_learner()` warnt bei doppeltem Slug, behält aber beide Sektionen. Weder
+  `due_topics.py` noch `SKILL.md` legen fest, welche der beiden Sektionen ein
+  Agent aktualisieren soll, wenn beide denselben Slug tragen — beide zeigen auf
+  denselben Aufgaben-Pfad (`exercises_path_for()` kennt nur den Slug, keine
+  Sektion). Kein Eval deckt diesen Fall ab. Aus einem unabhängigen Review als
+  Anmerkung eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst,
+  das Thema verschwindet nicht), aber ein unterspezifizierter Update-Fall.
 
 ## Verweise
 
