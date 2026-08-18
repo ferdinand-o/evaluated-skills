@@ -704,6 +704,133 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   gilt für jeden Eintrag, den `registry.py add_entry()` erzeugt (Schlüsselreihenfolge
   ist durch den Code fixiert), bricht aber, falls ein künftiger Agent das Register von
   Hand statt über `registry.py` bearbeitet und dabei die Feldreihenfolge ändert.
+## testing-strategy
+
+- **Fix-Runde 3 (zentraler Bestätigungslauf, 3/4): `legacy-trap` war ein
+  echter Harness-Bug, `anti-ceremony` ein echter Description-Defekt.** Der
+  „embedded null byte"-Fehler bei `legacy-trap`, den ich in Fix-Runde 2 als
+  vermutliches Session-Limit-Artefakt eingestuft hatte, war tatsächlich ein
+  Bug in `evalkit/workspace.py`: `dump_changed_files` liest jede geänderte
+  Datei als Text, ein `__pycache__/*.pyc` im Workspace enthält aber Nullbytes,
+  die `errors="replace"` durchlässt und die `subprocess` im Judge-Argument
+  verbietet. Behoben in `evalkit/workspace.py` (Commit `e186556` auf
+  `feat/dev-report`, hier übernommen) — kein Fund dieser Skill, aber die
+  Nullbyte-Sackgasse hätte jede Skill mit Judge-Assertion getroffen, sobald
+  Python im Workspace lief. `anti-ceremony-single-test-stays-short` blieb
+  offen: Diagnose zeigte, dass der Prompt „ich hab eine Funktion ergänzt,
+  brauche einen Test" fast wörtlich auf die eigene SKILL.md-Abgrenzung gegen
+  `test-driven-development` passte („implementing a single already-planned
+  test") — die Description schloss sich damit selbst vom
+  Pflicht-Anti-Zeremonie-Fall aus Spec 00 §2 aus, obwohl der Body (einmal
+  geladen) den Fall korrekt behandelt hätte. Behoben durch schärfere
+  Formulierung: TDD ist der *Zyklus* aus fehlschlagendem Test und Code
+  während aktiver Implementierung, testing-strategy deckt auch das
+  *Zumessen* eines einzelnen neuen Tests für bereits existierenden Code ab.
+  **Diagnose-Lehre:** Ein `--keep-workspace`-Verzeichnis, das `run_evals.py`
+  bereits einmal bespielt hat, darf für einen zweiten, direkten
+  Diagnose-Aufruf nicht wiederverwendet werden, sobald der Prompt
+  Schreibzugriffe auslösen kann — der erste Diagnoseversuch für
+  `anti-ceremony` lief versehentlich im bereits vom echten Lauf veränderten
+  Workspace und bestätigte nur dessen (bereits geschriebene) Testdatei, ohne
+  eigenständige Aussagekraft. Ein frischer `evalkit.workspace.prepare()`-Aufruf
+  behob das.
+- **Fix-Runde 2 (echter Agentenlauf): Der erste reale Lauf bestand 1 von 4 —
+  Ursache war ein Format- und ein Fixture-Defekt, keine Routing-Lücke.** Ein
+  direkter Aufruf mit `--output-format stream-json --verbose` gegen
+  `legacy-trap` und `extension-trap` zeigte für beide einen echten
+  `Skill`-Tool-Aufruf für `testing-strategy`, einen echten Lauf von
+  `detect_stack.py` und einen inhaltlich korrekten, vollständigen
+  Test-Plan-Block — die Skill wurde also zuverlässig geladen. Der Fehlschlag
+  lag an der Assertion: Das Modell formatiert die vier Feldmarken teils mit
+  Markdown-Fettschrift (`- **Repo-Typ:** legacy`), das die ursprüngliche
+  Regex (`^-\s*Repo-Typ:`) nicht zuließ. Behoben durch eine Zeichenklasse
+  `[*_`]*` um Label und Doppelpunkt, in allen vier Feldmarken-Mustern sowie
+  den entsprechenden `must_not`-Mustern in `routing-trap` und
+  `anti-ceremony`. Für `anti-ceremony` zeigte derselbe direkte Aufruf einen
+  echten zweiten Defekt: Der Prompt behauptete, `strip_punct()` sei bereits
+  ergänzt worden, aber die Fixture enthielt die Funktion nie — der Agent
+  untersuchte first die falsche Prämisse (`grep`, `git log -S`, Rückfrage ans
+  Nutzer) und rief die Skill nie auf. Dieselbe Inkonsistenz steckte auch in
+  `extension-trap` (HANDLE_SYNC nie im Fixture-`background.js`) und
+  `legacy-trap` (der Prompt verlangt, „Stornierungen zu erweitern", aber
+  `orders.py` hatte keine Stornierungslogik). Alle drei Fixtures wurden
+  erweitert, damit ihr Inhalt die Prämisse des jeweiligen Prompts stützt.
+  **Zusätzlich verstärkt:** SKILL.md trug bisher keine explizite R6-Regel —
+  nur `known-limits.md` und die Randnotiz in `chrome-extension.md` wussten,
+  dass die Playwright-Fixture ungeprüft ist. Ein Agent, der den Body lädt,
+  aber die Referenz nicht liest, kannte die Regel nicht — genau das erklärte
+  den gefeuerten `must_not` in `extension-trap`s erstem echten Lauf. SKILL.md
+  hat jetzt einen eigenen Abschnitt „Die Playwright-Fixture ist ungeprüft".
+  Ein erneuter Teil-Lauf (2 von 4, unterbrochen durch ein Session-Limit) ist
+  im Bericht (`docs/superpowers/reports/testing-strategy-report.md`)
+  festgehalten; der volle Bestätigungslauf war zum Zeitpunkt dieses Commits
+  noch nicht abgeschlossen.
+- **Die Playwright-Fixture in `chrome-extension.md` ist geschrieben, aber nicht
+  real ausgeführt.** Playwright ist in dieser Umgebung nicht installiert und
+  wurde für diese Arbeit nicht installiert (bewusste Vorgabe, siehe R6 des
+  Implementierungsauftrags). Die Persistent-Context-Fixture, die
+  SW-Termination-Chaostest-Vorlage und das Content-Script-Beispiel gegen
+  Fixture-Seiten sind vollständig ausgeschrieben, aber kein einziges davon
+  hat je in einem echten Browser gelaufen. Insbesondere die
+  `ServiceWorker.stopWorker`-CDP-Sequenz im Chaostest ist ein Muster, keine
+  verifizierte Implementierung — die `versionId`-Ermittlung ist im Kommentar
+  als offen markiert. Wer diese Fixture zum ersten Mal einsetzt, sollte mit
+  einem einzigen trivialen Message-Handler beginnen, bevor echte Routen
+  darauf aufbauen, und mit dem Auftreten realer Fehler rechnen, die erst der
+  erste echte Einsatz zeigt.
+- **Das Legacy-Alterssignal (`erster Commit vor N Jahren`) ist über
+  Eval-Fixtures nicht auslösbar.** `detect_stack.py`s Legacy-Score hat eine
+  Komponente für das Alter des ersten Commits (≥3 Jahre). Der bestehende
+  Punkt „Fixture-Historie ist deklarativ, nicht aufgezeichnet" weiter oben
+  beschreibt die Ursache bereits allgemein: `evalkit/workspace.py` erzeugt
+  jeden deklarierten Fixture-Commit zum Zeitpunkt des Eval-Laufs, nicht mit
+  einem frei wählbaren Datum. Für `testing-strategy` heißt das konkret: Der
+  Legacy-Trap-Eval (`legacy-trap-characterization-not-invented-behavior`)
+  kann `legacy.suspected: true` nur über das Umfangssignal erreichen (Datei-
+  oder Commit-Zahl über der Schwelle, siehe unten), nie über das
+  Alterssignal — dieser Codepfad in `_legacy_score()` ist unit-getestet,
+  aber nie unter Eval-Bedingungen durchlaufen worden.
+- **Fix-Runde: „keine Tests" allein durfte ursprünglich Legacy bedeuten —
+  behoben, dokumentiert als Warnung für künftige Schwellenänderungen.** Die
+  erste Fassung von `_legacy_score()` summierte Punkte über eine feste
+  Schwelle (3), erreichbar allein über „keine Testdateien" (+2) plus „≥8
+  Commits" (+1) — damit galt jedes frische, gerade erst begonnene, noch
+  ungetestete Projekt fälschlich als Legacy. Ein unabhängiger Reviewer hat
+  das gefunden. Behoben: `suspected` ist jetzt eine notwendig-und-hinreichend-
+  Bedingung, keine Summe — „keine Tests" ist notwendig, aber erst zusammen
+  mit einem Alters- **oder** Umfangssignal hinreichend, dessen Schwellen
+  bewusst über das hinausgehen, was ein Projekt in seinen ersten Commits
+  ansammelt (`LEGACY_FILE_COUNT_THRESHOLD = 20`,
+  `LEGACY_COMMIT_COUNT_THRESHOLD = 25`, unverändert `LEGACY_AGE_DAYS_THRESHOLD
+  = 3 Jahre`). Die `legacy-monolith`-Fixture wurde von 10 auf 24 Commits/Module
+  erweitert, um die geschärften Schwellen zu überschreiten. Wer diese
+  Schwellen künftig weiter absenkt, sollte `test_legacy_no_tests_alone_is_not_sufficient`
+  in `tests/test_testing_strategy_detect.py` im Kopf behalten — der Test
+  scheitert, sobald ein kleines, frisches Repo wieder als Legacy gilt.
+- **Fix-Runde: Die Substring-Suche in `pyproject.toml`/`requirements.txt`
+  klassifizierte ursprünglich auch an Kommentaren — behoben.** Ein
+  Kommentar wie `# früher haben wir django evaluiert` reichte, ein reines
+  Click-CLI-Tool als `rest-api` zu klassifizieren, weil der komplette
+  Rohtext durchsucht wurde. Behoben: `_strip_toml_line_comments`/
+  `_extract_toml_dependency_text` entfernen Kommentare zeilenweise und
+  beschränken die Suche auf die Abschnitte, in denen Abhängigkeitsnamen laut
+  TOML-Struktur überhaupt stehen können (`dependencies = [...]` im
+  `[project]`-Wurzelabschnitt, `[project.optional-dependencies]`,
+  `[tool.poetry.(dev-)dependencies]`); `requirements.txt` und `pom.xml`
+  bekamen dieselbe Kommentar-Bereinigung mit ihrer jeweiligen Syntax (`#`
+  bzw. `<!-- -->`). Weiterhin kein echter Parser — `build.gradle`s
+  `//`-Zeilenkommentare werden **nicht** entfernt (nur die für pom.xml
+  ergänzte XML-Kommentarbereinigung greift dort), eine bekannte Lücke
+  derselben Fehlerklasse, die der Review nicht explizit geprüft hat.
+- **Der Router-Muster-Scan ist ein bewusst enger Textabgleich, keine
+  Code-Analyse.** `detect_stack.py` durchsucht nur eine feste Liste bekannter
+  Entry-Point-Dateinamen (`app.py`, `main.py`, `server.js`, …) nach wenigen
+  Regex-Mustern (`@app.get(`, `@RestController`, …), nicht das ganze Repo und
+  nicht mit echtem Parsing. Ein REST-Backend mit unüblichem Einstiegsdateinamen
+  oder einem Framework außerhalb der bekannten Muster liefert dann `primary:
+  null` statt `rest-api` — durch Unit-Tests wie
+  `test_router_pattern_in_entry_file_signals_rest_api` nur für die bekannten
+  Fälle abgesichert, nicht als Vollständigkeitsgarantie.
 
 ## Verweise
 

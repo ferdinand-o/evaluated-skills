@@ -34,7 +34,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | --- | --- | --- |
 | neues Feature, Codebase existiert | feature-spec | brainstorming (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger *(geplant)* | feature-spec |
-| Testplan, Repo-Typ-Frage | testing-strategy *(geplant)* | test-driven-development (Zyklus *während* der Implementierung) |
+| Testplan, Repo-Typ-Frage | testing-strategy | test-driven-development (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
 | Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
 | UI: Stil und Tokens | ui-architect | enterprise-ui (Produktoberfläche), motion-landing (Bewegung) |
