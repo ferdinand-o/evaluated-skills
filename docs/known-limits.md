@@ -406,6 +406,174 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   Storyboard-*Text* in der Chat-Antwort selbst (das, was SKILL.md als
   Pflicht-Output vor jeder Implementierung verlangt) hat keine mechanische
   Prüfung, nur Eval 1s Judge-Claims.
+## visual-summary
+
+- **HTML-Budget ist nur sichtprüfbar, nicht mechanisch.** `references/formats.md`
+  nennt harte Zeilenbudgets für die Markdown-Fassung jedes Formats (mechanisch
+  über `file_max_lines` prüfbar), aber für die HTML-Fassung gibt es kein
+  Äquivalent — die Zeilenzahl einer Markup-Datei sagt nichts über die gerenderte
+  Länge (Whitespace, eingebettetes CSS, Slot-Füllung variieren stark). Das
+  HTML-Budget bleibt Teil des Selbst-Audits aus `SKILL.md` und ist damit G1
+  (Selbstauskunft), nicht mechanisch erzwungen — keiner der sechs Evals prüft es.
+- **`tokens.css` ist in vier HTML-Templates dupliziert, nicht per Build
+  zusammengeführt.** Jedes der vier `assets/*.html`-Templates bettet den
+  vollständigen Inhalt von `assets/tokens.css` in ein eigenes `<style>`-Tag ein
+  (Entscheidung für Selbstenthaltenheit ohne Build-Schritt, siehe
+  `docs/superpowers/plans/2026-08-15-visual-summary.md`). Eine künftige
+  Token-Änderung muss von Hand in allen fünf Dateien (`tokens.css` plus vier
+  Templates) synchron gehalten werden — nichts erzwingt das mechanisch, ein
+  Auseinanderlaufen fiele nur bei einer visuellen Stichprobe auf.
+- **Der Ausgabepfad ist ohne Nutzer-Slug nicht vorhersagbar.** Ohne Sammel-Skript
+  gibt es keine deterministische Pfadberechnung wie bei dev-reports
+  `report_path`. Die Skill leitet ohne Vorgabe einen Slug aus der Kernthese ab —
+  das ist für echte Nutzung gewollt, macht den Pfad für einen externen
+  Konsumenten (ein Skript, das `docs/summaries/` durchsucht) aber nur nach dem
+  Muster `<format>-<slug>` vorhersagbar, nie nach einem konkreten Dateinamen. Alle
+  sechs Evals in `evals/visual-summary/evals.json` umgehen das, indem der Prompt
+  den Slug ausdrücklich nennt — ein Prompt ohne Slug-Vorgabe ist damit
+  eval-seitig ungetestet.
+- **Referenzmarken-Adjazenz und -Legitimität sind nur für einen Fall über einen
+  Judge geprüft, nicht generell mechanisch.** Der Contract aus `SKILL.md`
+  verlangt, dass jede Zahl unmittelbar eine Referenzmarke mit einer echten
+  Fundstelle trägt. Mechanisch geprüft wird das nur indirekt (Existenz von Zahl
+  und Seitenreferenz getrennt in `buried-number-gets-page-ref`) bzw. strukturell
+  über einen Judge-Claim im einen behavior-Eval
+  (`unsupported-number-needs-a-reference-mark`). Fix-Runde 2 hat diesen einen
+  Judge-Claim geschärft, damit er nicht nur die Form (Zahl+Marke+Listeneintrag),
+  sondern auch die Legitimität des Listeneintrags prüft (eine Pseudo-Referenz
+  wie „Nutzerangabe, nicht geprüft" besteht die Form, aber nicht mehr den
+  Claim) — das gilt aber weiterhin nur für diesen einen Eval-Fall. Ein
+  genereller Regex-Check „jede Zahl im Dokument braucht eine unmittelbar
+  folgende Marke" wurde bewusst nicht gebaut — er träfe legitime
+  Nicht-Beleg-Zahlen wie Jahreszahlen in Überschriften oder das Datum in der
+  Meta-Zeile falsch positiv. Die Lücke ist eine bewusste Entscheidung, aber eine
+  echte Grenze der Eval-Abdeckung: eine zweite unbelegte oder unecht belegte
+  Zahl in einem sonst korrekten Dokument hat keinen zweiten Eval, der sie fängt.
+- **Das Inhaltsmodell ist kein eigenständiges Artefakt.** Tier 0 ohne Skript
+  bedeutet: Es gibt kein `model.json`, das Kernthese, Belege, Datenpunkte und
+  offene Punkte vor dem Rendern festhält. Die Quellenbindung wird erst im
+  gerenderten Output sichtbar (Referenzmarken plus Quellenliste). Ein Konsument,
+  der das Modell selbst lesen wollte — unabhängig vom gewählten Medium — hat
+  dafür kein Artefakt, nur die beiden Renderings.
+- **Die dokumentweite Referenzmarken-Nummerierung ist nur als Regel dokumentiert,
+  nicht mechanisch erzwungen.** Ein unabhängiger Review (Fix-Runde 2) fand: Der
+  Platzhalter `{{REF_ID}}` tauchte in mehreren unabhängigen REPEAT-Blöcken auf
+  (Belege, Chart-Zeilen, Quellenliste), ohne dass irgendwo stand, dass es ein
+  einziger, blockübergreifender Zähler ist — ein gutgläubig ausfüllender Agent
+  hätte plausibel pro Block bei 1 neu gezählt, dann zeigen Referenzmarken ins
+  Leere. Behoben durch einen expliziten Kommentar am ersten REPEAT-Block in
+  allen acht Templates, eine Contract-Zeile in `SKILL.md` und eine neue
+  Gegenprobe im Selbst-Audit. Was damit noch **nicht** existiert: kein Eval
+  prüft mechanisch, dass jede vergebene Marke im Text einen Quellenlisten-Eintrag
+  hat und umgekehrt — die Gegenprobe ist G1 (Selbstauskunft im Selbst-Audit),
+  keiner der sechs Evals verifiziert sie an einem echten, mehrere Belege
+  tragenden Dokument. Ein Agent, der die neue Regel liest, aber trotzdem pro
+  Block neu zählt, würde von keinem der sechs Evals auffällig.
+- **`chat-distills-three-decisions` ist seit Fix-Runde 2 class `behavior` statt
+  `contract`.** Ursprünglich fing ein `must_not` nur das Wort „Kaffee" aus der
+  Rausch-Fixture — jede andere Rausch-Nachricht (Wetter, Meeting-Logistik,
+  Feierabendbier, Urlaub) wäre ungehindert durchgerutscht, ohne den Eval rot zu
+  machen (dieselbe Fehlerklasse wie dev-reports `must_not`-Regexe). Der Eval
+  läuft jetzt mit einem Judge-Claim, der Vollständigkeit und Abwesenheit von
+  Rauschen strukturell verlangt — kostet damit einen Judge-Aufruf mehr und läuft
+  nicht mehr im billigen `--class contract`-Routine-Gate mit.
+- **Fünf Fixtures trugen `"git": false`, obwohl ihre Evals einen Repo-Pfad
+  prüften — der erste echte Lauf ging deshalb 0 von 6 bestanden durch.**
+  `SKILL.md` legt fest: Repo (`.git` im cwd oder Elternverzeichnis) →
+  `docs/summaries/…`, sonst `~/.skills/visual-summary/summaries/…`. Fünf der
+  sechs Fixtures (`buried-number-doc`, `chat-three-decisions`, `unbelegt-draft`,
+  `budget-trap-doc`, `trivial-note`) trugen `"git": false`, während ihre
+  Assertions durchweg Pfade unter `docs/summaries/` erwarteten. Die Skill hat
+  sich korrekt verhalten — ohne `.git` im Workspace griff der Nicht-Repo-Zweig,
+  und jede Zusammenfassung landete im echten Home-Verzeichnis des ausführenden
+  Nutzers, außerhalb jeder Workspace-Beobachtung (`evalkit.workspace.snapshot()`
+  sieht nur Dateien unter der Workspace-Wurzel, siehe oben). Kein einziger
+  `file_exists`/`file_matches`/`file_max_lines` konnte das je erreichen. Behoben
+  durch `"git": true` in allen fünf Fixture-Manifesten — `empty-dir` (für
+  `bare-request-triggers-triage`, das absichtlich keinen Repo-Pfad erwartet)
+  bleibt `false`.
+  **Die Lehre, allgemein für künftige Skills dieser Sammlung:** Eine
+  Fixture, die einen conditionalen Ablageort prüft (Repo vs. kein Repo, wie hier;
+  ebenso denkbar bei anderen Skills mit ähnlicher Verzweigung), muss die
+  **Vorbedingung** dieses Zweigs selbst herstellen. Assertions und Fixture
+  beschrieben hier zwei verschiedene Welten — der Eval-Autor sah beim Schreiben
+  der Assertions „wir sind im Repo-Fall" vor Augen und beim Schreiben der
+  Fixture „kein Grund für ein Repo, die Skill braucht ja nur eine Datei" —, und
+  weil jede Seite für sich gelesen plausibel wirkte, fiel die Lücke beim
+  Selbst-Review nicht auf. Erst der reale Agentenlauf zeigte es. Eine Prüfung,
+  die das mechanisch vorab abfangen würde (z. B. ein Schema-Lint, der bei
+  `file_exists`-Pfaden unter einem repo-typischen Präfix wie `docs/` ein
+  `"git": true` in der referenzierten Fixture verlangt), existiert im
+  Eval-Harness nicht — auch das eine Lücke für später.
+- **`bare-request-triggers-triage`s `output_matches`-Regex war zu eng an
+  Schlüsselwörter gebunden — ebenfalls erst im echten Lauf aufgefallen.** Die
+  ursprüngliche Regex verlangte beide Themen (Publikum, Zweck) über feste
+  Wortlisten (`wer\s+liest|leser|zielgruppe|adressat|publikum` bzw.
+  `entscheidung|handlung|zweck|wofür|folgen\s+soll`) plus ein Fragezeichen. Die
+  tatsächliche Formulierung der Skill traf keines der Publikums-Schlüsselwörter
+  (plausibel z. B. „Für wen ist das gedacht?"), obwohl inhaltlich beide Fragen
+  gestellt wurden — dieselbe „spröde Keyword-Regex"-Grenze von `output_matches`,
+  die weiter oben unter „Assertion-Vokabular" bereits als inhärent (nicht als
+  Implementierungsfehler) geführt wird, hier aber trotzdem produktiv zugeschlagen
+  hat. Fix-Runde 3: Eval auf class `behavior` umgestellt, die Regex durch einen
+  Judge-Claim ersetzt, der die beiden Themen inhaltlich statt wortwörtlich
+  prüft. Das `must_not` (`file_absent`) bleibt als mechanischer, wortunabhängiger
+  Riegel bestehen.
+- **`bare-request-triggers-triage`s `must_not: file_absent` hatte die Polung
+  verkehrt herum — der Eval verlangte damit sein eigenes Gegenteil.**
+  `must_not` + `file_absent` heißt „es darf nicht sein, dass die Datei fehlt",
+  also *muss* sie existieren. Der Eval soll aber belegen, dass die Skill bei
+  „Fass das zusammen." erst fragt statt zu schreiben — er verlangte also exakt
+  das Gegenteil seines eigenen Zwecks, und ein korrektes Nicht-Schreiben wurde
+  als Verstoß gemeldet. `evalkit/runner.py` warnt im Code-Kommentar zu `grade()`
+  ausdrücklich vor genau dieser Polungsfalle bei Judge-Claims in `must_not` —
+  dieselbe Logik gilt unverändert für mechanische Typen wie `file_absent`.
+  Behoben: `file_absent` jetzt in `must`. Zusätzlich, auch am echten Lauf
+  verifiziert: selbst mit korrigierter Polung hätte die Assertion nichts
+  bewacht, weil die verwendete Fixture `empty-dir` `"git": false` trägt — ohne
+  `.git` ist `docs/summaries/…` unabhängig vom Skill-Verhalten immer abwesend
+  (siehe Repo-Vorbedingungs-Lehre oben), dieselbe Fehlerklasse ein drittes Mal.
+  Neue eigene Fixture `bare-request-repo` (`git: true`, ohne jedes Material)
+  macht das Nicht-Vorhandensein wieder aussagekräftig. `empty-dir` blieb
+  unangetastet — die Fixture gehört laut ihrer eigenen Beschreibung `handoff`
+  und wird von dessen Evals mitbenutzt.
+- **Der dritte, tiefste Fund: Die Skill wurde für den bare „Fass das
+  zusammen."-Prompt anfangs gar nicht erst aufgerufen — kein Body-Text-Problem,
+  sondern ein Routing-Problem.** Diagnose per `--evals-dir` mit einer
+  Wegwerf-Sammlung und `--keep-workspace`, dann der Agent erneut direkt mit
+  `--output-format stream-json --verbose` im selben Workspace gestartet, um
+  Tool-Aufrufe statt nur der Endantwort zu sehen: Der Judge verneinte den
+  Triage-Claim, weil im Transcript **kein einziger `Skill`-Tool-Aufruf**
+  vorkam — der Agent ging direkt zu `Bash`/`Read` (Verzeichnis auflisten,
+  README lesen) und lieferte eine generische Rückfrage nach dem Material,
+  ohne je `visual-summary`s SKILL.md zu laden. Zwei Runden Textänderungen an
+  `SKILL.md`s Ablauf-Abschnitt (kombinierte Rückfrage statt „erst Material,
+  dann Triage", inklusive wörtlichem Beispieltext) hatten dadurch **keine**
+  Wirkung — der Body wird nie gelesen, wenn die Skill nicht aufgerufen wird.
+  Erst eine Ergänzung der Frontmatter-`description` (expliziter Hinweis, dass
+  auch ein material-loser „fass das zusammen" ohne offensichtlichen Inhalt im
+  Arbeitsverzeichnis in diese Skill routet, statt in generische
+  Verzeichnis-Exploration) brachte den Agenten dazu, den `Skill`-Tool-Aufruf
+  zu machen — danach griff der bereits korrigierte Ablauf-Text sofort und
+  fehlerfrei (beide Fragen in einer Antwort, mit Format-Tabelle). **Lehre:**
+  Ein Verhaltensdefekt bei Skills mit natürlichsprachlichem Routing kann in
+  der `description` sitzen, nicht im SKILL.md-Body — und ein Body-Fix, der im
+  echten Lauf wirkungslos bleibt, ist kein Beweis, dass der Body falsch war;
+  es kann heißen, dass er nie gelesen wurde. `--output-format stream-json
+  --verbose` (statt nur `text`) macht diesen Unterschied sichtbar, indem es
+  Tool-Aufrufe statt nur die Endantwort zeigt.
+- **Der Diagnose-Lauf zeigte zusätzlich, dass die Prozessisolation lückenhafter
+  ist als der bestehende Isolation-Abschnitt oben vermuten lässt.** Das
+  `system.init`-Event des CLI-Laufs listete unter `skills` nicht nur
+  `visual-summary` aus dem Projekt-Workspace, sondern auch gut ein Dutzend
+  offensichtlich persönliche, global installierte Skills (`deep-research`,
+  `dataviz`, `update-config`, `code-review`, `schedule`, `run-skill-generator`
+  u. a.), obwohl der Runner `--setting-sources project` setzt. Konsistent mit
+  der bereits dokumentierten Grenze „Die Prozessumgebung des Agenten ist nicht
+  isoliert" (siehe oben, `$HOME` wird nicht umgebogen) — hier aber am
+  `skills`-Feld eines echten Laufs sichtbar bestätigt, nicht nur vermutet:
+  Ein Eval kann in einer Umgebung mit vielen konkurrierenden, dem Skill fremden
+  Skills laufen, was Routing-Entscheidungen zusätzlich beeinflusst.
 
 ## Verweise
 
