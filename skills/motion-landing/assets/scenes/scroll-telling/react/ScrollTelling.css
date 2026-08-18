@@ -1,0 +1,58 @@
+.scroll-telling {
+  height: 300vh;
+  position: relative;
+}
+
+.scroll-telling__viewport {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+}
+
+.scroll-telling__panel {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--motion-fg, #f4f5f7);
+  /* Grundzustand: statisch und lesbar, bevor Feature-Detection entscheidet —
+     Inhalte sind ohne JS lesbar, Animation ist Enhancement. */
+  opacity: 1;
+}
+
+.scroll-telling__panel p {
+  color: var(--motion-muted, #a3a9b7);
+  max-width: 50ch;
+  margin: 0;
+}
+
+/* Nur wenn React per useEffect Unterstützung festgestellt hat, bekommen die
+   Panels ihre Crossfade-Choreografie — identische Technik zur Vanilla-Demo. */
+[data-supports-scroll-driven="true"] .scroll-telling__panel {
+  opacity: 0;
+  animation: scroll-telling-cross-fade linear both;
+  animation-timeline: scroll(nearest);
+}
+[data-supports-scroll-driven="true"] .scroll-telling__panel[data-index="0"] { animation-range: 0% 33%; }
+[data-supports-scroll-driven="true"] .scroll-telling__panel[data-index="1"] { animation-range: 25% 66%; }
+[data-supports-scroll-driven="true"] .scroll-telling__panel[data-index="2"] { animation-range: 58% 100%; }
+
+@keyframes scroll-telling-cross-fade {
+  0% { opacity: 0; transform: translateY(24px); }
+  20% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-supports-scroll-driven="true"] .scroll-telling__panel {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+}

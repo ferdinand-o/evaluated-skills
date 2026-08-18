@@ -1,0 +1,13 @@
+{
+  "git": true,
+  "description": "Scroll-Telling-Szene mit kaputtem reduced-motion-Zustand: prefers-reduced-motion versteckt den Panel-Inhalt komplett (display: none), statt ihn statisch und sichtbar zu zeigen.",
+  "commits": [
+    {
+      "message": "feat: Scroll-Telling-Panel",
+      "touch": {
+        "index.html": "<!doctype html>\n<html lang=\"de\">\n<head>\n<meta charset=\"utf-8\">\n<title>Sequenz</title>\n<link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n  <section class=\"sequence\">\n    <article class=\"panel\">\n      <h2>Erster Gedanke</h2>\n      <p>Text, der bei reduzierter Bewegung komplett verschwindet statt statisch zu bleiben.</p>\n    </article>\n  </section>\n</body>\n</html>\n",
+        "styles.css": "body { margin: 0; font-family: system-ui, sans-serif; }\n\n.panel {\n  opacity: 0;\n  animation: reveal 800ms ease-out forwards;\n  animation-timeline: view();\n}\n\n@keyframes reveal {\n  to { opacity: 1; }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .panel {\n    display: none;\n  }\n}\n"
+      }
+    }
+  ]
+}
