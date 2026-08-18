@@ -574,6 +574,83 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   `skills`-Feld eines echten Laufs sichtbar bestätigt, nicht nur vermutet:
   Ein Eval kann in einer Umgebung mit vielen konkurrierenden, dem Skill fremden
   Skills laufen, was Routing-Entscheidungen zusätzlich beeinflusst.
+## review-context
+
+- **Der Uncommitted-Modus ist im Eval-Harness nicht prüfbar.** `collect_context.py` kann ohne
+  `--range` das Arbeitsverzeichnis gegen HEAD reviewen (der realistischste Fall: „review meine
+  gerade gemachte, noch nicht committete Änderung"), aber `evalkit.workspace.prepare()`
+  hinterlässt nach jedem Fixture-Aufbau einen sauberen Baum — dieselbe Grenze, die oben bei
+  `dirty-worktree` schon steht. Alle vier Evals in `evals/review-context/evals.json` nutzen
+  deshalb `--range HEAD~1..HEAD`; der Uncommitted-Pfad ist nur durch Unit-Tests
+  (`test_uncommitted_mode_reads_worktree`, `test_main_writes_cache_file`-Nachbarn) abgedeckt,
+  nicht durch einen echten Agenten-Lauf.
+- **Ob eine Commit-Message als Soll zählt, wird am Inhalt gemessen, nicht an der Anzahl der
+  Commits im Range — eine eigene Entscheidung, nicht aus Spec 04 oder R13 zwingend ableitbar.**
+  (Fix-Runde: Die erste Fassung nutzte eine Mindestanzahl von zwei Commits als Proxy und wurde
+  live widerlegt — eine ausführliche, klar zielbeschreibende Message wurde als „nicht reviewbar"
+  gemeldet, nur weil sie allein stand. Die Anzahl der Commits sagt nichts über die Aussagekraft
+  ihrer Messages.) Die jetzige Regel (`_is_meaningful_commit_message()`): eine Message zählt,
+  wenn sie einen Body jenseits der Betreffzeile hat, oder wenn ihre um ein Conventional-Commit-
+  Präfix bereinigte Betreffzeile mindestens `MIN_SUBJECT_CHARS` (20) Zeichen hat und kein reiner
+  Platzhalter ist (`GENERIC_COMMIT_SUBJECTS`: `wip`, `fix`, `tmp`, `misc`, …). Diese Schwellen
+  sind selbst wieder eine Heuristik — eine 19 Zeichen lange, aber inhaltsreiche Betreffzeile
+  zählt nicht, ein 20 Zeichen langes Füllwort ohne Aussage schon, solange es nicht im
+  Platzhalter-Set steht.
+- **Aufrufer-Suche ist namensbasiert, ohne Scope- oder Import-Analyse — und übersieht deshalb
+  nicht zu wenige, sondern zu viele Treffer.** (Fix-Runde: Der ursprüngliche Text hier behauptete
+  das Gegenteil — `self.name(...)`-Aufrufe seien falsch-negativ, würden also übersehen. Live
+  widerlegt: `find_callers()` grept `\bname\s*\(` über den ganzen Baum, und der Wortgrenzen-Test
+  `\b` steht bereits zwischen einem `.` und dem folgenden Namen — `self.add(x)` **matcht**, wird
+  also mitgezählt. Reproduziert am eigenen Skript: Ein Review von `add()` zählt
+  `seen_dirs.add(dir_rel)` aus `gather_conventions()` als Treffer mit, obwohl es `set.add()` ist,
+  nicht die berührte Funktion.) Echte falsch-negative Fälle bleiben ein Import-Alias
+  (`from x import name as anders`) und ein Aufruf, dessen öffnende Klammer durch einen
+  Zeilenumbruch vom Funktionsnamen getrennt ist. Die Deckelung auf 20 Treffer wirkt bei
+  falsch-positiven Treffern schädlicher als bei falsch-negativen: Füllt Rauschen (fremde
+  `.add()`-artige Aufrufe) die ersten 20 Plätze, verdrängt es echte Aufrufer aus der gezeigten
+  Liste, statt nur zu fehlen — der Reviewer sieht eine volle, aber irreführende Liste statt einer
+  ehrlich unvollständigen.
+- **`_has_meaningful_spec_content()` prüft jetzt Inhalt statt Existenz, aber mit einer eigenen
+  Magic-Number-Grenze.** (Fix-Runde: Die erste Fassung von `find_feature_spec()` prüfte nur, ob
+  überhaupt eine `.md`-Datei unter `docs/specs/wip/` lag — eine leere Datei genügte, um
+  `resolve_soll()` `source == "feature_spec"` melden zu lassen und damit den Kernbefund
+  „nicht reviewbar" fälschlich zu unterdrücken. Live reproduziert, jetzt behoben.) Die Behebung
+  selbst bringt eine neue, kleinere Grenze mit: `MIN_SPEC_CONTENT_CHARS = 40` ist eine
+  Schätzung, keine gemessene Größe. Eine legitime, aber knapp und präzise formulierte Spec unter
+  40 Zeichen Prosa (ohne Given/When/Then) würde fälschlich als „nicht tragfähig" verworfen; eine
+  40 Zeichen lange, aber inhaltsleere Platzhalter-Zeile („TODO: Diese Spec noch ausfüllen, bitte
+  nicht vergessen") zählt umgekehrt fälschlich als Soll. Wortzahl ist kein Aussagekraft-Maß,
+  nur ein billiger Proxy dafür.
+- **`_extract_signature()` zählt Klammertiefe zeilenweise, ohne Strings zu berücksichtigen.**
+  Ein Default-Wert wie `sep: str = "("` würde die Tiefenzählung verfälschen und die Signatur zu
+  früh oder zu spät abschneiden. In der Praxis selten, aber eine Heuristik, kein Parser für
+  diesen einen Aspekt — `ast.parse()` selbst ist exakt, nur die Rückübersetzung in Quelltext
+  nicht.
+- **Symbol- und Aufrufer-Erkennung entfällt für gelöschte Dateien.** Eine gelöschte Datei hat
+  keinen „Nachher"-Zustand, aus dem `ast` oder die TS-Regex Symbolgrenzen ableiten könnten. Wer
+  wissen will, wer ein jetzt entferntes Symbol noch aufruft, bekommt das aus diesem Paket nicht
+  — eine bewusste Lücke (siehe SKILL.md-Referenz), keine überprüfte.
+- **TS/JS-Symbolerkennung sieht nur die Deklarationszeile, keine Body-Änderungen.** Anders als
+  bei Python (Zeilenbereich-Überlappung über den ganzen Funktionskörper) zählt eine TS/JS-
+  Funktion nur als „berührt", wenn sich ihre eigene Signaturzeile im geänderten Bereich
+  befindet. Eine reine Body-Änderung ohne Signaturänderung wird für TS/JS nicht erkannt — R16
+  erlaubt die grep-basierte TS-Suche ausdrücklich, diese konkrete Asymmetrie zu Python ist aber
+  ungetestet gegen eine echte TS-Fixture (alle vier Evals nutzen Python).
+- **`docs/decisions.md` hat noch keine reale Instanz zum Testen.** `read_decisions()` folgt der
+  Konsumenten-Regel aus Spec 00 §1 (Header fehlt oder Schema passt nicht → sichtbar
+  übersprungen), aber die Skill, die diese Datei mit Kopfzeile erzeugt (feature-spec, Spec 03),
+  ist noch nicht gebaut. Der Regelfall in jedem echten Repo dieser Sammlung ist aktuell
+  `missing`; `no_header`/`schema_mismatch`/`read` sind nur durch Unit-Tests mit synthetischem
+  Inhalt geprüft, nicht gegen ein reales `docs/decisions.md`.
+- **`gather_conventions()` prüft nur Existenz, nie Inhalt.** Konventions-Marker
+  (`pyproject.toml`, `tsconfig.json`, …) werden nur als vorhanden/fehlend gemeldet; ob ein
+  `ruff.toml` z. B. Line-Length-Regeln enthält, die für die Vereinfachungslinse relevant wären,
+  bleibt ungelesen. Absichtlich Tier-1-minimal, aber eine Grenze der Simplification-Paket-Tiefe.
+- **Die Aufrufer-Deckelung (20, benannte Grenze) ist nur unit-getestet, nicht eval-getestet.**
+  `test_find_callers_caps_with_named_limit` deckt den Fall mechanisch ab; ein echter
+  Agenten-Lauf gegen eine Fixture mit > 20 Aufrufern existiert nicht — der Eval-Umfang war laut
+  Auftrag auf vier Evals begrenzt, und die anderen drei Ränder (kein Soll, Spec-Kriterien,
+  Anti-Zeremonie) wogen dafür schwerer.
 
 ## Verweise
 
