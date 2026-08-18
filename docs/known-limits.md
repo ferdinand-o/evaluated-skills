@@ -290,14 +290,49 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   behobenen Skill-Defekte — beide Ursachen wurden aber unabhängig voneinander
   bestätigt (Defekt 1 durch reproduzierten Dateizustand, Defekt 2 durch
   reproduzierten Antworttext mit Optionsliste), nicht nur vermutet.
-- **Beide Fixes aus Runde 3 je dreimal gegen echte Agentenläufe grün** (über
-  `--evals-dir` mit einer Zwei-Eval-Teilmenge, nicht über die volle Suite —
-  siehe „Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis" oben, das gilt
-  auch hier: drei grüne Läufe sind ein starkes, aber kein endgültiges Signal).
-  Die übrigen sieben Evals der Skill wurden in dieser Runde nicht erneut
-  ausgeführt (Scope-Vorgabe: „diese beiden Evals selbst fahren"); eine
-  manuelle Durchsicht der SKILL.md-Änderungen gegen ihre Prompts/Claims ergab
-  keinen erkennbaren Konflikt, das ist aber kein Ersatz für einen echten Lauf.
+- **Fix-Runde 3 war unvollständig: der Auslöser wurde ersetzt, nicht
+  erweitert.** Der Fix in Runde 3 band die Persistenz an „jedes inhaltliche
+  Statement zu einem fälligen Thema" — das reparierte `abrupt-end-still-updates`
+  (dreimal grün), riss aber `short-session-still-updates` auf: Reproduziert,
+  zweimal, gleicher Commit — bei der Kurzform-Anfrage („Ich hab nur 10 Minuten.
+  Lern-Session bitte, Kurzform.") gab es in einem Ein-Zug-Austausch gar kein
+  „inhaltliches Statement" im engen Sinn, nur eine gestellte Frage ohne Antwort,
+  also blieb `learner.md` unverändert. Vorher `abrupt-end` rot, `short-session`
+  grün; nach dem Fix umgekehrt — derselbe Fehler wie beim ersten Mal (E4-Regel
+  „ein einzelner Auslöser repariert einen Fall und reißt einen anderen auf"),
+  nur an einer anderen Stelle.
+- **Fix-Runde 4 — Regel von der Zusage her formuliert, nicht vom Auslöser.**
+  Die drei Persistenz-Evals (`nothing-due-stays-honest`,
+  `short-session-still-updates`, `abrupt-end-still-updates`) beschreiben
+  zusammen eine einzige Bedingung: `learner.md` wird aktualisiert, sobald die
+  Sitzung ein fälliges Thema *in irgendeiner Form* berührt hat — eine gestellte
+  Frage genügt bereits, eine beantwortete erst recht, ebenso ein
+  unaufgefordertes Statement. Der Umfang des Eintrags skaliert mit der
+  Berührung (eine gestellte, unbeantwortete Frage bekommt mindestens ein
+  aktualisiertes „Letzte Abfrage"-Datum); „kein Update" bleibt nur für den
+  Fall richtig, den `nothing-due-stays-honest` prüft (wirklich nichts fällig).
+  SKILL.md trägt die Regel jetzt als eiserne Regel direkt nach der Kernaussage
+  (Codeblock-Imperativ, nach dem Muster von `dev-report`s „KEIN SATZ ÜBER DAS
+  PROJEKT, BEVOR collect.py GELAUFEN IST.") — eine Formulierung mitten in
+  Schritt 2 allein hatte für den Kurzform-Fall nicht genügt. **Alle drei Evals
+  gemeinsam** (ein Lauf, nicht nacheinander) liefen danach synchron im
+  Vordergrund grün. Eine einzelne frühere Stichprobe (asynchron, vor der
+  finalen Bestätigung) zeigte `nothing-due-stays-honest` einmal rot — der
+  Agent hängte eine Randbemerkung zu einem verdächtig weit in der Zukunft
+  liegenden Fälligkeitsdatum plus ein Freiwilligkeits-Angebot an, was die im
+  Claim geforderte Kürze verletzte. Das ist keine Persistenz-Frage (die Datei
+  blieb korrekt unverändert) und nicht Gegenstand dieser Fix-Runde — als
+  eigener, unbehobener Befund unten festgehalten, nicht in die Persistenzregel
+  eingearbeitet.
+- **Verbleibender, unbehobener Befund:** `nothing-due-stays-honest` kann bei
+  Gelegenheit ausführlicher antworten als „wenige Sätze" (z. B. mit einer
+  Anmerkung zu einem auffälligen Fälligkeitsdatum plus einem Angebot, freiwillig
+  zu quizzen) — inhaltlich korrekt und `learner.md` bleibt unangetastet, aber
+  der Judge-Claim verlangt ausdrücklich Kürze. SKILL.md enthält bislang keine
+  explizite Kürze-Anweisung für genau diesen Fall (nur „keine Pflicht-Session
+  herbeireden"); nicht behoben, weil außerhalb des Scopes dieser Fix-Runde
+  (Persistenz-Trigger) und weil `SKILL.md` an der 150-Zeilen-Grenze aus Spec 00
+  §5 liegt.
 - **Doppelte Themen-Slugs in `learner.md` werden erkannt, aber nicht aufgelöst.**
   `parse_learner()` warnt bei doppeltem Slug, behält aber beide Sektionen. Weder
   `due_topics.py` noch `SKILL.md` legen fest, welche der beiden Sektionen ein

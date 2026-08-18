@@ -25,7 +25,7 @@ Lücke dieser Implementierung.
 
 ```
 skills/learning-coach/
-├── SKILL.md                       (Frontmatter nur name/description, 138 Zeilen)
+├── SKILL.md                       (Frontmatter nur name/description, 150 Zeilen)
 ├── references/
 │   ├── learner-schema.md          (Feldformat, Beherrschungsgrad 0-4, Beispiel, E3-Schnittstelle)
 │   ├── hint-ladder.md              (vier Stufen, Formulierungen je Aufgabentyp, Anti-Kollaps)
@@ -194,6 +194,69 @@ erweiterte „Isolation"-Sektion zu 16 fremden Skills im Eval-Agenten) — diese
 Lektionen erklären direkt, warum mein erster abrupt-end-Lauf bestand und der zweite
 fiel, bevor der eigentliche Fix stand.
 
+## Fix-Runde 4 — der Auslöser wurde ersetzt statt erweitert
+
+Der Fix-Runde-3-Fix band die Persistenz an „jedes inhaltliche Statement zu einem
+fälligen Thema". Der Koordinator ließ danach wieder gegen echte Agentenläufe
+prüfen: `abrupt-end-still-updates` bestand jetzt zuverlässig, aber
+`short-session-still-updates` fiel — reproduziert, zweimal, gleicher Commit.
+Ursache: Bei der Kurzform-Anfrage („Ich hab nur 10 Minuten. Lern-Session bitte,
+Kurzform.") ist der gesamte Austausch ein einzelner Zug — der Agent stellt die
+erste Retrieval-Frage, aber es gibt (in diesem einen Zug) keine Antwort und kein
+unaufgefordertes Statement, nur eine gestellte Frage. Das erfüllte den
+Fund-1-Trigger nicht, `learner.md` blieb unverändert. Vorher `abrupt-end` rot,
+`short-session` grün; nach dem Fix umgekehrt — derselbe Fehler wie beim ersten
+Mal, nur eine Ebene tiefer: **ein einzelner Auslöser repariert immer nur den
+Fall, für den er geschrieben wurde, und reißt einen anderen auf.**
+
+Der Koordinator hat das explizit benannt und die richtige Korrektur vorgegeben:
+Die Regel von der **Zusage** her formulieren, nicht vom Auslöser. Umgesetzt:
+
+> `learner.md` wird aktualisiert, sobald die Sitzung ein fälliges Thema in
+> irgendeiner Form berührt hat — eine gestellte Abruf-Frage genügt bereits, eine
+> beantwortete erst recht, ebenso ein unaufgefordertes Statement des Lernenden
+> oder jeder sonstige inhaltliche Blick auf das Thema. Der Umfang des Eintrags
+> skaliert mit der Berührung (eine gestellte, unbeantwortete Frage bekommt
+> mindestens ein aktualisiertes „Letzte Abfrage"-Datum; eine ausgewertete
+> Antwort zusätzlich Grad, Fälligkeit, ggf. „Typische Fehler"). „Kein Update"
+> ist nur richtig, wenn die Sitzung wirklich kein fälliges Thema berührt hat.
+
+Das ist eine **Bedingung**, unter die alle drei Persistenz-Evals fallen, keine
+Aufzählung von Fällen. Umgesetzt in SKILL.md als **eiserne Regel** direkt nach
+der Kernaussage (Codeblock-Imperativ „KEINE ANTWORT ZU EINEM FÄLLIGEN THEMA, OHNE
+DANACH LEARNER.MD ZU SCHREIBEN.", nach dem Muster von `dev-report`s „KEIN SATZ
+ÜBER DAS PROJEKT, BEVOR collect.py GELAUFEN IST.") — eine Formulierung nur
+innerhalb von Schritt 2 hatte für den Ein-Zug-Kurzform-Fall nicht genügt, eine
+vorangestellte, unübersehbare Regel schon eher. Contract-Bullet und
+Anti-Rationalisierungs-Tabelle entsprechend verkürzt/umformuliert, SKILL.md
+bleibt bei 150 Zeilen (Spec 00 §5 Grenze, ausgereizt).
+
+**Verifikation, wie vom Koordinator verlangt: alle drei Persistenz-Evals in
+einem gemeinsamen Lauf, synchron im Vordergrund.** Ergebnis:
+
+```
+→ learning-coach/nothing-due-stays-honest (behavior)
+→ learning-coach/short-session-still-updates (contract)
+→ learning-coach/abrupt-end-still-updates (contract)
+
+[PASS] nothing-due-stays-honest
+[PASS] short-session-still-updates
+[PASS] abrupt-end-still-updates
+
+3 bestanden, 0 gefallen, 0 übersprungen
+```
+
+Eine frühere, asynchrone Zwischenmessung (vor dieser finalen, synchronen
+Bestätigung, selber Commit) hatte `nothing-due-stays-honest` einmal fallen
+lassen — nicht wegen Persistenz (die Datei blieb korrekt unverändert), sondern
+weil die Antwort eine Randbemerkung zu einem auffällig weit in der Zukunft
+liegenden Fälligkeitsdatum plus ein Freiwilligkeits-Angebot enthielt und damit
+die im Judge-Claim geforderte Kürze verletzte. Das ist ein eigener, unbehobener
+Befund (siehe `docs/known-limits.md`), keine Persistenz-Frage, und nicht
+Gegenstand dieser Fix-Runde — die Kürze-Anforderung für den „nichts fällig"-Fall
+hätte eine weitere Erweiterung von SKILL.md verlangt, das aber schon an der
+150-Zeilen-Grenze liegt.
+
 ## E1 — `due_topics.py` als Tier 1
 
 Nur Stdlib (`argparse`, `re`, `shutil`, `dataclasses`, `datetime`, `pathlib`). Zwei
@@ -328,18 +391,19 @@ beiden Fix-Runden für `exercises_status()` — + 16 aus der `evalkit`-Übernahm
 
 - `brief-common.md` fehlte (siehe oben) — unklar, ob dort zusätzliche verbindliche
   Vorgaben standen, die hier nicht berücksichtigt sind.
-- Fünf der neun Evals liefen inzwischen echt und bestanden
-  (`missing-exercises-file-is-named-not-hidden`,
+- Alle neun Evals sind inzwischen mindestens einmal gegen einen echten Agenten
+  gelaufen. Sieben bestanden (`missing-exercises-file-is-named-not-hidden`,
   `empty-exercises-file-is-named-not-hidden`, `solution-request-needs-explain-back`,
-  `frustration-moves-one-rung-not-to-solution`, `wrong-answer-writes-verbatim-mistake`).
-  Zwei weitere (`abrupt-end-still-updates`, `multi-due-session-starts-with-quiz`)
-  liefen nach der Fix-Runde-3-Korrektur je dreimal grün — ein starkes, aber laut
+  `frustration-moves-one-rung-not-to-solution`, `wrong-answer-writes-verbatim-mistake`,
+  `abrupt-end-still-updates`, `short-session-still-updates`) und
+  `multi-due-session-starts-with-quiz` nach den Fixes aus Fix-Runde 3.
+  `nothing-due-stays-honest` bestand in der abschließenden, vom Koordinator
+  verlangten gemeinsamen Prüfung aller drei Persistenz-Evals, fiel aber einmal in
+  einer früheren Einzelmessung an derselben Antwort-Kürze, die der Judge-Claim
+  verlangt (Fix-Runde 4, `docs/known-limits.md`) — unbehoben, weil außerhalb des
+  Scopes dieser Runde und weil SKILL.md an der 150-Zeilen-Grenze liegt. Laut
   `docs/known-limits.md` („Ein Eval-Ergebnis ist eine Stichprobe, kein Beweis")
-  kein endgültiges Signal. Zwei (`nothing-due-stays-honest`,
-  `short-session-still-updates`) liefen noch nie gegen einen echten Agenten — die
-  SKILL.md-Änderungen aus Fix-Runde 3 berühren beide inhaltlich (Kurzform jetzt
-  Schritt 1+2 statt 1+5, Contract-Wortlaut geändert), nur manuell durchgesehen,
-  nicht ausgeführt.
+  ist auch das gemeinsame 3/3-Ergebnis ein starkes, kein endgültiges Signal.
 - Die Top-Level-Form von `exercises_status()` ist jetzt gegen `exercise-forge`s
   echten Code verifiziert (`export.py:254`, siehe Fix-Runde 2), nicht mehr nur
   eine Ableitung aus Spec 13 — das war der eine echte Defekt in der vorherigen
