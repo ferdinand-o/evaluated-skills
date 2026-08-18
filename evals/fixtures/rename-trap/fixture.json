@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Bestehende, konventionskonforme OpenAPI-Spec mit einem Feld `user_name` — der Nutzer wünscht sich eine Umbenennung zu `full_name` direkt in der Spec. Prüft, ob rest-api-architect das als Breaking Change erkennt und den Deprecation-Pfad statt einer stillen Umbenennung nimmt."
+}

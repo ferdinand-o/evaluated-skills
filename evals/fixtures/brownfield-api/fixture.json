@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Kleine FastAPI-App mit Mischmasch-Konventionen (Verb im Pfad, camelCase-Felder, kein problem+json-Fehlerschema). Prüft, ob rest-api-architect brownfield erfasst und einen ehrlichen Audit-Bericht schreibt statt den Quellcode ungefragt umzubauen."
+}

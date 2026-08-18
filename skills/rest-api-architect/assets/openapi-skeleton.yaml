@@ -1,0 +1,194 @@
+# skill: rest-api-architect | schema: 1 | generated: von Hand als Vorlage gepflegt, nicht generiert
+#
+# Grundgerüst für Greenfield-Entwürfe. Diese Datei wird von keinem Skript geparst — sie ist
+# eine Vorlage, die du (Claude) beim Entwerfen ausfüllst, nicht die Skill selbst. Kopiere sie
+# nach api/openapi.yaml (pro Service, R4) und ersetze die Platzhalter. Die Kopfzeile oben bleibt
+# stehen, wenn die Vorlage kopiert wird — sie identifiziert das Ergebnis als von dieser Skill
+# begleitet.
+openapi: 3.0.3
+info:
+  title: "<Service-Name>"
+  version: "0.1.0"
+  description: >
+    <Ein Satz: was dieser Service tut. Kein Marketing, keine Feature-Liste — das steht in den
+    Pfaden selbst.>
+servers:
+  - url: "https://api.example.invalid/v1"
+    description: "<Umgebung, z. B. Produktion>"
+
+tags:
+  - name: "<ressource>"
+    description: "<wofür diese Ressourcen-Gruppe steht>"
+
+paths:
+  # Beispielpfad — Plural-Ressource, Pfad-Version, Cursor-Paginierung. Lösche ihn, sobald echte
+  # Pfade existieren; er ist keine Pflichtroute.
+  /v1/<ressourcen>:
+    get:
+      operationId: "list_<ressourcen>"
+      tags: ["<ressource>"]
+      summary: "<Ressourcen> auflisten"
+      parameters:
+        - $ref: "#/components/parameters/CursorParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: "Liste von <Ressourcen>"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: ["items", "next_cursor"]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/<Ressource>"
+                  next_cursor:
+                    type: ["string", "null"]
+                    description: "Cursor für die nächste Seite, null wenn keine weitere Seite existiert."
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: "create_<ressource>"
+      tags: ["<ressource>"]
+      summary: "<Ressource> anlegen"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/<Ressource>Input"
+      responses:
+        "201":
+          description: "<Ressource> angelegt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/<Ressource>"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /v1/<ressourcen>/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: "get_<ressource>"
+      tags: ["<ressource>"]
+      responses:
+        "200":
+          description: "<Ressource>"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/<Ressource>"
+        default:
+          $ref: "#/components/responses/Error"
+
+  # Beispiel für eine echte Aktion, die keine Ressource ist (naming.verb_exceptions) —
+  # nicht "PATCH /orders/{id}" mit einem Status-Feld, wenn die Aktion eigene Nebenwirkungen hat.
+  /v1/<ressourcen>/{id}/<aktion>:
+    post:
+      operationId: "<aktion>_<ressource>"
+      tags: ["<ressource>"]
+      summary: "<Was diese Aktion bewirkt — Ausnahme von 'keine Verben in Pfaden', siehe conventions.json naming.verb_exceptions>"
+      # x-deviation: <falls diese Aktion vom Preset abweicht, hier begründen — nie stillschweigend
+      # im Code abweichen (Contract, siehe SKILL.md).>
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      responses:
+        "200":
+          description: "<Ergebnis der Aktion>"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  parameters:
+    CursorParam:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: "Opaker Cursor aus einer vorherigen Antwort (next_cursor). Fehlt beim ersten Aufruf."
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 50
+        maximum: 200
+      description: "Seitengröße, siehe conventions.json pagination.default_limit/max_limit."
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: "Pflicht für unsichere POSTs (conventions.json idempotency). Wiederholter Key mit gleichem Payload liefert die erste Antwort erneut."
+
+  schemas:
+    "<Ressource>":
+      type: object
+      required: ["id", "created_at"]
+      properties:
+        id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: "RFC 3339, UTC (conventions.json timestamps)."
+        # x-deviation: <Felder ergänzen. snake_case, siehe naming.field_case.>
+
+    "<Ressource>Input":
+      type: object
+      description: "Eingabe-Variante ohne server-generierte Felder (id, created_at, ...)."
+
+    Error:
+      type: object
+      description: "RFC 9457 problem+json — siehe references/conventions.md."
+      required: ["type", "title", "status", "detail", "code"]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: "URI, die den Fehlertyp identifiziert (kann 'about:blank' sein)."
+        title:
+          type: string
+          description: "Kurze, menschenlesbare Zusammenfassung — ändert sich nicht pro Instanz."
+        status:
+          type: integer
+          description: "HTTP-Statuscode, dupliziert den Response-Code für Clients ohne Header-Zugriff."
+        detail:
+          type: string
+          description: "Menschenlesbare Erklärung dieser konkreten Instanz. Clients matchen nie darauf."
+        code:
+          type: string
+          description: "Stabile, programmatisch auswertbare Kennung aus der Fehlercode-Registry (conventions.json errors.registry)."
+
+  responses:
+    Error:
+      description: "Fehlerantwort nach RFC 9457."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Nur die Schnittstelle — die Auth-Implementierung selbst ist außerhalb dieser Skill
+        (siehe SKILL.md Abgrenzung).
+
+security:
+  - BearerAuth: []

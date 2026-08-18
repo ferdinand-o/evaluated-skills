@@ -1,0 +1,110 @@
+{
+  "_meta": {
+    "skill": "rest-api-architect",
+    "schema": 1,
+    "generated": "python skills/rest-api-architect/scripts/gen_ruleset.py --conventions skills/rest-api-architect/assets/conventions.json"
+  },
+  "rules": {
+    "error-response-is-problem-json": {
+      "description": "Fehlerantworten (4xx/5xx) folgen RFC 9457 problem+json.",
+      "message": "Response-Content sollte application/problem+json enthalten (Preset: errors.media_type).",
+      "severity": "error",
+      "given": "$.paths[*][*].responses[?(@property >= '400')].content",
+      "then": {
+        "function": "truthy"
+      }
+    },
+    "error-schema-has-required-fields": {
+      "description": "Error-Schema trägt alle Pflichtfelder aus dem Preset.",
+      "message": "Error-Schema sollte type, title, status, detail, code enthalten (Preset: errors.required_fields).",
+      "severity": "warn",
+      "given": "$.components.schemas.Error.properties",
+      "then": [
+        {
+          "field": "type",
+          "function": "truthy"
+        },
+        {
+          "field": "title",
+          "function": "truthy"
+        },
+        {
+          "field": "status",
+          "function": "truthy"
+        },
+        {
+          "field": "detail",
+          "function": "truthy"
+        },
+        {
+          "field": "code",
+          "function": "truthy"
+        }
+      ]
+    },
+    "pagination-request-params-present": {
+      "description": "List-Endpunkte akzeptieren die Paginierungs-Parameter aus dem Preset.",
+      "message": "GET-Listen sollten Parameter cursor/limit haben (Preset: pagination.request_params).",
+      "severity": "warn",
+      "given": "$.paths[*].get.parameters",
+      "then": {
+        "function": "truthy"
+      }
+    },
+    "pagination-response-has-next-cursor": {
+      "description": "Paginierte Antworten tragen die Response-Felder aus dem Preset.",
+      "message": "Listen-Antwort sollte next_cursor enthalten (Preset: pagination.response_fields).",
+      "severity": "warn",
+      "given": "$.paths[*].get.responses.200.content['application/json'].schema.properties",
+      "then": {
+        "function": "truthy"
+      }
+    },
+    "path-is-versioned": {
+      "description": "Pfade folgen dem Versionierungs-Präfix aus dem Preset.",
+      "message": "Pfad sollte dem Muster ^/v[0-9]+/ folgen (Preset: versioning.prefix_pattern).",
+      "severity": "error",
+      "given": "$.paths[*]~",
+      "then": {
+        "function": "pattern",
+        "functionOptions": {
+          "match": "^/v[0-9]+/"
+        }
+      }
+    },
+    "unsafe-post-requires-idempotency-key": {
+      "description": "Unsichere POSTs verlangen den Idempotency-Key-Header aus dem Preset.",
+      "message": "POST-Operationen sollten Header Idempotency-Key referenzieren (Preset: idempotency.header).",
+      "severity": "warn",
+      "given": "$.paths[*].post.parameters",
+      "then": {
+        "function": "truthy"
+      }
+    },
+    "field-names-are-snake-case": {
+      "description": "Property-Namen folgen snake_case (Preset: naming.field_case).",
+      "message": "Property-Namen sollten snake_case sein (Preset: naming.field_case).",
+      "severity": "warn",
+      "given": "$.components.schemas..properties[*]~",
+      "then": {
+        "function": "casing",
+        "functionOptions": {
+          "type": "snake"
+        }
+      }
+    },
+    "timestamp-fields-use-date-time-format": {
+      "description": "Zeitstempel-Felder nutzen das OpenAPI-Format date-time (RFC 3339, Preset: timestamps.format).",
+      "message": "Zeitstempel-Felder (*_at, *_date, timestamp) sollten format: date-time tragen.",
+      "severity": "warn",
+      "given": "$.components.schemas..properties[?(@property.match(/(_at|_date|timestamp)$/))]",
+      "then": {
+        "field": "format",
+        "function": "pattern",
+        "functionOptions": {
+          "match": "date-time"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Pflicht-Anti-Zeremonie-Eval (Spec 00 §2): bereits konventionskonforme Spec, der Nutzer beschreibt einen neuen, vollständig konformen Endpoint bis ins Detail. Prüft, dass rest-api-architect klein bleibt — kein Audit-Bericht, keine x-deviation-Einträge, keine Architekturdiskussion für einen trivialen, konformen Fall."
+}
