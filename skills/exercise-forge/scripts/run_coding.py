@@ -9,6 +9,11 @@ das benannt und markiert die Aufgabe als 'unverified', nie als 'bestanden'
 Führt Musterlösung und Blind-Lösung nie per `import` aus (Rulings A3) —
 beide laufen als eigener `python -m pytest`-Subprozess in einem
 Wegwerf-Verzeichnis.
+
+Fix-Runde 5: `verification` trägt kein `status`-Feld mehr — ein gespeicherter
+Status wäre redundant zum `protocol` (`model_passed`/`blind_passed`) und war
+genau die Fehlerquelle, die Fix-Runde 3/4 in der Praxis traf. Siehe
+`verify_blind.py`s Modul-Docstring für die volle Begründung.
 """
 
 from __future__ import annotations
@@ -62,11 +67,30 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _verdict(status: str, detail: str, protocol: dict | None = None) -> dict:
-    """`protocol` trägt die rohen Testergebnisse (`model_passed`/`blind_passed`)
-    — das ist, was `export.derive_status_from_protocol()` beim Rendern statt
-    des `status`-Worts nachrechnet (Fix-Runde 4: Ableiten statt Validieren)."""
-    return {"status": status, "method": "blind_solve_coding", "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
+def _verdict(detail: str, protocol: dict | None = None) -> dict:
+    """Kein `status`-Feld mehr (Fix-Runde 5, wie in `verify_blind.py`):
+    `protocol` trägt die rohen Testergebnisse (`model_passed`/`blind_passed`)
+    — daraus, nicht aus einem gespeicherten Wort, leitet `derive_coding_status()`
+    unten (bzw. `export.derive_status_from_protocol()`) den Status ab."""
+    return {"method": "blind_solve_coding", "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
+
+
+def derive_coding_status(protocol: dict | None) -> str:
+    """Nur für Anzeige/CLI-Ausgabe in diesem Skript — nie persistiert. Die
+    typübergreifende Fassung, die `export.py` tatsächlich zum Rendern nutzt,
+    ist `verify_blind.derive_status_from_protocol()` (dorthin dupliziert aus
+    denselben Gründen wie hier, Rulings A3).
+
+    `blind_passed` fehlt komplett, wenn keine Blind-Lösung übergeben wurde
+    (Blind-Gate unvollständig) — das ist `unverified`, nicht `suspicious`.
+    Ein bloßes `protocol.get("blind_passed")` würde beides gleich (falsy)
+    behandeln; deshalb der explizite `isinstance`-Check."""
+    if not isinstance(protocol, dict) or not protocol.get("model_passed"):
+        return "unverified"
+    blind_passed = protocol.get("blind_passed")
+    if not isinstance(blind_passed, bool):
+        return "unverified"
+    return "verified" if blind_passed else "suspicious"
 
 
 def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = sys.executable) -> dict:
@@ -75,19 +99,19 @@ def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = s
     sie an bestehender Musterlösung, sind die Tests verdächtig überspezifiziert,
     nicht automatisch die Blind-Lösung falsch."""
     if not pytest_available(python=python):
-        return _verdict("unverified", "pytest nicht verfügbar - Testlauf übersprungen")
+        return _verdict("pytest nicht verfügbar - Testlauf übersprungen")
 
     with tempfile.TemporaryDirectory() as td:
         model_result = run_pytest_against(exercise["model_solution"], exercise["test_suite"], Path(td) / "model", python=python)
     if not model_result["passed"]:
         return _verdict(
-            "unverified", f"Musterlösung fällt durch eigene Tests - Aufgabe fehlerhaft: {model_result['detail']}",
+            f"Musterlösung fällt durch eigene Tests - Aufgabe fehlerhaft: {model_result['detail']}",
             {"model_passed": False},
         )
 
     if blind_solution is None:
         return _verdict(
-            "unverified", "Musterlösung besteht die Tests, aber keine Blind-Lösung übergeben - Blind-Gate unvollständig",
+            "Musterlösung besteht die Tests, aber keine Blind-Lösung übergeben - Blind-Gate unvollständig",
             {"model_passed": True},
         )
 
@@ -95,9 +119,8 @@ def verify_coding(exercise: dict, blind_solution: str | None, *, python: str = s
         blind_result = run_pytest_against(blind_solution, exercise["test_suite"], Path(td) / "blind", python=python)
     protocol = {"model_passed": True, "blind_passed": blind_result["passed"]}
     if blind_result["passed"]:
-        return _verdict("verified", "Musterlösung und Blind-Lösung bestehen beide die Tests.", protocol)
+        return _verdict("Musterlösung und Blind-Lösung bestehen beide die Tests.", protocol)
     return _verdict(
-        "suspicious",
         f"Blind-Lösung fällt durch, obwohl Musterlösung besteht - Tests könnten überspezifiziert sein: {blind_result['detail']}",
         protocol,
     )
@@ -130,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
         match["verification"] = verification
         args.exercises.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    status = derive_coding_status(verification.get("protocol"))
+    print(f"{args.id}: {status} — {verification['detail']}", file=sys.stderr)
     print(json.dumps({"id": args.id, "verification": verification}, ensure_ascii=False))
     return 0
 

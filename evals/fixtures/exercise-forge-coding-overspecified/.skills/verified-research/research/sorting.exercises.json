@@ -11,7 +11,7 @@
       "stem": "Schreibe eine Funktion is_sorted(xs), die True liefert, wenn xs aufsteigend sortiert ist, sonst False.",
       "model_solution": "def is_sorted(xs):\n    for i in range(len(xs) - 1):\n        if xs[i] > xs[i + 1]:\n            return False\n    return True\n",
       "test_suite": "import inspect\nfrom solution import is_sorted\n\n\ndef test_behaviour():\n    assert is_sorted([1, 2, 3]) is True\n    assert is_sorted([3, 2, 1]) is False\n\n\ndef test_uses_explicit_loop():\n    assert \"for\" in inspect.getsource(is_sorted)\n",
-      "verification": {"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null}
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
     }
   ]
 }

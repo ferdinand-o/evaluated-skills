@@ -324,44 +324,136 @@ gebunden. Eine Signatur oder ein Audit-Log, das den Lauf kryptographisch an
 das Protokoll bindet, wäre der nächste Schritt und wurde nicht gebaut (siehe
 `docs/known-limits.md`).
 
+**Korrektur in Fix-Runde 5: Auch das reichte nicht — nicht weil die Ableitung
+falsch war, sondern weil sie am falschen Ort griff.** Siehe Fix-Runde 5 unten.
+
+## Fix-Runde 5 (Feld statt Fassade — `status` entfernt; learning-coach-Migration)
+
+Der Koordinator fuhr den Bestätigungslauf nach Fix-Runde 4. Ergebnis: alle
+drei „Gate findet ein Problem"-Evals fielen weiterhin an derselben
+`must_not`-Assertion (`"status": "verified"` in der rohen Aufgaben-JSON).
+Der Grund war banal, sobald benannt: **Ich hatte `export.py` vom Statusfeld
+entkoppelt, nicht die Aufgabendatei selbst.** Die Assertion prüft die
+Aufgabendatei — ein Artefakt, das auch andere Werkzeuge lesen (namentlich
+`learning-coach`, Zyklus 14) —, nicht `export.py`s Rendering. Der Widerspruch
+zwischen `status` und `protocol` entstand nach wie vor beim Schreiben; er
+wirkte sich nur nicht mehr aufs Rendern aus. Der Koordinator benannte die
+Konsequenz aus meinem eigenen Ansatz treffend: **Wenn der Status ableitbar
+ist, ist er als gespeichertes Feld redundant — und ein redundantes, frei
+beschreibbares Feld ist die Fehlerquelle.**
+
+**Fix:** `status` aus dem `verification`-Schema entfernt. `verification`
+trägt jetzt nur noch `method`, `detail`, `checked_at`, `protocol`. Eine neu
+erzeugte Aufgabe trägt `{"method": "not_run", "detail": "Blind-Gate noch
+nicht gelaufen", "checked_at": null, "protocol": null}`. `_make_verification()`
+(`verify_blind.py`) und `_verdict()` (`run_coding.py`) speichern kein
+`status` mehr; wer einen Anzeigestatus braucht — `main()`s `--all`-Filter und
+Konsolenausgabe, `export.py`s Rendering — ruft `derive_status_from_protocol()`
+auf. Diese Funktion ist unverändert aus Fix-Runde 4 übernommen (ihre Logik
+war korrekt, sie griff nur am falschen Ort) und jetzt zusätzlich in
+`verify_blind.py` dupliziert (Rulings A3), damit `main()` denselben Status
+berechnen kann, den `export.py` später anzeigt. `run_coding.py` bekam eine
+eigene, einfachere `derive_coding_status()` nur für seine CLI-Ausgabe (nie
+persistiert) — beim Implementieren fiel dabei ein eigenständiger Bug auf und
+wurde sofort behoben: eine naive `protocol.get("blind_passed")`-Abfrage
+behandelte „keine Blind-Lösung übergeben" (Schlüssel fehlt) und „Blind-Lösung
+durchgefallen" (`False`) gleich (beides falsy) und hätte `suspicious`
+gemeldet, wo `unverified` korrekt ist. Ein Regressionstest in beiden
+betroffenen Testdateien hält das fest; die typübergreifende Fassung in
+`export.py`/`verify_blind.py` hatte diesen Fehler nicht (sie prüft
+`isinstance(blind_passed, bool)` explizit).
+
+**Zweiter Teil des Auftrags: `mc-distractor-trap-is-caught` fiel zusätzlich
+am Judge-Claim.** Geprüft, ob die Skill den Konflikt tatsächlich benennt: Der
+`detail`-Text von `verify_mc`s `suspicious`-Zweig lautete bisher „Blind-Löser
+wählte Distraktor A ('…'). Begründung: …" — eine neutrale Tatsachenmeldung,
+die weder „Problem" noch „kaputt" noch „mehrdeutig" sagt. Der Judge-Claim
+verlangt aber genau diese Framing-Wörter („benennt sichtbar, dass … ein
+Problem ist (mehrdeutig, kaputt, oder zu präzisieren)"). Fix: Der Satz
+beginnt jetzt mit „Möglicherweise kaputter oder mehrdeutiger Distraktor: …" —
+eine deterministische Formulierung im Code, die nicht mehr von der
+Chat-Antwort des Agenten abhängt, um den Claim zu erfüllen. `verify_open`s
+und `run_coding.verify_coding`s `suspicious`-Meldungen wurden geprüft und
+enthielten bereits passende Framing-Wörter („vermutlich zu eng",
+„überspezifiziert") — keine Änderung nötig.
+
+**learning-coach-Migration (an den Koordinator zur Weitergabe):**
+`learning-coach` (Zyklus 14) liest dieselben Aufgaben-JSONs unter
+`~/.skills/verified-research/research/<thema>.exercises.json` und meldet
+unter anderem „keine verifizierten Aufgaben gefunden". Jede Stelle in
+`learning-coach`, die `exercise["verification"]["status"]` liest, bricht mit
+`KeyError` — laut, nicht still, aber sie bricht. `learning-coach` muss
+stattdessen dieselbe Ableitungsregel implementieren, die
+`export.derive_status_from_protocol()`/`verify_blind.derive_status_from_protocol()`
+umsetzen. Die Regel ist bewusst code-unabhängig dokumentiert in
+`skills/exercise-forge/references/task-schemas.md`, Abschnitt
+„`verification`-Objekt" (Tabelle mit `protocol`-Feldern pro Typ plus die
+vier Ableitungsschritte in Prosa) — dorthin sollte sich `learning-coach`s
+Implementierung richten, nicht auf diesen Report oder den Python-Code dieser
+Skill, der sich weiterentwickeln kann. Kurzfassung der Regel: `method ==
+"not_run"` oder unbekannt → `unverified`; `checked_at` fehlt oder `protocol`
+ist kein Objekt → `unverified`; sonst typspezifisch aus `protocol` ableiten
+(Tabelle in `task-schemas.md`) — bei MC/offenen Fragen gegen die
+Aufgabendaten selbst nachgerechnet, nicht nur gegen die Protokoll-Behauptung.
+
+**Tests:** `has_verified_provenance`-Nachfolgetests durch `derive_status_from_protocol`-
+Aufrufe ersetzt (kein direktes `result["status"]`-Lesen mehr in Tests — ein
+Test-Helfer `status_of()`/`rc.derive_coding_status()` leitet ab, wie jeder
+andere Konsument es tun muss). Eval-Fixtures (`algorithms.exercises.json`,
+`sorting.exercises.json`, `python-basics.exercises.json`) auf das neue Schema
+aktualisiert (kein `status`-Schlüssel mehr in der `verification` der
+mitgelieferten Aufgabe). `evals/exercise-forge/evals.json` selbst brauchte
+**keine** Änderung: Die `must_not`-Pattern (`"status": "verified"`) bleiben
+exakt richtig — sie prüfen jetzt, dass das Feld nie wieder auftaucht,
+statt (wie vorher gedacht) dass es nicht widersprüchlich gesetzt ist. Gesamt
+230 → 235 Tests (siehe Testergebnis unten).
+
 ## Bekannte Grenzen (analog zu `docs/known-limits.md`)
 
 - **Kein drittes Urteil über „valide Begründung" bei MC-Distraktoren** (siehe
   Entscheidung 5 oben, L1) — `suspicious` ist eine Warnung zur menschlichen
   Durchsicht, kein Beweis, dass der Distraktor kaputt ist. Der Contract
   verspricht das seit der Fix-Runde auch nicht mehr.
-- **`status` wird beim Export abgeleitet, nicht validiert — G2 statt G1
-  (Fix-Runde 4).** Ein G1-Doktrin-Fix (Fix-Runde 3, „Melden ersetzt nicht
-  Markieren") wurde gegen einen echten Agenten gemessen und reichte nicht:
-  alle drei „Gate findet ein Problem"-Evals fielen danach weiterhin an
-  `must_not: "status": "verified"`. `export.derive_status_from_protocol()`
-  liest `status` seither beim Rendern gar nicht mehr — der angezeigte Status
-  kommt ausschließlich aus `verification.protocol` (den Rohdaten des
-  Blind-Laufs), neu gegen die Aufgabendaten berechnet. Ein von Hand
-  gesetztes `status: verified` hat dadurch keine Wirkung mehr auf
-  `[geprüft]`, unabhängig davon, ob `method`/`checked_at` echt aussehen.
+- **`status` existiert nicht mehr als gespeichertes Feld (Fix-Runde 5) —
+  zwei schwächere Fixes davor wurden je gemessen und verworfen.** Eine
+  G1-Doktrin (Fix-Runde 3) reichte nicht: ein echter Lauf zeigte
+  `"status": "verified"` trotz gemeldetem Konflikt. Eine G2-Ableitung nur am
+  Lesepfad (Fix-Runde 4, `export.py` liest `status` nicht mehr) reichte auch
+  nicht: der Widerspruch blieb in der rohen Aufgaben-JSON stehen, die
+  `learning-coach` (Zyklus 14) ebenfalls liest — die Eval-Assertion prüft
+  genau diese Datei, nicht `export.py`s Rendering. Erst das Entfernen des
+  Feldes schließt die Lücke an der Quelle. `verification` trägt jetzt nur
+  `method`/`detail`/`checked_at`/`protocol`; jeder Konsument leitet den
+  Status über `derive_status_from_protocol()` ab (dupliziert in `export.py`
+  und `verify_blind.py`, Regel dokumentiert in `references/task-schemas.md`).
+- **`learning-coach` (Zyklus 14) muss migriert werden — siehe Fix-Runde 5
+  oben und `docs/known-limits.md`.** Jede Stelle dort, die
+  `exercise["verification"]["status"]` liest, bricht mit `KeyError`. Diese
+  Skill baut nichts an `learning-coach`; der Nachzieh-Bedarf ist hier und in
+  `docs/known-limits.md` vermerkt.
 - **Die Ableitung schließt die alte D1-Lücke (Vorhandensein statt Stimmigkeit),
   bleibt aber selbst nicht kryptographisch.** `protocol` ist weiterhin eine
   editierbare JSON-Datei; eine vollständig konsistente Fälschung (auch
-  `chosen_index` o. Ä. passend mitfälschen) bekäme weiterhin `[geprüft]` —
-  eine erheblich aufwändigere, gezieltere Fälschung als ein Wort zu ändern,
-  aber keine kryptographische Unmöglichkeit. Eine Signatur oder ein Audit-Log
-  wäre der nächste Schritt, wurde nicht gebaut.
+  `chosen_index` o. Ä. passend mitfälschen) bekäme weiterhin `verified`
+  abgeleitet — eine erheblich aufwändigere, gezieltere Fälschung als ein
+  Feld zu schreiben, aber keine kryptographische Unmöglichkeit. Eine
+  Signatur oder ein Audit-Log wäre der nächste Schritt, wurde nicht gebaut.
 - **Blind-Gate ist ein Einzel-Stichprobenlauf ohne Retry oder Mehrheitsvotum.**
   Jeder Aufruf ist ein einzelner `claude -p`-Lauf; ein funktionierender,
   absichtlich schwieriger Distraktor kann mit einer gewissen
   Grundwahrscheinlichkeit trotzdem `suspicious` auslösen (der Blind-Löser rät
   falsch, ohne dass am Distraktor etwas kaputt ist) — von einem echten Befund
   nicht unterscheidbar, ohne die Begründung selbst zu lesen (siehe L1).
-- **Vier der sechs Evals sind gegen einen echten Agenten bestätigt**
+- **Drei der sechs Evals sind gegen einen echten Agenten bestätigt**
   (`single-flashcard-stays-single`, `twenty-cards-stay-atomic`,
-  `one-step-harder-changes-the-vector-not-just-wording`, sowie mittelbar der
-  Zerlegungsprozess selbst über zwei Läufe). Die drei „Gate findet ein
-  Problem"-Evals sind seit dem G2-Fix (Fix-Runde 4) nur schema-validiert,
-  nicht erneut über `run_evals.py` gefahren — genau die Evals, die den
-  Defekt aufdecken sollen, haben damit noch keine Bestätigung, dass der
-  mechanische Fix wirklich trägt (im Unterschied zu Fix-Runde 3 ist der
-  Fix diesmal aber ein Ausschluss, kein Versprechen).
+  `one-step-harder-changes-the-vector-not-just-wording`). Die drei „Gate
+  findet ein Problem"-Evals sind seit dem Fix-Runde-5-Schema-Fix nur
+  schema-validiert, nicht erneut über `run_evals.py` gefahren — genau die
+  Evals, die den Defekt aufdecken sollen, haben damit noch keine Bestätigung,
+  dass der jetzt strukturelle Ausschluss (Feld existiert nicht mehr) wirklich
+  trägt. Zwei vorherige „das müsste jetzt reichen"-Einschätzungen haben sich
+  bereits als falsch erwiesen; ich vermeide bewusst, das ein drittes Mal zu
+  behaupten, ohne dass der Koordinator es bestätigt hat.
 - **`verify_blind.py` läuft den Blind-Löser in einem leeren Temp-Verzeichnis**,
   nicht in einer vollständig isolierten Prozessumgebung — dieselbe Grenze wie
   bei `evalkit.dispatch.run_agent` (siehe `docs/known-limits.md`, Abschnitt
@@ -409,7 +501,7 @@ Zieldateiname ohne Glob-Unterstützung deterministisch bleibt.
 
 ```
 .venv/bin/pytest -q
-230 passed
+235 passed
 ```
 
 ## Offene Sorgen
@@ -417,19 +509,26 @@ Zieldateiname ohne Glob-Unterstützung deterministisch bleibt.
 - `brief-common.md` fehlte (siehe oben) — falls die Datei eigentlich existieren
   sollte, sind mir möglicherweise Fehlerklassen oder Arbeitsweise-Vorgaben
   entgangen, die dort und nirgends sonst standen.
-- Vier von sechs Evals sind gegen einen echten Agenten bestätigt; die drei
-  „Gate findet ein Problem"-Evals wurden seit dem G2-Fix (Fix-Runde 4, Ableiten
-  statt Validieren) nicht erneut gefahren. Anders als bei Fix-Runde 3 ist mein
-  Vertrauen diesmal nicht in eine Doktrin gesetzt, die ein Agent befolgen
-  muss, sondern in einen Ausschluss, den `export.py` mechanisch erzwingt
-  (`status` wird gar nicht gelesen) — trotzdem bleibt es ein Versprechen ohne
-  echten Bestätigungslauf, bis der Koordinator ihn fährt.
+- Drei von sechs Evals sind gegen einen echten Agenten bestätigt; die drei
+  „Gate findet ein Problem"-Evals wurden seit dem Fix-Runde-5-Schema-Fix
+  (`status` komplett entfernt) nicht erneut gefahren. Zwei vorherige Male
+  dachte ich, der Fix reiche jetzt — beide Male maß der Koordinator das
+  Gegenteil. Ich bin überzeugter als bei Fix-Runde 4 (der Ausschluss ist
+  jetzt strukturell: es gibt kein Feld mehr, das widersprechen könnte, nicht
+  nur eine Stelle, die es ignoriert), aber ich behaupte bewusst nicht mehr,
+  dass es reicht, ohne dass ein echter Lauf es zeigt.
 - `protocol` selbst ist weiterhin eine editierbare JSON-Datei ohne
   kryptographische Bindung an den tatsächlichen Lauf (siehe Bekannte Grenzen
-  und Fix-Runde 4) — eine vollständig konsistente Fälschung bekäme weiterhin
-  `[geprüft]`. Das war mit den Mitteln dieser Skill (Tier 1, kein
+  und Fix-Runde 5) — eine vollständig konsistente Fälschung bekäme weiterhin
+  `verified` abgeleitet. Das war mit den Mitteln dieser Skill (Tier 1, kein
   Signatur-/Audit-Mechanismus) nicht wirtschaftlich zu schließen, und die
-  Hürde dafür ist jetzt deutlich höher als ein einzelnes Wort zu ändern.
+  Hürde dafür ist jetzt deutlich höher als ein einzelnes Feld zu schreiben.
+- `learning-coach` (Zyklus 14) muss auf die entfernte `status`-Angabe
+  nachgezogen werden (siehe Fix-Runde 5) — ich kann nicht sicherstellen, dass
+  diese Information die Session erreicht, die `learning-coach` baut, außer
+  über diesen Bericht und `docs/known-limits.md`. Falls beide vor dem Bau von
+  `learning-coach` ungelesen bleiben, bricht die Schnittstelle still mit
+  einem `KeyError`, den niemand vorhergesehen hat.
 - Der Glob-Pfad-Fix aus dem Eval-Harness ist auf dieser Basis nicht vorhanden;
   sollte `feat/dev-report` vor `exercise-forge` gemergt werden, könnten die
   hartkodierten Themennamen in den Eval-Prompts unnötig restriktiv wirken

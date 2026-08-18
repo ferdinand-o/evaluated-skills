@@ -2,10 +2,21 @@
 """Rendert das Aufgaben-JSON nach Markdown-Übungsblatt und Anki-CSV.
 
 Tier 1: nur Stdlib. Reines Rendering — dieses Skript erzeugt keine Aufgaben
-und ändert nie `verification`. Eine Aufgabe ohne (oder mit widersprüchlichem)
+und ändert nie `verification`. Eine Aufgabe ohne (oder mit unvollständigem)
 Prüfnachweis wird sichtbar als ungeprüft exportiert, nie stillschweigend als
 geprüft (Nutzervorgabe, Spec 13 Constraint 'Blind-Verifikation ist
 Pflicht-Gate').
+
+Fix-Runde 5: `verification` trägt seit dieser Runde **kein `status`-Feld
+mehr**. Ein gespeicherter, frei editierbarer Status wäre redundant zu dem,
+was `derive_status_from_protocol()` ohnehin aus `protocol` berechnet — und
+ein redundantes, frei beschreibbares Feld war genau die Fehlerquelle
+(Fix-Runde 3/4: eine Session konnte `status: "verified"` neben einem
+Protokoll schreiben, das etwas anderes zeigte; Fix-Runde 4 entkoppelte nur
+das *Rendering* davon, ließ den Widerspruch aber im Aufgaben-JSON selbst
+stehen — einem Artefakt, das auch andere Werkzeuge lesen, siehe
+`references/task-schemas.md`). Ohne das Feld kann der Widerspruch gar nicht
+mehr entstehen.
 """
 
 from __future__ import annotations
@@ -22,6 +33,9 @@ LETTERS = "ABCDEFGH"
 KNOWN_TYPES = {"multiple_choice", "open_question", "coding", "flashcard"}
 DIFFICULTY_LABELS = {"leicht", "mittel", "schwer"}
 TRANSFER_VALUES = {"near", "far"}
+# Die möglichen Ergebnisse von derive_status_from_protocol() — kein
+# gespeichertes Feld mehr (Fix-Runde 5), sondern der Wertebereich der
+# Ableitung.
 VERIFICATION_STATUSES = {"verified", "suspicious", "unverified"}
 # Die einzigen 'method'-Werte, die verify_blind.py/run_coding.py tatsächlich
 # schreiben, wenn das Blind-Gate wirklich lief (Rulings D4, Review-Befund D1).
@@ -58,11 +72,12 @@ def _check_difficulty(difficulty: object) -> list[str]:
 
 
 def _check_verification(verification: object) -> list[str]:
+    """Rein strukturell: `status` ist seit Fix-Runde 5 kein gespeichertes Feld
+    mehr und wird hier nicht (mehr) verlangt — er entsteht ausschließlich aus
+    `derive_status_from_protocol()`."""
     if not isinstance(verification, dict):
         return ["'verification' fehlt oder ist kein Objekt"]
     problems = []
-    if verification.get("status") not in VERIFICATION_STATUSES:
-        problems.append("'verification.status' muss verified/suspicious/unverified sein")
     if not verification.get("method"):
         problems.append("'verification.method' fehlt")
     return problems
@@ -129,11 +144,12 @@ def validate_exercise(exercise: dict) -> list[str]:
 # die Anzeige gar nicht angesehen.
 
 def derive_status_from_protocol(exercise: dict) -> tuple[str, str]:
-    """(status, detail) — berechnet aus `verification.protocol`, nie aus dem
-    gespeicherten `verification.status`. Fehlt ein vollständiges, zum
-    Aufgabentyp passendes Protokoll, ist das Ergebnis `unverified` — dieselbe
-    A4-Regel wie überall sonst in dieser Skill: nicht sicher erkannt heißt nie
-    'in Ordnung'."""
+    """(status, detail) — berechnet aus `verification.protocol` (Fix-Runde 5:
+    `status` ist seit dieser Runde gar kein gespeichertes Feld mehr, siehe
+    Modul-Docstring — es gibt also auch nichts mehr, dem widersprochen werden
+    könnte). Fehlt ein vollständiges, zum Aufgabentyp passendes Protokoll, ist
+    das Ergebnis `unverified` — dieselbe A4-Regel wie überall sonst in dieser
+    Skill: nicht sicher erkannt heißt nie 'in Ordnung'."""
     verification = exercise.get("verification") or {}
     method = verification.get("method")
     checked_at = verification.get("checked_at")

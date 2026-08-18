@@ -15,7 +15,7 @@
         {"text": "O(n log n)", "correct": false},
         {"text": "O(2^n)", "correct": false}
       ],
-      "verification": {"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null}
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
     }
   ]
 }

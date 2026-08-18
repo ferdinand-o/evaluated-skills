@@ -8,26 +8,28 @@ export = load_script("skills/exercise-forge/scripts/export.py")
 
 DIFFICULTY = {"steps": 1, "prerequisites": [], "transfer": "near", "label": "leicht"}
 
-# Fix-Runde 4: 'verified'/'suspicious' entstehen jetzt ausschließlich aus
-# `verification.protocol` (derive_status_from_protocol), nie aus dem
-# gespeicherten `status`-Wort. Jede Fixture hier trägt deshalb ein zu ihrem
-# Typ und zu ihrem Status passendes Protokoll — reines "status: verified"
-# ohne stimmiges Protokoll reicht nicht mehr, das ist genau der Punkt.
+# Fix-Runde 5: 'verification' trägt kein gespeichertes 'status'-Feld mehr —
+# 'verified'/'suspicious' entstehen ausschließlich aus `verification.protocol`
+# (derive_status_from_protocol). Diese vier Fixtures spiegeln, was ein echter
+# verify_blind.py/run_coding.py-Lauf tatsächlich schreibt (kein 'status'-Key).
+# Die Kontrast-Fixtures weiter unten (HAND_WRITTEN_*, STATUS_CONTRADICTS_*)
+# fügen 'status' absichtlich wieder hinzu, um zu beweisen, dass er ignoriert
+# wird, selbst wenn ihn jemand von Hand zurückschreibt.
 MC_VERIFIED = {
-    "status": "verified", "method": "blind_solve_mc", "detail": "Blind-Löser wählte korrekt.",
+    "method": "blind_solve_mc", "detail": "Blind-Löser wählte korrekt.",
     "checked_at": "2026-08-17T10:00:00Z", "protocol": {"chosen_index": 1},  # Option B ("3") ist correct: true
 }
 OPEN_UNVERIFIED = {
-    "status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen",
+    "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen",
     "checked_at": None, "protocol": None,
 }
 CODING_VERIFIED = {
-    "status": "verified", "method": "blind_solve_coding",
+    "method": "blind_solve_coding",
     "detail": "Musterlösung und Blind-Lösung bestehen beide die Tests.",
     "checked_at": "2026-08-17T10:00:00Z", "protocol": {"model_passed": True, "blind_passed": True},
 }
 CARD_SUSPICIOUS = {
-    "status": "suspicious", "method": "blind_check_flashcard", "detail": "Antwort weicht ab.",
+    "method": "blind_check_flashcard", "detail": "Antwort weicht ab.",
     "checked_at": "2026-08-17T10:00:00Z", "protocol": {"matches": False},
 }
 
@@ -311,6 +313,24 @@ def test_derive_status_coding_verified_claim_next_to_failed_blind_solution_is_su
     assert "nicht" in detail
 
 
+def test_derive_status_coding_without_blind_passed_is_unverified_not_suspicious():
+    """Regression: 'blind_passed' fehlt komplett, wenn keine Blind-Lösung
+    übergeben wurde (Blind-Gate unvollständig, run_coding.verify_coding gibt
+    dann nur {'model_passed': True} zurück). Das ist 'unverified', nicht
+    'suspicious' — ein bloßes protocol.get('blind_passed') würde beides
+    (fehlend und explizit False) gleich behandeln (falsy)."""
+    faked = dict(
+        CODING,
+        verification={
+            "method": "blind_solve_coding", "detail": "nur Musterlösung geprüft",
+            "checked_at": "2026-08-17T10:00:00Z",
+            "protocol": {"model_passed": True},
+        },
+    )
+    status, _ = export.derive_status_from_protocol(faked)
+    assert status == "unverified"
+
+
 def test_derive_status_flashcard_verified_claim_next_to_non_matching_protocol_is_suspicious():
     faked = dict(
         CARD,
@@ -333,7 +353,7 @@ def test_derive_status_unverified_for_unknown_method():
 
 
 def test_derive_status_unverified_for_fresh_not_run_exercise():
-    fresh = dict(MC, verification={"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": None, "protocol": None})
+    fresh = dict(MC, verification={"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": None, "protocol": None})
     status, detail = export.derive_status_from_protocol(fresh)
     assert status == "unverified"
     assert detail == "Blind-Gate noch nicht gelaufen"

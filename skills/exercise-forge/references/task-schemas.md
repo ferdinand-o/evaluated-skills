@@ -86,37 +86,65 @@ Verstehen → Multiple Choice, Anwenden/Analysieren → offene Frage oder Coding
 
 ```json
 "verification": {
-  "status": "verified" | "suspicious" | "unverified",
   "method": "blind_solve_mc" | "blind_solve_open" | "blind_solve_coding" | "blind_check_flashcard" | "not_run",
-  "detail": "ein bis zwei Sätze, mit Zitat der Blind-Begründung bei suspicious",
+  "detail": "ein bis zwei Sätze, mit Zitat der Blind-Begründung bei einem Konflikt",
   "checked_at": "ISO-Datum oder null",
   "protocol": { /* typspezifisch, siehe unten, oder null */ }
 }
 ```
 
-`status: verified` soll **ausschließlich** durch `verify_blind.py` (bzw.
-`run_coding.py` für Coding) entstehen. Eine neu erzeugte Aufgabe trägt
-`{"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}`.
+**Es gibt kein `status`-Feld.** Das war ein bewusster Schritt (Fix-Runde 5),
+kein Versehen: Ein gespeicherter Status wäre redundant zu dem, was sich aus
+`protocol` ohnehin ableiten lässt — und ein redundantes, frei editierbares
+Feld war genau die Fehlerquelle. Zwei vorherige Fix-Runden versuchten
+schwächere Lösungen und scheiterten daran, gemessen an echten Agentenläufen:
 
-**`status` von Hand zu setzen hat keine Wirkung mehr — das Feld wird beim
-Export gar nicht gelesen (Fix-Runde 4).** Eine reine Selbstauskunft-Doktrin
-("schreib `status` nie selbst") wurde ausprobiert und reichte nachweislich
-nicht: In drei echten Läufen setzte eine Session `status: "verified"`, nachdem
-sie einen vom Gate gefundenen Konflikt bereits gemeldet hatte. `export.py`
-verlässt sich deshalb nicht mehr auf `status`, sondern berechnet den
-angezeigten Status aus `protocol` — den Rohdaten des Blind-Laufs — und den
-Aufgabendaten selbst neu (`derive_status_from_protocol()`):
+1. **G1 — Doktrin** ("schreib `status` nie selbst"): reichte nicht. Eine
+   Session setzte `status: "verified"` in der Aufgaben-JSON, nachdem sie einen
+   vom Gate gefundenen Konflikt bereits gemeldet hatte.
+2. **G2 — nur beim Rendern ableiten** (`export.py` liest `status` nicht mehr,
+   berechnet ihn aber aus `protocol`): schloss die Lücke fürs *gerenderte*
+   Übungsblatt, ließ aber den Widerspruch in der **Aufgaben-JSON selbst**
+   stehen — einem Artefakt, das auch andere Werkzeuge lesen (`learning-coach`,
+   Zyklus 14).
+
+**Konsequenz:** Wer einen Status braucht — egal ob `export.py`, `verify_blind.py`
+selbst (für seinen `--all`-Filter) oder ein fremder Konsument wie
+`learning-coach` — leitet ihn nach der folgenden Regel ab, statt ihn zu lesen.
+Das ist die Regel, unabhängig vom Code dieser Skill:
+
+**Ableitungsregel:**
+
+1. Ist `method` gleich `"not_run"` (oder fehlt): Status ist `unverified`. Das
+   ist der Normalfall einer frisch erzeugten, noch nicht geprüften Aufgabe.
+2. Ist `method` keiner der vier echten Werte oben (weder `not_run` noch eine
+   der vier Blind-Gate-Methoden): Status ist `unverified` — kein bekannter
+   Prüfnachweis.
+3. Fehlt `checked_at`, oder ist `protocol` kein Objekt: Status ist
+   `unverified` — `method` sieht nach einem echten Lauf aus, aber der
+   Nachweis ist unvollständig.
+4. Sonst, je nach Typ, aus `protocol` (siehe Tabelle) — bei
+   `multiple_choice`/`open_question` **nachgerechnet gegen die aktuellen
+   Aufgabendaten** (Optionen/Kriterien), nicht nur gegen das im Protokoll
+   behauptete Ergebnis:
 
 | Typ | `protocol`-Feld | Ableitung |
 | --- | --- | --- |
-| `multiple_choice` | `{"chosen_index": int}` | `verified`, wenn `options[chosen_index].correct == true` ist — nachgerechnet gegen die Optionen der Aufgabe, nicht behauptet |
-| `open_question` | `{"criteria_met": [bool, …], "answer_is_plausible": bool}` | `verified`, wenn `answer_is_plausible` und alle `criteria_met` wahr sind |
-| `flashcard` | `{"matches": bool}` | `verified`, wenn `matches` wahr ist |
-| `coding` | `{"model_passed": bool, "blind_passed": bool}` | `verified`, wenn beide wahr sind |
+| `multiple_choice` | `{"chosen_index": int}` | `verified`, wenn `options[chosen_index].correct == true` ist; sonst `suspicious` |
+| `open_question` | `{"criteria_met": [bool, …], "answer_is_plausible": bool}` | `unverified`, wenn `answer_is_plausible` falsch ist oder `criteria_met` nicht zur Länge von `criteria` passt; sonst `verified`, wenn alle `criteria_met` wahr sind, sonst `suspicious` |
+| `flashcard` | `{"matches": bool}` | `verified`, wenn `matches` wahr ist; sonst `suspicious` |
+| `coding` | `{"model_passed": bool, "blind_passed": bool}` | `unverified`, wenn `model_passed` fehlt oder falsch ist; sonst `verified`, wenn `blind_passed` wahr ist, sonst `suspicious` — **`blind_passed` fehlend ist `unverified`, nicht `suspicious`** (keine Blind-Lösung übergeben ≠ Blind-Lösung durchgefallen) |
 
-Ein `status: "verified"` neben einem `protocol`, das etwas anderes zeigt (oder
-neben fehlendem `protocol`), wird beim Export ignoriert — `[geprüft]` entsteht
-ausschließlich, wenn das Protokoll es hergibt. `status` bleibt trotzdem im
-Objekt: für Menschen, die die Rohdatei überfliegen, und für `verify_blind.py`s
-eigene Entscheidungen (Konsolenausgabe, `--all`-Filter) — nur ist es nicht
-mehr die Quelle, der `export.py` vertraut.
+Referenzimplementierung: `export.derive_status_from_protocol(exercise)` bzw.
+identisch dupliziert `verify_blind.derive_status_from_protocol(exercise)`
+(Rulings A3 — Skripte bleiben eigenständig, deshalb zweimal derselbe
+Funktion statt eines Imports). Eine neu erzeugte Aufgabe trägt
+`{"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}`.
+
+**Für `learning-coach` (Zyklus 14):** Diese Skill liest dieselben
+Aufgaben-JSONs (`~/.skills/verified-research/research/<thema>.exercises.json`)
+und meldet unter anderem „keine verifizierten Aufgaben gefunden". Sie muss
+den Status ebenfalls nach obiger Regel ableiten, nicht aus einem `status`-Feld
+lesen — das Feld existiert nicht (mehr). Eine Prüfung auf `exercise["verification"]["status"] == "verified"`
+liefert einen `KeyError`, keine falsche Antwort — das ist absichtlich laut,
+nicht still (siehe Rulings A4).

@@ -26,6 +26,9 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT = 300
 LETTERS = "ABCDEFGH"
+# Dupliziert aus export.py (Rulings A3, Skripte bleiben eigenständig) — die
+# einzigen 'method'-Werte, die ein echter Blind-Lauf schreibt.
+REAL_VERIFICATION_METHODS = {"blind_solve_mc", "blind_solve_open", "blind_solve_coding", "blind_check_flashcard"}
 
 
 class VerifyError(RuntimeError):
@@ -83,27 +86,103 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _make_verification(status: str, method: str, detail: str, protocol: dict | None = None) -> dict:
-    """`protocol` trägt die Rohdaten, aus denen `status` sich ergibt (z. B.
-    `chosen_index` bei MC) — das ist, was `export.derive_status_from_protocol()`
-    beim Rendern statt des `status`-Worts nachrechnet (Fix-Runde 4: Ableiten
-    statt Validieren, Spec 00 §4 G2). `status` bleibt trotzdem gesetzt, für
-    Menschen, die die Rohdatei lesen, und für `main()`s eigene Entscheidungen
-    (Konsolenausgabe, `--all`-Filter) — es ist nur nicht mehr die einzige
-    Quelle, der ein Konsument vertraut."""
-    return {"status": status, "method": method, "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
+def _make_verification(method: str, detail: str, protocol: dict | None = None) -> dict:
+    """Kein `status`-Feld mehr (Fix-Runde 5): `protocol` trägt die Rohdaten,
+    aus denen sich ein Status ableiten lässt (z. B. `chosen_index` bei MC) —
+    ein zusätzliches, frei editierbares `status`-Feld wäre redundant dazu und
+    genau die Fehlerquelle, die Fix-Runde 3/4 in der Praxis traf (eine Session
+    schrieb `status: "verified"` neben einem Protokoll, das etwas anderes
+    zeigte — die Aufgaben-JSON, ein Artefakt, das auch andere Werkzeuge lesen,
+    behielt den Widerspruch, selbst nachdem `export.py` ihn beim Rendern schon
+    ignorierte). Wer einen Status braucht, ruft `derive_status_from_protocol()`
+    auf — hier für `main()`s eigene Entscheidungen, in `export.py` fürs
+    Rendern, in `learning-coach` (Zyklus 14) nach derselben Regel (siehe
+    `references/task-schemas.md`)."""
+    return {"method": method, "detail": detail, "checked_at": _now_iso(), "protocol": protocol}
 
 
 def _verified(method: str, detail: str, protocol: dict | None = None) -> dict:
-    return _make_verification("verified", method, detail, protocol)
+    return _make_verification(method, detail, protocol)
 
 
 def _suspicious(method: str, detail: str, protocol: dict | None = None) -> dict:
-    return _make_verification("suspicious", method, detail, protocol)
+    return _make_verification(method, detail, protocol)
 
 
 def _unverified(method: str, detail: str, protocol: dict | None = None) -> dict:
-    return _make_verification("unverified", method, detail, protocol)
+    return _make_verification(method, detail, protocol)
+
+
+def derive_status_from_protocol(exercise: dict) -> tuple[str, str]:
+    """(status, detail) aus `verification.protocol` — dupliziert aus
+    `export.derive_status_from_protocol()` (Rulings A3, Skripte bleiben
+    eigenständig). Gleiche Regel, gleiche Rückgabewerte; siehe dort für die
+    ausführlicheren Kommentare pro Typ und `references/task-schemas.md` für
+    die Regel unabhängig vom Code."""
+    verification = exercise.get("verification") or {}
+    method = verification.get("method")
+    checked_at = verification.get("checked_at")
+    protocol = verification.get("protocol")
+    ex_type = exercise.get("type")
+
+    if method == "not_run" or method is None:
+        return "unverified", verification.get("detail") or "Blind-Gate noch nicht gelaufen"
+
+    if method not in REAL_VERIFICATION_METHODS:
+        return "unverified", f"'{method}' ist keine der vom Blind-Gate erzeugten Methoden — kein Prüfnachweis"
+
+    if not checked_at or not isinstance(protocol, dict):
+        return "unverified", (
+            f"method {method!r} sieht nach einem echten Lauf aus, aber checked_at "
+            "und/oder protocol fehlen oder sind unvollständig — kein vollständiger Prüfnachweis"
+        )
+
+    if ex_type == "multiple_choice" and method == "blind_solve_mc":
+        options = exercise.get("options")
+        chosen_index = protocol.get("chosen_index")
+        if not isinstance(options, list) or not isinstance(chosen_index, int) or not (0 <= chosen_index < len(options)):
+            return "unverified", "Protokoll verweist auf keine gültige Option der Aufgabe"
+        chosen = options[chosen_index]
+        letter = LETTERS[chosen_index] if chosen_index < len(LETTERS) else str(chosen_index)
+        if chosen.get("correct"):
+            return "verified", f"Blind-Löser wählte laut Protokoll die als korrekt markierte Option {letter}."
+        return "suspicious", f"Blind-Löser wählte laut Protokoll Option {letter} — nicht als korrekt markiert."
+
+    if ex_type == "open_question" and method == "blind_solve_open":
+        criteria = exercise.get("criteria") or []
+        met = protocol.get("criteria_met")
+        plausible = protocol.get("answer_is_plausible")
+        if not criteria or not isinstance(met, list) or len(met) != len(criteria) or not isinstance(plausible, bool):
+            return "unverified", "Protokoll passt nicht zur Kriterienliste der Aufgabe"
+        if not plausible:
+            return "unverified", "Blind-Antwort war laut Protokoll nicht plausibel genug für ein Urteil"
+        if all(met):
+            return "verified", "Blind-Antwort erfüllt laut Protokoll alle Kriterien."
+        unmet = [i + 1 for i, ok in enumerate(met) if not ok]
+        return "suspicious", f"Blind-Antwort erfüllt laut Protokoll Kriterium/-ien {unmet} nicht."
+
+    if ex_type == "flashcard" and method == "blind_check_flashcard":
+        matches = protocol.get("matches")
+        if not isinstance(matches, bool):
+            return "unverified", "Protokoll enthält kein 'matches'-Feld"
+        if matches:
+            return "verified", "Blind-Antwort trifft laut Protokoll die Rückseite."
+        return "suspicious", "Blind-Antwort weicht laut Protokoll von der Rückseite ab."
+
+    if ex_type == "coding" and method == "blind_solve_coding":
+        model_passed = protocol.get("model_passed")
+        blind_passed = protocol.get("blind_passed")
+        if not isinstance(model_passed, bool):
+            return "unverified", "Protokoll enthält kein Testergebnis für die Musterlösung"
+        if not model_passed:
+            return "unverified", "Musterlösung besteht laut Protokoll die eigenen Tests nicht"
+        if not isinstance(blind_passed, bool):
+            return "unverified", "Protokoll enthält kein Testergebnis für die Blind-Lösung"
+        if blind_passed:
+            return "verified", "Musterlösung und Blind-Lösung bestehen laut Protokoll beide die Tests."
+        return "suspicious", "Blind-Lösung besteht laut Protokoll nicht, obwohl die Musterlösung besteht."
+
+    return "unverified", f"Methode {method!r} passt nicht zum Aufgabentyp {ex_type!r}"
 
 
 def _find_json_object(text: str, required_key: str) -> dict | None:
@@ -173,7 +252,9 @@ def verify_mc(exercise: dict, cwd: Path, *, cli: str = "claude", timeout: int = 
         return _verified("blind_solve_mc", f"Blind-Löser wählte korrekt (Option {letter}).", protocol)
     return _suspicious(
         "blind_solve_mc",
-        f"Blind-Löser wählte Distraktor {letter} ('{chosen.get('text')}'). Begründung: {result.stdout.strip()[:300]}",
+        f"Möglicherweise kaputter oder mehrdeutiger Distraktor: Blind-Löser wählte "
+        f"{letter} ('{chosen.get('text')}') statt der markierten korrekten Option. "
+        f"Begründung: {result.stdout.strip()[:300]}",
         protocol,
     )
 
@@ -444,7 +525,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Aufgabe {args.id!r} nicht gefunden in {path}", file=sys.stderr)
             return 2
     else:
-        targets = [e for e in exercises if e.get("verification", {}).get("status") != "verified"]
+        targets = [e for e in exercises if derive_status_from_protocol(e)[0] != "verified"]
 
     checked = 0
     with tempfile.TemporaryDirectory() as td:
@@ -461,7 +542,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             exercise["verification"] = verdict
             checked += 1
-            print(f"{exercise.get('id')}: {verdict['status']} ({verdict['method']}) — {verdict['detail']}")
+            status, _ = derive_status_from_protocol(exercise)
+            print(f"{exercise.get('id')}: {status} ({verdict['method']}) — {verdict['detail']}")
             # Nach jeder Aufgabe sichern, nicht erst am Ende der Schleife — ein
             # Abbruch später im Batch (Timeout von außen, SIGKILL) darf bereits
             # geprüfte Urteile nicht mehr verwerfen können als bis hierhin ohnehin.

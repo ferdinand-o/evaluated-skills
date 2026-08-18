@@ -11,6 +11,13 @@ vb = load_script("skills/exercise-forge/scripts/verify_blind.py")
 RUN_CODING_PATH = REPO_ROOT / "skills" / "exercise-forge" / "scripts" / "run_coding.py"
 
 
+def status_of(exercise: dict, verification: dict) -> str:
+    """Fix-Runde 5: `verification` trägt kein `status`-Feld mehr — Tests
+    leiten ihn wie jeder andere Konsument über `derive_status_from_protocol()`
+    ab, statt ihn direkt aus dem Ergebnis-Dict zu lesen."""
+    return vb.derive_status_from_protocol(dict(exercise, verification=verification))[0]
+
+
 def fake_cli(tmp_path: Path, body: str, name: str = "fake-claude") -> str:
     script = tmp_path / name
     script.write_text("#!/bin/bash\n" + body, encoding="utf-8")
@@ -69,30 +76,32 @@ MC_EXERCISE = {
 def test_verify_mc_correct_choice_is_verified(tmp_path):
     cli = fake_cli(tmp_path, 'echo "Begruendung ...\\nANTWORT: B"\n')
     result = vb.verify_mc(MC_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "verified"
+    assert status_of(MC_EXERCISE, result) == "verified"
     assert result["method"] == "blind_solve_mc"
     assert result["checked_at"]
     assert result["protocol"] == {"chosen_index": 1}  # Option B, "3", correct: true
+    assert "status" not in result  # Fix-Runde 5: kein gespeichertes Statusfeld mehr
 
 
 def test_verify_mc_distractor_choice_is_suspicious(tmp_path):
     cli = fake_cli(tmp_path, 'echo "Weil man beim Zaehlen bei 0 anfaengt.\\nANTWORT: A"\n')
     result = vb.verify_mc(MC_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "suspicious"
+    assert status_of(MC_EXERCISE, result) == "suspicious"
     assert "A" in result["detail"] or "2" in result["detail"]
+    assert "kaputter oder mehrdeutiger Distraktor" in result["detail"]  # Judge-Claim braucht explizite Problem-Framing
     assert result["protocol"] == {"chosen_index": 0}  # Option A, "2", correct: false
 
 
 def test_verify_mc_unparsable_answer_is_unverified(tmp_path):
     cli = fake_cli(tmp_path, 'echo "Ich bin mir nicht sicher."\n')
     result = vb.verify_mc(MC_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "unverified"
+    assert status_of(MC_EXERCISE, result) == "unverified"
     assert "parsebar" in result["detail"]
 
 
 def test_verify_mc_missing_cli_is_unverified_not_raised(tmp_path):
     result = vb.verify_mc(MC_EXERCISE, tmp_path, cli=str(tmp_path / "does-not-exist"))
-    assert result["status"] == "unverified"
+    assert status_of(MC_EXERCISE, result) == "unverified"
     assert "erreichbar" in result["detail"]
 
 
@@ -119,7 +128,7 @@ def test_verify_open_all_criteria_met_is_verified(tmp_path):
     grading = json.dumps({"answer_is_plausible": True, "criteria_met": [True, True], "why": "passt"})
     cli = fake_cli_sequence(tmp_path, "Listen sind veraenderbar, Tupel nicht. Tupel fuer Koordinaten.", grading)
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "verified"
+    assert status_of(OPEN_EXERCISE, result) == "verified"
     assert result["method"] == "blind_solve_open"
     assert result["protocol"] == {"criteria_met": [True, True], "answer_is_plausible": True}
 
@@ -128,7 +137,7 @@ def test_verify_open_unmet_criterion_on_plausible_answer_is_suspicious(tmp_path)
     grading = json.dumps({"answer_is_plausible": True, "criteria_met": [True, False], "why": "kein Anwendungsfall genannt"})
     cli = fake_cli_sequence(tmp_path, "Listen sind veraenderbar, Tupel nicht.", grading)
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "suspicious"
+    assert status_of(OPEN_EXERCISE, result) == "suspicious"
     assert "eng" in result["detail"]
     assert result["protocol"] == {"criteria_met": [True, False], "answer_is_plausible": True}
 
@@ -137,14 +146,14 @@ def test_verify_open_implausible_answer_is_unverified(tmp_path):
     grading = json.dumps({"answer_is_plausible": False, "criteria_met": [False, False], "why": "unverstaendlich"})
     cli = fake_cli_sequence(tmp_path, "asdf qwer", grading)
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "unverified"
+    assert status_of(OPEN_EXERCISE, result) == "unverified"
     assert "plausibel" in result["detail"]
 
 
 def test_verify_open_unparsable_grading_is_unverified(tmp_path):
     cli = fake_cli_sequence(tmp_path, "Eine Antwort.", "kein JSON hier")
     result = vb.verify_open(OPEN_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "unverified"
+    assert status_of(OPEN_EXERCISE, result) == "unverified"
     assert "parsebar" in result["detail"]
 
 
@@ -156,14 +165,14 @@ def test_verify_open_empty_criteria_is_unverified_not_verified(tmp_path):
     erreichbar' statt der eigentlichen Ursache melden."""
     empty_criteria = dict(OPEN_EXERCISE, criteria=[])
     result = vb.verify_open(empty_criteria, tmp_path, cli=str(tmp_path / "does-not-exist"))
-    assert result["status"] == "unverified"
+    assert status_of(empty_criteria, result) == "unverified"
     assert "leer" in result["detail"]
 
 
 def test_verify_open_missing_criteria_field_is_unverified():
     without_criteria = {"id": "open-02", "type": "open_question", "stem": "Frage ohne Kriterien?"}
     result = vb.verify_open(without_criteria, Path("."), cli="does-not-matter")
-    assert result["status"] == "unverified"
+    assert status_of(without_criteria, result) == "unverified"
     assert "leer" in result["detail"]
 
 
@@ -181,7 +190,7 @@ def test_verify_flashcard_matching_answer_is_verified(tmp_path):
     grading = json.dumps({"matches": True, "why": "trifft zu"})
     cli = fake_cli_sequence(tmp_path, "Paris", grading)
     result = vb.verify_flashcard(CARD_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "verified"
+    assert status_of(CARD_EXERCISE, result) == "verified"
     assert result["method"] == "blind_check_flashcard"
     assert result["protocol"] == {"matches": True}
 
@@ -190,7 +199,7 @@ def test_verify_flashcard_diverging_answer_is_suspicious(tmp_path):
     grading = json.dumps({"matches": False, "why": "Frage koennte auch Bevoelkerungsfrage sein"})
     cli = fake_cli_sequence(tmp_path, "67 Millionen", grading)
     result = vb.verify_flashcard(CARD_EXERCISE, tmp_path, cli=cli)
-    assert result["status"] == "suspicious"
+    assert status_of(CARD_EXERCISE, result) == "suspicious"
     assert "mehrdeutig" in result["detail"]
     assert result["protocol"] == {"matches": False}
 
@@ -204,8 +213,9 @@ def test_verify_one_dispatches_by_type(tmp_path):
 
 
 def test_verify_one_unknown_type_is_unverified(tmp_path):
-    result = vb.verify_one({"id": "x", "type": "essay"}, tmp_path, cli="claude")
-    assert result["status"] == "unverified"
+    exercise = {"id": "x", "type": "essay"}
+    result = vb.verify_one(exercise, tmp_path, cli="claude")
+    assert status_of(exercise, result) == "unverified"
     assert result["method"] == "not_run"
 
 
@@ -220,8 +230,8 @@ def test_load_and_save_roundtrip(tmp_path):
 
 
 def test_main_with_id_updates_only_that_exercise(tmp_path, monkeypatch):
-    other = dict(CARD_EXERCISE, id="card-02", verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
-    target = dict(MC_EXERCISE, verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    other = dict(CARD_EXERCISE, id="card-02", verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
+    target = dict(MC_EXERCISE, verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
     path = tmp_path / "topic.exercises.json"
     vb.save_exercises(path, {"topic": "topic", "exercises": [target, other]})
 
@@ -231,13 +241,16 @@ def test_main_with_id_updates_only_that_exercise(tmp_path, monkeypatch):
 
     written = vb.load_exercises(path)
     by_id = {e["id"]: e for e in written["exercises"]}
-    assert by_id["mc-01"]["verification"]["status"] == "verified"
-    assert by_id["card-02"]["verification"]["status"] == "unverified"  # unangetastet
+    assert status_of(MC_EXERCISE, by_id["mc-01"]["verification"]) == "verified"
+    assert status_of(CARD_EXERCISE, by_id["card-02"]["verification"]) == "unverified"  # unangetastet
 
 
 def test_main_with_all_skips_already_verified(tmp_path):
-    verified = dict(CARD_EXERCISE, id="card-01", verification={"status": "verified", "method": "blind_check_flashcard", "detail": "ok", "checked_at": "2026-01-01T00:00:00Z"})
-    unverified = dict(MC_EXERCISE, verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    verified = dict(CARD_EXERCISE, id="card-01", verification={
+        "method": "blind_check_flashcard", "detail": "ok", "checked_at": "2026-01-01T00:00:00Z",
+        "protocol": {"matches": True},
+    })
+    unverified = dict(MC_EXERCISE, verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
     path = tmp_path / "topic.exercises.json"
     vb.save_exercises(path, {"topic": "topic", "exercises": [verified, unverified]})
 
@@ -247,7 +260,7 @@ def test_main_with_all_skips_already_verified(tmp_path):
 
     written = vb.load_exercises(path)
     by_id = {e["id"]: e for e in written["exercises"]}
-    assert by_id["mc-01"]["verification"]["status"] == "verified"
+    assert status_of(MC_EXERCISE, by_id["mc-01"]["verification"]) == "verified"
     assert by_id["card-01"]["verification"]["checked_at"] == "2026-01-01T00:00:00Z"  # unangetastet
 
 
@@ -266,9 +279,9 @@ def test_main_all_survives_one_malformed_exercise_and_keeps_the_rest(tmp_path):
     malformed = {
         "id": "mc-broken", "type": "multiple_choice", "stem": "Kaputte Optionen?",
         "options": [{"correct": True}, {"correct": False}],  # kein 'text'
-        "verification": {"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None},
+        "verification": {"method": "not_run", "detail": "x", "checked_at": None, "protocol": None},
     }
-    healthy = dict(MC_EXERCISE, verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    healthy = dict(MC_EXERCISE, verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
     path = tmp_path / "topic.exercises.json"
     vb.save_exercises(path, {"topic": "topic", "exercises": [malformed, healthy]})
 
@@ -278,9 +291,9 @@ def test_main_all_survives_one_malformed_exercise_and_keeps_the_rest(tmp_path):
 
     written = vb.load_exercises(path)
     by_id = {e["id"]: e for e in written["exercises"]}
-    assert by_id["mc-broken"]["verification"]["status"] == "unverified"
+    assert status_of(malformed, by_id["mc-broken"]["verification"]) == "unverified"
     assert "KeyError" in by_id["mc-broken"]["verification"]["detail"] or "text" in by_id["mc-broken"]["verification"]["detail"]
-    assert by_id["mc-01"]["verification"]["status"] == "verified"  # nicht mitgerissen
+    assert status_of(MC_EXERCISE, by_id["mc-01"]["verification"]) == "verified"  # nicht mitgerissen
 
 
 def test_main_saves_incrementally_not_only_at_the_end(tmp_path, monkeypatch):
@@ -296,8 +309,8 @@ def test_main_saves_incrementally_not_only_at_the_end(tmp_path, monkeypatch):
 
     monkeypatch.setattr(vb, "save_exercises", counting_save)
 
-    ex1 = dict(MC_EXERCISE, id="mc-a", verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
-    ex2 = dict(MC_EXERCISE, id="mc-b", verification={"status": "unverified", "method": "not_run", "detail": "x", "checked_at": None})
+    ex1 = dict(MC_EXERCISE, id="mc-a", verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
+    ex2 = dict(MC_EXERCISE, id="mc-b", verification={"method": "not_run", "detail": "x", "checked_at": None, "protocol": None})
     path = tmp_path / "topic.exercises.json"
     vb.save_exercises(path, {"topic": "topic", "exercises": [ex1, ex2]})
     save_calls.clear()
@@ -353,7 +366,7 @@ def test_verify_coding_task_correct_blind_solution_is_verified(tmp_path):
     result = vb.verify_coding_task(
         CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
     )
-    assert result["status"] == "verified"
+    assert status_of(CODING_EXERCISE, result) == "verified"
 
 
 def test_verify_coding_task_no_code_block_is_unverified(tmp_path):
@@ -361,7 +374,7 @@ def test_verify_coding_task_no_code_block_is_unverified(tmp_path):
     result = vb.verify_coding_task(
         CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
     )
-    assert result["status"] == "unverified"
+    assert status_of(CODING_EXERCISE, result) == "unverified"
     assert "Codeblock" in result["detail"]
 
 
@@ -370,5 +383,5 @@ def test_verify_one_dispatches_coding(tmp_path):
     result = vb.verify_one(
         CODING_EXERCISE, tmp_path, cli=cli, python=sys.executable, run_coding_path=RUN_CODING_PATH,
     )
-    assert result["status"] == "verified"
+    assert status_of(CODING_EXERCISE, result) == "verified"
     assert result["method"] == "blind_solve_coding"

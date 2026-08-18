@@ -14,7 +14,7 @@
         "Nennt wörtlich den englischen Begriff 'immutable' für Tupel",
         "Nennt Koordinaten als Anwendungsbeispiel für Tupel"
       ],
-      "verification": {"status": "unverified", "method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null}
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
     }
   ]
 }
