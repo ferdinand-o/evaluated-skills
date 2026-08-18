@@ -1,0 +1,12 @@
+{
+  "git": true,
+  "description": "Plan mit zwei unabhaengigen Tasks — der Anti-Zeremonie-Fall unter der Parallel-Schwelle.",
+  "commits": [
+    {
+      "message": "docs: Mini-Plan mit zwei unabhaengigen Tasks",
+      "touch": {
+        "docs/superpowers/plans/mini-two-tasks.md": "# Mini Two Tasks Plan\n\n**Goal:** Zwei kleine, unabhaengige Helfer.\n\n## Global Constraints\n\n- Testfixture fuer subagent-dev.\n\n---\n\n### Task 1: Logging-Helfer\n\n**Files:**\n- Create: `src/logging_helper.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement logging helper**\n\n### Task 2: Config-Loader\n\n**Files:**\n- Create: `src/config_loader.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement config loader**\n"
+      }
+    }
+  ]
+}
