@@ -56,13 +56,13 @@
         {"type": "file_matches", "path": ".skills/verified-research/research/sorting.exercises.json", "pattern": "\"method\": \"blind_solve_coding\""},
         {
           "type": "judge",
-          "claim": "Das Ergebnis — die Antwort des Agenten oder der 'detail'-Text von code-01 im Aufgaben-JSON — benennt sichtbar einen überspezifizierten Test als Ursache (die Blind-Lösung scheiterte an der geforderten 'for'-Schleife im Quelltext, nicht an fehlerhaftem Verhalten), nicht nur, dass irgendein Status gesetzt wurde."
+          "claim": "Das Ergebnis — die Antwort des Agenten oder der 'detail'-Text von code-01 im Aufgaben-JSON — benennt sichtbar einen überspezifizierten Test als Ursache (die Blind-Lösung scheiterte an einem Test, der den Quelltext selbst festnagelt — am md5-Fingerabdruck der Referenzimplementierung —, nicht an fehlerhaftem Verhalten), nicht nur, dass irgendein Status gesetzt wurde."
         }
       ],
       "must_not": [
         {"type": "file_matches", "path": ".skills/verified-research/research/sorting.exercises.json", "pattern": "\"status\": \"verified\""}
       ],
-      "notes": "Eval 2 aus Spec 13 §Approach. `test_uses_explicit_loop` in der Fixture prüft ein Implementierungsdetail (siehe test_verify_coding_overspecified_tests_flags_suspicious in tests/test_exercise_forge_run_coding.py — dasselbe Muster, dort bereits mechanisch gegen run_coding.py bestätigt). Ursprünglich derselbe Ketten-Fehler wie bei den beiden anderen zerlegten Evals (siehe dort und docs/known-limits.md) — nach der Zerlegung deckte die neue must_not-Assertion denselben echten Defekt auf: status blieb 'verified', obwohl das Gate ein Problem fand. Jetzt drei einzeln entscheidbare Assertionen wie bei mc-distractor-trap-is-caught."
+      "notes": "Eval 2 aus Spec 13 §Approach. `test_uses_explicit_loop` in der Fixture prüft ein Implementierungsdetail (siehe test_verify_coding_overspecified_tests_flags_suspicious in tests/test_exercise_forge_run_coding.py — dasselbe Muster, dort bereits mechanisch gegen run_coding.py bestätigt). Ursprünglich derselbe Ketten-Fehler wie bei den beiden anderen zerlegten Evals (siehe dort und docs/known-limits.md) — nach der Zerlegung deckte die neue must_not-Assertion denselben echten Defekt auf: status blieb 'verified', obwohl das Gate ein Problem fand. Jetzt drei einzeln entscheidbare Assertionen wie bei mc-distractor-trap-is-caught. Fix-Runde 6: Der ursprüngliche 'überspezifizierte' Test (\"for\" muss im Quelltext stehen) sprang nicht zuverlässig an — verify_blind.build_coding_prompt zeigt dem Blind-Löser die Testsuite, und er erfüllt jede sichtbare Auflage, die erfüllbar ist (jede Comprehension enthält ebenfalls 'for'). Zwei Läufe hintereinander bestand die Blind-Lösung, es gab nichts zu melden, der Judge verneinte zu Recht. Ersetzt durch einen Test, der den md5-Fingerabdruck des Quelltexts verlangt: sichtbar, aber ohne die Referenzimplementierung nicht erfüllbar. Mechanisch geprüft für Schleifen- und Comprehension-Lösung — beide 'suspicious'. Die allgemeine Grenze steht in docs/known-limits.md."
     },
     {
       "id": "narrow-criteria-on-open-question-are-flagged",
