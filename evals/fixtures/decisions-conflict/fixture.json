@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "docs/decisions.md legt ein Fehlerformat fest (error.code + error.message); die Prompt fordert ein Format ohne error.code an. Trägt Eval 2 aus Spec 03 — der Scan muss den Widerspruch aufgreifen."
+}

@@ -32,7 +32,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
-| neues Feature, Codebase existiert | feature-spec *(geplant)* | brainstorming (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
+| neues Feature, Codebase existiert | feature-spec | brainstorming (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger *(geplant)* | feature-spec |
 | Testplan, Repo-Typ-Frage | testing-strategy *(geplant)* | test-driven-development (Zyklus *während* der Implementierung) |
 | Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Kleine Task-Manager-Codebase mit bestehendem EmailService und EventBus, ohne docs/decisions.md — Grundlage für die vage Anfrage 'bau mir Notifications'."
+}
