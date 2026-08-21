@@ -93,26 +93,59 @@ def _versioning_prefix_regex(prefix_pattern: str) -> re.Pattern:
     Dokuments. Der Anker `^` wird hier durch Zeilenanfang plus optionalem Leerraum und
     optionalem Anführungszeichen ersetzt: YAML quotet Pfad-Schlüssel nicht zwingend (siehe
     assets/openapi-skeleton.yaml), `extract_openapi.py`s Dumper dagegen immer — beide Stile
-    müssen erkannt werden, sonst meldet der Check einen Fehlalarm rein je nach Schreibstil."""
-    inner = prefix_pattern.lstrip("^")
-    return re.compile(rf'(?m)^[ \t]*"?{inner}')
+    müssen erkannt werden, sonst meldet der Check einen Fehlalarm rein je nach Schreibstil.
+
+    Review-Fund: `prefix_pattern` interpoliert werden musste ungeschützt — bei einer
+    Alternation (`^/v[0-9]+/|^/api/v[0-9]+/`) bekam nur der erste Zweig den Präfix, weil `|`
+    die niedrigste Regex-Präzedenz hat. Jeder Zweig wird jetzt einzeln von seinem eigenen `^`
+    befreit, bevor die Alternation als Ganzes gruppiert und mit dem Präfix versehen wird.
+    Kann `prefix_pattern` selbst nicht kompiliert werden (z. B. ein Inline-Flag, das nach dem
+    Voranstellen nicht mehr an Position 0 steht), wirft dies `re.error` — der Aufrufer in
+    `run_checklist` fängt das ab, statt das Gate mit Traceback sterben zu lassen."""
+    alternatives = prefix_pattern.split("|")
+    inner = "|".join(alt.lstrip("^") for alt in alternatives)
+    return re.compile(rf'(?m)^[ \t]*"?(?:{inner})')
 
 
 def _document_has_method(openapi_text: str, method: str) -> bool:
     """Textheuristik (kein YAML-Parsing, siehe Modulkopf): erkennt eine HTTP-Methode als
     eigene Mapping-Key-Zeile (`post:` oder `"post":`), so wie OpenAPI Pfad-Items sie
-    schreiben — Grundlage dafür, ob idempotency.header überhaupt anwendbar ist."""
+    schreiben — Grundlage dafür, ob idempotency.header überhaupt anwendbar ist.
+
+    Review-Fund: verlangte bislang, dass der Key bis Zeilenende allein steht. Damit blieben
+    JSON-formatiertes OpenAPI (`"post": {`) und YAML mit Zeilenkommentar (`post:   # ...`)
+    unerkannt. Es genügt jetzt, dass die Zeile (nach optionalem Leerraum/Anführungszeichen)
+    mit `<methode>:` beginnt — was danach folgt (Wert, `{`, Kommentar, nichts) ist egal."""
     escaped = re.escape(method.strip().lower())
-    pattern = re.compile(rf'(?mi)^[ \t]*"?{escaped}"?[ \t]*:[ \t]*$')
+    pattern = re.compile(rf'(?mi)^[ \t]*"?{escaped}"?[ \t]*:')
     return bool(pattern.search(openapi_text))
 
 
+_LIST_ENDPOINT_ARRAY_RE = re.compile(r'"?type"?\s*:\s*"?array"?')
+_LIST_ENDPOINT_ITEMS_RE = re.compile(r'^[ \t]*"?items"?[ \t]*:', re.MULTILINE)
+_COLLECTION_PATH_RE = re.compile(r'^[ \t]*"?(/[^"\s]+)"?[ \t]*:', re.MULTILINE)
+
+
 def _document_has_list_endpoint(openapi_text: str) -> bool:
-    """Textheuristik für „es gibt einen Listen-Endpoint": ein Array-typisiertes
-    Antwortschema (`type: array` bzw. `"type": "array"`) ist das übliche OpenAPI-Signal für
-    eine Collection-Response. Ohne dieses Signal ist Cursor-Paginierung schlicht nicht
-    anwendbar — ihr Fehlen ist dann kein Konventionsbruch, sondern eine fehlende Voraussetzung."""
-    return bool(re.search(r'"?type"?\s*:\s*"?array"?', openapi_text))
+    """Textheuristik für „es gibt einen Listen-Endpoint". Drei Signale, jedes für sich
+    hinreichend: ein Array-typisiertes Antwortschema (`type: array`), ein `items:`-Schlüssel
+    (Array-Schema-Bestandteil), oder ein Pfad-Schlüssel ohne Pfadparameter am Ende (z. B.
+    `/v1/orders` statt `/v1/orders/{id}`) — eine Collection-Route.
+
+    Review-Fund: `type: array` allein reicht nicht — `extract_openapi.py` (Brownfield) trägt
+    in Responses nur einen `TODO`-Platzhalter ein, nie ein Antwortschema. Ohne ein zweites,
+    von der Response-Struktur unabhängiges Signal blieben Pagination-Checks im Brownfield-
+    Ablauf dauerhaft übersprungen, auch bei echten Collection-Endpoints. Bleibt Textheuristik,
+    kein YAML-Parsing (Absicht, siehe Modulkopf)."""
+    if _LIST_ENDPOINT_ARRAY_RE.search(openapi_text):
+        return True
+    if _LIST_ENDPOINT_ITEMS_RE.search(openapi_text):
+        return True
+    for match in _COLLECTION_PATH_RE.finditer(openapi_text):
+        path = match.group(1)
+        if not path.rstrip("/").endswith("}"):
+            return True
+    return False
 
 
 def run_checklist(openapi_text: str, conventions: dict) -> list[dict]:
@@ -145,8 +178,16 @@ def run_checklist(openapi_text: str, conventions: dict) -> list[dict]:
     versioning = conventions.get("versioning") or {}
     prefix_pattern = versioning.get("prefix_pattern")
     if prefix_pattern:
-        passed = bool(_versioning_prefix_regex(prefix_pattern).search(openapi_text))
-        checks.append(_check("versioning.prefix_pattern", passed, "versionierter Pfad gefunden" if passed else "kein versionierter Pfad gefunden"))
+        try:
+            regex = _versioning_prefix_regex(prefix_pattern)
+        except re.error as exc:
+            # Ein unbrauchbares Muster darf nie als bestanden gelten (kein stiller Erfolg) —
+            # es zählt als Konventionsbruch, nicht als "skipped" (das ist für fehlende
+            # Voraussetzungen im Dokument reserviert, nicht für kaputte Konfiguration).
+            checks.append(_check("versioning.prefix_pattern", False, f"prefix_pattern ist kein gültiges Regex: {exc}"))
+        else:
+            passed = bool(regex.search(openapi_text))
+            checks.append(_check("versioning.prefix_pattern", passed, "versionierter Pfad gefunden" if passed else "kein versionierter Pfad gefunden"))
 
     idempotency = conventions.get("idempotency") or {}
     header = idempotency.get("header")
