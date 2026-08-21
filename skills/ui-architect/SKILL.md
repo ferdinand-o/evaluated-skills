@@ -59,6 +59,8 @@ The centered `navbar → hero → three-card-row → footer` is the AI-default s
 - Consider Bento-box composition, broken/overlapping grids, a strong off-axis anchor, or editorial multi-column flow.
 - Symmetry is a choice you must justify, not a fallback.
 
+6. **Mobile baseline (the web is a phone).** Design the base layout for a ~360 px viewport and *add* upward — never build wide and shrink. The craft is in `references/mobile.md`: `dvh/svh` instead of a lying `100vh`, safe-area insets, a touch path for anything hover-revealed, 24×24 px hit areas, and nothing fixed where the keyboard will be. When the page is built, verify it with the `mobile-audit` skill rather than resizing a desktop window — that window emulates neither touch nor keyboard nor notch.
+
 ## Output Contract
 
 Every UI response begins with a compact pre-flight block, then the code:
