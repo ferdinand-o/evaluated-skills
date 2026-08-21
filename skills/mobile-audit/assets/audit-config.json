@@ -1,0 +1,12 @@
+{
+  "_meta": {
+    "skill": "mobile-audit",
+    "schema": 1,
+    "generated": "von Hand gepflegt — Preset, kein erzeugtes Artefakt"
+  },
+  "tap_target_min_px": 24,
+  "tap_target_hint_px": 44,
+  "input_font_min_px": 16,
+  "scan_extensions": [".css", ".scss", ".html", ".htm", ".jsx", ".tsx", ".vue", ".svelte"],
+  "skip_dirs": [".git", "node_modules", "dist", "build", ".next", "vendor", "__pycache__", ".venv"]
+}
