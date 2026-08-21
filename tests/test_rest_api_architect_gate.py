@@ -16,6 +16,13 @@ FULL_CONVENTIONS = {
 
 COMPLIANT_TEXT = """
 "/v1/orders":
+  "get":
+    "responses":
+      "200":
+        "content":
+          "application/json":
+            "schema":
+              "type": "array"
   "post":
     "parameters":
       - "name": "Idempotency-Key"
@@ -128,6 +135,73 @@ def test_checklist_never_silently_skips_a_dimension():
         "versioning.prefix_pattern", "idempotency.header", "naming.field_case",
         "naming.no_verbs_in_paths", "timestamps.format",
     }
+
+
+# --- Fehlalarme: Versionierung, Idempotency und Pagination ohne Voraussetzung ----
+#
+# gate.py hat keinen YAML-Parser (siehe Modulkopf) — die folgenden Fixtures sind bewusst
+# so roh wie ein echtes, unquotiertes YAML-Dokument, nicht wie das quotierte JSON-artige
+# COMPLIANT_TEXT oben, das aus einer früheren, zu engen Implementierung stammt.
+
+VERSIONING_ONLY_CONVENTIONS = {"versioning": {"prefix_pattern": "^/v[0-9]+/"}}
+
+UNQUOTED_YAML_TEXT = """
+paths:
+  /v1/users/{id}:
+    get:
+      operationId: get_user
+      responses:
+        "200":
+          description: ok
+"""
+
+
+def test_checklist_versioning_accepts_unquoted_yaml_path():
+    # Fehlalarm: gate.py:104 verlangte bislang ein Anführungszeichen direkt vor dem Pfad
+    # (hartkodiert, unabhängig vom conventions.json-Wert). Echtes YAML quotet Pfad-Schlüssel
+    # aber nicht zwingend (siehe assets/openapi-skeleton.yaml: "/v1/<ressourcen>:" unquotiert).
+    checks = {c["name"]: c for c in gate.run_checklist(UNQUOTED_YAML_TEXT, VERSIONING_ONLY_CONVENTIONS)}
+    assert checks["versioning.prefix_pattern"]["passed"] is True
+
+
+GET_ONLY_SINGLE_RESOURCE_TEXT = """
+paths:
+  /v1/users/{id}:
+    get:
+      operationId: get_user
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+"""
+
+
+def test_checklist_skips_idempotency_when_no_relevant_method_present():
+    # Fehlalarm: ein GET-only-Dokument ohne jede der in required_for_methods genannten
+    # Methoden hat keinen Ort, an dem ein Idempotency-Key stehen könnte — der Check darf
+    # nicht als "failed" gelten, sondern muss die fehlende Voraussetzung als "skipped" melden.
+    conventions = {"idempotency": {"header": "Idempotency-Key", "required_for_methods": ["POST"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(GET_ONLY_SINGLE_RESOURCE_TEXT, conventions)}
+    check = checks["idempotency.header"]
+    assert check.get("skipped") is True
+    assert check["passed"] is not False
+
+
+def test_checklist_skips_pagination_when_no_list_endpoint():
+    # Fehlalarm: ein einzelnes Ressourcen-GET (kein Array-Antwortschema) ist kein
+    # Listen-Endpoint — Cursor-Paginierung ist hier nicht anwendbar, ihr Fehlen also kein
+    # Verstoß. Beide Pagination-Checks müssen als "skipped" markiert sein.
+    conventions = {"pagination": {"request_params": ["cursor", "limit"], "response_fields": ["next_cursor"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(GET_ONLY_SINGLE_RESOURCE_TEXT, conventions)}
+    for name in ("pagination.request_params", "pagination.response_fields"):
+        assert checks[name].get("skipped") is True
+        assert checks[name]["passed"] is not False
 
 
 # --- Erfolgspfad: nur mit gemocktem subprocess getestet, nie mit echtem Werkzeug --
@@ -245,6 +319,26 @@ def test_format_report_contains_degradation_line_verbatim(tmp_path):
     assert "ungeprüft (Spectral/oasdiff nicht verfügbar)" in text
     for check in report["checklist"]:
         assert check["name"] in text
+
+
+def test_format_report_marks_skipped_checks_as_skip_not_ok_or_fail(tmp_path):
+    # Report-Schema (Step 5): ein "skipped" Check darf im Report weder als bestanden noch
+    # als durchgefallen erscheinen, sonst verschwindet die Auslassung still.
+    conventions = {"idempotency": {"header": "Idempotency-Key", "required_for_methods": ["POST"]}}
+    openapi = tmp_path / "openapi.yaml"
+    openapi.write_text(GET_ONLY_SINGLE_RESOURCE_TEXT, encoding="utf-8")
+    report = gate.build_gate_report(
+        openapi, tmp_path / "ruleset.json", conventions, previous_path=None,
+        which=_which_factory(set()), run=_run_returning("[]"),
+    )
+    check = {c["name"]: c for c in report["checklist"]}["idempotency.header"]
+    assert check["skipped"] is True
+    text = gate.format_report(report)
+    assert "[SKIP] idempotency.header" in text
+    assert "[FAIL] idempotency.header" not in text
+    assert "[OK] idempotency.header" not in text
+    # Ein übersprungener Check darf das Gesamtergebnis nicht kippen.
+    assert report["checklist_ok"] is True
 
 
 # --- main() -------------------------------------------------------------------
