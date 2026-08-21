@@ -104,8 +104,10 @@ decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
    `docs/summaries/<format>-<slug>.md|html`; sonst
    `~/.skills/visual-summary/summaries/<format>-<slug>.*`. Bootstrap-Regel: Der
    erste Lauf kündigt die Anlage von `docs/summaries/` an und nennt den Pfad.
-   Jede Datei trägt die Artefakt-Kopfzeile aus `docs/artifact-header.md` als
-   erste Zeile.
+   Jede Datei trägt als erste Zeile die Kopfzeile
+   `<!-- skill: visual-summary | schema: 1 | generated: <Kommando> -->`.
+   Vollregel (Ausnahmen, Konsumenten-Regel): `docs/artifact-header.md` —
+   Repo-Kontext, nicht Teil dieser Skill.
 6. **Selbst-Audit vor Lieferung:**
    - Überlebt die Kernaussage, wenn der Leser nur Headline und Chart sieht?
    - Ist jeder Beleg klickbar/auffindbar (Referenzmarke → Quellenlisten-Eintrag)?
