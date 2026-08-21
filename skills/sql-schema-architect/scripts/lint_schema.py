@@ -26,7 +26,11 @@ ARTIFACT_HEADER_RE = re.compile(
     r"\s*schema:\s*(?P<schema>\d+)\s*\|"
     r"\s*generated:\s*(?P<cmd>.+?)\s*(?:-->)?\s*$"
 )
-DEFAULT_CONVENTIONS_PATH = Path("skills/sql-schema-architect/assets/conventions.json")
+# Das mitgelieferte Preset liegt neben dem Skript, nicht im aufrufenden Projekt: ein
+# repo-relativer Pfad gegen --repo fand es nur im cc-skills-Repo selbst und brach in
+# jedem anderen Projekt — und in jeder installierten Skill — mit exit 1 ab.
+SKILL_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_CONVENTIONS_PATH = SKILL_DIR / "assets" / "conventions.json"
 PROJECT_OVERRIDE_PATH = Path(".skills/sql-schema-architect/conventions.json")
 CACHE_PATH = Path(".skills") / "cache" / "lint-schema-report.json"
 
@@ -53,7 +57,7 @@ class LintError(RuntimeError):
 
 def load_conventions(repo: Path, skill_dir: Path | None = None) -> dict:
     """Default-Preset, projektüberschrieben nach Spec 00 §1 unter .skills/<skill>/."""
-    default_path = (skill_dir / "assets" / "conventions.json") if skill_dir else (repo / DEFAULT_CONVENTIONS_PATH)
+    default_path = (skill_dir / "assets" / "conventions.json") if skill_dir else DEFAULT_CONVENTIONS_PATH
     if not default_path.is_file():
         raise LintError(f"Konventions-Preset fehlt: {default_path}")
     conventions = json.loads(default_path.read_text(encoding="utf-8"))
