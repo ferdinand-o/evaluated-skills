@@ -131,9 +131,130 @@ es von Hand: einmal mit dem Finger bedienen.
 
 ---
 
-## Stufe 2 (Geräte-Matrix)
+## horizontal-overflow
 
-`horizontal-overflow`, `tap-target-size` und `safe-area` entstehen erst im Layout
-und brauchen `audit_devices.py`. Ihre Rezepte kommen mit dem Skript — bis dahin
-meldet Stufe 2 `ungeprüft`, und dieser Abschnitt bleibt bewusst leer statt
-Rezepte für Befunde zu versprechen, die noch niemand gemessen hat.
+**Befund:** Das Dokument ist breiter als der sichtbare Viewport; der genannte Selektor
+ist das erste Element, das über den Rand ragt.
+
+**Warum es bricht:** Ein einziges überbreites Element lässt die ganze Seite seitwärts
+schwingen. Fixierte Leisten verlieren dabei ihre Ausrichtung, Text wird beim Zurückwischen
+abgeschnitten, und die Seite fühlt sich kaputt an — auch dort, wo sie es nicht ist.
+
+**Rezept:** Nicht das Element schmaler machen, sondern ihm einen eigenen Scroll-Bereich
+geben. Breiter Inhalt darf breit sein; nur der Seitenkörper darf nicht mitscrollen.
+
+```css
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap table { min-width: 640px; }   /* darf breit bleiben */
+```
+
+Häufige Ursachen, bevor du den Container baust: feste `width` in px statt `max-width`,
+ein `100vw` (rechnet die Scrollbar mit), lange Zeichenketten ohne
+`overflow-wrap: anywhere`, negative Margins in einem Grid.
+
+**Achtung:** `overflow-x: hidden` auf `body` versteckt den Befund, statt ihn zu beheben —
+der Inhalt ist dann unerreichbar statt nur unbequem.
+
+---
+
+## tap-target-size
+
+**Befund:** Die gemessene Trefferfläche eines Bedienelements liegt unter 24×24 px.
+
+**Warum es bricht:** 24×24 px ist der Boden aus WCAG 2.2 AA. Darunter trifft ein Daumen
+zuverlässig daneben — besonders bei Elementen, die dicht nebeneinander liegen, wo ein
+Fehlgriff nicht nur nichts tut, sondern das Falsche.
+
+**Rezept:** Die *Trefferfläche* wächst, nicht die Glyphe. Ein 12-px-Icon mit 24-px-Ziel
+ist richtig; ein Ziel, das exakt die Icon-Pixel umschließt, ist es nicht.
+
+```css
+.icon-btn {
+  min-width: 24px; min-height: 24px;      /* Boden */
+  display: inline-grid; place-items: center;
+  padding: 6px;                            /* vergroessert das Ziel, nicht das Icon */
+}
+/* Reicht der Platz im Layout nicht, das Ziel unsichtbar vergroessern: */
+.icon-btn { position: relative; }
+.icon-btn::after { content: ""; position: absolute; inset: -8px; }
+```
+
+Für primäre Aktionen auf dem Telefon sind 44×44 px die bequeme Größe — ein Ziel, kein
+Grenzwert. Der Audit meldet sie nicht als Verstoß.
+
+**Weicht euer System bewusst ab?** Dann in `.skills/mobile-audit/audit-config.json`
+überschreiben, mit Begründung im Projekt — nicht stillschweigend unterschreiten.
+
+---
+
+## safe-area
+
+**Befund:** Ein fixiertes Bedienelement ragt in die Notch-Zone oder in den Bereich der
+Home-Anzeige.
+
+**Warum es bricht:** Auf Geräten mit Aussparung ist der Viewport nicht der nutzbare
+Bereich. Was am Rand klebt, liegt teilweise unter der Kamera-Insel oder unter dem
+Home-Strich — und dort nimmt das System die Berührung entgegen, nicht deine Schaltfläche.
+
+**Rezept:** Mit den Insets rechnen statt gegen sie. `max()` sorgt dafür, dass auch Geräte
+ohne Aussparung einen vernünftigen Abstand behalten.
+
+```css
+.bottom-bar {
+  position: fixed; inset-inline: 0; bottom: 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.top-bar { padding-top: max(8px, env(safe-area-inset-top)); }
+```
+
+Voraussetzung ist `viewport-fit=cover` im Viewport-Meta — ohne das sind die `env()`-Werte
+immer `0` und die Regel wirkt, als sei sie nicht da.
+
+**Zur Einordnung:** Der Audit rendert keine echte Notch; er vergleicht die Position gegen
+die deklarierten Insets des Geräteprofils. Der Befund ist damit so gut wie das Profil —
+siehe `device-matrix.md`.
+
+---
+
+## keyboard-overlay
+
+**Befund:** Ein fixiertes Bedienelement liegt in dem Bereich, den die Bildschirmtastatur
+verdeckt, und die Seite hat mindestens ein Eingabefeld.
+
+**Warum es bricht:** Die Tastatur nimmt etwa das untere Drittel. Elemente im normalen
+Fluss sind unkritisch — der Browser scrollt das fokussierte Feld hinein. Fixierte bleiben
+liegen. Der Klassiker ist die angepinnte „Absenden"-Leiste, die genau in dem Moment
+verschwindet, in dem jemand zu tippen beginnt.
+
+**Rezept — eine der beiden Varianten:**
+
+```js
+// 1. Die Leiste mit dem sichtbaren Viewport mitfuehren
+const bar = document.querySelector('.submit-bar');
+visualViewport.addEventListener('resize', () => {
+  bar.style.transform = `translateY(-${innerHeight - visualViewport.height}px)`;
+});
+```
+
+```html
+<!-- 2. Dem Browser sagen, dass er das Layout verkleinern soll -->
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+```
+
+Variante 2 ist die einfachere und reicht oft; sie wirkt allerdings nur dort, wo die
+Engine sie unterstützt. Wenn beides ausscheidet, gehört die Leiste in den normalen Fluss —
+ein Button am Formularende, den der Browser mitscrollt, ist besser als einer, der zum
+falschen Zeitpunkt unsichtbar wird.
+
+**Zur Einordnung:** Dieser Befund ist `modelliert`, nicht `gemessen`. Eine virtuelle
+Tastatur lässt sich mit Chromium nicht emulieren (siehe `device-matrix.md`), deshalb
+rechnet der Audit mit einer deklarierten Tastaturhöhe je Profil. Was er nicht sieht: ob
+deine Seite beim Fokus korrekt scrollt. Das prüfst du mit dem Finger.
+
+---
+
+## Was Stufe 2 nicht prüft
+
+Daumen-Zonen, ob ein Karten-Stapel die richtigen Spalten behalten hat, ob eine Bottom-Nav
+die richtigen fünf Ziele führt — das sind Entwurfsfragen, keine Messwerte. Sie stehen in
+`mobile.md` und bleiben deine Aufgabe.
