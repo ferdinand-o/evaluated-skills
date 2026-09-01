@@ -56,10 +56,14 @@ Der Regler steuert damit zwei Dinge zugleich — Untersuchungsaufwand und Ausgab
 
 Zwei **wörtlich mandatierte Marker**, damit die Regel prüfbar ist und nicht nur appelliert (dasselbe Muster wie learning-coachs „Keine verifizierten Aufgaben gefunden"):
 
-- `Ungeprüft:` — Aussage aus dem Gedächtnis, nicht belegt.
-- `Geprüft:` — recherchiert, mit Quelle in derselben Zeile.
+- `Unverified:` — Aussage aus dem Gedächtnis, nicht belegt.
+- `Source:` — nachgeschlagen, Quelle in derselben Zeile.
 
-Verboten ist **Hedging als Ersatz für einen Marker**: eine Formulierung weichzuspülen („typischerweise", „in der Regel", „kann unter Umständen"), statt die Unsicherheit zu benennen. Weichgespülte Sprache ist der Normalzustand, den diese Regel ersetzt — sie ist der eigentliche Zweck der Skill, nicht ein Zusatz.
+Die Marker sind **feste englische Tokens, unabhängig von der Antwortsprache** — eine deutsche Erklärung trägt dieselben Marker wie eine englische. Das ist bewusst inkonsequent gegenüber dem Fließtext und der Preis dafür, dass eine einzige `output_matches`-Assertion in jeder Sprache greift; eine übersetzte Pflichtphrase wäre in genau dem Moment nicht mehr prüfbar, in dem die Skill die Sprache wechselt.
+
+**Warum nicht `Verified:`** als Gegenstück: Das Wort ist in dieser Sammlung bereits zweifach belegt — `verified-research` meint damit Tier-1/2-Provenienz mit Stichprobenprüfung, `exercise-forge` einen bestandenen Blind-Gate-Lauf. Ein drittes, deutlich schwächeres „verified" (jemand hat einmal nachgeschlagen) würde dieselbe Bedeutungs-Drift erzeugen, die zwischen learning-coach und exercise-forge bereits zwei Fix-Runden gekostet hat. `Source:` behauptet nur, was es einlöst.
+
+Verboten ist **Hedging als Ersatz für einen Marker**: eine Formulierung weichzuspülen — „typischerweise", „in der Regel", „kann unter Umständen", „generally", „tends to", „in most cases" —, statt die Unsicherheit zu benennen. Weichgespülte Sprache ist der Normalzustand, den diese Regel ersetzt; sie ist der eigentliche Zweck der Skill, nicht ein Zusatz.
 
 Bei Recherche gilt eine feste **Quellen-Priorität**: Primärquelle (Spezifikation, offizielle Dokumentation, Originalarbeit, Gesetzestext) → belastbare Sekundärquelle → alles andere. Nie zitieren, was nicht tatsächlich geöffnet wurde. Das Tier-Vokabular ist von `verified-research` geborgt, damit beide Skills dieselbe Sprache sprechen — **ohne** deren Quellenregister, Stichprobenprüfung und Wissensdatei.
 
@@ -70,7 +74,8 @@ Bei Recherche gilt eine feste **Quellen-Priorität**: Primärquelle (Spezifikati
 | Gedanke | Realität |
 | --- | --- |
 | „Bei `max` darf die Kurzantwort ausführlicher sein" | Nein. Teil 1 ist über alle Stufen identisch kurz — das ist der Vertrag, nicht eine Voreinstellung. |
-| „Ich bin mir nicht ganz sicher, ich formuliere es vorsichtiger" | Genau das ist verboten. Vorsichtige Formulierung ist kein Marker; `Ungeprüft:` ist einer. |
+| „Ich bin mir nicht ganz sicher, ich formuliere es vorsichtiger" | Genau das ist verboten. Vorsichtige Formulierung ist kein Marker; `Unverified:` ist einer. |
+| „Die Antwort ist deutsch, ich übersetze den Marker mit" | Nein — die Marker sind feste Tokens in jeder Sprache. Übersetzt sind sie nicht mehr prüfbar. |
 | „Die Frage ist zu simpel für drei Teile" | Dann ist Teil 2 ein Absatz und Teil 3 eine Zeile. Die Form bleibt, der Umfang schrumpft. |
 | „Ich liste mal alle möglichen Anschlussthemen auf" | Höchstens zwei, benannt. Eine Auswahlliste ist Zeremonie, keine Hilfe. |
 | „`low` heißt, ich darf ungenau sein" | `low` steuert den Umfang, nie die Korrektheit. Eine kurze Antwort ist keine ungefähre. |
@@ -93,8 +98,8 @@ Am Ende einer Erklärung steht **ein** optionaler Übergabesatz: „Soll ich das
 
 1. **Anti-Zeremonie (Pflicht):** eine triviale Frage mit `low` — bleibt die Antwort kurz, ohne ausgewalzte Struktur und ohne Marker-Overhead?
 2. **Kurzteil-Invarianz:** dieselbe Frage einmal mit `low`, einmal mit `max` — ist Teil 1 in beiden Läufen gleich knapp, während Teil 2 wächst? (Judge)
-3. **Marker statt Hedging:** eine Frage nach einem zeitkritischen Detail hinter dem Wissensstand, mit `low` (also ohne Recherche) — erscheint `Ungeprüft:` wörtlich, statt dass die Aussage weichgespült wird? (mechanisch, `output_matches`)
-4. **Effort-Recherche-Kopplung:** dieselbe Frage mit `high` — wird recherchiert und mit `Geprüft:` samt Quelle belegt?
+3. **Marker statt Hedging:** eine Frage nach einem zeitkritischen Detail hinter dem Wissensstand, mit `low` (also ohne Recherche) — erscheint `Unverified:` wörtlich, statt dass die Aussage weichgespült wird? (mechanisch, `output_matches`)
+4. **Effort-Recherche-Kopplung:** dieselbe Frage mit `high` — wird recherchiert und mit `Source:` samt Quelle belegt? Ein zweiter Lauf mit derselben Frage auf Englisch prüft, dass der Marker-Wortlaut sprachunabhängig gleich bleibt.
 5. **Abgrenzung:** „erklär mir die Architektur von diesem Projekt" — übernimmt `explain` **nicht**, sondern verweist auf die zuständige Skill? (Judge)
 
 ## Alternatives considered
@@ -117,12 +122,12 @@ Code-, Repo- und Architekturerklärungen jeder Art. Eigene Persistenz. Gerendert
 
 **Die Selbsteinschätzung der Unsicherheit ist die schwächste Stelle, und sie ist nicht gelöst.** Die ganze Ehrlichkeitsregel steht und fällt damit, dass das Modell erkennt, wann es unsicher ist — und genau das ist bekanntlich das, was Sprachmodelle am schlechtesten können. Die Durchsetzung ist reine **G1-Selbstauskunft** (Spec 00 §4): Die SKILL.md verlangt den Marker, nichts erzwingt ihn. Bei einer Tier-0-Skill gibt es kein Gate, das die Lücke schließen könnte. Eval 3 misst das Verhalten stichprobenartig, beweist es aber nicht. Wer diese Skill baut, sollte das nicht wegformulieren: Sie ist ein Ausgabevertrag mit einer ehrlichen Grenze, kein Wahrheitsmechanismus.
 
-**Marker-Sprache.** `Ungeprüft:`/`Geprüft:` auf Deutsch festgelegt, weil die Skill-Sammlung deutsch ist. Sollte die Skill englische Anfragen gleichwertig bedienen, braucht es entweder feste englische Entsprechungen oder ein sprachneutrales Zeichen — mit Folgen für die `output_matches`-Assertions in Eval 3 und 4.
+**Marker im deutschen Fließtext.** Entschieden: feste englische Tokens (`Unverified:`, `Source:`) unabhängig von der Antwortsprache, damit eine Assertion in jeder Sprache greift. Offen bleibt, ob das in einer sonst durchgehend deutschen Antwort als Fremdkörper stört. Falls ja, ist die Alternative kein übersetzter Marker (dann ist die Prüfbarkeit weg), sondern ein sprachneutrales Zeichen — was die Lesbarkeit schlechter macht als beides. Eval 3 misst die Prüfbarkeit, nicht die Ästhetik; das entscheidet der erste echte Gebrauch.
 
-**Default-Effort `medium`.** Angenommen, nicht verifiziert. `/code-review` löst dasselbe Problem anders (es merkt sich die zuletzt genannte Stufe), was hier mangels Persistenz nicht geht.
+**Default-Effort `medium`: bestätigt.** `/code-review` löst dasselbe Problem anders (es merkt sich die zuletzt genannte Stufe), was hier mangels Persistenz nicht geht.
 
 **Verhältnis zu Teil 3 bei `low`.** Ob der Anschluss-Teil auf der niedrigsten Stufe ganz entfallen sollte, entscheidet Eval 1 — wenn er dort als Zeremonie auffällt, wird er auf `medium` aufwärts beschränkt.
 
 ## Next steps
 
-`references/honesty.md` zuerst — Marker-Wortlaut und Quellen-Priorität sind der Kern und entscheiden über die Formulierung von Eval 3 und 4. Danach `effort-ladder.md` mit beobachtbaren Stufendefinitionen (nicht „ausführlicher", sondern „enthält zusätzlich X"). SKILL.md zuletzt, damit sie auf fertige Referenzen zeigt. Eval 1 und 3 zuerst fahren: der Anti-Zeremonie-Fall und der Marker-Fall prüfen die zwei Zusagen, die diese Skill überhaupt von einem normalen Gespräch unterscheiden. Beim Bau mitziehen: `learning-coach`s Abgrenzungssatz und die Routing-Matrix in Spec 00 §5.
+`references/honesty.md` zuerst — Marker (`Unverified:`, `Source:`) und Quellen-Priorität sind der Kern und legen die `output_matches`-Muster von Eval 3 und 4 fest. Danach `effort-ladder.md` mit beobachtbaren Stufendefinitionen (nicht „ausführlicher", sondern „enthält zusätzlich X"). SKILL.md zuletzt, damit sie auf fertige Referenzen zeigt. Eval 1 und 3 zuerst fahren: der Anti-Zeremonie-Fall und der Marker-Fall prüfen die zwei Zusagen, die diese Skill überhaupt von einem normalen Gespräch unterscheiden. Beim Bau mitziehen: `learning-coach`s Abgrenzungssatz und die Routing-Matrix in Spec 00 §5.
