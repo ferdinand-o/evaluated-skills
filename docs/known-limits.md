@@ -143,6 +143,23 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 ## Betrieb
 
+- **Der Harness läuft nicht als root — in keinem Container, keiner CI.**
+  `evalkit/dispatch.py` setzt `permission_mode="bypassPermissions"` fest
+  verdrahtet; die Claude-CLI verweigert diesen Modus unter uid 0 mit
+  „--dangerously-skip-permissions cannot be used with root/sudo privileges for
+  security reasons". Der Runner meldet das nicht als Fehler, sondern als
+  `[SKIP] … Agent exit 1` pro Eval und beendet sich mit „0 bestanden,
+  0 gefallen, N übersprungen" — ein Lauf, der aussieht, als wäre nichts kaputt,
+  obwohl nichts gemessen wurde. Gemessen am 2026-09-01 beim Versuch, die
+  learning-coach-Evals in einem Root-Container zu fahren: alle sechs
+  contract-Evals übersprungen. Wer den Harness in einer solchen Umgebung fährt,
+  braucht einen Nicht-root-Nutzer mit Zugriff auf `~/.claude/.credentials.json`;
+  ein abgeschwächter Permission-Modus ist **kein** Ersatz, weil die Skills im
+  Eval Bash brauchen (Skript-Aufrufe) und deren Verweigerung im `-p`-Modus
+  Rot erzeugt, das nichts über die Skill aussagt. Nicht behoben: der feste
+  Modus in `dispatch.py` ist eine bewusste Isolationszusage, kein Versehen —
+  aber ein `--permission-mode`-Flag am Runner plus eine laute Fehlermeldung
+  statt eines stillen SKIP wäre die naheliegende Verbesserung.
 - **Kein Transcript wird persistiert.** Spec 00 §2 verlangt „`run_evals.py` …
   protokolliert den Verlauf" — der Harness hält die Agent-Ausgabe nur im
   Prozessspeicher (`Transcript.stdout`) und schreibt sie nirgends auf Platte. Ein
