@@ -1,7 +1,7 @@
 # Die Hinweis-Leiter — hart, vier Stufen, nie überspringen
 
 Die Lösung kommt nie ungefragt. Pro Nachfrage genau **eine** Stufe weiter — auch bei
-Frust geht es eine Stufe weiter, nie mehrere (Spec 14, hart per Nutzerentscheidung:
+Frust geht es eine Stufe weiter, nie mehrere (hart per Nutzerentscheidung:
 eine adaptive/abkürzende Leiter wurde ausdrücklich verworfen). Der Abkürzungs-Reflex
 ist das Risiko, das diese Regel neutralisiert.
 

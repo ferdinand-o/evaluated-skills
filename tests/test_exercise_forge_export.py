@@ -418,3 +418,15 @@ def test_main_exports_hand_faked_exercise_as_ungeprueft_not_excluded(tmp_path, c
     md = (out_dir / "t.md").read_text(encoding="utf-8")
     assert "mc-01" in md  # exportiert, nicht ausgeschlossen
     assert "[geprüft]" not in md  # aber nie als geprüft ausgewiesen
+
+
+def test_resolve_prefers_project_override_when_only_base_dir_exists(tmp_path, monkeypatch):
+    """Die Basis genügt, `research/` muss noch nicht existieren. Vorher wich diese
+    Bedingung von verified-research (dem Namensraum-Eigentümer) und von
+    learning-coachs `due_topics.py` ab: Erzeuger schrieb nach `~`, Konsument suchte
+    im Projekt — die Aufgaben galten dauerhaft als nicht gefunden."""
+    monkeypatch.setattr(export.Path, "home", staticmethod(lambda: tmp_path / "home"))
+    repo = tmp_path / "repo"
+    (repo / ".skills" / "verified-research").mkdir(parents=True)
+    path = export.resolve_exercises_path("python-basics", repo=repo)
+    assert path == repo / ".skills" / "verified-research" / "research" / "python-basics.exercises.json"

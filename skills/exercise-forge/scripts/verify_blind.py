@@ -481,11 +481,18 @@ def verify_one(
 # --- Pfad, I/O, CLI -------------------------------------------------------------
 
 def resolve_exercises_path(topic: str, repo: Path = Path(".")) -> Path:
-    """Projekt-Override vor Home (D2/Rulings): existiert das Projektverzeichnis
-    bereits, gewinnt es — sonst der globale Pfad unter `~/.skills/`."""
-    project_dir = Path(repo) / ".skills" / "verified-research" / "research"
-    if project_dir.is_dir():
-        return project_dir / f"{topic}.exercises.json"
+    """Projekt-Override vor Home (D2/Rulings), festgemacht an der **Basis**
+    `.skills/verified-research/`, nicht am `research/`-Unterverzeichnis.
+
+    Der Namensraum gehört verified-research, und dessen eigenes
+    `registry.py::resolve_base_dir` prüft die Basis — ebenso `learning-coach`s
+    `due_topics.py`, das diese Dateien liest. Die frühere `research/`-Bedingung
+    wich davon ab: Existierte die Basis, aber noch kein `research/`, schrieb
+    diese Skill nach `~`, während `learning-coach` projektlokal suchte und die
+    Aufgaben dauerhaft als "nicht gefunden" meldete."""
+    base_dir = Path(repo) / ".skills" / "verified-research"
+    if base_dir.is_dir():
+        return base_dir / "research" / f"{topic}.exercises.json"
     return Path.home() / ".skills" / "verified-research" / "research" / f"{topic}.exercises.json"
 
 

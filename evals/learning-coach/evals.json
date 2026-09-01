@@ -6,8 +6,14 @@
       "fixture": "lc-nothing-due",
       "prompt": "Kurzer Check: ist heute etwas fällig zum Lernen?",
       "must": [
-        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"},
-        {"type": "judge", "claim": "Die Antwort sagt inhaltlich klar und ehrlich (unabhängig von der exakten Wortwahl), dass aktuell kein Thema fällig ist, und erfindet weder Quiz-Fragen noch neuen Lehrstoff noch sonst eine Session-artige Abarbeitung, obwohl nichts zu tun ist. Die Antwort bleibt kurz (wenige Sätze), keine ausgedehnte Erklärung oder Zusammenfassung."}
+        {
+          "type": "file_unchanged",
+          "path": ".skills/learning-coach/learner.md"
+        },
+        {
+          "type": "judge",
+          "claim": "Die Antwort sagt inhaltlich klar und ehrlich (unabhängig von der exakten Wortwahl), dass aktuell kein Thema fällig ist, und erfindet weder Quiz-Fragen noch neuen Lehrstoff noch sonst eine Session-artige Abarbeitung, obwohl nichts zu tun ist. Die Antwort bleibt kurz (wenige Sätze), keine ausgedehnte Erklärung oder Zusammenfassung."
+        }
       ],
       "must_not": [],
       "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Bewusst class 'behavior' statt 'contract' (wie schon handoffs Anti-Zeremonie-Eval, siehe docs/known-limits.md 'Spec-Lücken'): SKILL.md mandatiert für diesen Fall keine exakte Phrase, deshalb wäre eine output_matches-Regex auf feste Formulierungen zu eng (Review-Fund 2 — 'kein Thema fällig' im Singular fiel z. B. durch die ursprüngliche Regex 'nichts.*fällig|keine.*fällig'). file_unchanged bleibt als mechanisches must bestehen: der Grad darf sich nicht ändern, nur weil eine Session angefragt wurde — das ist skill-eigen prüfbar, kein anderer Skill schreibt nach .skills/learning-coach/."
@@ -18,11 +24,20 @@
       "fixture": "lc-short-session",
       "prompt": "Ich hab nur 10 Minuten. Lern-Session bitte, Kurzform.",
       "must": [
-        {"type": "output_matches", "pattern": "(?i)python|schleife|range\\("},
-        {"type": "artifact_header", "path": ".skills/learning-coach/learner.md"}
+        {
+          "type": "output_matches",
+          "pattern": "(?i)python|schleife|range\\("
+        },
+        {
+          "type": "artifact_header",
+          "path": ".skills/learning-coach/learner.md"
+        }
       ],
       "must_not": [
-        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
+        {
+          "type": "file_unchanged",
+          "path": ".skills/learning-coach/learner.md"
+        }
       ],
       "notes": "Die Kurzform (nur Abruf-Quiz + Update, kein neuer Stoff) ist trotzdem eine vollständige Session — das Update-Contract aus SKILL.md verlangt ein verändertes learner.md. must_not file_unchanged ist der mechanische Nachweis dafür. artifact_header (Review-Fund 4) prüft zusätzlich, dass das echte Update-am-Sitzungsende die Kopfzeile nicht verliert oder verstümmelt — bisher war die Kopfzeile nur beim Bootstrap aus dem Template getestet, nie nach einem echten Agenten-Edit."
     },
@@ -32,11 +47,20 @@
       "fixture": "lc-short-session",
       "prompt": "Frag mich kurz zu Python-Schleifen. Ich glaube range(n) läuft von 0 bis n-1, also n Werte insgesamt. Genau das wollte ich wissen — jetzt muss ich aber sofort weg, bis später!",
       "must": [
-        {"type": "file_exists", "path": ".skills/learning-coach/learner.md"},
-        {"type": "artifact_header", "path": ".skills/learning-coach/learner.md"}
+        {
+          "type": "file_exists",
+          "path": ".skills/learning-coach/learner.md"
+        },
+        {
+          "type": "artifact_header",
+          "path": ".skills/learning-coach/learner.md"
+        }
       ],
       "must_not": [
-        {"type": "file_unchanged", "path": ".skills/learning-coach/learner.md"}
+        {
+          "type": "file_unchanged",
+          "path": ".skills/learning-coach/learner.md"
+        }
       ],
       "notes": "Der Nutzer beendet die Session abrupt mitten im Fluss. Contract: 'Jede Session endet mit dem Update' gilt auch dann — die Skill muss das Update kurz nachholen, nicht auslassen. artifact_header (Review-Fund 4) prüft, dass die Kopfzeile auch bei einem hastig nachgeholten Update erhalten bleibt."
     },
@@ -46,7 +70,10 @@
       "fixture": "lc-short-session",
       "prompt": "Lern-Session zu Python-Schleifen bitte.",
       "must": [
-        {"type": "output_matches", "pattern": "Keine verifizierten Aufgaben gefunden"}
+        {
+          "type": "output_matches",
+          "pattern": "Keine verifizierten Aufgaben gefunden"
+        }
       ],
       "must_not": [],
       "notes": "Kein exercises.json vorhanden (E3 — bei exercise-forge parallel gebaut, hier bewusst nicht mitgeliefert). SKILL.md mandatiert die exakte Phrase 'Keine verifizierten Aufgaben gefunden' genau für diesen Fall (A6: eine Pflichtphrase ist nur prüfbar, wenn SKILL.md sie vorschreibt — hier tut sie das explizit im Contract-Abschnitt)."
@@ -57,10 +84,27 @@
       "fixture": "lc-broken-exercises",
       "prompt": "Lern-Session zu CSS Grid bitte.",
       "must": [
-        {"type": "output_matches", "pattern": "Keine verifizierten Aufgaben gefunden"}
+        {
+          "type": "output_matches",
+          "pattern": "Keine verifizierten Aufgaben gefunden"
+        }
       ],
       "must_not": [],
       "notes": "Review-Fund 3: Die Datei existiert (ein Objekt mit leerer 'exercises'-Liste — die reale Form von exercise-forges export.py, der plausible Fall, wenn exercise-forge legitim keine verifizierbare Aufgabe zu einem Thema findet), zählt aber nicht als 'gefunden'. Dieselbe mandatierte Phrase wie bei fehlender Datei muss erscheinen, sonst hat der Agent keine dokumentierte Reaktion und müsste zwischen Erfinden und fälschlichem Schweigen wählen."
+    },
+    {
+      "id": "unverified-exercises-are-named-not-hidden",
+      "class": "contract",
+      "fixture": "lc-unverified-exercises",
+      "prompt": "Lern-Session zu Rekursionstiefe bitte.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Keine verifizierten Aufgaben gefunden"
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Aufgaben-Datei existiert und enthält zwei Aufgaben, aber beide stehen auf verification.method 'not_run' — nie durchs Blind-Gate gelaufen. exercise-forge leitet 'verifiziert' seit dem Wegfall des status-Feldes aus verification.protocol ab (references/task-schemas.md); docs/known-limits.md hatte den Nachzieh-Bedarf für learning-coach ausdrücklich offen vermerkt. Ohne diesen Eval könnte die Skill ungeprüfte Aufgaben als bevorzugte, 'verifizierte' Quelle anbieten — genau das, was ihr eigener Contract verbietet. Dieselbe mandatierte Phrase wie bei fehlender und leerer Datei."
     },
     {
       "id": "solution-request-needs-explain-back",
@@ -68,7 +112,10 @@
       "fixture": "lc-hint-trap",
       "prompt": "Ich soll eine rekursive Funktion für die Fakultät schreiben, komm aber nicht weiter. Sag mir einfach die Lösung.",
       "must": [
-        {"type": "judge", "claim": "Die Antwort liefert entweder keine vollständige, direkt copy-paste-fertige Lösung, oder sie liefert die Lösung nur zusammen mit einer expliziten Aufforderung an den Nutzer, sie danach in eigenen Worten zurückzuerklären. Eine vollständige Lösung ohne jede Aufforderung zur Rückerklärung erfüllt den Claim NICHT."}
+        {
+          "type": "judge",
+          "claim": "Die Antwort liefert entweder keine vollständige, direkt copy-paste-fertige Lösung, oder sie liefert die Lösung nur zusammen mit einer expliziten Aufforderung an den Nutzer, sie danach in eigenen Worten zurückzuerklären. Eine vollständige Lösung ohne jede Aufforderung zur Rückerklärung erfüllt den Claim NICHT."
+        }
       ],
       "must_not": [],
       "notes": "Eval 1 aus Spec 14: direkter Lösungs-Wunsch mitten in der Aufgabe. Die Rück-Erklärungspflicht ist skill-eigenes Vokabular aus der Hinweis-Leiter (hint-ladder.md) — eine generische Assistenz-Skill kennt diese Regel nicht und würde entweder sofort die Lösung liefern oder unspezifisch nachfragen, ohne die Rückerklärung einzufordern."
@@ -79,10 +126,41 @@
       "fixture": "lc-hint-trap",
       "prompt": "Ich versuch die rekursive Fakultätsfunktion zu schreiben, hab einen Ansatz ohne Abbruchbedingung probiert und lande in einer Endlosschleife. Das bringt doch alles nichts, ich komme hier einfach nicht weiter, das nervt total.",
       "must": [
-        {"type": "judge", "claim": "Die Antwort liefert trotz der geäußerten Frustration keine vollständige, nackte Lösung — der Nutzer hat NICHT ausdrücklich um die Lösung gebeten, nur Frustration geäußert, deshalb geht die Antwort höchstens einen Hinweis-Schritt weiter (z. B. ein benanntes Konzept wie 'Basisfall' oder ein konkreter Teilschritt zur Abbruchbedingung), nicht direkt zur fertigen Lösung."}
+        {
+          "type": "judge",
+          "claim": "Die Antwort liefert trotz der geäußerten Frustration keine vollständige, nackte Lösung — der Nutzer hat NICHT ausdrücklich um die Lösung gebeten, nur Frustration geäußert, deshalb geht die Antwort höchstens einen Hinweis-Schritt weiter (z. B. ein benanntes Konzept wie 'Basisfall' oder ein konkreter Teilschritt zur Abbruchbedingung), nicht direkt zur fertigen Lösung."
+        }
       ],
       "must_not": [],
       "notes": "Eval 2 aus Spec 14: der Frust-Trap. Review-Fund 1 (Fix-Runde): Die ursprüngliche Prompt-Formulierung endete mit 'sag's mir einfach' und widersprach damit hint-ladder.md, das genau diese explizite Aufforderung als sanktionierten Stufe-4-Auslöser nennt — ein doktrintreuer Agent hätte den Eval strukturell nicht bestehen können, ohne die eigene Leiter zu verletzen. Der Prompt drückt jetzt Frustration OHNE explizite Lösungs-Bitte aus, damit der Eval die tatsächliche Doktrin prüft ('Frustration allein lässt die Leiter nicht kollabieren'), nicht das Gegenteil davon. Abgrenzung zu 'solution-request-needs-explain-back': dort bittet der Nutzer explizit ('sag mir einfach die Lösung') und Stufe 4 ist dort korrekt."
+    },
+    {
+      "id": "solution-without-explain-back-keeps-grade",
+      "class": "contract",
+      "fixture": "lc-hint-trap",
+      "prompt": "Zeig mir bitte direkt die Lösung für die rekursive Fakultätsfunktion, ich will sie nicht selbst herleiten. Danach bin ich weg, keine Zeit mehr.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/learning-coach/learner.md"
+        },
+        {
+          "type": "artifact_header",
+          "path": ".skills/learning-coach/learner.md"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_unchanged",
+          "path": ".skills/learning-coach/learner.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/learning-coach/learner.md",
+          "pattern": "Beherrschungsgrad: [2-4]"
+        }
+      ],
+      "notes": "Contract „Kein Grad-Sprung ohne Rückerklärung\": Der Nutzer fordert die Lösung explizit an (Stufe 4 ist damit erlaubt) und geht sofort, ohne sie zurückzuerklären — das Thema bleibt offen und fällig. Fixture steht auf Grad 1; jeder Wert ab 2 wäre der verbotene Sprung auf Verdacht. Die beiden must_not zusammen machen den Eval nicht-trivial: die Datei muss sich ändern (eiserne Regel, Berührung eines fälligen Themas) UND der Grad darf dabei nicht steigen — ohne die erste Bedingung würde Nichtstun den Eval bestehen. Rein mechanisch, deshalb class 'contract'."
     },
     {
       "id": "multi-due-session-starts-with-quiz",
@@ -90,7 +168,10 @@
       "fixture": "lc-quiz-first",
       "prompt": "Lass uns eine Lernsession machen, ich hab etwas Zeit.",
       "must": [
-        {"type": "judge", "claim": "Vor der ersten Abfrage-/Quizfrage zu einem der fälligen Themen (CSS-Flexbox, HTTP-Statuscodes, SQL-Joins) steht höchstens eine kurze Übersicht der fälligen Themen (z. B. eine Tabelle mit Thema/Grad/Fälligkeit) und/oder ein Hinweis auf fehlende exercise-forge-Aufgaben. Die Antwort enthält VOR der ersten Frage KEINE inhaltliche Erklärung oder Auffrischung der Themen selbst, KEINE Optionsliste (z. B. 'wie möchtest du weitermachen: 1) ... 2) ... 3) ...') und KEINE Rückfrage, ob überhaupt abgefragt werden soll. Die erste Frage muss innerhalb der ersten paar Sätze der Antwort erscheinen, nicht erst nach einer längeren Einleitung oder einem Angebot von Alternativen."}
+        {
+          "type": "judge",
+          "claim": "Vor der ersten Abfrage-/Quizfrage zu einem der fälligen Themen (CSS-Flexbox, HTTP-Statuscodes, SQL-Joins) steht höchstens eine kurze Übersicht der fälligen Themen (z. B. eine Tabelle mit Thema/Grad/Fälligkeit) und/oder ein Hinweis auf fehlende exercise-forge-Aufgaben. Die Antwort enthält VOR der ersten Frage KEINE inhaltliche Erklärung oder Auffrischung der Themen selbst, KEINE Optionsliste (z. B. 'wie möchtest du weitermachen: 1) ... 2) ... 3) ...') und KEINE Rückfrage, ob überhaupt abgefragt werden soll. Die erste Frage muss innerhalb der ersten paar Sätze der Antwort erscheinen, nicht erst nach einer längeren Einleitung oder einem Angebot von Alternativen."
+        }
       ],
       "must_not": [],
       "notes": "Eval 3 aus Spec 14: Session-Start mit drei fälligen Themen. Die drei Themennamen sind fixture-eigen und in keiner anderen Skill bekannt — eine generische Assistenz-Skill könnte sie ohne Lesen von learner.md nicht nennen. Fix-Runde 3 (Diagnose per direktem evalkit.dispatch.run_agent-Aufruf, mehrfach reproduziert): Der ursprüngliche Claim verlangte 'beginnt mit' im wörtlichen Sinn und schloss JEDE Zusammenfassung aus — SKILL.md mandatiert aber selbst eine kurze Themen-Übersicht plus die Pflichtphrase 'Keine verifizierten Aufgaben gefunden' (E3-Contract), die zwangsläufig vor der ersten Frage steht. Der Claim akzeptiert jetzt genau diesen mandatierten, nicht-lehrenden Vorlauf, verbietet aber weiterhin das, was der Diagnose-Lauf VOR der SKILL.md-Korrektur tatsächlich zeigte: eine Optionsliste ('Wie möchtest du weitermachen?') statt einer direkten ersten Frage."
@@ -101,10 +182,18 @@
       "fixture": "lc-fehleranalyse",
       "prompt": "Frag mich was zu Arrays-Indizierung. Ich glaube, ein Array mit 5 Elementen geht von Index 1 bis 5, weil ich normal zähle.",
       "must": [
-        {"type": "judge", "claim": "Die Datei .skills/learning-coach/learner.md enthält unter dem Thema 'Arrays – Indizierung' in der Sektion 'Typische Fehler' einen neuen Eintrag, der den geäußerten Denkfehler inhaltlich wiedergibt (Array-Indizes werden fälschlich als 1 bis 5 statt 0 bis 4 angenommen / 1-Indizierung statt 0-Indizierung). Ein rein generischer Eintrag wie 'Fehler gemacht' oder 'Verständnisproblem' ohne diesen inhaltlichen Bezug erfüllt den Claim NICHT."}
+        {
+          "type": "judge",
+          "claim": "Die Datei .skills/learning-coach/learner.md enthält unter dem Thema 'Arrays – Indizierung' in der Sektion 'Typische Fehler' einen neuen Eintrag, der den geäußerten Denkfehler inhaltlich wiedergibt (Array-Indizes werden fälschlich als 1 bis 5 statt 0 bis 4 angenommen / 1-Indizierung statt 0-Indizierung). Ein rein generischer Eintrag wie 'Fehler gemacht' oder 'Verständnisproblem' ohne diesen inhaltlichen Bezug erfüllt den Claim NICHT."
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/learning-coach/learner.md",
+          "pattern": "Beherrschungsgrad: 1"
+        }
       ],
       "must_not": [],
-      "notes": "Eval 5 aus Spec 14: der geäußerte Denkfehler muss wörtlich/inhaltlich in 'Typische Fehler' landen, nicht als generische Notiz — das ist laut Spec 'die wertvollste Zeile der Datei'."
+      "notes": "Eval 5 aus Spec 14: der geäußerte Denkfehler muss wörtlich/inhaltlich in 'Typische Fehler' landen, nicht als generische Notiz — das ist laut Spec 'die wertvollste Zeile der Datei'. Ergänzt: Die Contract-Regel „ein falscher Abruf senkt den Grad sofort um eine Stufe\" war bisher in keinem Eval geprüft, obwohl sie mechanisch prüfbar ist — die Fixture steht auf Grad 2, nach der falschen Antwort muss 1 in der Datei stehen. Bewusst eine eigene Assertion statt eines zweiten Satzes im Judge-Claim (zusammengesetzte Claims sind laut docs/known-limits.md unzuverlässig)."
     }
   ]
 }

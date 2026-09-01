@@ -103,31 +103,46 @@ wörtlich festgehaltener Fehler lässt sich beim nächsten Abruf gezielt erneut 
 - Offene Fragen:
 ```
 
-## Schnittstelle zu exercise-forge (Spec 13)
+## Schnittstelle zu exercise-forge
 
 Aufgaben-JSONs liegen **nicht** unter `learning-coach/`, sondern neben der
-Wissensdatei aus Spec 12: `~/.skills/verified-research/research/<slug>.exercises.json`
-(projektlokal nach demselben Muster). `due_topics.py::exercises_status()` prüft
-Existenz und **grobe Struktur** dieser Datei, nie den Inhalt der einzelnen Aufgaben
-— sie enthält nach Spec 13 pro Aufgabe mindestens Typ, Lernziel, Schwierigkeit und
-ein Verifikations-Protokoll, aber die genauen Feldnamen legt exercise-forge fest
-(wird parallel zu dieser Skill gebaut) und werden hier nicht angenommen. Die
-Top-Level-Form ist ein JSON-**Objekt** mit dem Schlüssel `"exercises"`, dessen Wert
-eine Liste von Aufgaben-Objekten ist — verifiziert gegen den echten Erzeuger
-(`exercise-forge`s `export.py`: `data.get("exercises", [])`), nicht bloß aus dem
-Spec-13-Text abgeleitet. Eine frühere Fix-Runde hatte fälschlich ein reines
-Top-Level-*Array* angenommen; das ist jetzt korrigiert.
+Wissensdatei von verified-research:
+`~/.skills/verified-research/research/<slug>.exercises.json` (projektlokal nach
+demselben Muster). Der Projekt-Override hängt an der Basis
+`.skills/verified-research/` — identisch in `verified-research/scripts/registry.py`,
+in exercise-forges `resolve_exercises_path` und hier. Weichen die Bedingungen
+voneinander ab, schreibt der Erzeuger an eine Stelle, an der der Leser nicht sucht,
+und die Aufgaben gelten dauerhaft als nicht vorhanden.
 
-Vier Zustände, drei davon ergeben dieselbe Meldung:
+`due_topics.py::exercises_status()` prüft drei Dinge und nie mehr: Existenz,
+Top-Level-Form und Prüfnachweis.
+
+- **Top-Level-Form:** ein JSON-**Objekt** mit dem Schlüssel `"exercises"`, dessen
+  Wert eine Liste von Aufgaben-Objekten ist (exercise-forges `export.py`:
+  `data.get("exercises", [])`).
+- **Prüfnachweis:** exercise-forge speichert bewusst **kein** `status`-Feld — wer
+  einen Status braucht, leitet ihn aus `verification` ab
+  (`exercise-forge/references/task-schemas.md`, Abschnitt `verification`-Objekt).
+  Diese Skill prüft davon den gemeinsamen Vorspann: `verification.method` ist eine
+  echte Blind-Gate-Methode (nicht `not_run`), `checked_at` ist gesetzt, `protocol`
+  ist ein Objekt. Das ist notwendig, nicht hinreichend — die typspezifische
+  Protokollprüfung bleibt beim Erzeuger und wird hier absichtlich nicht nachgebaut.
+  Die Richtung stimmt trotzdem: Was hier durchfällt, ist dort garantiert nicht
+  verifiziert.
+- **Nie geprüft:** der Inhalt der Aufgaben selbst — Stamm, Optionen, Musterlösung,
+  Lernziel, Schwierigkeit.
+
+Fünf Zustände, vier davon ergeben dieselbe Meldung:
 
 | Zustand | Bedeutung | Meldung |
 | --- | --- | --- |
 | fehlt | Datei existiert nicht | „Keine verifizierten Aufgaben gefunden" |
 | leer | `"exercises"` ist eine leere Liste | „Keine verifizierten Aufgaben gefunden" |
 | strukturell unerwartet | kein gültiges JSON, kein Objekt, oder `"exercises"` fehlt/ist keine Liste | „Keine verifizierten Aufgaben gefunden" |
-| gefunden | `"exercises"` ist eine nicht-leere Liste | Pfad wird genannt, Inhalt ungeprüft |
+| ungeprüft | Aufgaben vorhanden, keine mit Prüfnachweis | „Keine verifizierten Aufgaben gefunden" |
+| gefunden | mindestens eine Aufgabe mit Prüfnachweis | Pfad wird genannt, Aufgabeninhalt ungeprüft |
 
-Alle drei Nicht-Erfolgsfälle sind aus Nutzersicht gleich (kein verwertbarer
+Alle vier Nicht-Erfolgsfälle sind aus Nutzersicht gleich (kein verwertbarer
 Aufgabenbestand) und deshalb bewusst nicht unterschieden — nur der Detailtext im
-Skript-Output unterscheidet sie für die Fehlersuche. Das ist normal, kein Fehler —
-SKILL.md schlägt dann vor, exercise-forge aufzurufen.
+Skript-Output trennt sie für die Fehlersuche. Das ist normal, kein Fehler; SKILL.md
+schlägt dann vor, exercise-forge aufzurufen.
