@@ -9,18 +9,23 @@ Python-Skript ersetzen. Dieses Skript liefert nur die zwei Dinge, die sich mecha
 und deterministisch berechnen lassen: welche Themen fällig sind, und wie das nächste
 Intervall aussieht.
 
-Schnittstelle zu exercise-forge (Spec 13, E3): Nur der Pfad
-`~/.skills/verified-research/research/<slug>.exercises.json` wird geprüft — auf
-Existenz und grobe Struktur (gültiges JSON-Objekt mit einer nicht-leeren
-`"exercises"`-Liste), nicht auf den Inhalt der einzelnen Aufgaben. Das
-Aufgaben-JSON-Schema von exercise-forge wird hier nicht im Detail geparst, weil die
-genauen Feldnamen der einzelnen Aufgaben nicht bekannt sind (A4: was nicht sicher
-bekannt ist, wird nicht angenommen) — die Top-Level-Form (`{"exercises": [...]}`)
-ist dagegen gegen den echten Erzeuger verifiziert (`exercise-forge`s `export.py`:
-`data.get("exercises", [])`), keine Ableitung mehr aus dem Spec-Text. Jede andere
-Form (kaputtes JSON, ein Array statt eines Objekts, ein fehlender/falscher
-`"exercises"`-Schlüssel, eine leere Liste) wird konservativ als "keine verwertbare
-Aufgabe" behandelt statt stillschweigend als in Ordnung durchzuwinken (A4).
+Schnittstelle zu exercise-forge (E3): Geprüft wird nur der Pfad
+`~/.skills/verified-research/research/<slug>.exercises.json` — Existenz, grobe
+Struktur (JSON-Objekt mit nicht-leerer `"exercises"`-Liste) und pro Aufgabe ein
+Prüfnachweis. Der Projekt-Override hängt an der Basis `.skills/verified-research/`,
+identisch zu `verified-research/scripts/registry.py` und zu exercise-forges
+`resolve_exercises_path` — beide Seiten müssen denselben Pfad berechnen, sonst
+meldet diese Skill Aufgaben als fehlend, die der Erzeuger gerade geschrieben hat.
+
+Der Prüfnachweis wird abgeleitet, nie gelesen: exercise-forge speichert bewusst
+kein `status`-Feld (`references/task-schemas.md`, Abschnitt `verification`-Objekt).
+Diese Datei prüft den gemeinsamen Vorspann derselben Ableitung — `verification.method`
+ist eine echte Blind-Gate-Methode, `checked_at` gesetzt, `protocol` ein Objekt. Das
+ist eine notwendige, keine hinreichende Bedingung: die typspezifische
+Protokollprüfung aus exercise-forges `derive_status_from_protocol()` wird hier
+absichtlich **nicht** nachgebaut (sie gehört dem Erzeuger, eine Kopie würde
+auseinanderlaufen). Jede Form, die diesen Vorspann nicht erfüllt, gilt konservativ
+als "keine verwertbare Aufgabe" statt stillschweigend als in Ordnung (A4).
 """
 
 from __future__ import annotations
@@ -35,8 +40,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 SKILL_DIRNAME = "learning-coach"
-# E3: Aufgaben-JSONs liegen neben der Wissensdatei aus Spec 12, nicht unter
-# learning-coach/ selbst — siehe Spec 13 und rulings-final-four.md E3.
+# E3: Aufgaben-JSONs liegen neben verified-researchs Wissensdatei, nicht unter
+# learning-coach/ selbst.
 EXERCISES_SKILL_DIRNAME = "verified-research"
 SCHEMA_VERSION = 1
 
@@ -52,6 +57,12 @@ HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 TOPIC_HEADING_RE = re.compile(r"^## (?P<slug>[a-z0-9][a-z0-9-]*): (?P<name>.+)$")
 FIELD_LINE_RE = re.compile(r"^- ([^:]+):\s*(.*)$")
 LIST_ITEM_RE = re.compile(r"^ {2,}- (.+)$")
+# Derselbe Eintrag ohne Einrückung. `learner.md` wird per Doktrin von Hand bzw. vom
+# Agenten geschrieben, nie von diesem Skript — die häufigste Abweichung vom Schema
+# ist der vergessene Einzug. Er wird akzeptiert und gemeldet, statt den Eintrag
+# stillschweigend zu verlieren: "Typische Fehler" ist die wertvollste Zeile der
+# Datei (learner-schema.md), ein stummer Verlust dort ist der teuerste Fehlermodus.
+UNINDENTED_LIST_ITEM_RE = re.compile(r"^- (?!\s)(?P<item>[^:]+)$")
 LIST_LABELS = ("Typische Fehler", "Offene Fragen")
 
 
@@ -108,32 +119,63 @@ def exercises_path_for(repo: Path, slug: str, home: Path | None = None) -> Path:
 EXERCISES_STATUS_MISSING = "missing"
 EXERCISES_STATUS_MALFORMED = "malformed"
 EXERCISES_STATUS_EMPTY = "empty"
+EXERCISES_STATUS_UNVERIFIED = "unverified"
 EXERCISES_STATUS_OK = "ok"
 
 
 EXERCISES_LIST_KEY = "exercises"
 
+# Die `verification.method`-Werte, die exercise-forges Blind-Gate bei einem echten
+# Lauf schreibt (Spiegel von `export.py::REAL_VERIFICATION_METHODS`; bewusst
+# dupliziert statt importiert — Skripte bleiben eigenständig, Rulings A3).
+# `"not_run"` fehlt hier absichtlich: das ist der Startzustand einer erzeugten,
+# noch ungeprüften Aufgabe, kein Prüfnachweis.
+REAL_VERIFICATION_METHODS = frozenset(
+    {"blind_solve_mc", "blind_solve_open", "blind_solve_coding", "blind_check_flashcard"}
+)
+
+
+def has_verification_evidence(exercise: object) -> bool:
+    """Gemeinsamer Vorspann von exercise-forges `derive_status_from_protocol()`:
+    echte Blind-Gate-Methode, gesetztes `checked_at`, `protocol` als Objekt.
+
+    Notwendig, nicht hinreichend — die typspezifische Protokollprüfung bleibt beim
+    Erzeuger. Was hier durchkommt, kann dort noch als `unverified` enden; was hier
+    durchfällt, ist dort garantiert nicht verifiziert. Die Richtung stimmt also:
+    diese Skill behauptet nie Verifikation, wo keine stattgefunden hat.
+    """
+    if not isinstance(exercise, dict):
+        return False
+    verification = exercise.get("verification")
+    if not isinstance(verification, dict):
+        return False
+    if verification.get("method") not in REAL_VERIFICATION_METHODS:
+        return False
+    if not verification.get("checked_at"):
+        return False
+    return isinstance(verification.get("protocol"), dict)
+
 
 def exercises_status(ex_path: Path) -> tuple[str, str]:
-    """Existenz- und Grobstruktur-Check für ein Aufgaben-JSON, ohne das
-    Aufgaben-Schema von exercise-forge im Detail zu kennen (A4/E3).
+    """Existenz-, Grobstruktur- und Prüfnachweis-Check für ein Aufgaben-JSON.
 
     Top-Level-Form: ein JSON-*Objekt* mit dem Schlüssel `"exercises"`, dessen Wert
-    eine Liste ist — verifiziert gegen den echten Erzeuger (`exercise-forge`s
-    `export.py`: `data.get("exercises", [])`), nicht mehr nur aus Spec 13
-    abgeleitet (Korrektur einer früheren Fix-Runde, die fälschlich ein reines
-    Top-Level-Array annahm — das Objekt lässt Platz für Metadaten neben der
-    Aufgabenliste, exercise-forge ist hier die maßgebliche Quelle).
+    eine Liste ist (exercise-forges `export.py`: `data.get("exercises", [])`).
+    Gezählt werden davon nur Aufgaben mit Prüfnachweis
+    (`has_verification_evidence()`) — der Inhalt der Aufgaben selbst (Stamm,
+    Optionen, Musterlösung) wird nie angesehen.
 
     Rückgabe `(status, detail)`:
-    - `missing`   — Datei existiert nicht (Normalfall, kein Fehler).
-    - `malformed` — Datei existiert, ist aber kein lesbares/gültiges JSON-Objekt,
-      oder `"exercises"` fehlt/ist keine Liste. Eine andere Form ist "strukturell
-      unerwartet" und wird konservativ behandelt, nie stillschweigend als in
-      Ordnung angenommen (A4).
-    - `empty`     — `"exercises"` ist eine leere Liste.
-    - `ok`        — `"exercises"` ist eine nicht-leere Liste. Der Inhalt der
-      einzelnen Aufgaben (Feldnamen, Verifikations-Protokoll) wird NICHT geprüft.
+    - `missing`    — Datei existiert nicht (Normalfall, kein Fehler).
+    - `malformed`  — kein lesbares JSON-Objekt, oder `"exercises"` fehlt/ist keine
+      Liste.
+    - `empty`      — `"exercises"` ist eine leere Liste.
+    - `unverified` — Aufgaben vorhanden, aber keine einzige mit Prüfnachweis
+      (typisch: frisch erzeugt, Blind-Gate noch nicht gelaufen).
+    - `ok`         — mindestens eine Aufgabe mit Prüfnachweis.
+
+    Alle vier Nicht-Erfolgsfälle führen zur selben, in SKILL.md mandatierten
+    Meldung; nur `detail` unterscheidet sie für die Fehlersuche.
     """
     if not ex_path.is_file():
         return EXERCISES_STATUS_MISSING, "Datei nicht gefunden"
@@ -153,7 +195,13 @@ def exercises_status(ex_path: Path) -> tuple[str, str]:
         return EXERCISES_STATUS_MALFORMED, f"Schlüssel '{EXERCISES_LIST_KEY}' {found}"
     if not exercises:
         return EXERCISES_STATUS_EMPTY, f"'{EXERCISES_LIST_KEY}' ist leer, enthält keine Aufgabe"
-    return EXERCISES_STATUS_OK, f"{len(exercises)} Aufgabe(n)"
+    verified = sum(1 for exercise in exercises if has_verification_evidence(exercise))
+    if not verified:
+        return EXERCISES_STATUS_UNVERIFIED, (
+            f"{len(exercises)} Aufgabe(n), aber keine mit Prüfnachweis — "
+            f"Blind-Gate noch nicht gelaufen (exercise-forge)"
+        )
+    return EXERCISES_STATUS_OK, f"{verified} von {len(exercises)} Aufgabe(n) mit Prüfnachweis"
 
 
 def ensure_learner(repo: Path, assets_path: Path, home: Path | None = None) -> tuple[Path, bool]:
@@ -240,6 +288,15 @@ def _parse_topic_block(heading_line: str, body: list[str]) -> Topic:
             if item_match:
                 list_target.append(item_match.group(1).strip())
                 continue
+            loose_match = UNINDENTED_LIST_ITEM_RE.match(line)
+            if loose_match:
+                item = loose_match.group("item").strip()
+                list_target.append(item)
+                warnings.append(
+                    f"Listeneintrag ohne Einrückung übernommen: {item!r} — "
+                    f"Schema verlangt zwei Leerzeichen vor dem '-'"
+                )
+                continue
             list_target = None  # Zeile gehört nicht mehr zur Liste — unten normal auswerten
 
         field_match = FIELD_LINE_RE.match(line)
@@ -249,6 +306,14 @@ def _parse_topic_block(heading_line: str, body: list[str]) -> Topic:
 
         if label in LIST_LABELS:
             list_target = typical_errors if label == "Typische Fehler" else open_questions
+            inline = value.strip()
+            if inline:
+                # `- Typische Fehler: Verwechselt A mit B` statt einer Unterliste.
+                list_target.append(inline)
+                warnings.append(
+                    f"{label} stand inline statt als Unterliste: {inline!r} — "
+                    f"übernommen, Schema verlangt eine eingerückte '- '-Zeile"
+                )
         elif label == "Gebiet":
             gebiet = value.strip() or None
         elif label == "Beherrschungsgrad":
@@ -347,9 +412,26 @@ def _default_assets_path() -> Path:
     return Path(__file__).resolve().parent.parent / "assets" / "learner-template.md"
 
 
+def _parse_today(raw: str | None) -> date:
+    """`--today` validieren, bevor irgendetwas angelegt oder gelesen wird.
+
+    Vorher warf ein Müll-Datum einen nackten Traceback — und im `due`-Pfad erst,
+    nachdem `ensure_learner()` die Datei bereits angelegt hatte: eine
+    Bootstrap-Nebenwirkung auf einem Lauf, der danach abstürzt. Jede andere
+    ungültige Eingabe dieses Skripts endet in `DueTopicsError` + Exit 2.
+    """
+    if not raw:
+        return date.today()
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        raise DueTopicsError(f"--today muss YYYY-MM-DD sein, war {raw!r} ({exc})") from exc
+
+
 def _cmd_due(args: argparse.Namespace) -> int:
     assets_path = args.assets or _default_assets_path()
     try:
+        today = _parse_today(args.today)
         path, _ = ensure_learner(args.repo, assets_path)
     except DueTopicsError as exc:
         print(f"Fehler: {exc}", file=sys.stderr)
@@ -361,7 +443,6 @@ def _cmd_due(args: argparse.Namespace) -> int:
         print(f"Fehler: Lernstandsdatei nicht lesbar ({path}): {exc}", file=sys.stderr)
         return 2
 
-    today = date.fromisoformat(args.today) if args.today else date.today()
     topics, file_warnings = parse_learner(text)
 
     print(f"Lernstandsdatei: {path}")
@@ -392,9 +473,10 @@ def _cmd_due(args: argparse.Namespace) -> int:
             if ex_status == EXERCISES_STATUS_OK:
                 print(f"  Aufgaben: {ex_path} ({ex_detail})")
             else:
-                # missing/empty/malformed führen alle zur selben, in SKILL.md
-                # mandatierten Phrase — aus Nutzersicht ist "keine Datei", "leeres
-                # Array" und "kaputtes JSON" gleich: kein verwertbarer Aufgabenbestand.
+                # missing/empty/malformed/unverified führen alle zur selben, in
+                # SKILL.md mandatierten Phrase — aus Nutzersicht sind "keine Datei",
+                # "leere Liste", "kaputtes JSON" und "nichts davon ist geprüft"
+                # dasselbe: kein verwertbarer Aufgabenbestand.
                 print(f"  Aufgaben: Keine verifizierten Aufgaben gefunden ({ex_path} — {ex_detail})")
         print("Abruf-Quiz-Budget: 2-4 Fragen aus den fälligen Themen.")
 
@@ -409,8 +491,8 @@ def _cmd_due(args: argparse.Namespace) -> int:
 
 
 def _cmd_interval(args: argparse.Namespace) -> int:
-    today = date.fromisoformat(args.today) if args.today else date.today()
     try:
+        today = _parse_today(args.today)
         new_grade, new_due = next_interval(args.grade, args.result, today)
     except DueTopicsError as exc:
         print(f"Fehler: {exc}", file=sys.stderr)

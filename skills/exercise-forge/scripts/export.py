@@ -48,9 +48,19 @@ ALL_VERIFICATION_METHODS = REAL_VERIFICATION_METHODS | {"not_run"}
 # --- Pfad (dupliziert aus verify_blind.py — Skripte bleiben eigenständig, Rulings A3) --
 
 def resolve_exercises_path(topic: str, repo: Path = Path(".")) -> Path:
-    project_dir = Path(repo) / ".skills" / "verified-research" / "research"
-    if project_dir.is_dir():
-        return project_dir / f"{topic}.exercises.json"
+    """Projekt-Override an der **Basis** `.skills/verified-research/` festmachen,
+    nicht am `research/`-Unterverzeichnis.
+
+    Der Namensraum gehört verified-research, und dessen eigenes
+    `registry.py::resolve_base_dir` prüft die Basis — ebenso `learning-coach`s
+    `due_topics.py`, das diese Dateien liest. Die frühere `research/`-Bedingung
+    wich davon ab: Existierte die Basis, aber noch kein `research/`, schrieb
+    diese Skill nach `~`, während `learning-coach` projektlokal suchte und die
+    Aufgaben dauerhaft als "nicht gefunden" meldete.
+    """
+    base_dir = Path(repo) / ".skills" / "verified-research"
+    if base_dir.is_dir():
+        return base_dir / "research" / f"{topic}.exercises.json"
     return Path.home() / ".skills" / "verified-research" / "research" / f"{topic}.exercises.json"
 
 

@@ -385,3 +385,15 @@ def test_verify_one_dispatches_coding(tmp_path):
     )
     assert status_of(CODING_EXERCISE, result) == "verified"
     assert result["method"] == "blind_solve_coding"
+
+
+def test_resolve_prefers_project_override_when_only_base_dir_exists(tmp_path, monkeypatch):
+    """Die Basis genügt, `research/` muss noch nicht existieren. Vorher wich diese
+    Bedingung von verified-research (dem Namensraum-Eigentümer) und von
+    learning-coachs `due_topics.py` ab: Erzeuger schrieb nach `~`, Konsument suchte
+    im Projekt — die Aufgaben galten dauerhaft als nicht gefunden."""
+    monkeypatch.setattr(vb.Path, "home", staticmethod(lambda: tmp_path / "home"))
+    repo = tmp_path / "repo"
+    (repo / ".skills" / "verified-research").mkdir(parents=True)
+    path = vb.resolve_exercises_path("python-basics", repo=repo)
+    assert path == repo / ".skills" / "verified-research" / "research" / "python-basics.exercises.json"

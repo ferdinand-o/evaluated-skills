@@ -1322,6 +1322,73 @@ offen:
   Sektion). Kein Eval deckt diesen Fall ab. Aus einem unabhängigen Review als
   Anmerkung eingestuft (kein beobachtbares Fehlverhalten des Skripts selbst,
   das Thema verschwindet nicht), aber ein unterspezifizierter Update-Fall.
+
+### Fix-Runde 4 (Review nach dem Merge — Schnittstelle, Parser, Tier 0)
+
+- **Behoben: Erzeuger und Leser berechneten verschiedene Pfade.** `due_topics.py`
+  hängte den Projekt-Override an die Basis `.skills/verified-research/`,
+  exercise-forges `resolve_exercises_path` an das Unterverzeichnis `research/`.
+  Existierte die Basis ohne `research/`, schrieb exercise-forge nach `~` und
+  learning-coach suchte im Projekt — die Aufgaben galten dauerhaft als „nicht
+  gefunden", ohne dass irgendetwas rot wurde. Dieselbe Klasse wie Fix-Runde 2
+  (dort die Top-Level-Form, hier der Pfad), erneut nur durch Nebeneinanderlegen
+  beider Seiten sichtbar. Vereinheitlicht auf die Basis-Regel, die dem
+  Namensraum-Eigentümer `verified-research/scripts/registry.py` gehört; beide
+  exercise-forge-Skripte nachgezogen. Ein parametrisierter Test prüft jetzt für
+  alle drei Verzeichniszustände, dass Konsument und Erzeuger denselben Pfad
+  liefern — die Verdrahtung, nicht nur die zwei Seiten einzeln.
+- **Behoben: „gefunden" behauptete Verifikation, die nie geprüft wurde.** Der in
+  `exercise-forge` unten festgehaltene Nachzieh-Bedarf (entferntes `status`-Feld)
+  war offen: `exercises_status()` gab `ok` für jede nicht-leere `"exercises"`-Liste
+  zurück, also auch für lauter frisch erzeugte Aufgaben mit `method: "not_run"`,
+  die exercise-forges eigener Exporter überspringt. Die Skill hätte sie als
+  bevorzugte, „verifizierte" Quelle angeboten — gegen ihren eigenen Contract.
+  `has_verification_evidence()` prüft jetzt den gemeinsamen Vorspann derselben
+  Ableitung (echte Blind-Gate-Methode, `checked_at`, `protocol` als Objekt); die
+  typspezifische Protokollprüfung bleibt bewusst beim Erzeuger, eine Kopie würde
+  auseinanderlaufen. Notwendig, nicht hinreichend — die Richtung stimmt: was hier
+  durchfällt, ist dort garantiert nicht verifiziert. Neuer Zustand `unverified`
+  mündet in dieselbe mandatierte Phrase; Fixture `lc-unverified-exercises` und der
+  Eval `unverified-exercises-are-named-not-hidden` decken ihn ab.
+- **Behoben: der Parser verlor „Typische Fehler" stillschweigend.** `learner.md`
+  wird per Doktrin freihändig vom Agenten geschrieben — das Skript schreibt nie
+  zurück, es gibt also keine Schreibvalidierung. Ein Listeneintrag ohne die zwei
+  Leerzeichen Einzug und ein Inline-Wert (`- Typische Fehler: …`) fielen beide
+  ersatzlos heraus, ohne Warnung, während jede andere Fehlform eine erzeugt.
+  Betroffen war ausgerechnet die Zeile, die `learner-schema.md` selbst „die
+  wertvollste" nennt. Beide Formen werden jetzt übernommen **und** gemeldet.
+- **Behoben: `--today` mit Müll-Datum warf einen nackten Traceback**, im
+  `due`-Pfad erst, nachdem `ensure_learner()` die Datei angelegt hatte — eine
+  Bootstrap-Nebenwirkung auf einem abstürzenden Lauf. Datum wird jetzt vor allem
+  anderen validiert, `DueTopicsError` + Exit 2 wie jede andere ungültige Eingabe.
+- **Ergänzt: zwei mechanisch prüfbare Contracts hatten keinen Eval.** „Ein
+  falscher Abruf senkt den Grad sofort um eine Stufe" wird jetzt in
+  `wrong-answer-writes-verbatim-mistake` per `file_matches` mitgeprüft (eigene
+  Assertion, kein zusammengesetzter Judge-Claim). „Kein Grad-Sprung ohne
+  Rückerklärung" hat mit `solution-without-explain-back-keeps-grade` einen eigenen,
+  rein mechanischen Eval bekommen: die Datei muss sich ändern (eiserne Regel) und
+  der Grad darf dabei nicht steigen — ohne die erste Bedingung würde Nichtstun
+  bestehen.
+- **Unbelegt geblieben: der Tier-0-Pfad.** SKILL.md verwies auf ihn, spezifizierte
+  aber nur die *Ausgabe* (kopierbarer Block). Woher der Lernstand ohne
+  `due_topics.py` kommt, stand nirgends — und drei Contract-Regeln („kein Update"
+  nur bei null fälligen Themen, „kein Quiz erfinden", die Pflichtphrase zu
+  fehlenden Aufgaben) waren wörtlich an die Skriptausgabe gebunden und damit im
+  Web undefiniert. `references/tier0-path.md` schreibt jetzt Eingabe, Fälligkeits-
+  rechnung, Aufgaben-Fall und Ausgabe aus, nach dem Muster von `motion-landing`s
+  Degradationsabschnitt. **Kein Eval prüft das**, und das lässt sich hier auch nur
+  schwer nachholen: Der Harness gibt jedem Agenten eine Shell, „kein Dateizugriff"
+  ist darin nicht abbildbar. Der Pfad ist damit dokumentiert, aber ungemessen —
+  dieselbe Kategorie wie die ungeprüften Degradationspfade von `motion-landing`.
+- **Nicht behoben, repo-weit: der Skriptaufruf ist repo-relativ.** SKILL.md nennt
+  `python skills/learning-coach/scripts/due_topics.py --repo .`; dieser Pfad löst
+  nur innerhalb dieses Checkouts auf. Als persönliche Skill unter
+  `~/.claude/skills/`, als Plugin oder als Upload installiert, schlägt der Aufruf
+  fehl, und die Skill fällt auch dort auf Tier 0 zurück, wo eine Shell vorhanden
+  wäre. Alle vierzehn Skills schreiben es so — die Tier-Tabelle in Spec 00 §3
+  („Tier 1: überall mit Shell") gilt faktisch nur für dieses Repo. Bewusst nicht
+  einseitig in learning-coach geändert: eine Konvention repariert man überall oder
+  gar nicht.
 ## exercise-forge
 
 Fünf Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
@@ -1386,7 +1453,8 @@ behoben zu werden:
   Eine Signatur oder ein Audit-Log, das `protocol` kryptographisch an den
   tatsächlichen Lauf bindet, wäre der nächste Schritt und wurde nicht gebaut.
 - **`learning-coach` (Zyklus 14) muss auf das entfernte `status`-Feld
-  nachgezogen werden — sonst bricht die Schnittstelle still.** `learning-coach`
+  nachgezogen werden — sonst bricht die Schnittstelle still.** *(Erledigt in
+  learning-coachs Fix-Runde 4, siehe oben: `has_verification_evidence()`.)* `learning-coach`
   liest dieselben Aufgaben-JSONs und meldet unter anderem „keine verifizierten
   Aufgaben gefunden". Jede Prüfung, die dort `exercise["verification"]["status"]`
   erwartet, muss durch dieselbe Ableitungsregel ersetzt werden, die
