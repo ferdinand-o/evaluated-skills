@@ -87,6 +87,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Landing-Page-Bewegung | motion-landing (06) | ui-architect (Stil/Tokens), enterprise-ui (Produktoberfläche) |
 | ad-hoc „fass zusammen" | visual-summary (11) | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
+| Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 
 *Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `superpowers:writing-plans`. *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
 

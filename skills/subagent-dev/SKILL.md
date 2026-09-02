@@ -1,6 +1,6 @@
 ---
 name: subagent-dev
-description: Use when a superpowers:writing-plans plan exists and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that superpowers:subagent-driven-development does not have. Not for writing the plan itself (use superpowers:writing-plans) and not for auftragslose ad-hoc delegation without a plan (use superpowers:subagent-driven-development directly, or writing-plans first).
+description: Use when an impl-plan plan exists (or a superpowers:writing-plans plan, for repos without impl-plan) and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that superpowers:subagent-driven-development does not have. Not for writing the plan itself (use impl-plan) and not for auftragslose ad-hoc delegation without a plan (use superpowers:subagent-driven-development directly, or impl-plan first).
 ---
 
 # subagent-dev — Gate vor Dispatch, Task-Datei statt Historie
@@ -11,8 +11,9 @@ kein Fehlschlag.
 
 ## Ablauf
 
-1. **Plan vorhanden?** Kein Plan → `superpowers:writing-plans` zuerst. Diese
-   Skill parst nur `### Task N:`-Blöcke im `writing-plans`-Format.
+1. **Plan vorhanden?** Kein Plan → `impl-plan` zuerst. Diese Skill parst nur
+   `### Task N:`-Blöcke im Format des impl-plan-Templates (aus `writing-plans`
+   übernommen).
 2. **Gate fällen und Task-Dateien erzeugen:**
    ```bash
    python skills/subagent-dev/scripts/plan_to_tasks.py generate docs/superpowers/plans/<plan>.md
@@ -108,8 +109,9 @@ kein Fehlschlag.
 
 ## Abgrenzung
 
-- **superpowers:writing-plans** — erzeugt den Plan, den diese Skill konsumiert.
-  Kein Plan vorhanden → dort zuerst.
+- **impl-plan** — erzeugt den Plan, den diese Skill konsumiert, lint-sauber.
+  Kein Plan vorhanden → dort zuerst. `superpowers:writing-plans` bleibt die
+  Ausnahme für Repos ohne diese Sammlung.
 - **superpowers:subagent-driven-development** — die 503-Zeilen-Referenz für
   den *Ablauf* (Fix-Loop, Modellwahl, Ledger). Diese Skill ersetzt sie nicht,
   sondern liefert ihr vorgeschaltet: ein mechanisches Gate statt einer
