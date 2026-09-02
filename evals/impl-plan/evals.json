@@ -1,0 +1,132 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-two-task-change-stays-small",
+      "class": "contract",
+      "fixture": "ip-tiny",
+      "prompt": "Nutze impl-plan und schreib den Implementierungsplan zu `specs/Spec 21 – note-tag.md`. Die Skill note-tag existiert schon unter skills/note-tag/.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": "docs/superpowers/plans/*.md"
+        },
+        {
+          "type": "file_max_lines",
+          "path": "docs/superpowers/plans/*.md",
+          "max_lines": 50
+        }
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Die Spec ändert zwei Zeilen einer References-Datei einer bestehenden Skill — der Fall, in dem die vier Pflicht-Tasks zu einem Sammel-Task `Pflicht` zusammenfallen (SKILL.md, Anti-Rationalisierung „Zeremonie\"). 50 Zeilen sind Kopf plus zwei Tasks plus Sammel-Task, gemessen am Template: 32 Zeilen ohne Sammel-Task. Diskriminator: Kürze allein könnte das Basismodell auch; die Kopfzeile `<!-- skill: impl-plan | schema: 1 | generated: … -->` schreibt nur diese Skill, ein writing-plans-Plan trägt sie nicht. Beide Assertions hängen an der Plandatei unter docs/superpowers/plans/ — die Fixture bringt dort nichts mit, der Glob trifft deshalb genau die Datei, die die Skill schreibt."
+    },
+    {
+      "id": "spec-eval-ids-each-have-a-task",
+      "class": "contract",
+      "fixture": "ip-five",
+      "prompt": "Nutze impl-plan und schreib den Implementierungsplan zu `specs/Spec 22 – handoff-note.md`.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": "docs/superpowers/plans/*.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*anti-ceremony-one-line-note-stays-bare"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*note-carries-header"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*note-lists-open-items"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*stale-note-is-replaced"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*note-names-next-owner"
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Spec trägt eine Eval-Tabelle mit id-Spalte und fünf IDs. Jede muss im Plan nach dem kanonischen Task-Titel `### Task N: Evals` vorkommen — das ist, was `plan_to_tasks.py lint --spec` im Repo mechanisch prüft, hier aber nicht laufen kann, weil der Eval-Workspace nur das Skill-Verzeichnis kopiert (docs/known-limits.md, impl-plan). Diskriminator: Die IDs allein diskriminieren nicht, jedes Modell schreibt sie aus der Spec ab. Die Kopfzeile und der wörtliche Titel `Evals`, unter dem sie stehen müssen, sind Hausvokabular aus assets/plan-template.md; writing-plans kennt beides nicht."
+    },
+    {
+      "id": "mandatory-tasks-carry-canonical-titles",
+      "class": "contract",
+      "fixture": "ip-five",
+      "prompt": "Nutze impl-plan und schreib den Implementierungsplan zu `specs/Spec 22 – handoff-note.md`.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals\\s*$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Nachbarn\\s*$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: known-limits\\s*$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Report\\s*$"
+        }
+      ],
+      "must_not": [],
+      "notes": "Derselbe Prompt wie spec-eval-ids-each-have-a-task, andere Frage an den Plan: dort, ob die IDs im Eval-Task stehen; hier, ob alle vier Pflicht-Tasks mit ihren kanonischen Titeln da sind. Eine neue Tier-1-Skill ist kein Anti-Zeremonie-Fall, der Sammel-Task `Pflicht` wäre hier falsch — deshalb vier einzelne Titel, jeder mit Zeilenende-Anker, damit „Evals-Fixtures\" oder „Report schreiben\" nicht zählen. Diskriminator: Vier wörtliche Titel, die nur references/task-patterns.md vorschreibt. Ein Basismodell nennt seine Tasks nach Inhalt („Tests schreiben\", „Dokumentation\"), nicht nach diesem Vokabular."
+    },
+    {
+      "id": "doctrine-task-interfaces-carry-tokens",
+      "class": "contract",
+      "fixture": "ip-tier0",
+      "prompt": "Nutze impl-plan und schreib den Implementierungsplan zu `specs/Spec 23 – checkpoint.md`.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "token:[\\s\\S]*token:"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*^### Task \\d+: SKILL\\.md"
+        }
+      ],
+      "must_not": [],
+      "notes": "Eine Tier-0-Spec mit zwei mandatierten Tokens (Recap:, Open:) und ohne Skript. Zwei Regeln aus references/task-patterns.md sind hier messbar: Doktrin-Tasks führen ihre Tokens als `token:`-Symbole in Interfaces (mindestens zwei Vorkommen), und bei Tier 0 steht der Eval-Task vor dem SKILL.md-Task, weil die Evals dort das einzige Messinstrument sind. Diskriminator: Das `token:`-Präfix ist Vokabular des subagent-dev-Parsers, das nur diese Skill in Pläne schreibt; die Evals-vor-SKILL.md-Reihenfolge ist eine Hausregel, die ein Basismodell nicht kennt und writing-plans nicht hat. Ohne Kopfzeilen-Assertion, wie in Spec 16 festgelegt — beide Muster tragen den Eval allein."
+    },
+    {
+      "id": "routing-house-header-not-superpowers",
+      "class": "contract",
+      "fixture": "ip-five",
+      "prompt": "Schreib mir den Implementierungsplan zur Spec `specs/Spec 22 – handoff-note.md`.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": "docs/superpowers/plans/*.md"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": "docs/superpowers/plans/*.md",
+          "pattern": "REQUIRED SUB-SKILL"
+        }
+      ],
+      "notes": "Routing-Eval ohne Skill-Namen im Prompt: Landet „schreib mir den Implementierungsplan\" bei impl-plan oder bei superpowers:writing-plans? Diskriminator: Die Kopfzeile schreibt nur impl-plan; `REQUIRED SUB-SKILL` ist der Header, den writing-plans in seine Pläne setzt. Routing-Evals sind stochastisch (docs/known-limits.md, „Ein Eval-Ergebnis ist eine Stichprobe\") — ein grüner Lauf beweist nichts, ein roter zeigt die Kollision mit writing-plans, die Spec 16 als Trigger-Problem diagnostiziert hat."
+    }
+  ]
+}
