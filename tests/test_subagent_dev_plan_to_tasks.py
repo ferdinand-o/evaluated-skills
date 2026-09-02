@@ -775,3 +775,132 @@ def test_check_allowlist_uncommitted_rename_outside_allowlist_is_a_legible_viola
     violations = ptt.check_allowlist(tmp_path, base, ["src/unrelated.py"])
     assert " -> " not in " ".join(violations)
     assert set(violations) == {"src/old_name.py", "src/new_name.py"}
+
+
+# --- Fail-Closed für Backtick-Ausdrücke ohne Bezeichner + Lint (Einsatz an Spec 15) ---
+
+def _task_block(interfaces: str) -> str:
+    return (
+        "### Task 1: X\n\n**Files:**\n- Create: `a.py`\n\n**Interfaces:**\n"
+        + interfaces + "\n\n- [ ] **Step 1: tun**\n"
+    )
+
+
+def test_backtick_span_without_identifier_makes_interfaces_unknown():
+    """Das Fail-Open aus known-limits: `Unverified:` liefert kein Symbol, wurde
+    aber nicht als unbekannt markiert, weil ein Backtick vorhanden war."""
+    doc = ptt.parse_plan(_task_block("- Consumes: (nichts Neues)\n- Produces: `Unverified:`, `token_next`"))
+    assert doc.tasks[0].interfaces_unknown is True
+    assert ptt.unextractable_backtick_spans("`Unverified:`, `token_next`") == ["Unverified:"]
+
+
+def test_valid_identifier_symbols_keep_interfaces_known():
+    doc = ptt.parse_plan(_task_block("- Consumes: (nichts Neues)\n- Produces: `marker_unverified`, `token_next`"))
+    assert doc.tasks[0].interfaces_unknown is False
+
+
+def test_sub_bullets_under_produces_are_symbols_not_prose():
+    """Die übliche Form im Repo: `- Produces:` allein, darunter je Symbol ein
+    eingerückter Bullet. Muss Symbole liefern, keine Prosa-Befunde."""
+    block = _task_block(
+        "- Consumes: `evalkit`\n- Produces:\n  - `collect.commits(repo, rev)`\n  - `collect.main(argv)`"
+    )
+    consumes, produces, stray = ptt._interface_lines(block)
+    assert stray == []
+    assert [n for n, _ in ptt.extract_produced_symbols(produces)] == ["collect.commits", "collect.main"]
+    assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
+
+
+def test_prose_paragraph_after_produces_is_stray_not_swallowed():
+    """Der zweite Defekt aus known-limits: Prosa unter dem Interfaces-Block lief
+    in Produces hinein und machte die Task unbekannt — sequential mit falscher
+    Begründung."""
+    block = _task_block("- Consumes: (nichts Neues)\n- Produces: `token_next`\nOhne diesen Task ist nichts erreichbar.")
+    consumes, produces, stray = ptt._interface_lines(block)
+    assert produces == "`token_next`"
+    assert stray == ["Ohne diesen Task ist nichts erreichbar."]
+    assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
+
+
+CLEAN_PLAN = """# P
+
+**Goal:** x
+**Spec:** `spec.md`
+
+### Task 1: A
+
+**Files:**
+- Create: `a.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `parse(line)`
+
+- [ ] **Step 1: tun**
+"""
+
+DIRTY_PLAN = """# P
+
+**Goal:** x
+**Spec:** `fehlt.md`
+
+### Task 1: A
+
+**Files:**
+- Create: `a.py`
+- Touch: `b.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `Unverified:`
+Prosa hier.
+
+- [ ] **Step 1: tun** TBD
+
+### Task 2: B
+
+**Files:**
+- Create: `c.py`
+
+**Interfaces:**
+- Consumes: `parse(line)`
+- Produces: (nichts Neues)
+
+- [ ] ohne Step-Format
+"""
+
+
+def test_lint_clean_plan_has_no_findings(tmp_path):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(CLEAN_PLAN, encoding="utf-8")
+    assert ptt.lint_plan(CLEAN_PLAN, plan) == []
+
+
+def test_lint_names_every_reason(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(DIRTY_PLAN, encoding="utf-8")
+    messages = [f.render() for f in ptt.lint_plan(DIRTY_PLAN, plan)]
+    joined = "\n".join(messages)
+    assert "fehlt.md" in joined and "nicht gefunden" in joined
+    assert "Platzhalter 'TBD'" in joined
+    assert "Touch:" in joined and "files_unknown" in joined
+    assert "`Unverified:`" in joined and "fail-closed" in joined
+    assert "Prosa im Interfaces-Block" in joined and "Prosa hier." in joined
+    assert "Task 2: keine Steps" in joined
+
+
+def test_main_lint_exit_codes(tmp_path, capsys):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    clean = tmp_path / "clean.md"; clean.write_text(CLEAN_PLAN, encoding="utf-8")
+    dirty = tmp_path / "dirty.md"; dirty.write_text(DIRTY_PLAN, encoding="utf-8")
+    broken = tmp_path / "broken.md"; broken.write_text("# kein Task\n", encoding="utf-8")
+    out = tmp_path / "lint.json"
+
+    assert ptt.main(["lint", str(clean)]) == 0
+    assert "Keine Befunde" in capsys.readouterr().out
+    assert ptt.main(["lint", str(dirty), "--out", str(out)]) == 1
+    assert "nicht umformulieren, bis es 'parallel' sagt" in capsys.readouterr().out
+    assert json.loads(out.read_text(encoding="utf-8"))["status"] == "findings"
+    assert ptt.main(["lint", str(broken)]) == 2
+    assert "nicht parsbar" in capsys.readouterr().err

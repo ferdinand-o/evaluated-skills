@@ -177,18 +177,64 @@ def _has_unrecognized_prose(text: str) -> bool:
     return "`" not in stripped
 
 
-def _parse_interfaces(block: str) -> tuple[str, str, bool]:
+BACKTICK_SPAN_RE = re.compile(r"`([^`]+)`")
+
+
+def _interface_lines(block: str) -> tuple[str, str, list[str]]:
+    """Consumes-/Produces-Zeile und alle übrigen nicht-leeren Zeilen des
+    Interfaces-Blocks. Zeilengenau: Früher lief `Produces:` bis zum ersten Step
+    und schluckte erklärende Prosa darunter — das machte die Task unbekannt und
+    erzeugte ein `sequential` mit falscher Begründung (known-limits, Einsatz an
+    Spec 15). Die Prosa wird jetzt separat zurückgegeben, damit `lint` sie
+    benennen kann, statt dass sie das Verdikt still verschiebt.
+    """
     text = _section(block, "**Interfaces:**", ("\n- [ ]", "\n- [x]", "\n- [X]"))
-    consumes = ""
-    produces = ""
-    consumes_start = text.find("- Consumes:")
-    produces_start = text.find("- Produces:")
-    if consumes_start != -1:
-        end = produces_start if produces_start > consumes_start else len(text)
-        consumes = text[consumes_start + len("- Consumes:"):end].strip()
-    if produces_start != -1:
-        produces = text[produces_start + len("- Produces:"):].strip()
-    interfaces_unknown = _has_unrecognized_prose(consumes) or _has_unrecognized_prose(produces)
+    fields: dict[str, list[str]] = {"consumes": [], "produces": []}
+    active: str | None = None
+    stray: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- Consumes:"):
+            active = "consumes"
+            fields[active].append(stripped[len("- Consumes:"):].strip())
+        elif stripped.startswith("- Produces:"):
+            active = "produces"
+            fields[active].append(stripped[len("- Produces:"):].strip())
+        elif stripped.startswith("-") and active is not None:
+            # Unter-Bullet je Symbol — die übliche Form in diesem Repo
+            # (`- Produces:` allein auf der Zeile, darunter eingerückt je ein
+            # Symbol). Gehört zum aktiven Feld, nie zur Prosa.
+            fields[active].append(stripped)
+        else:
+            stray.append(stripped)
+    consumes = " ".join(s for s in fields["consumes"] if s).strip()
+    produces = " ".join(s for s in fields["produces"] if s).strip()
+    return consumes, produces, stray
+
+
+def unextractable_backtick_spans(text: str) -> list[str]:
+    """Backtick-Ausdrücke, aus denen `extract_produced_symbols` kein Symbol zieht.
+
+    Das ist die Lücke, die das Gate still geöffnet hat (known-limits, Einsatz an
+    Spec 15): `\`Unverified:\``, `\`Next:\``, `\`effort-ladder\`` sind keine
+    gültigen Bezeichner, liefern null Symbole — und galten trotzdem nicht als
+    unbekannt, weil ein Backtick vorhanden war. Kein Symbol *und* nichts
+    Unbekanntes hieß: keine Abhängigkeit. Jetzt gilt jeder solche Ausdruck als
+    unbekannt (fail-closed), und `lint` sagt, welcher.
+    """
+    return [span for span in BACKTICK_SPAN_RE.findall(text) if not extract_produced_symbols(f"`{span}`")]
+
+
+def _parse_interfaces(block: str) -> tuple[str, str, bool]:
+    consumes, produces, _stray = _interface_lines(block)
+    interfaces_unknown = (
+        _has_unrecognized_prose(consumes)
+        or _has_unrecognized_prose(produces)
+        or bool(unextractable_backtick_spans(consumes))
+        or bool(unextractable_backtick_spans(produces))
+    )
     return consumes, produces, interfaces_unknown
 
 
@@ -756,6 +802,130 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+
+# --------------------------------------------------------------------------
+# Lint — sagt, *warum* das Gate eine Task für unsicher hält (G2: meldet, blockiert nicht)
+# --------------------------------------------------------------------------
+
+PLACEHOLDER_RE = re.compile(r"\b(TBD|TODO|FIXME|XXX)\b|\?\?\?|<platzhalter>|<placeholder>", re.IGNORECASE)
+SPEC_LINE_RE = re.compile(r"^\*\*Spec:\*\*\s*`([^`]+)`", re.MULTILINE)
+KNOWN_FILE_VERBS = ("Create", "Modify", "Test", "Delete", "Rename")
+
+
+@dataclass(frozen=True)
+class LintFinding:
+    task_id: int | None  # None = Plan-Ebene
+    message: str
+
+    def render(self) -> str:
+        where = "Plan" if self.task_id is None else f"Task {self.task_id}"
+        return f"{where}: {self.message}"
+
+
+def _explain_files(block: str) -> list[str]:
+    files_text = _section(block, "**Files:**", ("**Interfaces:**", "\n- [ ]", "\n- [x]", "\n- [X]"))
+    if "**Files:**" not in block:
+        return ["files_unknown: kein **Files:**-Block"]
+    reasons: list[str] = []
+    for line in BULLET_LINE_RE.findall(files_text):
+        if FILE_LINE_RE.match(line) or RENAME_LINE_RE.match(line):
+            continue
+        reasons.append(
+            f"files_unknown: Bullet-Zeile ohne bekanntes Verb {KNOWN_FILE_VERBS}: {line.strip()!r}"
+        )
+    if not BULLET_LINE_RE.findall(files_text):
+        reasons.append("files_unknown: **Files:**-Block ohne Bullet-Zeilen")
+    return reasons
+
+
+def _explain_interfaces(block: str) -> list[str]:
+    if "**Interfaces:**" not in block:
+        return ["interfaces_unknown: kein **Interfaces:**-Block"]
+    consumes, produces, stray = _interface_lines(block)
+    reasons: list[str] = []
+    for label, text in (("Consumes", consumes), ("Produces", produces)):
+        if _has_unrecognized_prose(text):
+            reasons.append(f"interfaces_unknown: {label} ist Prosa ohne Backtick-Symbol: {text!r}")
+        for span in unextractable_backtick_spans(text):
+            reasons.append(
+                f"interfaces_unknown: {label} nennt `{span}` — kein gültiger Bezeichner "
+                f"([A-Za-z_][A-Za-z0-9_.]*), kein Symbol extrahierbar (fail-closed)"
+            )
+    for line in stray:
+        reasons.append(f"Prosa im Interfaces-Block, weder Consumes noch Produces: {line!r}")
+    return reasons
+
+
+def lint_plan(text: str, plan_path: Path | None = None) -> list[LintFinding]:
+    """Alle Befunde eines parsbaren Plans. Wirft `PlanParseError` bei unparsbarem
+    Plan — das ist kein Befund, das ist das Ende der Prüfung."""
+    doc = parse_plan(text)
+    findings: list[LintFinding] = []
+    masked = _mask_fenced_blocks(text)
+
+    for field_name in ("**Goal:**", "**Spec:**"):
+        if field_name not in masked:
+            findings.append(LintFinding(None, f"Kopffeld {field_name} fehlt"))
+    spec_match = SPEC_LINE_RE.search(masked)
+    if spec_match:
+        spec_ref = Path(spec_match.group(1))
+        candidates = [spec_ref]
+        if plan_path is not None:
+            for parent in plan_path.resolve().parents:
+                candidates.append(parent / spec_ref)
+        if not any(c.is_file() for c in candidates):
+            findings.append(LintFinding(None, f"**Spec:** zeigt auf {spec_ref} — Datei nicht gefunden"))
+
+    for m in PLACEHOLDER_RE.finditer(masked):
+        line_no = masked.count("\n", 0, m.start()) + 1
+        findings.append(LintFinding(None, f"Platzhalter {m.group(0)!r} in Zeile {line_no}"))
+
+    headers = list(TASK_HEADER_RE.finditer(masked))
+    for i, header in enumerate(headers):
+        block = masked[header.end():headers[i + 1].start() if i + 1 < len(headers) else len(masked)]
+        task_id = int(header.group(1))
+        task = next(t for t in doc.tasks if t.id == task_id)
+        if task.files_unknown:
+            findings.extend(LintFinding(task_id, r) for r in _explain_files(block))
+        for r in _explain_interfaces(block):
+            findings.append(LintFinding(task_id, r))
+        if not task.steps:
+            findings.append(LintFinding(task_id, "keine Steps im Format `- [ ] **Step N: …**`"))
+    return findings
+
+
+def _cmd_lint(args: argparse.Namespace) -> int:
+    plan_path = Path(args.plan)
+    try:
+        text = plan_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Plan nicht lesbar: {exc}", file=sys.stderr)
+        return 2
+    try:
+        findings = lint_plan(text, plan_path)
+    except PlanParseError as exc:
+        print(f"Plan nicht parsbar: {exc}", file=sys.stderr)
+        return 2
+
+    if findings:
+        for f in findings:
+            print(f.render())
+        print(f"{len(findings)} Befund(e). Das Gate wertet jede unsichere Task als Abhängigkeit — "
+              f"Befunde beheben, nicht umformulieren, bis es 'parallel' sagt.")
+    else:
+        print("Keine Befunde — Plan ist für das Gate vollständig lesbar.")
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "plan": str(plan_path),
+            "findings": [{"task": f.task_id, "message": f.message} for f in findings],
+            "status": "clean" if not findings else "findings",
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return 1 if findings else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan -> Tasks für subagent-dev")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -765,6 +935,11 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--tasks", help="Kommagetrennte Task-IDs, sonst alle")
     gen.add_argument("--out-dir", default=str(Path(".skills") / "cache" / "tasks"))
     gen.set_defaults(func=_cmd_generate)
+
+    lint = sub.add_parser("lint", help="Plan prüfen: warum ist eine Task unsicher, wo stehen Platzhalter, fehlt etwas im Kopf")
+    lint.add_argument("plan", help="Pfad zum Plan")
+    lint.add_argument("--out", help="Befunde zusätzlich als JSON-Artefakt schreiben")
+    lint.set_defaults(func=_cmd_lint)
 
     ver = sub.add_parser("verify", help="Allowlist + Produces-Signaturen gegen einen Worktree prüfen")
     ver.add_argument("--task-file", required=True)

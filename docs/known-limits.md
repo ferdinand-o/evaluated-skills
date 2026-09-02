@@ -1117,6 +1117,21 @@ mit vertretbarem Aufwand behebbar waren:
 
 ## subagent-dev — Befunde aus dem Einsatz an Spec 15 (2026-09-01)
 
+**Beide Parser-Defekte unten sind behoben** (Fix-Runde nach der Prüfung
+`docs/assessment-writing-skills-writing-plans.md`, Schritt 1): Ein
+Backtick-Ausdruck ohne gültigen Bezeichner macht die Task jetzt unbekannt
+(fail-closed), Prosa unter dem Interfaces-Block wird getrennt geführt statt in
+`Produces:` zu laufen, und `plan_to_tasks.py lint` nennt pro Task den Grund.
+Gemessen über alle 17 Pläne: **8 parsen nicht** (Exit 2), die übrigen 9 tragen
+zwischen 2 und 78 Befunde — kein einziger ist lint-sauber. Die Bedienbarkeits-Lehre
+steht jetzt als Zeile in der Anti-Rationalisierungs-Tabelle. Was bleibt: Der
+Fail-Closed-Fix ist **laut** — beschreibende Backticks in Interfaces
+(`\`(git_range, end_label)\``, `\`facts.json\``) machen eine Task unbekannt, obwohl
+sie kein Symbol meinen. Das ist die richtige Richtung, aber die saubere Lösung ist
+ein erklärtes Interface-Vokabular (`token:`, `file:`, `fn:`), und das gehört zu
+Spec 16, nicht in diesen Fix. Der historische Befund darunter bleibt stehen.
+
+
 Beim ersten produktiven Einsatz des Gates an einem fremden Plan (`explain`) kippte
 das Verdikt dreimal — `sequential`, `parallel`, `sequential` — allein durch
 Umformulierungen im `**Interfaces:**`-Block, ohne dass sich an der tatsächlichen

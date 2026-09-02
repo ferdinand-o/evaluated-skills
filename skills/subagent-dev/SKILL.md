@@ -18,7 +18,10 @@ kein Fehlschlag.
    python skills/subagent-dev/scripts/plan_to_tasks.py generate docs/superpowers/plans/<plan>.md
    ```
    Schreibt `.skills/cache/tasks/gate.json` (Verdikt + Begründung) und je Task
-   eine Handoff-Datei. `--tasks 3,4,5` beschränkt auf eine Teilmenge, z. B. die
+   eine Handoff-Datei. Sagt das Gate `sequential` und du verstehst nicht warum:
+   `plan_to_tasks.py lint <plan>` nennt pro Task den Grund für
+   `files_unknown`/`interfaces_unknown`, Prosa im Interfaces-Block, Platzhalter
+   und fehlende Steps — und endet mit Exit 2, wenn der Plan gar nicht parst. `--tasks 3,4,5` beschränkt auf eine Teilmenge, z. B. die
    noch offenen Tasks eines laufenden Plans.
 3. **Verdikt lesen, nicht überstimmen:**
    - `parallel` → die genannte `parallel_group` läuft je in einem eigenen
@@ -79,8 +82,10 @@ kein Fehlschlag.
   existieren und keine eindeutig zur erwarteten Signatur passt.
 - **Überlappung ist konservativ:** unparsbare/leere `Files:`, eine
   Files:-Zeile mit unbekanntem Vokabular, Prosa ohne Backtick-Symbol in
-  `Consumes:`/`Produces:`, oder ein Interface-Symbol, das eine andere Task
-  konsumiert, gilt jeweils als Abhängigkeit. Datei-Pfade werden dabei
+  `Consumes:`/`Produces:`, ein Backtick-Ausdruck, der kein gültiger Bezeichner
+  ist (`\`Next:\``, `\`facts.json\`` — kein Symbol extrahierbar, fail-closed),
+  oder ein Interface-Symbol, das eine andere Task konsumiert, gilt jeweils als
+  Abhängigkeit. Datei-Pfade werden dabei
   Groß-/Kleinschreibungs- und Backslash-normalisiert und absolut gegen
   relativ sowie Glob-Muster gegen ihre Wurzel verglichen. Im Zweifel keine
   Parallelisierung.
@@ -95,6 +100,7 @@ kein Fehlschlag.
 | „Review pro Task ist zu teuer" | Ein kollidierter Merge kostet mehr als alle Reviews zusammen. |
 | „Recherche mache ich schnell selbst" | Flutet das Rohmaterial den Hauptkontext, ist Fan-out billiger. |
 | „Die zwei Tasks teilen sich ja nur eine Konfigdatei, das ist doch harmlos" | Genau das ist die Überlappung, die das Gate suchen soll. |
+| „Ich formuliere die Interfaces um, bis das Gate `parallel` sagt" | Das Gate ist nur so hart wie die Disziplin dessen, der `Files:`/`Interfaces:` schreibt. Ein Verdikt, das durch Umformulieren kippt, ohne dass sich ein Aufgabenzuschnitt ändert, ist kein Verdikt — `lint` zeigt, was das Gate wirklich sieht; behebe das, statt es zu umgehen. |
 | „Ich erkläre kurz, wie ich gesucht habe, das hilft beim Nachvollziehen" | Das Vorgehen gehört nicht in die Findings-Datei — sie ist für Ergebnisse, nicht für den Prozess. Eine Datei mit drei Funden und fünfzig Zeilen Beiwerk hat den Zweck des Fan-outs verfehlt, selbst wenn jeder Satz stimmt. |
 
 ## Abgrenzung
