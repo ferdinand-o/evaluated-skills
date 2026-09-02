@@ -1,0 +1,125 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-trivial-low-stays-bare",
+      "class": "behavior",
+      "fixture": "empty-dir",
+      "prompt": "Erklär mir kurz, was ein Semikolon in Python macht.",
+      "must": [
+        {
+          "type": "judge",
+          "claim": "Die gesamte Antwort umfasst höchstens sechs Sätze und enthält keine Zwischenüberschriften, keine Aufzählung von Anschlussthemen und keinen ausgewalzten Beispielblock."
+        }
+      ],
+      "must_not": [
+        {
+          "type": "output_matches",
+          "pattern": "Next:"
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. 'Kurz' löst laut effort-ladder.md die Stufe low aus, und bei low entfällt Teil 3 (Next:) ersatzlos — das ist der mechanische Teil der Prüfung und der harte Teil: Er misst eine skill-eigene Regel, nicht generische Kürze. Der Judge-Claim trägt eine Zahl (sechs Sätze) statt eines Adjektivs, weil im Repo gemessen ist, dass ein Judge Kürze nur bei grober Verletzung zuverlässig beurteilt (docs/known-limits.md). Ein output_max_lines gäbe es nicht — file_max_lines greift nur auf Dateien, und diese Skill erzeugt keine. Diskriminator: Könnte das Basismodell ohne die Skill dieselbe Ausgabe erzeugen? Für die Kürze ja, für das must_not nein — ohne die Skill gibt es keine Regel, die einen Anschlussblock bei low verbietet, und keinen Grund, ihn 'Next:' zu nennen. Der Eval trägt deshalb auf dem must_not, nicht auf dem Judge."
+    },
+    {
+      "id": "medium-answer-carries-next-block",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Erklär mir, was ein Semikolon in Python macht.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Next:"
+        }
+      ],
+      "must_not": [],
+      "notes": "Dieselbe Frage ohne Stufenangabe — laut effort-ladder.md gilt dann der Default medium, und ab medium ist Teil 3 Pflicht. Zusammen mit dem vorigen Eval bildet dieser das low/medium-Paar ab, ohne dass ein einzelner Eval zwei Läufe bräuchte: evalkit/schema.py gibt jedem Eval genau einen Prompt, ein Vergleich innerhalb eines Prompts wäre wertlos, weil das Modell seine erste Antwort im Kontext sieht und kopiert. Diskriminator: Der wörtliche Token 'Next:' ist skill-eigenes Vokabular — ein Basismodell hat keinen Anlass, seinen Ausblick genau so zu betiteln."
+    },
+    {
+      "id": "short-answer-stays-bare-at-max",
+      "class": "behavior",
+      "fixture": "empty-dir",
+      "prompt": "Erklär mir in aller Tiefe, mit Quellen und Entstehungsgeschichte, warum eine Hash-Tabelle im Durchschnitt O(1) ist.",
+      "must": [
+        {
+          "type": "judge",
+          "claim": "Vor dem ersten Absatzumbruch stehen höchstens vier Sätze, und dieser erste Block enthält kein Beispiel, keinen Randfall und keine Quellenangabe."
+        }
+      ],
+      "must_not": [],
+      "notes": "Prüft den Hauptvertrag der Skill: Die Kurzantwort ist auf jeder Effort-Stufe gleich knapp. 'In aller Tiefe, mit Quellen und Entstehungsgeschichte' löst laut effort-ladder.md max aus — die Stufe, auf der die Versuchung am größten ist, schon oben auszuholen. Genau ein Judge-Claim, weil zusammengesetzte Claims im Repo nachweislich unzuverlässig sind (docs/known-limits.md, Abschnitt Judge). Diskriminator: Ein Basismodell beantwortet eine max-Anfrage typischerweise mit einer ausholenden Einleitung; die Vier-Satz-Grenze vor dem ersten Umbruch ist eine Regel, die nur diese Skill aufstellt."
+    },
+    {
+      "id": "uncertainty-is-marked",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Welche Python-Version ist aktuell die neueste stabile, und was hat sich in ihrem letzten Release genau geändert? Nutze keine Websuche, antworte kurz aus dem, was du weißt.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Unverified:"
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Frage ist so gebaut, dass Unsicherheit reproduzierbar entsteht statt zufällig: 'aktuell die neueste' liegt per Konstruktion hinter jedem Wissensstand und wird mit der Zeit verlässlicher unsicher, nicht weniger. 'Nutze keine Websuche' hält die Stufe bei low, wo laut effort-ladder.md nur markiert und nicht recherchiert wird — das ist ein G1-Prompt-Vertrag nach dem Muster aller sieben verified-research-Prompts, kein Mechanismus: Der Harness schränkt das Werkzeugset nicht ein. Diskriminator: Der wörtliche Token 'Unverified:' ist skill-eigen; ein Basismodell drückt Unsicherheit in Prosa aus, nicht mit diesem Präfix."
+    },
+    {
+      "id": "hedging-is-not-a-substitute",
+      "class": "behavior",
+      "fixture": "empty-dir",
+      "prompt": "Welche Python-Version ist aktuell die neueste stabile, und was hat sich in ihrem letzten Release genau geändert? Nutze keine Websuche, antworte kurz aus dem, was du weißt.",
+      "must": [
+        {
+          "type": "judge",
+          "claim": "Die Antwort benennt ihre Unsicherheit über die aktuelle Version ausdrücklich als Unsicherheit, statt sie nur in abschwächende Formulierungen wie 'typischerweise', 'vermutlich' oder 'dürfte' zu verlegen."
+        }
+      ],
+      "must_not": [],
+      "notes": "Derselbe Prompt wie uncertainty-is-marked, andere Frage an die Antwort: Dort wird geprüft, dass der Marker auftaucht; hier, dass er die Weichspülung tatsächlich ersetzt statt sie zu ergänzen. Ohne diesen Eval bestünde eine Antwort, die den Marker setzt UND zusätzlich hedged — und das Hedging-Verbot ist laut SKILL.md der eigentliche Zweck der Skill. Ein must_not per Regex auf die Hedging-Wörter wäre falsch-rot, weil dieselben Wörter in statistischen Aussagen legitim sind (honesty.md trennt das ausdrücklich); deshalb Judge statt Regex. Diskriminator: Ein Basismodell hedged in genau dieser Lage — das ist die dokumentierte Standardreaktion, gegen die die Skill gebaut ist."
+    },
+    {
+      "id": "high-effort-cites-a-source",
+      "class": "contract",
+      "fixture": "ex-sources",
+      "prompt": "Erklär mir gründlich, wie der Kestrel-Handshake funktioniert und wie groß die early payload höchstens sein darf. Nutze ausschließlich sources/kestrel-handshake.md, keine Websuche.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Source:"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "1440"
+        }
+      ],
+      "must_not": [],
+      "notes": "'Gründlich' löst laut effort-ladder.md high aus — die erste Stufe, die recherchiert und belegt. Kein Eval dieses Repos geht ins Netz; verified-research verbietet Websuche in allen seinen Prompts und arbeitet mit lokalen Quellen-Fixtures, dieser Eval folgt dem Muster. Gemessen wird damit die Marker-Disziplin bei verfügbarer Quelle, nicht die Recherchefähigkeit — Sichtbarkeitsregel Spec 00 §3. Die Fixture erfindet Protokoll und Konstanten bewusst: 1440 kann kein Modell aus dem Training kennen, die Zahl kommt also nur aus der Datei, und ein Source:-Marker darauf ist verdient statt behauptet. Diskriminator: Ein Basismodell nennt die Datei allenfalls in Prosa; das Präfix 'Source:' in derselben Zeile wie die Fundstelle verlangt nur diese Skill."
+    },
+    {
+      "id": "marker-token-is-language-independent",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Which Python version is currently the newest stable one, and what exactly changed in its latest release? Don't use web search, answer briefly from what you know.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Unverified:"
+        }
+      ],
+      "must_not": [],
+      "notes": "Dieselbe Frage auf Englisch. Die Marker sind laut SKILL.md feste Tokens unabhängig von der Antwortsprache — eine übersetzte Pflichtphrase wäre in genau dem Moment nicht mehr per output_matches prüfbar, in dem die Skill die Sprache wechselt. Eigener Eval statt eines zweiten Laufs im selben Eval, weil evalkit/schema.py jedem Eval genau einen Prompt gibt. Diskriminator: wie bei uncertainty-is-marked — der Token ist skill-eigen, die Sprache ändert daran nichts."
+    },
+    {
+      "id": "codebase-question-is-routed-away",
+      "class": "behavior",
+      "fixture": "layered-service",
+      "prompt": "Erklär mir die Architektur von diesem Projekt.",
+      "must": [
+        {
+          "type": "judge",
+          "claim": "Die Antwort erklärt die Architektur dieses konkreten Projekts NICHT selbst, sondern benennt, dass Codebase- und Architekturfragen bei einer anderen Zuständigkeit liegen (etwa architecture-map oder /code-review)."
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Abgrenzung, die am ehesten bricht: architecture-map führt 'erklär mir die Architektur' wörtlich als Trigger, explain heißt explain — beide konkurrieren auf demselben Satz. Auf Description-Ebene ist das nicht auflösbar, dieser Eval misst es nur stichprobenartig, und ein einzelner grüner Lauf beweist nichts (docs/known-limits.md, 'Ein Eval-Ergebnis ist eine Stichprobe'). Bekannte Schwäche dieses Evals: Bestünde er, weil architecture-map die Anfrage selbst übernimmt und korrekt beantwortet, würde der Judge eine fremde Leistung explain gutschreiben — der Claim ist deshalb negativ formuliert (explain erklärt NICHT selbst) und verlangt zusätzlich die ausdrückliche Nennung der anderen Zuständigkeit. Diskriminator: Könnte das Basismodell ohne diese Skill dieselbe Ausgabe erzeugen? Nein — ohne die Skill gibt es keinen Grund, eine beantwortbare Frage nicht zu beantworten. Genau das Ablehnen und Weiterverweisen ist die skill-eigene Leistung, die hier gemessen wird."
+    }
+  ]
+}

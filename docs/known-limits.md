@@ -1115,6 +1115,44 @@ mit vertretbarem Aufwand behebbar waren:
   keinem Allowlist-Eintrag matchen konnte. Jetzt wird bei `" -> "` in beide
   Pfade aufgeteilt.
 
+## subagent-dev — Befunde aus dem Einsatz an Spec 15 (2026-09-01)
+
+Beim ersten produktiven Einsatz des Gates an einem fremden Plan (`explain`) kippte
+das Verdikt dreimal — `sequential`, `parallel`, `sequential` — allein durch
+Umformulierungen im `**Interfaces:**`-Block, ohne dass sich an der tatsächlichen
+Kopplung der Tasks etwas änderte. Zwei benennbare Ursachen:
+
+- **Ein Backtick-Symbol, das kein gültiger Bezeichner ist, öffnet das Gate
+  still.** `extract_produced_symbols()` verlangt `[A-Za-z_][A-Za-z0-9_.]*`;
+  Namen mit Doppelpunkt oder Bindestrich (`` `Unverified:` ``, `` `Next:` ``,
+  `` `effort-ladder` ``) liefern **null Symbole**. `_has_unrecognized_prose()`
+  wiederum meldet sie *nicht* als unsicher, weil ein Backtick vorhanden ist. Die
+  Kombination heißt: kein Symbol **und** nichts Unbekanntes, also keine
+  Abhängigkeit — obwohl die Tasks über genau dieses Symbol gekoppelt sind. Der
+  Contract sagt „Prosa ohne Backtick-Symbol gilt als Abhängigkeit"; die Lücke
+  liegt dazwischen: Backtick vorhanden, Symbol trotzdem nicht extrahierbar. Das
+  ist ein Fail-Open in einem Gate, dessen erklärte Haltung „im Zweifel keine
+  Parallelisierung" ist. Fix-Vorschlag: Wenn ein Backtick-Ausdruck im
+  Interfaces-Block zu keinem Symbol führt, `interfaces_unknown=True` setzen statt
+  ihn zu ignorieren.
+- **Prosa zwischen dem Interfaces-Block und dem ersten Step wird in `Produces:`
+  hineingelesen.** `_parse_interfaces()` schneidet erst bei `\n- [ ]`, ein
+  erklärender Satz darunter landet also im Produces-Text und macht ihn per
+  `_has_unrecognized_prose()` unbekannt. Das ist konservativ (Fail-Closed) und
+  damit ungefährlich, erzeugt aber ein `sequential` mit falscher Begründung —
+  im ersten Lauf war Task 5 der einzige `interfaces_unknown`, und allein dieses
+  Flag koppelte alle sechs Tasks.
+
+**Die eigentliche Lehre ist die Bedienbarkeit, nicht der Parser.** Wer das Gate
+bedient, kann durch reines Umformulieren des Interfaces-Blocks auf ein
+`parallel`-Urteil hinarbeiten, ohne je die Aufgabenzuschnitte zu ändern — genau
+die Sorte Nachziehen, die `docs/skill-building-pitfalls.md` unter „Ein Budget wird
+nicht nachgezogen, bis es passt" verbietet. Das Gate ist nur so hart wie die
+Disziplin dessen, der die `Files:`/`Interfaces:`-Blöcke schreibt. Ein Hinweis
+darauf fehlt in SKILL.md; die Anti-Rationalisierungs-Tabelle deckt „vier Agents
+wirken produktiver" ab, nicht „ich formuliere die Interfaces so lange um, bis es
+parallel sagt".
+
 ## subagent-dev — Fix-Runde 2 (Bestätigungslauf)
 
 Der zentrale Bestätigungslauf nach Fix-Runde 1 bestätigte D1–D3 (drei Evals

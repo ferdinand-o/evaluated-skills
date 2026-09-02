@@ -41,6 +41,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | UI: Produktoberfläche, Tabellen, Formulare | enterprise-ui | ui-architect (Marketing/Brand) |
 | Landing-Page-Bewegung | motion-landing *(geplant)* | ui-architect (Stil/Tokens), enterprise-ui |
 | ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
+| Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
 
 ## Konventionen
