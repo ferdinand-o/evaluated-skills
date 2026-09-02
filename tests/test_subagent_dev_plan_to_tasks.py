@@ -245,7 +245,7 @@ def test_render_task_file_contains_required_sections():
     assert "src/parser.py" in rendered
     block = ptt.parse_task_machine_block(rendered)
     assert block["allowlist"] == ["src/parser.py", "tests/test_parser.py"]
-    assert {"name": "parse", "arity": 1} in block["produces"]
+    assert {"kind": "fn", "name": "parse", "arity": 1} in block["produces"]
 
 
 def test_write_tasks_creates_gate_and_task_files(tmp_path):
@@ -822,7 +822,11 @@ def test_prose_paragraph_after_produces_is_stray_not_swallowed():
     assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
 
 
-CLEAN_PLAN = """# P
+HEADER = "<!-- skill: impl-plan | schema: 1 | generated: von Hand nach skills/impl-plan/assets/plan-template.md -->"
+
+CLEAN_PLAN = HEADER + """
+
+# P
 
 **Goal:** x
 **Spec:** `spec.md`
@@ -888,6 +892,7 @@ def test_lint_names_every_reason(tmp_path):
     assert "`Unverified:`" in joined and "fail-closed" in joined
     assert "Prosa im Interfaces-Block" in joined and "Prosa hier." in joined
     assert "Task 2: keine Steps" in joined
+    assert "Kopfzeile fehlt" in joined
 
 
 def test_main_lint_exit_codes(tmp_path, capsys):
@@ -904,3 +909,150 @@ def test_main_lint_exit_codes(tmp_path, capsys):
     assert json.loads(out.read_text(encoding="utf-8"))["status"] == "findings"
     assert ptt.main(["lint", str(broken)]) == 2
     assert "nicht parsbar" in capsys.readouterr().err
+
+
+# --- Spec 16: Interface-Vokabular, Kopfzeile, Spec-Coverage, _meta --------------
+
+def test_prefixed_symbols_are_extracted_with_kind():
+    got = ptt.extract_symbols("`fn:parse(line)`, `token:Next`, `file:docs/x.md`, `bare_name`")
+    assert ("fn", "parse", 1) in got
+    assert ("token", "Next", None) in got
+    assert ("file", "docs/x.md", None) in got
+    assert ("fn", "bare_name", None) in got
+
+
+def test_unknown_prefix_stays_fail_closed():
+    assert ptt.symbol_kind("foo:bar") is None
+    assert ptt.unextractable_backtick_spans("`foo:bar`") == ["foo:bar"]
+    assert ptt.unextractable_backtick_spans("`token:Next`, `file:a.md`") == []
+
+
+def test_token_with_trailing_colon_is_matched_as_dependency():
+    """`Unverified:` endet auf ein Nicht-Wortzeichen — ein \\b-Muster griffe nie."""
+    plan = (
+        "### Task 1: A\n\n**Files:**\n- Create: `a.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: `token:Unverified:`\n\n- [ ] **Step 1: x**\n"
+        "### Task 2: B\n\n**Files:**\n- Create: `b.md`\n\n**Interfaces:**\n"
+        "- Consumes: `token:Unverified:`\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: y**\n"
+    )
+    doc = ptt.parse_plan(plan)
+    assert 2 in ptt.build_overlap_graph(doc.tasks)[1]
+
+
+def test_file_consumption_overlaps_with_the_task_that_writes_it():
+    plan = (
+        "### Task 1: A\n\n**Files:**\n- Create: `docs/x.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: x**\n"
+        "### Task 2: B\n\n**Files:**\n- Create: `other.md`\n\n**Interfaces:**\n"
+        "- Consumes: `file:docs/x.md`\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: y**\n"
+    )
+    doc = ptt.parse_plan(plan)
+    assert doc.tasks[1].consumed_files == ["docs/x.md"]
+    assert doc.tasks[1].interfaces_unknown is False
+    assert 1 in ptt.build_overlap_graph(doc.tasks)[2]
+
+
+def test_check_produces_token_by_text_search(tmp_path):
+    (tmp_path / "SKILL.md").write_text("Teil 3 beginnt mit `Next:`.\n", encoding="utf-8")
+    present, missing = ptt.check_produces(tmp_path, ["SKILL.md"], [("token", "Next:", None), ("token", "Absent:", None)])
+    assert present["status"] == "present"
+    assert missing["status"] == "missing"
+
+
+def test_check_produces_accepts_legacy_pairs_as_fn(tmp_path):
+    (tmp_path / "a.py").write_text("def parse(line):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "present"
+
+
+def test_machine_block_carries_kind_and_verify_reads_it_back(tmp_path, monkeypatch):
+    """Die Verdrahtung: kind aus dem Plan landet im Maschinenblock und verify
+    prüft einen token per Textsuche — nicht per ast, das ihn nie fände."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### Task 1: Doktrin\n\n**Files:**\n- Create: `SKILL.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: `token:Next:`\n\n- [ ] **Step 1: x**\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "tasks"
+    assert ptt.main(["generate", str(plan), "--out-dir", str(out)]) == 0
+    task_file = next(out.glob("task-1-*.md"))
+    assert ptt.parse_task_machine_block(task_file.read_text(encoding="utf-8"))["produces"] == [
+        {"kind": "token", "name": "Next:", "arity": None}
+    ]
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    (worktree / "SKILL.md").write_text("Teil 3: `Next:`\n", encoding="utf-8")
+    rc = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree)])
+    assert rc != 2  # unverified (kein --base), aber nicht fail — der Token wurde gefunden
+
+
+def test_file_in_produces_is_a_lint_finding(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: A\n\n**Files:**\n- Create: `a.md`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `file:a.md`\n\n- [ ] **Step 1: x**\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("gehört in **Files:**" in m for m in msgs)
+
+
+def test_check_header_variants():
+    assert ptt.check_header(HEADER + "\n# P\n") is None
+    assert "fehlt" in ptt.check_header("# P\n")
+    assert "fremd" in ptt.check_header("<!-- skill: subagent-dev | schema: 1 | generated: x -->\n")
+
+
+SPEC_WITH_TABLE = """# Spec
+
+| # | id | Klasse | Fixture |
+| --- | --- | --- | --- |
+| 1 | `alpha-eval` | contract | `f` |
+| 2 | `beta-eval` | contract | `f` |
+"""
+
+
+def test_spec_eval_ids_reads_id_column_by_name():
+    assert ptt.spec_eval_ids(SPEC_WITH_TABLE) == ["alpha-eval", "beta-eval"]
+    assert ptt.spec_eval_ids("# Spec\n\n**Evals:** (1) … (2) …\n") is None
+
+
+def test_lint_reports_uncovered_spec_eval_ids(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n- [ ] **Step 1: alpha-eval anlegen**\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md")]
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+    assert not any("`alpha-eval`" in m for m in msgs)
+
+
+def test_lint_skill_flag_reports_ids_missing_from_spec(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    (tmp_path / "evals" / "x").mkdir(parents=True)
+    (tmp_path / "evals" / "x" / "evals.json").write_text(
+        json.dumps({"evals": [{"id": "alpha-eval"}, {"id": "gamma-eval"}]}), encoding="utf-8"
+    )
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n- [ ] **Step 1: alpha-eval, beta-eval**\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md", skill="x")]
+    assert any("`gamma-eval` aus evals/x/evals.json fehlt in der Spec" in m for m in msgs)
+
+
+def test_lint_out_json_carries_meta(tmp_path, capsys):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(CLEAN_PLAN, encoding="utf-8")
+    out = tmp_path / "lint.json"
+    assert ptt.main(["lint", str(plan), "--out", str(out)]) == 0
+    meta = json.loads(out.read_text(encoding="utf-8"))["_meta"]
+    assert meta["skill"] == "subagent-dev" and meta["schema"] == 1 and "lint" in meta["generated"]

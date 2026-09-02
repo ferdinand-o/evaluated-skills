@@ -82,10 +82,13 @@ kein Fehlschlag.
   existieren und keine eindeutig zur erwarteten Signatur passt.
 - **Überlappung ist konservativ:** unparsbare/leere `Files:`, eine
   Files:-Zeile mit unbekanntem Vokabular, Prosa ohne Backtick-Symbol in
-  `Consumes:`/`Produces:`, ein Backtick-Ausdruck, der kein gültiger Bezeichner
-  ist (`\`Next:\``, `\`facts.json\`` — kein Symbol extrahierbar, fail-closed),
-  oder ein Interface-Symbol, das eine andere Task konsumiert, gilt jeweils als
-  Abhängigkeit. Datei-Pfade werden dabei
+  `Consumes:`/`Produces:`, ein Backtick-Ausdruck, der weder Bezeichner noch
+  bekanntes Präfix ist (fail-closed), ein Interface-Symbol, das eine andere Task
+  konsumiert, oder eine `file:`-Abhängigkeit auf eine Datei, die eine andere Task
+  schreibt, gilt jeweils als Abhängigkeit. Drei Präfixe sind bekannt:
+  `fn:parse(line)` (Aufrufbares, `verify` prüft per `ast`), `token:Next`
+  (Doktrin-Token, `verify` prüft per Textsuche), `file:docs/x.md`
+  (Lese-Abhängigkeit, geht in die Pfad-Überlappung, nie in Produces). Datei-Pfade werden dabei
   Groß-/Kleinschreibungs- und Backslash-normalisiert und absolut gegen
   relativ sowie Glob-Muster gegen ihre Wurzel verglichen. Im Zweifel keine
   Parallelisierung.
