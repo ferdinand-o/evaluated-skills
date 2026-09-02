@@ -1,0 +1,103 @@
+# impl-plan — Abschlussbericht
+
+Gebaut nach `specs/Spec 16 – impl-plan.md` und `docs/superpowers/plans/2026-09-02-impl-plan.md`.
+Zyklus 16, Tier 1 ohne eigenes Skript, gebaut am 2026-09-02 sequenziell im Hauptkontext
+(zehn Tasks, ein Commit je Task; das Gate sagte `sequential`, weil jede Task die
+Plandatei oder `plan_to_tasks.py` berührt).
+
+## Was entstanden ist
+
+```
+skills/impl-plan/SKILL.md                      98 Zeilen (Grenze 150)
+skills/impl-plan/references/task-patterns.md   Code-/Doktrin-Task, Pflicht-Tasks, Vokabular
+skills/impl-plan/references/reviewer-prompt.md übersetzter writing-plans-Reviewer, erweitert
+skills/impl-plan/assets/plan-template.md       lint-sauberes Template, 155 Zeilen
+evals/impl-plan/evals.json                     5 contract-Evals
+evals/fixtures/ip-tiny, ip-five, ip-tier0      drei Specs, eine Mini-Skill, kein Plan
+tests/test_plans_lint.py                       Repo-Test, 6 Tests
+tests/test_impl_plan_evals_schema.py           12 Tests
+```
+
+In `subagent-dev`: `plan_to_tasks.py` um das Interface-Vokabular (`fn:`, `token:`,
+`file:` mit `kind`), `lint --spec/--skill`, die Kopfzeilen-Prüfung und `_meta` in
+`lint.json` erweitert — 369 Zeilen dazu, 29 weg, 66 Tests dort grün. Nachgezogen:
+`subagent-dev`s Description, Ablauf und Abgrenzung zeigen auf `impl-plan`; die
+Routing-Matrix in Spec 00 §5 und `README.md` hat die Zeile „Implementierungsplan zu
+einer Spec"; der explain-Plan trägt die Kopfzeile.
+
+## Die drei Entscheidungen, die den Bau geprägt haben
+
+**Der Parser bleibt bei `subagent-dev`.** Sauberer nach der Konsumentenregel wäre er
+bei `impl-plan`, verworfen wegen der Konvention „Skill-Skripte importieren einander
+nie": Ein Subprozess-JSON-Protokoll zwischen zwei Skills wäre eine Schnittstelle, die
+es heute nicht gibt — genau die Fehlerklasse „parallel gebaute Schnittstellen". Der
+Preis ist sichtbar: `impl-plan` ruft ein fremdes Skript per Kommando auf und muss eine
+Degradationszeile kennen, falls es fehlt.
+
+**Das Legacy-Register friert nach Namen ein, nicht nach Befund-Zahl.** Der erste
+Entwurf wollte pro Plan eine erlaubte Anzahl Befunde einfrieren. Der Review hat das
+gekippt: nicht monoton, für unparsbare Pläne gibt es keine Zahl, und schon die
+Kopfzeilen-Prüfung dieser Spec hätte alle Zahlen falsch gemacht, ohne dass ein Plan
+angefasst wurde. Jetzt gilt: 16 Namen, nicht gelintet, Menge darf nur schrumpfen.
+
+**Kein Eval hängt am Lint.** Der Eval-Workspace kopiert nur das Skill-Verzeichnis;
+`subagent-dev`s Skript ist dort nicht. Statt einen Eval zu schreiben, der strukturell
+rot bliebe, prüfen alle fünf die Plandatei direkt — über die Kopfzeile als
+Diskriminator, die nur diese Skill schreibt, und über Hausvokabular (kanonische Titel,
+`token:`), das `writing-plans` nicht kennt.
+
+## Was gemessen wurde
+
+- **1025 Tests grün**, einer deselektiert: `test_rest_api_architect_gate.py::test_main_exit_zero_when_degraded_but_checklist_clean`
+  ist vorbestehend und fremd — per `git stash` auf unverändertem Stand gegengeprüft; er
+  erwartet ein fehlendes Spectral, das in dieser Umgebung über `npx` erreichbar ist.
+- **Der Repo-Test über alle Pläne (2026-09-02):** 18 Pläne unter
+  `docs/superpowers/plans/`, 16 im Legacy-Register, 2 gelintet (explain, impl-plan),
+  beide sauber; das Template sauber. Von den 16 eingefrorenen parsen 8 nicht, die
+  übrigen 8 tragen 15 bis 79 Befunde.
+- **Der Lint fand beim Bau zwei echte Fehler in diesem Plan selbst:** `--spec` meldete
+  fünf Eval-IDs der Spec, die im Plan in keinem Task standen; und ein Sammel-Task
+  `Pflicht` im Template-Fließtext wurde als Task geparst. Beides behoben, bevor
+  weitergebaut wurde — der Mechanismus hat sich an seinem eigenen Bau bewährt.
+- **Schema-Test:** die Regexe aller `must`-Assertions greifen an einem
+  templatekonformen Beispielplan, dieser Plan ist lint-sauber, die fünf IDs in Eval 2
+  sind exakt die IDs der Fixture-Spec, die beiden Tokens in Eval 4 stehen in der
+  Tier-0-Spec.
+
+## Was NICHT gemessen wurde
+
+**Kein einziger der fünf Evals ist gefahren.** Derselbe Grund wie bei `explain`:
+`evalkit/dispatch.py` verdrahtet `permission_mode="bypassPermissions"`, die
+Claude-CLI verweigert das unter uid 0 (`docs/known-limits.md`, „Betrieb"). Was
+vorliegt, ist eine schema-valide, regex-geprüfte Eval-Sammlung, kein Nachweis über das
+Verhalten der Skill.
+
+**Der Trigger ist ungemessen — und er war die Diagnose.** Spec 16 ist entstanden, weil
+„schreib mir den Implementierungsplan" bei `writing-plans` landete und acht unparsbare
+Pläne hinterließ. Ob die neue Description das ändert, entscheidet der Harness pro Lauf
+(`routing-house-header-not-superpowers` ist stochastisch), und dieser Lauf hat nicht
+stattgefunden. Die Kollision ist auf Description-Ebene entschärft, nicht bewiesen
+aufgelöst.
+
+**Ob die Skill den Lint benutzt, misst kein Eval.** Im Eval-Workspace fehlt das
+Skript; ein Agent, der die SKILL.md befolgt, landet dort in der Degradationszeile. Die
+Evals messen, ob der Plan dem Template folgt — die Eiserne Regel („kein Plan fertig
+ohne Lint oder ohne dass das gesagt wurde") ist G1-Selbstauskunft, mit dem Repo-Test
+als einzigem Zahn, und der beißt nur, wenn jemand `pytest` startet.
+
+**Der 50-Zeilen-Wert des Anti-Zeremonie-Evals ist eine Rechnung, kein Messwert.** Kopf
+plus zwei Tasks plus Sammel-Task, hochgerechnet am Template. Ob ein Agent den
+Anti-Zeremonie-Fall überhaupt als solchen erkennt und den Sammel-Task `Pflicht` wählt,
+statt vier volle Pflicht-Tasks zu schreiben, ist die eigentliche Frage des Evals — und
+unbeantwortet.
+
+## Offen für die nächste Runde
+
+- Die fünf Evals außerhalb eines Root-Containers fahren. Am aussagekräftigsten:
+  `routing-house-header-not-superpowers` (die Diagnose) und
+  `anti-ceremony-two-task-change-stays-small` (die Zeremonie-Falle).
+- Beim nächsten echten Plan dieser Sammlung: Schreibt die Skill ihn, oder greift
+  wieder `writing-plans`? Das ist die einzige Messung des Triggers, die es heute gibt.
+- Ob das Interface-Vokabular im Gebrauch trägt oder ob Pläne weiter nackte Bezeichner
+  schreiben, weil die Präfixe im Kopf nicht ankommen — dann wäre `token:` Doktrin ohne
+  Konsumenten.
