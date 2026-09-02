@@ -1122,8 +1122,9 @@ mit vertretbarem Aufwand behebbar waren:
 Backtick-Ausdruck ohne gültigen Bezeichner macht die Task jetzt unbekannt
 (fail-closed), Prosa unter dem Interfaces-Block wird getrennt geführt statt in
 `Produces:` zu laufen, und `plan_to_tasks.py lint` nennt pro Task den Grund.
-Gemessen über alle 17 Pläne: **8 parsen nicht** (Exit 2), die übrigen 9 tragen
-zwischen 2 und 78 Befunde — kein einziger ist lint-sauber. Die Bedienbarkeits-Lehre
+Gemessen über alle 17 Pläne: **8 parsen nicht** (Exit 2), 8 tragen zwischen 14
+und 78 Befunde, einer ist sauber (der explain-Plan, nach Verschieben eines
+Prosa-Absatzes). Die Bedienbarkeits-Lehre
 steht jetzt als Zeile in der Anti-Rationalisierungs-Tabelle. Was bleibt: Der
 Fail-Closed-Fix ist **laut** — beschreibende Backticks in Interfaces
 (`\`(git_range, end_label)\``, `\`facts.json\``) machen eine Task unbekannt, obwohl
