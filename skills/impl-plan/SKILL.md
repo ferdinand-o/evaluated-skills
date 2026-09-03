@@ -27,7 +27,8 @@ macht die Testsuite rot. Das ist G2 — ein Skript meldet, sobald jemand `pytest
    die Abgrenzung (der Nachbarn-Task).
 2. **Template kopieren:** `assets/plan-template.md` nach
    `docs/superpowers/plans/<datum>-<skill>.md`. Die Kopfzeile bleibt wörtlich; `Spec:`
-   zeigt auf die eigene Spec.
+   zeigt auf die eigene Spec. Im Anti-Zeremonie-Fall entfällt der Skill-Struktur-Block,
+   von den Global Constraints bleiben nur die betroffenen (`task-patterns.md`).
 3. **Tasks schneiden** nach `references/task-patterns.md`: Code-Task oder Doktrin-Task,
    Zuschnittsregel („teile nur, wo ein Reviewer die eine Task ablehnen und die
    Nachbar-Task annehmen könnte"), bei Tier 0 der Eval-Task **vor** der SKILL.md. Die
@@ -38,7 +39,7 @@ macht die Testsuite rot. Das ist G2 — ein Skript meldet, sobald jemand `pytest
    und Step 1.
 5. **Lint:**
    ```bash
-   python skills/subagent-dev/scripts/plan_to_tasks.py lint <plan> --spec <spec> --out .skills/cache/tasks/lint.json
+   python skills/subagent-dev/scripts/plan_to_tasks.py lint <plan> --skill <skill> --out .skills/cache/tasks/lint.json
    ```
    Befunde beheben — nicht umformulieren, bis das Gate `parallel` sagt. Ist die Spec
    noch ohne Eval-Tabelle, meldet der Lint das als Hinweis und prüft Coverage nicht.
@@ -83,7 +84,7 @@ Vor der Übergabe, ohne Subagent, mit frischem Blick auf die Spec:
 | „Ich formuliere die Interfaces um, bis das Gate `parallel` sagt" | `lint` zeigt, was das Gate sieht. Behebe das. Ein Verdikt, das durch Umformulieren kippt, ist kein Verdikt. |
 | „Für diesen Doktrin-Task passt der Fünfschritt nicht, ich lasse die Steps weg" | Dann das Doktrin-Muster: Datei → Lint oder Schema-Test → Commit. Steps ohne Format sind für das Gate unsichtbar. |
 | „Die Pflicht-Tasks sind bei dieser kleinen Änderung Zeremonie" | Dann ein Sammel-Task `Pflicht` mit je einer Zeile. „Nachbarn: keine" kostet nichts; ein vergessener Nachbar kostet einen Fix-Zyklus. |
-| „Spec-Coverage prüfe ich im Kopf" | `--spec` prüft sie in einer Sekunde und hat im eigenen Bau-Plan dieser Skill sofort fünf fehlende IDs gefunden. |
+| „Spec-Coverage prüfe ich im Kopf" | Der Lint prüft sie in einer Sekunde gegen die `Spec:`-Zeile und hat im eigenen Bau-Plan dieser Skill sofort fünf fehlende IDs gefunden. `coverage.status` in `lint.json` sagt, ob der Abgleich lief. |
 | „Die Skill war beim Schreiben nicht geladen, das Format ist trotzdem okay" | Der Repo-Test entscheidet, nicht das Gefühl. |
 | „Ich schreibe `…` ins Symbol, das ist ja nur ein Beispiel" | Ein Symbol mit `…` ist kein Bezeichner — die Task wird unbekannt. Beispielnamen statt Auslassung. |
 

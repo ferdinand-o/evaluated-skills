@@ -260,7 +260,7 @@ def test_write_tasks_creates_gate_and_task_files(tmp_path):
 
 
 def test_extract_produced_symbols_reads_name_and_arity():
-    symbols = ptt.extract_produced_symbols("- Produces:\n  - `parse(line: str) -> dict`\n  - `Config`")
+    symbols = [(n, a) for _, n, a in ptt.extract_symbols("- Produces:\n  - `parse(line: str) -> dict`\n  - `Config`")]
     names = {s[0]: s[1] for s in symbols}
     assert names["parse"] == 1
     assert names["Config"] is None
@@ -807,7 +807,7 @@ def test_sub_bullets_under_produces_are_symbols_not_prose():
     )
     consumes, produces, stray = ptt._interface_lines(block)
     assert stray == []
-    assert [n for n, _ in ptt.extract_produced_symbols(produces)] == ["collect.commits", "collect.main"]
+    assert [n for _, n, _ in ptt.extract_symbols(produces)] == ["collect.commits", "collect.main"]
     assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
 
 
@@ -983,8 +983,16 @@ def test_machine_block_carries_kind_and_verify_reads_it_back(tmp_path, monkeypat
     worktree.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
     (worktree / "SKILL.md").write_text("Teil 3: `Next:`\n", encoding="utf-8")
-    rc = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree)])
-    assert rc != 2  # unverified (kein --base), aber nicht fail — der Token wurde gefunden
+    result_file = tmp_path / "verify.json"
+    ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree), "--out", str(result_file)])
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["produces"] == [{"name": "Next:", "status": "present", "detail": result["produces"][0]["detail"]}]
+    assert result["verdict"] == "unverified"  # kein --base: Allowlist ungeprüft, nie "pass"
+
+    (worktree / "SKILL.md").write_text("Teil 3 ohne den Token\n", encoding="utf-8")
+    ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree), "--out", str(result_file)])
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["produces"][0]["status"] == "missing" and result["verdict"] == "fail"
 
 
 def test_file_in_produces_is_a_lint_finding(tmp_path):
@@ -1007,6 +1015,14 @@ def test_check_header_variants():
 
 SPEC_WITH_TABLE = """# Spec
 
+## Contract
+
+| Feld | id | Typ |
+| --- | --- | --- |
+| Nutzer | `user_id` | int |
+
+### Evals
+
 | # | id | Klasse | Fixture |
 | --- | --- | --- | --- |
 | 1 | `alpha-eval` | contract | `f` |
@@ -1014,9 +1030,76 @@ SPEC_WITH_TABLE = """# Spec
 """
 
 
-def test_spec_eval_ids_reads_id_column_by_name():
+def test_spec_eval_ids_reads_id_column_under_the_evals_heading_only():
+    """Die Contract-Tabelle mit `user_id` davor zählt nicht — sonst meldete der Lint
+    `user_id` als fehlenden Task und prüfte die echten IDs nie."""
     assert ptt.spec_eval_ids(SPEC_WITH_TABLE) == ["alpha-eval", "beta-eval"]
     assert ptt.spec_eval_ids("# Spec\n\n**Evals:** (1) … (2) …\n") is None
+    no_heading = SPEC_WITH_TABLE.replace("### Evals", "### Tabelle")
+    assert ptt.spec_eval_ids(no_heading) is None
+
+
+def test_spec_eval_table_reports_id_cells_without_backticks():
+    spec = SPEC_WITH_TABLE + "| 3 | gamma-eval | contract | `f` |\n"
+    ids, malformed = ptt.spec_eval_table(spec)
+    assert ids == ["alpha-eval", "beta-eval"] and malformed == ["gamma-eval"]
+
+
+def _plan_with_steps(step_text: str, spec_ref: str = "spec.md") -> str:
+    return (
+        HEADER + f"\n\n**Goal:** x\n**Spec:** `{spec_ref}`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n" + step_text
+    )
+
+
+def test_lint_resolves_coverage_from_the_plans_own_spec_line(tmp_path):
+    """Coverage ist eine Eigenschaft des Plans, nicht des Aufrufs: ohne --spec
+    zählt die Datei aus der **Spec:**-Zeile — so sieht der Repo-Test sie auch."""
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval anlegen**\n"), encoding="utf-8")
+    report = ptt.lint_report(plan.read_text(encoding="utf-8"), plan)
+    assert report.coverage["status"] == "checked" and report.coverage["ids_checked"] == 2
+    assert any("`beta-eval` aus der Spec hat keinen Task" in f.message for f in report.findings)
+
+
+def test_lint_coverage_counts_whole_ids_inside_task_blocks_only(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    text = _plan_with_steps("- [ ] **Step 1: stale-alpha-eval-foo anlegen**\n")
+    text = text.replace("**Goal:** x", "**Goal:** x — beta-eval steht hier im Kopf, nicht in einem Task")
+    plan.write_text(text, encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("`alpha-eval` aus der Spec hat keinen Task" in m for m in msgs)
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+
+
+def test_lint_malformed_id_row_is_a_finding(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE + "| 3 | gamma-eval | contract | `f` |\n", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval, beta-eval, gamma-eval**\n"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("id-Zelle ohne Backtick-Wert" in m and "gamma-eval" in m for m in msgs)
+
+
+def test_lint_skill_without_any_spec_is_a_finding_not_silence(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n", spec_ref="missing.md"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, skill="x")]
+    assert any("--skill x ohne Spec" in m for m in msgs)
+
+
+def test_lint_out_json_marks_unchecked_coverage_and_full_command(tmp_path):
+    (tmp_path / "spec ohne tabelle.md").write_text("# Spec\n\nEvals in Prosa.\n", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n", spec_ref="spec ohne tabelle.md"), encoding="utf-8")
+    out = tmp_path / "lint.json"
+    assert ptt.main(["lint", str(plan), "--spec", str(tmp_path / "spec ohne tabelle.md"), "--skill", "x", "--out", str(out)]) == 1
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["coverage"]["status"] == "unchecked" and "keine Eval-Tabelle" in data["coverage"]["reason"]
+    assert "--spec" in data["_meta"]["generated"] and "--skill x" in data["_meta"]["generated"]
+    assert "tabelle.md'" in data["_meta"]["generated"]  # Pfad mit Leerzeichen ist shell-quotiert
+    assert any("evals/x/evals.json nicht gefunden" in f["message"] for f in data["findings"])
 
 
 def test_lint_reports_uncovered_spec_eval_ids(tmp_path):

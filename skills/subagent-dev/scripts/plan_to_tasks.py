@@ -19,6 +19,7 @@ import argparse
 import ast
 import json
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -48,7 +49,6 @@ NOTHING_NEW_RE = re.compile(r"^\(?nichts neues\)?\.?$", re.IGNORECASE)
 # Interface-Vokabular (Spec 16): `fn:name(args)`, `token:Name`, `file:pfad`.
 # Additiv zu nackten Bezeichnern; jedes andere Präfix bleibt fail-closed.
 PREFIXED_SYMBOL_RE = re.compile(r"`(fn|token|file):([^`]+)`")
-SYMBOL_KINDS = ("fn", "token", "file")
 # Kopfzeile eines impl-plan-Plans (docs/artifact-header.md, Spec 16).
 PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*impl-plan\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
 # Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
@@ -172,7 +172,7 @@ def _parse_files(block: str) -> tuple[list[FileRef], bool]:
 
 def _has_unrecognized_prose(text: str) -> bool:
     """True, wenn `text` etwas außer Backtick-Symbolen oder dem expliziten
-    Leerfall "nichts Neues" enthält — Prosa, aus der `extract_produced_symbols`
+    Leerfall "nichts Neues" enthält — Prosa, aus der `extract_symbols`
     kein Symbol ziehen kann, aber die trotzdem eine echte Abhängigkeit benennen
     könnte (Fix D3). Enthält der Text ein Backtick, gilt er als geparst, auch
     wenn drumherum Prosa steht — sonst wäre "Consumes: `parse()` aus Task 1"
@@ -224,10 +224,10 @@ def _interface_lines(block: str) -> tuple[str, str, list[str]]:
 
 
 def unextractable_backtick_spans(text: str) -> list[str]:
-    """Backtick-Ausdrücke, aus denen `extract_produced_symbols` kein Symbol zieht.
+    """Backtick-Ausdrücke, aus denen `extract_symbols` kein Symbol zieht.
 
     Das ist die Lücke, die das Gate still geöffnet hat (known-limits, Einsatz an
-    Spec 15): `\`Unverified:\``, `\`Next:\``, `\`effort-ladder\`` sind keine
+    Spec 15): ``Unverified:``, ``Next:``, ``effort-ladder`` sind keine
     gültigen Bezeichner, liefern null Symbole — und galten trotzdem nicht als
     unbekannt, weil ein Backtick vorhanden war. Kein Symbol *und* nichts
     Unbekanntes hieß: keine Abhängigkeit. Jetzt gilt jeder solche Ausdruck als
@@ -360,7 +360,7 @@ def extract_symbols(text: str) -> list[tuple[str, str, int | None]]:
     Drei Präfixe (Spec 16): `fn:parse(line)` — Aufrufbares mit Arity;
     `token:Next` — wörtlicher Ausgabe-Token einer Doktrin; `file:docs/x.md` —
     Lese-Abhängigkeit auf eine Datei. Ohne Präfix gilt die bisherige Regel:
-    `\`name(a, b)\`` ist ein Aufrufbares, `\`Name\`` ein Symbol ohne Arity, ein
+    ``name(a, b)`` ist ein Aufrufbares, ``Name`` ein Symbol ohne Arity, ein
     Dateipfad kein Symbol. Jedes andere Präfix (`foo:bar`) bleibt unerkannt —
     und damit fail-closed über `unextractable_backtick_spans`.
     """
@@ -403,13 +403,6 @@ def symbol_kind(span: str) -> str | None:
     """Kind eines einzelnen Backtick-Inhalts, oder None, wenn er kein Symbol ist."""
     found = extract_symbols(f"`{span}`")
     return found[0][0] if found else None
-
-
-def extract_produced_symbols(text: str) -> list[tuple[str, int | None]]:
-    """Produces-Symbole als (name, arity) — Rückwärtskompatibilität für Aufrufer,
-    die keinen kind brauchen. `file:` ist kein Produces-Symbol (eine erzeugte
-    Datei gehört in `Files:`) und wird hier nicht geliefert."""
-    return [(name, arity) for kind, name, arity in extract_symbols(text) if kind != "file"]
 
 
 def _symbol_pattern(name: str) -> str:
@@ -940,38 +933,72 @@ def check_header(text: str) -> str | None:
     return "Datei leer, keine Kopfzeile"
 
 
-def spec_eval_ids(spec_text: str) -> list[str] | None:
-    """Eval-IDs aus der Eval-Tabelle einer Spec: Header-Zeile mit einer Spalte
-    `id`, Werte in Backticks (ab Spec 15). None, wenn es keine solche Tabelle gibt
-    — ältere Specs nennen Evals in Prosa, dort wird nicht geraten."""
+EVAL_HEADING_RE = re.compile(r"^(#{1,6})\s+.*\beval", re.IGNORECASE)
+_ID_CELL_RE = re.compile(r"`([^`]+)`")
+
+
+def spec_eval_table(spec_text: str) -> tuple[list[str], list[str]] | None:
+    """Eval-Tabelle einer Spec: die erste Tabelle mit einer Spalte `id` **unter
+    einer Überschrift, die „Eval" enthält** (`### Evals`, `## §2 Evals`). Tabellen
+    anderswo — ein Contract mit einer Spalte `user_id` — zählen nicht. Liefert
+    (ids, fehlerhafte Zeilen): eine Zeile, deren id-Zelle gefüllt ist, aber keinen
+    Backtick-Wert trägt, wird gemeldet statt still übergangen. None, wenn es keine
+    solche Tabelle gibt — ältere Specs nennen Evals in Prosa, dort wird nicht geraten."""
     lines = spec_text.splitlines()
+    in_evals, level = False, 0
     for i, line in enumerate(lines):
-        if not line.lstrip().startswith("|"):
+        heading = re.match(r"^(#{1,6})\s", line)
+        if heading:
+            if in_evals and len(heading.group(1)) <= level:
+                in_evals = False
+            if EVAL_HEADING_RE.match(line):
+                in_evals, level = True, len(heading.group(1))
+            continue
+        if not in_evals or not line.lstrip().startswith("|"):
             continue
         cells = [c.strip().strip("`").lower() for c in line.strip().strip("|").split("|")]
         if "id" not in cells:
             continue
         idx = cells.index("id")
         ids: list[str] = []
+        malformed: list[str] = []
         for row in lines[i + 1:]:
             if not row.lstrip().startswith("|"):
                 break
             row_cells = [c.strip() for c in row.strip().strip("|").split("|")]
             if len(row_cells) <= idx or set(row_cells[idx]) <= set("-: "):
                 continue
-            match = re.search(r"`([^`]+)`", row_cells[idx])
+            match = _ID_CELL_RE.search(row_cells[idx])
             if match:
                 ids.append(match.group(1))
-        return ids
+            elif row_cells[idx]:
+                malformed.append(row_cells[idx])
+        return ids, malformed
     return None
 
 
-def lint_meta(plan_path: Path | str) -> dict:
-    return {
-        "skill": "subagent-dev",
-        "schema": SCHEMA_VERSION,
-        "generated": f"python skills/subagent-dev/scripts/plan_to_tasks.py lint {plan_path}",
-    }
+def spec_eval_ids(spec_text: str) -> list[str] | None:
+    """Nur die IDs der Eval-Tabelle (siehe `spec_eval_table`); None ohne Tabelle."""
+    table = spec_eval_table(spec_text)
+    return None if table is None else table[0]
+
+
+def _id_pattern(eval_id: str) -> str:
+    """Eine Eval-ID zählt nur als ganzes Wort — `note-carries-header` steckt sonst
+    in `stale-note-carries-header-foo` und gälte als abgedeckt."""
+    return rf"(?<![A-Za-z0-9_-]){re.escape(eval_id)}(?![A-Za-z0-9_-])"
+
+
+def lint_meta(plan_path: Path | str, spec: Path | str | None = None, skill: str | None = None) -> dict:
+    """`generated` ist das Kommando, so wie man es erneut eintippen würde
+    (docs/artifact-header.md) — mit `--spec`/`--skill`, sonst reproduziert es
+    die Befunde nicht."""
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py lint {shlex.quote(str(plan_path))}"
+    if spec is not None:
+        cmd += f" --spec {shlex.quote(str(spec))}"
+    if skill:
+        cmd += f" --skill {shlex.quote(skill)}"
+    return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
 
 
 def _resolve_near(plan_path: Path | None, rel: Path) -> Path | None:
@@ -1002,18 +1029,28 @@ def _explain_interfaces(block: str) -> list[str]:
     return reasons
 
 
-def lint_plan(
+@dataclass
+class LintReport:
+    findings: list[LintFinding]
+    coverage: dict
+
+
+def lint_report(
     text: str,
     plan_path: Path | None = None,
     spec_path: Path | None = None,
     skill: str | None = None,
-) -> list[LintFinding]:
-    """Alle Befunde eines parsbaren Plans. Wirft `PlanParseError` bei unparsbarem
-    Plan — das ist kein Befund, das ist das Ende der Prüfung.
+) -> LintReport:
+    """Befunde plus Coverage-Status. Wirft `PlanParseError` bei unparsbarem Plan
+    — das ist kein Befund, das ist das Ende der Prüfung.
 
-    `spec_path`: Eval-IDs aus der Eval-Tabelle der Spec müssen im Plan vorkommen.
+    Spec-Coverage (jede Eval-ID der Eval-Tabelle kommt in einem Task-Block vor)
+    läuft gegen `spec_path` oder, ohne `--spec`, gegen die Datei aus der eigenen
+    `**Spec:**`-Zeile — Coverage ist eine Eigenschaft des Plans, nicht des
+    Aufrufs. `coverage["status"]` sagt `checked` oder `unchecked` mit Grund;
+    ein übersprungener Abgleich sieht nie aus wie ein bestandener.
     `skill`: IDs aus `evals/<skill>/evals.json` müssen in der Spec vorkommen.
-    Beides sind Befunde, keine Abbrüche (G2: meldet)."""
+    Alles Befunde, keine Abbrüche (G2: meldet)."""
     doc = parse_plan(text)
     findings: list[LintFinding] = []
     masked = _mask_fenced_blocks(text)
@@ -1022,44 +1059,62 @@ def lint_plan(
     if header_problem:
         findings.append(LintFinding(None, header_problem))
 
-    if spec_path is not None:
-        spec_text = spec_path.read_text(encoding="utf-8")
-        ids = spec_eval_ids(spec_text)
-        for eval_id in ids or []:
-            if not re.search(re.escape(eval_id), masked):
-                findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus der Spec hat keinen Task"))
-        if skill:
-            evals_file = _resolve_near(plan_path, Path("evals") / skill / "evals.json")
-            if evals_file is None:
-                findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht gefunden (--skill)"))
-            else:
-                try:
-                    listed = [e.get("id", "") for e in json.loads(evals_file.read_text(encoding="utf-8")).get("evals", [])]
-                except (json.JSONDecodeError, AttributeError) as exc:
-                    listed = []
-                    findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht lesbar: {exc}"))
-                for eval_id in listed:
-                    if eval_id and eval_id not in spec_text:
-                        findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus evals/{skill}/evals.json fehlt in der Spec"))
-
     for field_name in ("**Goal:**", "**Spec:**"):
         if field_name not in masked:
             findings.append(LintFinding(None, f"Kopffeld {field_name} fehlt"))
     spec_match = SPEC_LINE_RE.search(masked)
     if spec_match:
         spec_ref = Path(spec_match.group(1))
-        candidates = [spec_ref]
-        if plan_path is not None:
-            for parent in plan_path.resolve().parents:
-                candidates.append(parent / spec_ref)
-        if not any(c.is_file() for c in candidates):
+        resolved = _resolve_near(plan_path, spec_ref)
+        if resolved is None:
             findings.append(LintFinding(None, f"**Spec:** zeigt auf {spec_ref} — Datei nicht gefunden"))
+        elif spec_path is None:
+            spec_path = resolved
+
+    coverage: dict = {
+        "spec": str(spec_path) if spec_path is not None else None,
+        "eval_table": False,
+        "ids_checked": 0,
+        "evals_file": None,
+        "status": "unchecked",
+        "reason": "keine Spec: weder --spec noch eine auflösbare **Spec:**-Zeile",
+    }
+    headers = list(TASK_HEADER_RE.finditer(masked))
+    task_region = masked[headers[0].start():] if headers else ""
+    if spec_path is not None:
+        spec_text = spec_path.read_text(encoding="utf-8")
+        table = spec_eval_table(spec_text)
+        if table is None:
+            coverage["reason"] = "keine Eval-Tabelle mit Spalte `id` unter einer Evals-Überschrift in der Spec"
+        else:
+            ids, malformed = table
+            coverage.update(eval_table=True, ids_checked=len(ids), status="checked", reason=None)
+            for cell in malformed:
+                findings.append(LintFinding(None, f"Eval-Tabelle der Spec: id-Zelle ohne Backtick-Wert, nicht prüfbar: {cell!r}"))
+            for eval_id in ids:
+                if not re.search(_id_pattern(eval_id), task_region):
+                    findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus der Spec hat keinen Task"))
+        if skill:
+            evals_file = _resolve_near(plan_path, Path("evals") / skill / "evals.json")
+            if evals_file is None:
+                findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht gefunden (--skill)"))
+            else:
+                coverage["evals_file"] = str(evals_file)
+                try:
+                    listed = [e.get("id", "") for e in json.loads(evals_file.read_text(encoding="utf-8")).get("evals", [])]
+                except (json.JSONDecodeError, AttributeError) as exc:
+                    listed = []
+                    findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht lesbar: {exc}"))
+                for eval_id in listed:
+                    if eval_id and not re.search(_id_pattern(eval_id), spec_text):
+                        findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus evals/{skill}/evals.json fehlt in der Spec"))
+    elif skill:
+        findings.append(LintFinding(None, f"--skill {skill} ohne Spec: Abgleich evals/{skill}/evals.json ↔ Spec nicht möglich"))
 
     for m in PLACEHOLDER_RE.finditer(masked):
         line_no = masked.count("\n", 0, m.start()) + 1
         findings.append(LintFinding(None, f"Platzhalter {m.group(0)!r} in Zeile {line_no}"))
 
-    headers = list(TASK_HEADER_RE.finditer(masked))
     for i, header in enumerate(headers):
         block = masked[header.end():headers[i + 1].start() if i + 1 < len(headers) else len(masked)]
         task_id = int(header.group(1))
@@ -1070,7 +1125,17 @@ def lint_plan(
             findings.append(LintFinding(task_id, r))
         if not task.steps:
             findings.append(LintFinding(task_id, "keine Steps im Format `- [ ] **Step N: …**`"))
-    return findings
+    return LintReport(findings, coverage)
+
+
+def lint_plan(
+    text: str,
+    plan_path: Path | None = None,
+    spec_path: Path | None = None,
+    skill: str | None = None,
+) -> list[LintFinding]:
+    """Nur die Befunde — siehe `lint_report` für den Coverage-Status."""
+    return lint_report(text, plan_path, spec_path=spec_path, skill=skill).findings
 
 
 def _cmd_lint(args: argparse.Namespace) -> int:
@@ -1085,12 +1150,15 @@ def _cmd_lint(args: argparse.Namespace) -> int:
         print(f"Spec nicht gefunden: {spec_path}", file=sys.stderr)
         return 2
     try:
-        findings = lint_plan(text, plan_path, spec_path=spec_path, skill=args.skill)
+        report = lint_report(text, plan_path, spec_path=spec_path, skill=args.skill)
     except PlanParseError as exc:
         print(f"Plan nicht parsbar: {exc}", file=sys.stderr)
         return 2
-    if spec_path is not None and spec_eval_ids(spec_path.read_text(encoding="utf-8")) is None:
-        print("Hinweis: keine Eval-Tabelle mit Spalte `id` in der Spec — Coverage nicht geprüft.")
+    findings = report.findings
+    if report.coverage["status"] != "checked":
+        print(f"Hinweis: Spec-Coverage NICHT geprüft — {report.coverage['reason']}.")
+    else:
+        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} Eval-ID(s) aus {report.coverage['spec']}.")
 
     if findings:
         for f in findings:
@@ -1104,8 +1172,9 @@ def _cmd_lint(args: argparse.Namespace) -> int:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps({
-            "_meta": lint_meta(plan_path),
+            "_meta": lint_meta(plan_path, spec=args.spec, skill=args.skill),
             "plan": str(plan_path),
+            "coverage": report.coverage,
             "findings": [{"task": f.task_id, "message": f.message} for f in findings],
             "status": "clean" if not findings else "findings",
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -136,7 +136,8 @@ Bei einer Tier-0-Skill rückt dieser Task vor den SKILL.md-Task (E6).
 ## Variante: Sammel-Task für den Anti-Zeremonie-Fall
 
 Bei einer Änderung an ein, zwei Dateien einer bestehenden Skill ersetzen die vier
-Pflicht-Tasks oben **einen** Task mit je einer Zeile pro Punkt — nicht null:
+Pflicht-Tasks oben **einen** Task mit je einer Zeile pro Punkt — nicht null. Der Kopf
+schrumpft mit: kein Skill-Struktur-Block, nur die betroffenen Global Constraints:
 
 ```markdown
 ### Task 3: Pflicht

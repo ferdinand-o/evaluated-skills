@@ -92,6 +92,52 @@ SAMPLE_PLAN = TEMPLATE.read_text(encoding="utf-8").splitlines()[0] + """
 - [ ] **Step 1: Sektion „Was nicht gemessen wurde".** Commit.
 """
 
+# Der Anti-Zeremonie-Fall (Fixture ip-tiny): zwei Zeilen einer References-Datei.
+# Kopf ohne Skill-Struktur, nur die betroffenen Constraints, ein Doktrin-Task, ein
+# Sammel-Task `Pflicht` — so, wie task-patterns.md es vorschreibt. Die Grenze des
+# Anti-Zeremonie-Evals ist an diesem Plan gemessen, nicht gerechnet.
+ANTI_CEREMONY_PLAN = TEMPLATE.read_text(encoding="utf-8").splitlines()[0] + """
+# note-tag Beispielspalte — Implementation Plan
+
+**Goal:** Zwei Beispiele in `tags.md` sind konkret statt vage; sonst ändert sich nichts.
+
+**Architecture:** Eine References-Datei einer bestehenden Tier-0-Skill, kein Skript.
+
+**Spec:** `specs/Spec 21 – note-tag.md`
+
+## Global Constraints
+
+- **E2 — Gate-Sprache** (Spec 00 §4): die Datei bleibt Doktrin, nichts nennt sich „Gate".
+- **E4 — SKILL.md bleibt unberührt**, die Änderung liegt allein in `references/`.
+
+### Task 1: references/tags.md
+
+**Files:**
+- Modify: `skills/note-tag/references/tags.md`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: (nichts Neues)
+
+- [ ] **Step 1: Zwei Beispiele ersetzen** — `#task`: „Cache-Invalidierung bis Freitag
+      schreiben"; `#ref`: „Redis-Konfiguration, Stand Mai 2026". Tabelle sonst unverändert.
+- [ ] **Step 2: Prüfen** — drei Tags, drei Zeilen, `Untagged:`-Satz steht noch. Commit.
+
+### Task 2: Pflicht
+
+**Files:**
+- Modify: `docs/known-limits.md`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: (nichts Neues)
+
+- [ ] **Step 1: Evals** — bestehende bleiben gültig, keine neue Datei.
+- [ ] **Step 2: Nachbarn** — keine; kein Skill verweist auf die Beispielspalte.
+- [ ] **Step 3: known-limits** — kein Satz nötig, keine Grenze verschiebt sich.
+- [ ] **Step 4: Report** — Commit-Message genügt; Commit.
+"""
+
 FIVE_IDS = (
     "anti-ceremony-one-line-note-stays-bare",
     "note-carries-header",
@@ -148,15 +194,42 @@ def test_template_header_satisfies_the_artifact_header_primitive():
 
 
 def test_must_patterns_grip_a_template_shaped_plan():
-    """Die Regexe der Evals 3 und 4 greifen an einem Plan, der dem Template folgt.
-    Eval 2 prüft IDs der ip-five-Spec und ist gegen den Tier-0-Beispielplan
-    absichtlich nicht gebunden."""
+    """Die Regexe der Evals 3 und 4 greifen an einem Plan, der dem Template folgt,
+    Eval 5s must_not greift nicht. Eval 2 prüft IDs der ip-five-Spec und ist gegen
+    den Tier-0-Beispielplan absichtlich nicht gebunden (siehe den ID-Test unten)."""
     evals = _evals()
     for eval_id in ("mandatory-tasks-carry-canonical-titles", "doctrine-task-interfaces-carry-tokens"):
         for pattern in _file_patterns(evals[eval_id]):
             assert re.search(pattern, SAMPLE_PLAN, re.MULTILINE), f"{eval_id}: {pattern}"
     for a in evals["routing-house-header-not-superpowers"].must_not:
         assert not re.search(a.pattern, SAMPLE_PLAN, re.MULTILINE)
+
+
+def test_doctrine_task_is_recognized_by_skill_md_anywhere_in_its_title():
+    """Kein Doktrin-Text macht `SKILL.md` zum wörtlichen Titel — nur zum Bestandteil."""
+    pattern = _file_patterns(_evals()["doctrine-task-interfaces-carry-tokens"])[1]
+    renamed = SAMPLE_PLAN.replace("### Task 2: SKILL.md", "### Task 2: checkpoint SKILL.md")
+    assert re.search(pattern, renamed, re.MULTILINE)
+    wrong_order = SAMPLE_PLAN.replace("### Task 1: Evals", "### Task 1: Vorbereitung").replace(
+        "### Task 5: Report", "### Task 5: Evals")
+    assert not re.search(pattern, wrong_order, re.MULTILINE)
+
+
+def test_anti_ceremony_limit_is_measured_on_a_doctrine_conforming_plan():
+    """Die Zeilengrenze von Eval 1 ist an einem Plan gemessen, der den Kopf so
+    schrumpft, wie task-patterns.md es für den Anti-Zeremonie-Fall vorschreibt —
+    mit Luft, aber nicht so viel, dass vier volle Pflicht-Tasks hineinpassen."""
+    anti = _evals()["anti-ceremony-two-task-change-stays-small"]
+    limit = next(a.max_lines for a in anti.must if a.type == "file_max_lines")
+    lines = ANTI_CEREMONY_PLAN.splitlines()
+    assert len(lines) < limit, f"{len(lines)} Zeilen, Grenze {limit}"
+    assert ARTIFACT_HEADER_RE.match(lines[0])
+    where = FIXTURES / "ip-tiny" / "docs" / "superpowers" / "plans" / "2026-09-02-note-tag.md"
+    findings = ptt.lint_plan(ANTI_CEREMONY_PLAN, plan_path=where)
+    assert findings == [], [f.render() for f in findings]
+    # Vier volle Pflicht-Tasks (je ≥ 11 Zeilen wie im Template) statt des Sammel-Tasks
+    # sprengen die Grenze — sonst misst der Eval keine Zeremonie.
+    assert len(lines) - 12 + 4 * 11 > limit
 
 
 def test_sample_plan_is_lint_clean():

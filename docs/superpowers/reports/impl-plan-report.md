@@ -20,7 +20,8 @@ tests/test_impl_plan_evals_schema.py           12 Tests
 
 In `subagent-dev`: `plan_to_tasks.py` um das Interface-Vokabular (`fn:`, `token:`,
 `file:` mit `kind`), `lint --spec/--skill`, die Kopfzeilen-Prüfung und `_meta` in
-`lint.json` erweitert — 369 Zeilen dazu, 29 weg, 66 Tests dort grün. Nachgezogen:
+`lint.json` erweitert — 215 Zeilen dazu, 27 weg im Bau, dazu die Fix-Runde unten; 66 Tests
+dort grün vor der Fix-Runde. Nachgezogen:
 `subagent-dev`s Description, Ablauf und Abgrenzung zeigen auf `impl-plan`; die
 Routing-Matrix in Spec 00 §5 und `README.md` hat die Zeile „Implementierungsplan zu
 einer Spec"; der explain-Plan trägt die Kopfzeile.
@@ -59,10 +60,42 @@ Diskriminator, die nur diese Skill schreibt, und über Hausvokabular (kanonische
   fünf Eval-IDs der Spec, die im Plan in keinem Task standen; und ein Sammel-Task
   `Pflicht` im Template-Fließtext wurde als Task geparst. Beides behoben, bevor
   weitergebaut wurde — der Mechanismus hat sich an seinem eigenen Bau bewährt.
-- **Schema-Test:** die Regexe aller `must`-Assertions greifen an einem
-  templatekonformen Beispielplan, dieser Plan ist lint-sauber, die fünf IDs in Eval 2
-  sind exakt die IDs der Fixture-Spec, die beiden Tokens in Eval 4 stehen in der
-  Tier-0-Spec.
+- **Schema-Test:** die `file_matches`-Regexe von Eval 3 und 4 greifen an einem
+  templatekonformen Tier-0-Beispielplan, Eval 5s `must_not` greift dort nicht; Eval 1
+  ist an einem eigenen Anti-Zeremonie-Beispielplan gemessen; beide Beispielpläne sind
+  lint-sauber. Eval 2 ist nicht an einen Beispielplan gebunden — seine fünf IDs werden
+  gegen die Fixture-Spec geprüft, die beiden Tokens in Eval 4 gegen die Tier-0-Spec.
+
+## Fix-Runde nach dem Review (2026-09-03)
+
+Zwei unabhängige Reviews des Baus — ein Subagent mit frischem Kontext gegen Spec und
+Plan, dazu `/code-review` über den Diff — fanden keinen Spec-Bruch, aber vier
+Fail-open-Stellen im Lint und zwei Evals, die einen doktrintreuen Plan zu Unrecht
+rot gemacht hätten. Alles behoben, jeder Punkt mit Test:
+
+- **Coverage ist jetzt eine Eigenschaft des Plans.** Ohne `--spec` zählt die Datei aus
+  der `Spec:`-Zeile; damit prüft auch der Repo-Test die Coverage jedes Plans. Der
+  explain-Plan hatte dadurch acht ungedeckte IDs — er nennt sie jetzt in seinem
+  Eval-Task. `--skill` ohne auflösbare Spec ist ein Befund, kein stilles Nichts.
+- **`lint.json` trägt `coverage`** mit `status: checked | unchecked` und Grund; ein
+  übersprungener Abgleich sieht nicht mehr aus wie ein bestandener. `_meta.generated`
+  nennt das volle Kommando mit `--spec`/`--skill`.
+- **Die Eval-Tabelle wird unter einer Evals-Überschrift gesucht**, nicht als erste
+  Tabelle mit einer Spalte `id`; eine id-Zelle ohne Backtick-Wert ist ein Befund. IDs
+  zählen nur als ganzes Wort und nur innerhalb von Task-Blöcken — Lint und Eval 2
+  messen jetzt dasselbe.
+- **Eval 4** erkennt den SKILL.md-Task an `SKILL.md` irgendwo im Titel; task-patterns.md
+  sagt das jetzt auch. **Eval 1** zieht die Grenze bei 45 Zeilen, gemessen an einem
+  Anti-Zeremonie-Beispielplan von 40 Zeilen, und SKILL.md, Template und task-patterns.md
+  sagen, was im Anti-Zeremonie-Fall aus dem Kopf entfällt.
+- Ein Verify-Test, der nie rot werden konnte (`rc != 2` bei einem Kommando, das nur 0
+  oder 1 liefert), prüft jetzt `present`/`missing` im Ergebnis-JSON. Toter Code
+  (`SYMBOL_KINDS`, der Kompatibilitäts-Shim) ist weg, die doppelte Spec-Auflösung durch
+  `_resolve_near` ersetzt.
+
+Stand danach: 92 Tests in den drei betroffenen Dateien, Legacy-Messung unverändert
+(8 unparsbar, 8 mit 15–79 Befunden), beide neuen Pläne und das Template sauber, der
+impl-plan-Plan mit `--skill impl-plan` sauber und `coverage.status: checked`.
 
 ## Was NICHT gemessen wurde
 

@@ -57,6 +57,9 @@ und einen Commit.
 - [ ] **Step 4: Commit.**
 ````
 
+Der Task, der die `SKILL.md` schreibt, trägt `SKILL.md` im Titel — Evals und Reviewer
+erkennen ihn daran, nicht am Inhalt der Files-Zeile.
+
 Die mechanische Prüfung in Step 3 ist Pflicht, auch wenn sie klein ist: Zeilenzahl,
 `load_evals`, `lint`. Ein Doktrin-Task ohne mechanischen Step ist reine
 Selbstauskunft — und die Pitfalls-Datei hält fest, was das gekostet hat.
@@ -98,7 +101,10 @@ Evals und Reviewer die Pflichtinhalte daran erkennen:
 Im Anti-Zeremonie-Fall — eine Änderung an ein, zwei Dateien einer bestehenden Skill —
 werden die vier zu **einem** Sammel-Task `### Task N: Pflicht` mit je einer Zeile pro
 Punkt. Nicht null: Auch eine Satzänderung kann einen Nachbarn betreffen, und wenn nicht,
-kostet die Zeile „Nachbarn: keine" nichts.
+kostet die Zeile „Nachbarn: keine" nichts. Im selben Fall entfällt der Kopf auf das,
+was die Änderung braucht: kein `Skill-Struktur`-Block, von den Global Constraints nur
+die betroffenen (meist E2 und E4), `**Architecture:**` in einem Satz. Ein solcher Plan
+hat um die 40 Zeilen; der Anti-Zeremonie-Eval zieht die Grenze bei 45.
 
 ## Platzhalter
 

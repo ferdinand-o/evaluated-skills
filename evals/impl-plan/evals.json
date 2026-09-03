@@ -13,11 +13,11 @@
         {
           "type": "file_max_lines",
           "path": "docs/superpowers/plans/*.md",
-          "max_lines": 50
+          "max_lines": 45
         }
       ],
       "must_not": [],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Die Spec ändert zwei Zeilen einer References-Datei einer bestehenden Skill — der Fall, in dem die vier Pflicht-Tasks zu einem Sammel-Task `Pflicht` zusammenfallen (SKILL.md, Anti-Rationalisierung „Zeremonie\"). 50 Zeilen sind Kopf plus zwei Tasks plus Sammel-Task, gemessen am Template: 32 Zeilen ohne Sammel-Task. Diskriminator: Kürze allein könnte das Basismodell auch; die Kopfzeile `<!-- skill: impl-plan | schema: 1 | generated: … -->` schreibt nur diese Skill, ein writing-plans-Plan trägt sie nicht. Beide Assertions hängen an der Plandatei unter docs/superpowers/plans/ — die Fixture bringt dort nichts mit, der Glob trifft deshalb genau die Datei, die die Skill schreibt."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Die Spec ändert zwei Zeilen einer References-Datei einer bestehenden Skill — der Fall, in dem die vier Pflicht-Tasks zu einem Sammel-Task `Pflicht` zusammenfallen (SKILL.md, Anti-Rationalisierung „Zeremonie\"). Die Grenze von 45 Zeilen ist an einem doktrintreuen Plan für genau diese Fixture gemessen — 40 Zeilen, plus fünf Luft (tests/test_impl_plan_evals_schema.py, ANTI_CEREMONY_PLAN): Kopf ohne Skill-Struktur-Block und nur mit den betroffenen Constraints, ein Doktrin-Task, ein Sammel-Task — task-patterns.md schreibt diesen Zuschnitt vor. Vier volle Pflicht-Tasks statt des Sammel-Tasks passen nicht hinein; das ist die Zeremonie, die der Eval messen soll. Diskriminator: Kürze allein könnte das Basismodell auch; die Kopfzeile `<!-- skill: impl-plan | schema: 1 | generated: … -->` schreibt nur diese Skill, ein writing-plans-Plan trägt sie nicht. Beide Assertions hängen an der Plandatei unter docs/superpowers/plans/ — die Fixture bringt dort nichts mit, der Glob trifft deshalb genau die Datei, die die Skill schreibt."
     },
     {
       "id": "spec-eval-ids-each-have-a-task",
@@ -102,11 +102,11 @@
         {
           "type": "file_matches",
           "path": "docs/superpowers/plans/*.md",
-          "pattern": "^### Task \\d+: Evals[\\s\\S]*^### Task \\d+: SKILL\\.md"
+          "pattern": "^### Task \\d+: Evals[\\s\\S]*^### Task \\d+: .*SKILL\\.md"
         }
       ],
       "must_not": [],
-      "notes": "Eine Tier-0-Spec mit zwei mandatierten Tokens (Recap:, Open:) und ohne Skript. Zwei Regeln aus references/task-patterns.md sind hier messbar: Doktrin-Tasks führen ihre Tokens als `token:`-Symbole in Interfaces (mindestens zwei Vorkommen), und bei Tier 0 steht der Eval-Task vor dem SKILL.md-Task, weil die Evals dort das einzige Messinstrument sind. Diskriminator: Das `token:`-Präfix ist Vokabular des subagent-dev-Parsers, das nur diese Skill in Pläne schreibt; die Evals-vor-SKILL.md-Reihenfolge ist eine Hausregel, die ein Basismodell nicht kennt und writing-plans nicht hat. Ohne Kopfzeilen-Assertion, wie in Spec 16 festgelegt — beide Muster tragen den Eval allein."
+      "notes": "Eine Tier-0-Spec mit zwei mandatierten Tokens (Recap:, Open:) und ohne Skript. Zwei Regeln aus references/task-patterns.md sind hier messbar: Doktrin-Tasks führen ihre Tokens als `token:`-Symbole in Interfaces (mindestens zwei Vorkommen), und bei Tier 0 steht der Eval-Task vor dem SKILL.md-Task, weil die Evals dort das einzige Messinstrument sind. Der SKILL.md-Task wird an `SKILL.md` irgendwo in seinem Titel erkannt (task-patterns.md: „trägt SKILL.md im Titel\"), nicht an einem wörtlichen Titel — `Task 2: SKILL.md` und `Task 2: checkpoint SKILL.md` zählen beide. Diskriminator: Das `token:`-Präfix ist Vokabular des subagent-dev-Parsers, das nur diese Skill in Pläne schreibt; die Evals-vor-SKILL.md-Reihenfolge ist eine Hausregel, die ein Basismodell nicht kennt und writing-plans nicht hat. Ohne Kopfzeilen-Assertion, wie in Spec 16 festgelegt — beide Muster tragen den Eval allein."
     },
     {
       "id": "routing-house-header-not-superpowers",

@@ -1590,6 +1590,15 @@ per Kommando aufgerufen, nie importiert. Was daraus folgt, in vier Punkten:
   Implementierungsplan" bei `impl-plan` oder bei `superpowers:writing-plans` landet,
   entscheidet der Harness pro Lauf, und ein grüner Lauf beweist nichts.
 
+**Nach der Fix-Runde (2026-09-03):** Der Lint löst die Spec aus der `Spec:`-Zeile
+selbst auf, der Repo-Test prüft damit auch die Coverage jedes nicht eingefrorenen Plans;
+`lint.json` trägt `coverage.status`, ein übersprungener Abgleich meldet sich als
+`unchecked` mit Grund. Was bleibt: Die Coverage findet eine ID, die irgendwo in einem
+Task-Block steht — nicht, ob der Task sie *baut*. Das prüft der Reviewer, kein Regex.
+Und die Eval-Tabelle wird nur unter einer Überschrift mit „Eval" gefunden; eine Spec,
+die ihre Tabelle anders betitelt, gilt als tabellenlos und bleibt `unchecked` — sichtbar
+in `lint.json`, aber ohne Befund.
+
 Dazu eine Lehre aus dem Bau selbst: Das Template musste dreimal umgeschrieben werden,
 bis es lint-sauber war — `fn:…(…)` und `evals_…` sind für den Parser keine Bezeichner,
 und ein Sammel-Task `Pflicht` im Fließtext wurde als echter Task geparst, bis er in
