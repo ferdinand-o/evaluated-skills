@@ -1140,7 +1140,7 @@ Umformulierungen im `**Interfaces:**`-Block, ohne dass sich an der tatsächliche
 Kopplung der Tasks etwas änderte. Zwei benennbare Ursachen:
 
 - **Ein Backtick-Symbol, das kein gültiger Bezeichner ist, öffnet das Gate
-  still.** `extract_produced_symbols()` verlangt `[A-Za-z_][A-Za-z0-9_.]*`;
+  still.** Die Symbol-Extraktion (heute `extract_symbols()`) verlangte `[A-Za-z_][A-Za-z0-9_.]*`;
   Namen mit Doppelpunkt oder Bindestrich (`` `Unverified:` ``, `` `Next:` ``,
   `` `effort-ladder` ``) liefern **null Symbole**. `_has_unrecognized_prose()`
   wiederum meldet sie *nicht* als unsicher, weil ein Backtick vorhanden ist. Die
@@ -1595,9 +1595,11 @@ selbst auf, der Repo-Test prüft damit auch die Coverage jedes nicht eingefroren
 `lint.json` trägt `coverage.status`, ein übersprungener Abgleich meldet sich als
 `unchecked` mit Grund. Was bleibt: Die Coverage findet eine ID, die irgendwo in einem
 Task-Block steht — nicht, ob der Task sie *baut*. Das prüft der Reviewer, kein Regex.
-Und die Eval-Tabelle wird nur unter einer Überschrift mit „Eval" gefunden; eine Spec,
-die ihre Tabelle anders betitelt, gilt als tabellenlos und bleibt `unchecked` — sichtbar
-in `lint.json`, aber ohne Befund.
+Und die Eval-Tabelle wird nur unter einer Überschrift ab Ebene 2 mit dem Wort
+„Eval(s)" gefunden; eine Spec, die ihre Tabelle anders betitelt, gilt als tabellenlos
+und bleibt `unchecked` — sichtbar in `lint.json`, aber ohne Befund. Ein Task-Block
+endet an der nächsten Überschrift bis Ebene 3; eine ID, die nur in einer
+Zwischenüberschrift der Ebene 4 innerhalb eines Tasks steht, zählt deshalb noch.
 
 Dazu eine Lehre aus dem Bau selbst: Das Template musste dreimal umgeschrieben werden,
 bis es lint-sauber war — `fn:…(…)` und `evals_…` sind für den Parser keine Bezeichner,

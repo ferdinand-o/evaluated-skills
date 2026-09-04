@@ -933,7 +933,10 @@ def check_header(text: str) -> str | None:
     return "Datei leer, keine Kopfzeile"
 
 
-EVAL_HEADING_RE = re.compile(r"^(#{1,6})\s+.*\beval", re.IGNORECASE)
+# Überschrift des Evals-Abschnitts: ab Ebene 2 (ein H1-Titel, der „Evals" nennt,
+# machte sonst das ganze Dokument zum Abschnitt) und mit dem ganzen Wort — „Evaluation
+# der Alternativen" ist kein Evals-Abschnitt, „Eval-Tabelle" und „§2 Evals" schon.
+EVAL_HEADING_RE = re.compile(r"^(#{2,6})\s+.*\bevals?\b", re.IGNORECASE)
 _ID_CELL_RE = re.compile(r"`([^`]+)`")
 
 
@@ -943,16 +946,19 @@ def spec_eval_table(spec_text: str) -> tuple[list[str], list[str]] | None:
     anderswo — ein Contract mit einer Spalte `user_id` — zählen nicht. Liefert
     (ids, fehlerhafte Zeilen): eine Zeile, deren id-Zelle gefüllt ist, aber keinen
     Backtick-Wert trägt, wird gemeldet statt still übergangen. None, wenn es keine
-    solche Tabelle gibt — ältere Specs nennen Evals in Prosa, dort wird nicht geraten."""
-    lines = spec_text.splitlines()
+    solche Tabelle gibt — ältere Specs nennen Evals in Prosa, dort wird nicht geraten.
+    Codezäune sind maskiert: ein `# Kommentar` in einem Beispielblock ist keine
+    Überschrift. Tiefere Unterüberschriften schließen den Abschnitt nicht."""
+    lines = _mask_fenced_blocks(spec_text).splitlines()
     in_evals, level = False, 0
     for i, line in enumerate(lines):
         heading = re.match(r"^(#{1,6})\s", line)
         if heading:
-            if in_evals and len(heading.group(1)) <= level:
+            depth = len(heading.group(1))
+            if in_evals and depth <= level:
                 in_evals = False
-            if EVAL_HEADING_RE.match(line):
-                in_evals, level = True, len(heading.group(1))
+            if not in_evals and EVAL_HEADING_RE.match(line):
+                in_evals, level = True, depth
             continue
         if not in_evals or not line.lstrip().startswith("|"):
             continue
@@ -981,6 +987,19 @@ def spec_eval_ids(spec_text: str) -> list[str] | None:
     """Nur die IDs der Eval-Tabelle (siehe `spec_eval_table`); None ohne Tabelle."""
     table = spec_eval_table(spec_text)
     return None if table is None else table[0]
+
+
+def _task_blocks(masked: str) -> list[tuple[int, re.Match, str]]:
+    """(task_id, header, block) je Task. Ein Block endet am nächsten `### Task`-Header
+    oder an der nächsten Überschrift bis Ebene 3 — ein `## Notizen` hinter dem letzten
+    Task gehört zu keinem Task, und was dort steht, deckt keine Eval-ID."""
+    headers = list(TASK_HEADER_RE.finditer(masked))
+    stops = [m.start() for m in re.finditer(r"^#{1,3}\s", masked, re.MULTILINE)]
+    blocks = []
+    for header in headers:
+        end = next((s for s in stops if s > header.start()), len(masked))
+        blocks.append((int(header.group(1)), header, masked[header.end():end]))
+    return blocks
 
 
 def _id_pattern(eval_id: str) -> str:
@@ -1070,6 +1089,10 @@ def lint_report(
             findings.append(LintFinding(None, f"**Spec:** zeigt auf {spec_ref} — Datei nicht gefunden"))
         elif spec_path is None:
             spec_path = resolved
+        elif resolved.resolve() != Path(spec_path).resolve():
+            findings.append(LintFinding(None, f"--spec {spec_path} weicht von der **Spec:**-Zeile ab ({spec_ref}) — eines von beiden ist falsch"))
+    elif "**Spec:**" in masked:
+        findings.append(LintFinding(None, "**Spec:** ohne Backtick-Pfad — der Lint kann die Spec nicht auflösen, Coverage bleibt ungeprüft"))
 
     coverage: dict = {
         "spec": str(spec_path) if spec_path is not None else None,
@@ -1079,8 +1102,8 @@ def lint_report(
         "status": "unchecked",
         "reason": "keine Spec: weder --spec noch eine auflösbare **Spec:**-Zeile",
     }
-    headers = list(TASK_HEADER_RE.finditer(masked))
-    task_region = masked[headers[0].start():] if headers else ""
+    blocks = _task_blocks(masked)
+    task_region = "\n".join(block for _, _, block in blocks)
     if spec_path is not None:
         spec_text = spec_path.read_text(encoding="utf-8")
         table = spec_eval_table(spec_text)
@@ -1115,9 +1138,7 @@ def lint_report(
         line_no = masked.count("\n", 0, m.start()) + 1
         findings.append(LintFinding(None, f"Platzhalter {m.group(0)!r} in Zeile {line_no}"))
 
-    for i, header in enumerate(headers):
-        block = masked[header.end():headers[i + 1].start() if i + 1 < len(headers) else len(masked)]
-        task_id = int(header.group(1))
+    for task_id, header, block in blocks:
         task = next(t for t in doc.tasks if t.id == task_id)
         if task.files_unknown:
             findings.extend(LintFinding(task_id, r) for r in _explain_files(block))

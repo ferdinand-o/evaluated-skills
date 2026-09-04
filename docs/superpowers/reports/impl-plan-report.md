@@ -8,14 +8,14 @@ Plandatei oder `plan_to_tasks.py` berührt).
 ## Was entstanden ist
 
 ```
-skills/impl-plan/SKILL.md                      98 Zeilen (Grenze 150)
+skills/impl-plan/SKILL.md                      99 Zeilen (Grenze 150)
 skills/impl-plan/references/task-patterns.md   Code-/Doktrin-Task, Pflicht-Tasks, Vokabular
 skills/impl-plan/references/reviewer-prompt.md übersetzter writing-plans-Reviewer, erweitert
-skills/impl-plan/assets/plan-template.md       lint-sauberes Template, 155 Zeilen
+skills/impl-plan/assets/plan-template.md       lint-sauberes Template, 156 Zeilen
 evals/impl-plan/evals.json                     5 contract-Evals
 evals/fixtures/ip-tiny, ip-five, ip-tier0      drei Specs, eine Mini-Skill, kein Plan
 tests/test_plans_lint.py                       Repo-Test, 6 Tests
-tests/test_impl_plan_evals_schema.py           12 Tests
+tests/test_impl_plan_evals_schema.py           15 Tests
 ```
 
 In `subagent-dev`: `plan_to_tasks.py` um das Interface-Vokabular (`fn:`, `token:`,
@@ -49,7 +49,8 @@ Diskriminator, die nur diese Skill schreibt, und über Hausvokabular (kanonische
 
 ## Was gemessen wurde
 
-- **1025 Tests grün**, einer deselektiert: `test_rest_api_architect_gate.py::test_main_exit_zero_when_degraded_but_checklist_clean`
+- **1025 Tests grün beim Bau, 1038 nach den zwei Fix-Runden**, einer fremd rot:
+  `test_rest_api_architect_gate.py::test_main_exit_zero_when_degraded_but_checklist_clean`
   ist vorbestehend und fremd — per `git stash` auf unverändertem Stand gegengeprüft; er
   erwartet ein fehlendes Spectral, das in dieser Umgebung über `npx` erreichbar ist.
 - **Der Repo-Test über alle Pläne (2026-09-02):** 18 Pläne unter
@@ -97,6 +98,30 @@ Stand danach: 92 Tests in den drei betroffenen Dateien, Legacy-Messung unveränd
 (8 unparsbar, 8 mit 15–79 Befunden), beide neuen Pläne und das Template sauber, der
 impl-plan-Plan mit `--skill impl-plan` sauber und `coverage.status: checked`.
 
+### Zweite Runde (2026-09-04)
+
+Dieselben zwei Reviewer über die Fix-Runde. Alle elf Punkte galten als behoben; neu
+gefunden und behoben:
+
+- **Eval 4 war zu locker geworden:** SKILL.md zuerst, Evals danach, und ein späterer
+  Nachbarn-Task mit „SKILL.md" im Titel bestand. Die Regex verlangt jetzt, dass kein
+  SKILL.md-Task vor dem Evals-Task steht; der Test prüft genau diese Reihenfolge.
+- **Die Überschriften-Heuristik der Eval-Tabelle** hatte drei Fail-open-Pfade: ein
+  H1-Titel mit „Evals" machte das ganze Dokument zum Abschnitt, ein `#`-Kommentar in
+  einem Codezaun schloss ihn, „Evaluation der Alternativen" öffnete ihn. Jetzt: ab
+  Ebene 2, ganzes Wort, auf maskiertem Text, tiefere Unterüberschriften schließen nicht.
+- **Coverage zählt nur Task-Blöcke:** ein Block endet an der nächsten Überschrift bis
+  Ebene 3, Prosa hinter dem letzten Task deckt keine ID mehr. Eine `Spec:`-Zeile ohne
+  Backtick-Pfad ist ein Befund; ein `--spec`, das von der Zeile abweicht, ebenfalls.
+- **Der Anti-Zeremonie-Test asserted jetzt `coverage.status: checked`** — die ip-tiny-Spec
+  trägt dafür eine Eval-Tabelle mit einer bestehenden ID, die der Beispielplan nennt.
+- **Spec 16 nachgezogen** (Grenze 45, strikte Eval-4-Regex, Spec aus der `Spec:`-Zeile,
+  `extract_symbols`), und ein Test vergleicht ihre Eval-Tabelle mit `evals.json`:
+  IDs, Zeilengrenze, Regex.
+
+Stand danach: 97 Tests in den drei Dateien, volle Suite 1038 grün mit demselben fremden
+Fehlschlag, Legacy-Messung unverändert.
+
 ## Was NICHT gemessen wurde
 
 **Kein einziger der fünf Evals ist gefahren.** Derselbe Grund wie bei `explain`:
@@ -118,11 +143,10 @@ Evals messen, ob der Plan dem Template folgt — die Eiserne Regel („kein Plan
 ohne Lint oder ohne dass das gesagt wurde") ist G1-Selbstauskunft, mit dem Repo-Test
 als einzigem Zahn, und der beißt nur, wenn jemand `pytest` startet.
 
-**Der 50-Zeilen-Wert des Anti-Zeremonie-Evals ist eine Rechnung, kein Messwert.** Kopf
-plus zwei Tasks plus Sammel-Task, hochgerechnet am Template. Ob ein Agent den
-Anti-Zeremonie-Fall überhaupt als solchen erkennt und den Sammel-Task `Pflicht` wählt,
-statt vier volle Pflicht-Tasks zu schreiben, ist die eigentliche Frage des Evals — und
-unbeantwortet.
+**Die 45-Zeilen-Grenze des Anti-Zeremonie-Evals ist an einem Plan gemessen, den ich
+selbst geschrieben habe.** Ob ein Agent den Anti-Zeremonie-Fall überhaupt als solchen
+erkennt und den Sammel-Task `Pflicht` wählt, statt vier volle Pflicht-Tasks zu
+schreiben, ist die eigentliche Frage des Evals — und unbeantwortet.
 
 ## Offen für die nächste Runde
 

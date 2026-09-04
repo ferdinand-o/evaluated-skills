@@ -102,11 +102,11 @@
         {
           "type": "file_matches",
           "path": "docs/superpowers/plans/*.md",
-          "pattern": "^### Task \\d+: Evals[\\s\\S]*^### Task \\d+: .*SKILL\\.md"
+          "pattern": "\\A(?:(?!^### Task \\d+: .*SKILL\\.md)[\\s\\S])*?^### Task \\d+: Evals[\\s\\S]*^### Task \\d+: .*SKILL\\.md"
         }
       ],
       "must_not": [],
-      "notes": "Eine Tier-0-Spec mit zwei mandatierten Tokens (Recap:, Open:) und ohne Skript. Zwei Regeln aus references/task-patterns.md sind hier messbar: Doktrin-Tasks führen ihre Tokens als `token:`-Symbole in Interfaces (mindestens zwei Vorkommen), und bei Tier 0 steht der Eval-Task vor dem SKILL.md-Task, weil die Evals dort das einzige Messinstrument sind. Der SKILL.md-Task wird an `SKILL.md` irgendwo in seinem Titel erkannt (task-patterns.md: „trägt SKILL.md im Titel\"), nicht an einem wörtlichen Titel — `Task 2: SKILL.md` und `Task 2: checkpoint SKILL.md` zählen beide. Diskriminator: Das `token:`-Präfix ist Vokabular des subagent-dev-Parsers, das nur diese Skill in Pläne schreibt; die Evals-vor-SKILL.md-Reihenfolge ist eine Hausregel, die ein Basismodell nicht kennt und writing-plans nicht hat. Ohne Kopfzeilen-Assertion, wie in Spec 16 festgelegt — beide Muster tragen den Eval allein."
+      "notes": "Eine Tier-0-Spec mit zwei mandatierten Tokens (Recap:, Open:) und ohne Skript. Zwei Regeln aus references/task-patterns.md sind hier messbar: Doktrin-Tasks führen ihre Tokens als `token:`-Symbole in Interfaces (mindestens zwei Vorkommen), und bei Tier 0 steht der Eval-Task vor dem SKILL.md-Task, weil die Evals dort das einzige Messinstrument sind. Der SKILL.md-Task wird an `SKILL.md` irgendwo in seinem Titel erkannt (task-patterns.md: „trägt SKILL.md im Titel\"), nicht an einem wörtlichen Titel — `Task 2: SKILL.md` und `Task 2: checkpoint SKILL.md` zählen beide. Die Regex verlangt zugleich, dass **kein** Task mit `SKILL.md` im Titel vor dem Evals-Task steht — sonst bestünde ein Plan mit SKILL.md zuerst, sobald ein späterer Nachbarn-Task „SKILL.md\" erwähnt. Diskriminator: Das `token:`-Präfix ist Vokabular des subagent-dev-Parsers, das nur diese Skill in Pläne schreibt; die Evals-vor-SKILL.md-Reihenfolge ist eine Hausregel, die ein Basismodell nicht kennt und writing-plans nicht hat. Ohne Kopfzeilen-Assertion, wie in Spec 16 festgelegt — beide Muster tragen den Eval allein."
     },
     {
       "id": "routing-house-header-not-superpowers",

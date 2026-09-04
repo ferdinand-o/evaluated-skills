@@ -132,7 +132,7 @@ ANTI_CEREMONY_PLAN = TEMPLATE.read_text(encoding="utf-8").splitlines()[0] + """
 - Consumes: (nichts Neues)
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Evals** — bestehende bleiben gültig, keine neue Datei.
+- [ ] **Step 1: Evals** — `one-tag-per-note` bleibt gültig, keine neue Datei.
 - [ ] **Step 2: Nachbarn** — keine; kein Skill verweist auf die Beispielspalte.
 - [ ] **Step 3: known-limits** — kein Satz nötig, keine Grenze verschiebt sich.
 - [ ] **Step 4: Report** — Commit-Message genügt; Commit.
@@ -213,6 +213,12 @@ def test_doctrine_task_is_recognized_by_skill_md_anywhere_in_its_title():
     wrong_order = SAMPLE_PLAN.replace("### Task 1: Evals", "### Task 1: Vorbereitung").replace(
         "### Task 5: Report", "### Task 5: Evals")
     assert not re.search(pattern, wrong_order, re.MULTILINE)
+    # SKILL.md zuerst, Evals danach, und ein späterer Nachbarn-Task erwähnt SKILL.md:
+    # das ist die Reihenfolge, die der Eval rot sehen muss.
+    skill_first = "### Task 1: SKILL.md\n### Task 2: Evals\n### Task 3: Nachbarn — SKILL.md von handoff-note anpassen\n"
+    assert not re.search(pattern, skill_first, re.MULTILINE)
+    evals_first = "### Task 1: Evals\n### Task 2: SKILL.md\n### Task 3: Nachbarn — SKILL.md von handoff-note anpassen\n"
+    assert re.search(pattern, evals_first, re.MULTILINE)
 
 
 def test_anti_ceremony_limit_is_measured_on_a_doctrine_conforming_plan():
@@ -225,8 +231,10 @@ def test_anti_ceremony_limit_is_measured_on_a_doctrine_conforming_plan():
     assert len(lines) < limit, f"{len(lines)} Zeilen, Grenze {limit}"
     assert ARTIFACT_HEADER_RE.match(lines[0])
     where = FIXTURES / "ip-tiny" / "docs" / "superpowers" / "plans" / "2026-09-02-note-tag.md"
-    findings = ptt.lint_plan(ANTI_CEREMONY_PLAN, plan_path=where)
-    assert findings == [], [f.render() for f in findings]
+    report = ptt.lint_report(ANTI_CEREMONY_PLAN, plan_path=where)
+    assert report.findings == [], [f.render() for f in report.findings]
+    # „lint-sauber" heißt hier: Coverage lief, nicht: Coverage wurde übersprungen.
+    assert report.coverage["status"] == "checked" and report.coverage["ids_checked"] == 1
     # Vier volle Pflicht-Tasks (je ≥ 11 Zeilen wie im Template) statt des Sammel-Tasks
     # sprengen die Grenze — sonst misst der Eval keine Zeremonie.
     assert len(lines) - 12 + 4 * 11 > limit
@@ -257,6 +265,19 @@ def test_tier0_spec_mandates_two_tokens():
     spec_text = (FIXTURES / "ip-tier0" / "specs" / "Spec 23 – checkpoint.md").read_text(encoding="utf-8")
     assert "`Recap:`" in spec_text and "`Open:`" in spec_text
     assert re.search(r"(?i)tier 0", spec_text)
+
+
+def test_spec_16_eval_table_matches_evals_json():
+    """Die Spec ist das, wogegen Reviews messen. Drift zwischen ihrer Eval-Tabelle
+    und evals.json (IDs, Zeilengrenze, Regex von Eval 4) bleibt sonst unbemerkt."""
+    spec_text = (REPO_ROOT / "specs" / "Spec 16 – impl-plan.md").read_text(encoding="utf-8")
+    evals = load_evals(EVALS_PATH)
+    assert ptt.spec_eval_ids(spec_text) == [ev.id for ev in evals]
+    anti = next(ev for ev in evals if "anti-ceremony" in ev.id)
+    limit = next(a.max_lines for a in anti.must if a.type == "file_max_lines")
+    assert f"`file_max_lines` {limit}" in spec_text
+    order_pattern = _file_patterns(_evals()["doctrine-task-interfaces-carry-tokens"])[1]
+    assert order_pattern in spec_text
 
 
 def test_no_contract_eval_relies_on_a_judge():

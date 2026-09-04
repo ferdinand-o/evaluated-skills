@@ -1039,6 +1039,22 @@ def test_spec_eval_ids_reads_id_column_under_the_evals_heading_only():
     assert ptt.spec_eval_ids(no_heading) is None
 
 
+def test_spec_eval_heading_is_level_two_or_deeper_whole_word_and_fence_safe():
+    """Drei Fail-open-Pfade aus dem zweiten Review: ein H1-Titel mit „Evals" machte
+    das ganze Dokument zum Abschnitt; ein `# Kommentar` in einem Codezaun schloss ihn;
+    „Evaluation der Alternativen" öffnete ihn."""
+    h1_title = "# Spec 00: Artefakt-Vertrag, Evals, Tiers\n\n## Contract\n\n| Feld | id |\n| --- | --- |\n| x | `user_id` |\n"
+    assert ptt.spec_eval_ids(h1_title) is None
+    fenced = "### Evals\n\n```bash\n# run all\n```\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(fenced) == ["a"]
+    evaluation = "## Evaluation der Alternativen\n\n| Option | id |\n| --- | --- |\n| x | `opt-1` |\n"
+    assert ptt.spec_eval_ids(evaluation) is None
+    deeper = "### Evals\n\n#### Eval-Fixtures\n\nProsa.\n\n#### Tabelle\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(deeper) == ["a"]
+    closed = "### Evals\n\nProsa.\n\n### Nachbarn\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(closed) is None
+
+
 def test_spec_eval_table_reports_id_cells_without_backticks():
     spec = SPEC_WITH_TABLE + "| 3 | gamma-eval | contract | `f` |\n"
     ids, malformed = ptt.spec_eval_table(spec)
@@ -1072,6 +1088,36 @@ def test_lint_coverage_counts_whole_ids_inside_task_blocks_only(tmp_path):
     msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
     assert any("`alpha-eval` aus der Spec hat keinen Task" in m for m in msgs)
     assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+
+
+def test_lint_coverage_ignores_prose_after_the_last_task(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        _plan_with_steps("- [ ] **Step 1: alpha-eval anlegen**\n") + "\n## Notizen\n\nbeta-eval kommt später.\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+
+
+def test_lint_spec_line_without_backticks_is_a_finding(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n").replace("**Spec:** `spec.md`", "**Spec:** spec.md"), encoding="utf-8")
+    report = ptt.lint_report(plan.read_text(encoding="utf-8"), plan)
+    assert any("**Spec:** ohne Backtick-Pfad" in f.message for f in report.findings)
+    assert report.coverage["status"] == "unchecked"
+
+
+def test_lint_explicit_spec_that_differs_from_the_spec_line_is_a_finding(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    (tmp_path / "other.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval, beta-eval**\n"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "other.md")]
+    assert any("weicht von der **Spec:**-Zeile ab" in m for m in msgs)
+    same = ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md")
+    assert not any("weicht" in f.message for f in same)
 
 
 def test_lint_malformed_id_row_is_a_finding(tmp_path):
