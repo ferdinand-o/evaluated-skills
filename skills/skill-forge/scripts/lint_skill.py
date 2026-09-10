@@ -443,7 +443,9 @@ def rule_neighbors(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     text = section(_read(md), BOUNDARY_HEADING_RE)
     if text is None:
         return RuleResult("neighbors", "unchecked", "kein Abschnitt „## Abgrenzung\" in SKILL.md")
-    skills_dir = skill_dir.resolve().parent
+    # Nachbarn liegen unter <repo>/skills/; im Eval-Workspace oder im Diff-Modus (Basis
+    # in einem Temp-Ordner) fällt das auf den Elternordner des Skill-Ordners zurück.
+    skills_dir = repo_root / "skills" if repo_root is not None and (repo_root / "skills").is_dir() else skill_dir.resolve().parent
     if repo_root is None or not skills_dir.is_dir():
         return RuleResult("neighbors", "unchecked", "Nachbar-Ordner nicht im Workspace")
     siblings = {p.name for p in skills_dir.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()} - {skill_dir.name}

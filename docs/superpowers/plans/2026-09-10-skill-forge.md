@@ -88,22 +88,22 @@ aufrufen können.
 - Consumes: `fn:lint_skill(skill_dir, repo_root)`, `fn:render_lint_json(report, meta)`
 - Produces: `fn:lint_at_base(skill_dir, repo_root, rev)`, `fn:evals_due(diff_lines, skill_dir)`, `token:evals_due`, `token:findings_mode`, `token:new_findings`
 
-- [ ] **Step 1: Tests schreiben** — Git-Repo in `tmp_path` mit einer Skill und einem
+- [x] **Step 1: Tests schreiben** — Git-Repo in `tmp_path` mit einer Skill und einem
       Commit: ein geänderter Satz im Body → `new_findings` leer, `evals_due: false`,
       Exit 0, obwohl die Skill an der Basis einen Altbefund trägt; eine geänderte Zeile
       im Frontmatter → `evals_due: true`; eine Zeile im Abschnitt `## Der Contract` →
       `true` (Regex `^## .*Contract`); eine Zeile, auf die ein `must_not`-Pattern mit
       `\s*` greift → `true`; ohne `--base` → `findings_mode: "all"`, `evals_due:
       "unchecked"`; `--base` ohne Git → Exit 2.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Implementieren** — `lint_at_base` liest den Ordner per
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Implementieren** — `lint_at_base` liest den Ordner per
       `git show <rev>:<pfad>` in ein Temp-Verzeichnis und lintet ihn dort;
       `new_findings` = Befunde des Arbeitsstands minus Befunde der Basis (nach Regel-ID);
       `evals_due` über `git diff <rev> -- <skill_dir>`, Zeilen mit `+`/`-`, gegen
       Frontmatter-Bereich, Contract-Bereich und `re.search` je Pattern aus `file_matches`
       und `output_matches` in `must` und `must_not`; Exit-Code folgt `new_findings`.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 3: Repo-Test mit Register
 

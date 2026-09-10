@@ -295,3 +295,102 @@ def test_unchecked_is_reported_loudly_and_never_counted_as_pass(tmp_path, capsys
     rc = ls.main([str(lonely)])
     out = capsys.readouterr().out
     assert rc == 0 and "UNGEPRÜFT" in out and "routing" in out
+
+
+# --- Diff-Modus (Task 2) ----------------------------------------------------------
+
+VERB_DESC = "Use when a note needs a tag. Generates the tag. Not for writing the note (use handoff)."
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
+
+
+def make_git_repo(tmp_path: Path, skill_md: str) -> tuple[Path, Path]:
+    root, skill = make_repo(tmp_path, skill_md)
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "basis")
+    return root, skill
+
+
+def _run(root: Path, skill: Path, out: Path, *extra: str) -> tuple[int, dict]:
+    rc = ls.main([str(skill), "--repo-root", str(root), "--out", str(out), *extra])
+    return rc, json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_diff_mode_counts_only_new_findings(tmp_path):
+    """Ein Altbefund (Prozessverb in der Description) steht an der Basis und danach —
+    ein geänderter Satz im Body ist kein neuer Befund und macht keine Evals fällig."""
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD.replace(GOOD_DESC, VERB_DESC))
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("1. Tag wählen.", "1. Tag wählen, ohne Rückfrage."), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert rc == 0
+    assert data["findings_mode"] == "new-vs-base"
+    assert data["findings_at_base"] == ["description"] and data["new_findings"] == []
+    assert data["evals_due"] is False
+    assert '"evals_due": false' in (tmp_path / "lint.json").read_text(encoding="utf-8")
+
+
+def test_diff_mode_reports_a_finding_the_change_introduced(tmp_path):
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD)
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8") + "\nDas Skript erzwingt das mechanisch.\n", encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert rc == 1 and data["new_findings"] == ["gate-language"] and data["findings_at_base"] == []
+
+
+def test_frontmatter_change_makes_evals_due(tmp_path):
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD)
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("name: note-tag", "name: note-tag\nversion: 2"), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "Frontmatter" in data["evals_due_reason"]
+
+
+def test_contract_section_change_makes_evals_due_with_any_contract_heading(tmp_path):
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD.replace("## Contract", "## Der Contract"))
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("- Genau ein Tag.", "- Genau ein Tag, nie zwei."), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "Contract" in data["evals_due_reason"]
+
+
+def test_pattern_hit_on_changed_line_makes_evals_due(tmp_path):
+    evals = {"evals": [dict(GOOD_EVALS["evals"][0], must_not=[{"type": "output_matches", "pattern": "Untagged:\\s*$"}])]}
+    root, skill = make_repo(tmp_path, GOOD_SKILL_MD, evals=evals)
+    _git(root, "init", "-q"); _git(root, "config", "user.email", "t@x"); _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A"); _git(root, "commit", "-q", "-m", "basis")
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("1. Tag wählen.", "1. Tag wählen, sonst Untagged:"), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "Pattern" in data["evals_due_reason"]
+
+
+def test_without_base_everything_counts_and_evals_due_is_unchecked(tmp_path):
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD.replace(GOOD_DESC, VERB_DESC))
+    rc, data = _run(root, skill, tmp_path / "lint.json")
+    assert rc == 1 and data["findings_mode"] == "all" and data["new_findings"] == ["description"]
+    assert data["evals_due"] == "unchecked"
+
+
+def test_base_without_git_or_unknown_revision_is_exit_2(tmp_path, capsys):
+    root, skill = make_repo(tmp_path)
+    assert ls.main([str(skill), "--repo-root", str(root), "--base", "HEAD"]) == 2
+    assert "Diff-Modus nicht möglich" in capsys.readouterr().err
+    root, skill = make_git_repo(tmp_path / "g", GOOD_SKILL_MD)
+    assert ls.main([str(skill), "--repo-root", str(root), "--base", "nope-rev"]) == 2
+
+
+def test_base_lint_sees_neighbors_of_the_real_repo(tmp_path):
+    """Der Basisstand liegt in einem Temp-Ordner — die Nachbarn kommen trotzdem aus
+    dem echten Repo, sonst wäre jeder Nachbarn-Befund an der Basis unsichtbar und
+    danach „neu"."""
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD)
+    (root / "skills" / "handoff" / "SKILL.md").write_text("---\nname: handoff\ndescription: Use when a session ends. Not for tags.\n---\n", encoding="utf-8")
+    _git(root, "add", "-A"); _git(root, "commit", "-q", "-m", "nachbar schweigt")
+    base = ls.lint_at_base(skill, root, "HEAD")
+    assert status_of(base, "neighbors")[0] == "finding"
