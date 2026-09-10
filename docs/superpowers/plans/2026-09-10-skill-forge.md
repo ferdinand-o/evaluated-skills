@@ -155,12 +155,12 @@ aufrufen können.
 - Consumes: (nichts Neues)
 - Produces: `form_selection_md`
 
-- [ ] **Step 1: Schreiben** — „Match the Form to the Failure" aus
+- [x] **Step 1: Schreiben** — „Match the Form to the Failure" aus
       `superpowers:writing-skills`, übersetzt: Verbot, Rezept, Pflichtslot, Konditional,
       je nach Fehlerart; mit der Beobachtung, dass Verbote bei Form-Fehlern nach hinten
       losgehen; ergänzt um die Fälle aus `docs/skill-building-pitfalls.md` („Beispiele
       schlagen Vorschriften", „Wo meldet etwas Erfolg, ohne geprüft zu haben").
-- [ ] **Step 2: Prüfen** — jeder Pitfalls-Fall ist mit seinem Abschnitt zitiert; kein
+- [x] **Step 2: Prüfen** — jeder Pitfalls-Fall ist mit seinem Abschnitt zitiert; kein
       Platzhalterwort. Commit.
 
 ### Task 6: references/evals.md
