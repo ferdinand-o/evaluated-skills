@@ -138,12 +138,12 @@ aufrufen können.
 - Consumes: `token:unchecked`
 - Produces: `checklist_md`
 
-- [ ] **Step 1: Schreiben** — die 19 Punkte der Prüfung §4.3 nach Bauphase gruppiert
+- [x] **Step 1: Schreiben** — die 19 Punkte der Prüfung §4.3 nach Bauphase gruppiert
       (Spec, Plan, Bau, Evals, Report/Nachbarn), je Punkt die Quelle (Spec 00 §, Pitfalls,
       known-limits-Abschnitt) und die Markierung „mechanisch: Regel-ID" für die dreizehn,
       die `lint_skill.py` prüft; die sechs Ermessenspunkte mit der Frage, die man sich
       stellt, nicht mit einem Appell.
-- [ ] **Step 2: Prüfen** — jede genannte Regel-ID existiert im Skript (`grep` gegen
+- [x] **Step 2: Prüfen** — jede genannte Regel-ID existiert im Skript (`grep` gegen
       `RULES`); kein Platzhalterwort. Commit.
 
 ### Task 5: references/form-selection.md
