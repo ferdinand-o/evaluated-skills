@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "skill": "skill-forge",
+    "schema": 1,
+    "generated": "von Hand nach skills/skill-forge/assets/skill-template/evals.json — beim Kopieren skill und generated auf die neue Skill setzen"
+  },
+  "evals": [
+    {
+      "id": "anti-ceremony-trivial-case-stays-small",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Der triviale Fall in der Sprache des Nutzers — ein Tippfehler, ein Einzeltest, ein geänderter Satz.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/<skill>/<artefakt>.json"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_exists",
+          "path": "docs/superpowers/reports/<skill>-report.md"
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, ID-Präfix anti-ceremony-. Diskriminator: Das Artefakt unter .skills/cache/ schreibt nur diese Skill; ein Basismodell schreibt keine Datei mit diesem Namen an diesem Ort. Die Abwesenheit des Reports ist die Zeremonie, die der Eval ausschließt."
+    },
+    {
+      "id": "contract-token-appears-verbatim",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Der Normalfall, der die Eiserne Regel auslöst.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "<Token aus dem Contract, wörtlich>"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: Der Token ist Vokabular der Doktrin; ein Basismodell drückt dasselbe in anderen Worten aus. Ein Prompt je Eval — ein Vergleich innerhalb eines Prompts wäre wertlos, weil das Modell seine erste Antwort sieht."
+    },
+    {
+      "id": "routing-without-skill-name",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Der Anlass ohne Skill-Namen, so wie ein Nutzer ihn sagt.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/<skill>/<artefakt>.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Routing-Eval: Landet der Anlass bei dieser Skill oder bei ihrem stärksten Konkurrenten? Routing-Evals sind stochastisch (docs/known-limits.md, Stichprobe) — ein roter Lauf zeigt die Kollision, ein grüner beweist nichts. Diskriminator: dasselbe Artefakt wie im Anti-Zeremonie-Eval."
+    }
+  ]
+}

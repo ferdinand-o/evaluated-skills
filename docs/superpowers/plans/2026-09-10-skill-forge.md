@@ -209,13 +209,13 @@ aufrufen können.
 - Consumes: `fn:lint_skill(skill_dir, repo_root)`
 - Produces: `skill_template`
 
-- [ ] **Step 1: SKILL.md-Gerüst** — Frontmatter mit Beispiel-Description (Trigger,
+- [x] **Step 1: SKILL.md-Gerüst** — Frontmatter mit Beispiel-Description (Trigger,
       Abgrenzung, kein Prozessverb), die fünf Hausabschnitte: Eiserne Regel, Ablauf,
       Contract, Anti-Rationalisierung, Abgrenzung; Auslassungen als `…`.
-- [ ] **Step 2: evals.json-Gerüst** — Kopfzeile per `_meta`, ein Eval mit ID-Präfix
+- [x] **Step 2: evals.json-Gerüst** — Kopfzeile per `_meta`, ein Eval mit ID-Präfix
       `anti-ceremony-`, gültige Beispielwerte (lädt über `evalkit.schema.load_evals`).
-- [ ] **Step 3: report.md-Gerüst** — Kopfzeile, Sektion „Was nicht gemessen wurde".
-- [ ] **Step 4: Prüfen** — das Template in ein `tmp_path`-Skill kopiert besteht die
+- [x] **Step 3: report.md-Gerüst** — Kopfzeile, Sektion „Was nicht gemessen wurde".
+- [x] **Step 4: Prüfen** — das Template in ein `tmp_path`-Skill kopiert besteht die
       Regeln 1–5 und `anti-ceremony-eval`; `load_evals` lädt die `evals.json`. Commit.
 
 ### Task 9: Evals
