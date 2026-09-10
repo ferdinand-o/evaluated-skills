@@ -303,7 +303,7 @@ aufrufen können.
 - Consumes: `known_findings`, `skill_forge_evals`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt `## skill-forge`** — das Register als Schuldenregister mit den
+- [x] **Step 1: Abschnitt `## skill-forge`** — das Register als Schuldenregister mit den
       gemessenen Zahlen; die Mengen-Semantik (zweiter Befund derselben Regel bleibt
       verdeckt); Evals ungefahren; Trigger ungemessen; `judge-claims` als `hint` mit der
       Trefferzahl; die Skriptpfad-Zweiform; die Forderung nach `--without-skill`. Commit.

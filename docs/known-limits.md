@@ -1607,6 +1607,56 @@ und ein Sammel-Task `Pflicht` im Fließtext wurde als echter Task geparst, bis e
 einen Codeblock wanderte. Ein Template, das der eigene Lint ablehnt, wäre der
 peinlichste Fehler dieser Skill gewesen; der Repo-Test lintet es deshalb mit.
 
+## skill-forge
+
+Gebaut nach Spec 17 (2026-09-10). Tier 1: `scripts/lint_skill.py`, dreizehn Regeln,
+Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
+
+- **Das Register ist ein Schuldenregister.** `tests/test_skills_lint.py` friert je
+  Skill die Regel-IDs ein, die beim ersten Lauf rot waren: 20 Skills, 79 Paare.
+  Gemessen: `report-section` 20 (Report-Sektion unter anderem Namen oder kein
+  known-limits-Abschnitt), `description` 18 (Prozessverben; `cad-parts` und
+  `ui-architect` ohne Abgrenzung), `routing` 15 (beide Matrizen gefordert, meist
+  fehlt eine), `anti-ceremony-eval` 11 (Eval vorhanden, ID ohne Präfix), `neighbors`
+  11 (Nennung ohne Rückverweis), `evals-exist` 3, `asset-headers` 2, `gate-language` 1
+  (`verified-research`: „erzwingt das mechanisch" ohne Hook). Die Menge darf nur
+  schrumpfen. Niemand räumt sie in dieser Spec auf.
+- **Mengen-Semantik verdeckt den zweiten Befund.** Das Register kennt Regel-IDs, keine
+  Fundstellen. Bekommt eine registrierte Skill an derselben Regel einen zweiten,
+  neuen Befund — ein zweites Prozessverb, eine zweite Kopfzeile ohne Header —, bleibt
+  er unsichtbar, bis jemand die Skill aus dem Register nimmt. Der Diff-Modus des Lints
+  hat dieselbe Auflösung: `new_findings` vergleicht Regel-IDs, nicht Zeilen.
+- **`judge-claims` ist ein Hinweis.** 24 von 47 Judge-Claims im Repo tragen „ und ",
+  „ statt " oder „ sowie "; die meisten sind legitim. Die Regel meldet `hint`, nie
+  `finding`, und steht nicht im Register — sie prüft nichts, sie erinnert.
+- **Die Evals sind ungefahren.** Derselbe Grund wie bei `explain` und `impl-plan`
+  (Abschnitt „Betrieb"). Schema-valide, und jedes `lint.json`-Muster ist gegen eine
+  echte Skript-Ausgabe getestet (`tests/test_skill_forge_evals_schema.py` spielt Eval 1
+  und 2 mit `--base HEAD` nach) — aber kein Agentenlauf. Ob ein Agent den Lint im
+  Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist genau die Frage von Eval 1,
+  und sie ist unbeantwortet.
+- **Der Trigger ist ungemessen.** Ob „bau mir eine Skill" bei `skill-forge` oder bei
+  `skill-creator` landet, entscheidet der Harness pro Lauf; Eval 5 ist stochastisch.
+  Die Description-Doktrin („keine Prozessbeschreibung") ist eine Entscheidung mit je
+  einem Beleg pro Seite, keine Messung; ein Trigger-Eval-Set steht in
+  `references/evals.md` für den Tag, an dem der Harness läuft.
+- **Der Skriptpfad ist eine dokumentierte Zweiform.** Im Repo
+  `skills/skill-forge/scripts/`, installiert `.claude/skills/skill-forge/scripts/`;
+  die SKILL.md nennt beide. Das ist das repo-weite Problem aus Punkt 19 der Prüfung,
+  ausgesprochen, nicht gelöst. Ein Bootstrap bleibt offen.
+- **Heuristiken mit bekannter Unschärfe.** `description` erkennt zwölf Prozessverben
+  und drei Trigger-Formen — „Use when a plan exists" ist eine Prozessbeschreibung ohne
+  Verb der Liste und geht durch. `gate-language` entkräftet per Negation im Absatz —
+  „nicht nur blockiert, sondern …" ginge ebenfalls durch. Beides fängt der Reviewer,
+  nicht der Lint.
+- **Im Eval-Workspace ist die Hälfte `unchecked`.** `asset-headers`, `routing`,
+  `report-section` brauchen `docs/` und `README.md`, `neighbors` fremde Skills. Die
+  fünf Evals binden nur an Regeln, die in ihrer Fixture geprüft sind; ein Eval, der
+  `routing` prüfen wollte, müsste die Matrix mitbringen.
+- **Gefordert, nicht gebaut:** `--without-skill` in `evals/run_evals.py` — derselbe
+  Prompt ohne installierte Skill. Erst damit wird die Diskriminator-Frage gemessen statt
+  beantwortet. Eigene, kleine Spec.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
