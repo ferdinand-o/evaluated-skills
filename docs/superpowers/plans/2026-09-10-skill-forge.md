@@ -262,17 +262,17 @@ aufrufen können.
 - Consumes: `token:evals_due`, `token:new_findings`, `checklist_md`, `evals_md`, `form_selection_md`, `reviewer_prompt_md`, `skill_template`
 - Produces: `skill_forge_skill`
 
-- [ ] **Step 1: Frontmatter** — `name: skill-forge`; Description mit Triggern („bau mir
+- [x] **Step 1: Frontmatter** — `name: skill-forge`; Description mit Triggern („bau mir
       eine Skill", „ändere die Skill X", „prüfe die Skill X"), Abgrenzung gegen
       `skill-creator` (außerhalb dieser Sammlung, eigenes Eval-Schema) und
       `superpowers:writing-skills` (Disziplin-Skills mit Druckszenarien), ohne Prozessverb.
-- [ ] **Step 2: Body** — Eiserne Regel (neue Befunde, Pflichtsektion), Ablauf in sieben
+- [x] **Step 2: Body** — Eiserne Regel (neue Befunde, Pflichtsektion), Ablauf in sieben
       Schritten mit beiden Skriptpfaden, Anti-Zeremonie-Regel, Contract (Statusmodell,
       `unchecked` nie `pass`, `--base HEAD` vor dem Commit), Anti-Rationalisierung
       (mindestens: „Der Altbefund ist nicht meiner", „Lint ist rot, ich räume schnell
       alles auf", „Ein Satz braucht keinen Lint"), Abgrenzung inklusive `impl-plan` und
       `subagent-dev`.
-- [ ] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/skill-forge` ohne
+- [x] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/skill-forge` ohne
       Befund außerhalb `report-section` und `routing` (die Task 11–13 schließen);
       Sprachprüfung nach Spec 00 §4. Commit.
 
