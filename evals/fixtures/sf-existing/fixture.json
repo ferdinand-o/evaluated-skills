@@ -1,4 +1,4 @@
 {
   "git": true,
-  "description": "Bestehende Mini-Skill note-tag, an der Basis lint-sauber: SKILL.md mit Contract und Token Untagged:, evals.json mit anti-ceremony-Präfix und einem Pattern auf den Token, Report mit Pflichtsektion, known-limits-Abschnitt, Routing-Matrix in README und Spec 00. Ein Baseline-Commit (git: true), damit --base HEAD einen Basisstand hat. Nichts unter .skills/cache/."
+  "description": "Bestehende Mini-Skill note-tag, an der Basis lint-sauber: SKILL.md mit Contract und Token Untagged:, evals.json mit anti-ceremony-Präfix und einem Pattern auf den Token, Report mit Pflichtsektion, known-limits-Abschnitt, Routing-Matrix in README und Spec 00, Nachbar handoff mit Rückverweis. Ein Baseline-Commit (git: true), damit --base HEAD einen Basisstand hat. Nichts unter .skills/cache/."
 }

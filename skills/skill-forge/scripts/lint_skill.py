@@ -43,10 +43,11 @@ FRONTMATTER_REQUIRED = ("name", "description")
 PROCESS_VERBS = ("runs", "builds", "generates", "produces", "collects", "renders",
                  "scans", "creates", "writes", "tracks", "enforces", "classifies")
 PROCESS_VERB_RE = re.compile(r"\b(" + "|".join(PROCESS_VERBS) + r")\b", re.IGNORECASE)
-TRIGGER_RE = re.compile(r"\bUse (when|for|this|it|to|before|after)\b|„[^“\"]+[\"“]|\"[^\"]{4,}\"", re.IGNORECASE)
+TRIGGER_RE = re.compile(r"\bUse\s+\w|„[^“\"]+[\"“]|\"[^\"]{4,}\"", re.IGNORECASE)
 BOUNDARY_RE = re.compile(r"\b[Nn]ot for\b|\bnicht für\b|\binstead\b|\bstattdessen\b")
-GATE_WORD_RE = re.compile(r"\b(blockiert|erzwingt|stellt sicher)\b")
-NEGATION_RE = re.compile(r"\b(nicht|nichts|nie|niemals|kein|keine|keinen|keinem|keiner|ohne)\b")
+GATE_WORD_RE = re.compile(r"\b(blockiert|erzwingt|stellt sicher)\b", re.IGNORECASE)
+# „ohne" gehört bewusst nicht dazu: „blockiert den Push ohne Rückfrage" ist keine Negation.
+NEGATION_RE = re.compile(r"\b(nicht|nichts|nie|niemals|kein|keine|keinen|keinem|keiner)\b", re.IGNORECASE)
 TIER_RE = re.compile(r"\bTier\s*(\d)\b")
 CONJUNCTION_RE = re.compile(r" und | UND | statt | sowie ")
 ANTI_CEREMONY_PREFIX = "anti-ceremony-"
@@ -112,25 +113,39 @@ def split_frontmatter(text: str) -> tuple[dict[str, str] | None, int]:
     if not lines or lines[0].strip() != "---":
         return None, 0
     fields: dict[str, str] = {}
+    current: str | None = None
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":
             return fields, i + 1
         m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", lines[i])
         if m:
-            fields[m.group(1)] = m.group(2).strip()
+            current = m.group(1)
+            value = m.group(2).strip()
+            fields[current] = "" if value in (">", "|", ">-", "|-") else value
+        elif current is not None and lines[i].startswith((" ", "\t")):
+            # Fortsetzung eines Blockskalars (`description: >`) oder eingerückte Folgezeile
+            fields[current] = (fields[current] + " " + lines[i].strip()).strip()
     return None, 0
 
 
 def _units(text: str) -> list[str]:
     """Absätze, durch Leerzeilen getrennt; Tabellen- und Listenzeilen sind je eine
     eigene Einheit — eine Negation in der Nachbarzeile einer Tabelle zählt nicht."""
+    marker = re.compile(r"^\s*(\||[-*+]\s|\d+\.\s)")
     units: list[str] = []
     for para in re.split(r"\n\s*\n", text):
-        lines = para.split("\n")
-        if any(re.match(r"^\s*(\||[-*+]\s|\d+\.\s)", l) for l in lines):
-            units.extend(l for l in lines if l.strip())
-        else:
+        lines = [l for l in para.split("\n") if l.strip()]
+        if not any(marker.match(l) for l in lines):
             units.append(para)
+            continue
+        current: list[str] = []
+        for line in lines:
+            if marker.match(line) and current:
+                units.append("\n".join(current))
+                current = []
+            current.append(line)  # eingerückte Fortsetzung eines Listenpunkts bleibt bei ihm
+        if current:
+            units.append("\n".join(current))
     return units
 
 
@@ -246,7 +261,7 @@ def rule_gate_language(skill_dir: Path, repo_root: Path | None) -> RuleResult:
 
 
 def rule_script_tier(skill_dir: Path, repo_root: Path | None) -> RuleResult:
-    scripts = sorted((skill_dir / "scripts").glob("*.py")) if (skill_dir / "scripts").is_dir() else []
+    scripts = sorted(p for p in (skill_dir / "scripts").glob("*.py") if p.is_file()) if (skill_dir / "scripts").is_dir() else []
     if not scripts:
         return RuleResult("script-tier", "pass", "keine Skripte (Tier 0)")
     siblings = {p.stem for p in scripts}
@@ -296,7 +311,7 @@ def rule_evals_exist(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     evals, err = load_evals_file(path)
     if evals is None:
         return RuleResult("evals-exist", "finding", f"evals.json {err}")
-    problems = []
+    problems = [] if evals else ["keine Evals in der Liste"]
     for i, ev in enumerate(evals):
         where = f"eval[{i}]"
         if not isinstance(ev, dict):
@@ -308,8 +323,8 @@ def rule_evals_exist(skill_dir: Path, repo_root: Path | None) -> RuleResult:
             problems.append(f"{where}: class muss contract oder behavior sein")
         if not isinstance(ev.get("prompt"), str) or not ev.get("prompt"):
             problems.append(f"{where}: genau ein prompt als String")
-        if not isinstance(ev.get("must"), list):
-            problems.append(f"{where}: must fehlt")
+        if not isinstance(ev.get("must"), list) or not ev.get("must"):
+            problems.append(f"{where}: must fehlt oder ist leer")
     if problems:
         return RuleResult("evals-exist", "finding", "; ".join(problems))
     return RuleResult("evals-exist", "pass", f"{len(evals)} Eval(s), Grundschema vollständig")
@@ -376,8 +391,9 @@ def rule_fixture_git(skill_dir: Path, repo_root: Path | None) -> RuleResult:
             wants_git = False
             if manifest.is_file():
                 try:
-                    wants_git = bool(json.loads(_read(manifest)).get("git", False))
-                except json.JSONDecodeError:
+                    data = json.loads(_read(manifest))
+                    wants_git = isinstance(data, dict) and bool(data.get("git", False))
+                except (json.JSONDecodeError, OSError):
                     wants_git = False
             if not wants_git:
                 problems.append(f"{ev.get('id')}: git_head_unchanged, aber Fixture {name} ohne \"git\": true")
@@ -388,19 +404,19 @@ def rule_fixture_git(skill_dir: Path, repo_root: Path | None) -> RuleResult:
 
 def rule_asset_headers(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     header_doc = repo_root / "docs" / "artifact-header.md" if repo_root else None
-    assets = sorted(p for p in (skill_dir / "assets").rglob("*.md") if p.name != "SKILL.md") \
+    assets = sorted(p for p in (skill_dir / "assets").rglob("*.md") if p.is_file() and p.name != "SKILL.md") \
         if (skill_dir / "assets").is_dir() else []
     if not assets:
         return RuleResult("asset-headers", "pass", "keine Markdown-Assets außer SKILL.md-Gerüsten")
     if header_doc is None or not header_doc.is_file():
         return RuleResult("asset-headers", "unchecked", "docs/artifact-header.md nicht im Workspace")
-    exceptions = header_doc.read_text(encoding="utf-8")
+    exceptions = _read(header_doc)
     exc_text = exceptions[exceptions.find(EXCEPTION_HEADING):] if EXCEPTION_HEADING in exceptions else ""
     problems = []
     for asset in assets:
         first = next((l.strip() for l in _read(asset).splitlines() if l.strip()), "")
         rel = asset.resolve().relative_to(repo_root.resolve()).as_posix() if asset.resolve().is_relative_to(repo_root.resolve()) else asset.name
-        if ARTIFACT_HEADER_RE.match(first) or rel in exc_text or asset.name in exc_text:
+        if ARTIFACT_HEADER_RE.match(first) or rel in exc_text:
             continue
         problems.append(rel)
     if problems:
@@ -436,7 +452,20 @@ def rule_routing(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     return RuleResult("routing", "pass", "in beiden Routing-Matrizen unter „zuständig\"")
 
 
+# Nur die Hausform `- **name** — …`: Backticks sind Code (`evalkit`, `assertions`), keine Nachbarn.
+NAME_CANDIDATE_RE = re.compile(r"\*\*([a-z][a-z0-9-]*[a-z0-9])\*\*")
+
+
+def _name_pattern(name: str) -> str:
+    return rf"(?<![a-z0-9-]){re.escape(name)}(?![a-z0-9-])"
+
+
 def rule_neighbors(skill_dir: Path, repo_root: Path | None) -> RuleResult:
+    """Genannte Nachbarn sind die fett gesetzten Namen im Abschnitt „Abgrenzung"
+    (Hausform: `- **handoff** — …`); Backticks sind Code, keine Nachbarn. Ein Name mit Doppelpunkt ist eine
+    fremde Skill (`superpowers:writing-skills`) und nicht Gegenstand. Ein genannter
+    Name ohne Ordner unter `skills/` ist **unchecked**, nie `pass` — im Eval-Workspace
+    fehlen die Nachbarn, und ohne sie gibt es nichts zu erwidern und nichts zu bestehen."""
     md = skill_dir / "SKILL.md"
     if not md.is_file():
         return RuleResult("neighbors", "finding", "SKILL.md fehlt")
@@ -446,16 +475,20 @@ def rule_neighbors(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     # Nachbarn liegen unter <repo>/skills/; im Eval-Workspace oder im Diff-Modus (Basis
     # in einem Temp-Ordner) fällt das auf den Elternordner des Skill-Ordners zurück.
     skills_dir = repo_root / "skills" if repo_root is not None and (repo_root / "skills").is_dir() else skill_dir.resolve().parent
-    if repo_root is None or not skills_dir.is_dir():
-        return RuleResult("neighbors", "unchecked", "Nachbar-Ordner nicht im Workspace")
-    siblings = {p.name for p in skills_dir.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()} - {skill_dir.name}
-    mentioned = sorted(s for s in siblings if re.search(rf"(?<![a-z0-9-]){re.escape(s)}(?![a-z0-9-])", text))
-    if not mentioned:
-        return RuleResult("neighbors", "pass", "Abgrenzung nennt keine Skill dieser Sammlung — nichts zu erwidern")
-    silent = [s for s in mentioned if skill_dir.name not in _read(skills_dir / s / "SKILL.md")]
+    candidates = sorted({n for n in NAME_CANDIDATE_RE.findall(text) if n != skill_dir.name})
+    if not candidates:
+        return RuleResult("neighbors", "pass", "Abgrenzung nennt keine Skill (kein **name**) — nichts zu erwidern")
+    siblings = {p.name for p in skills_dir.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()} if skills_dir.is_dir() else set()
+    present = [n for n in candidates if n in siblings]
+    absent = [n for n in candidates if n not in siblings]
+    silent = [n for n in present if not re.search(_name_pattern(skill_dir.name), _read(skills_dir / n / "SKILL.md"))]
     if silent:
         return RuleResult("neighbors", "finding", "genannt, nennt aber nicht zurück: " + ", ".join(silent))
-    return RuleResult("neighbors", "pass", "erwidert von: " + ", ".join(mentioned))
+    if absent:
+        return RuleResult("neighbors", "unchecked",
+                          "genannt, aber kein Ordner unter skills/ — fremde Skill oder hier nicht installiert: " + ", ".join(absent)
+                          + (("; erwidert von: " + ", ".join(present)) if present else ""))
+    return RuleResult("neighbors", "pass", "erwidert von: " + ", ".join(present))
 
 
 def rule_report_section(skill_dir: Path, repo_root: Path | None) -> RuleResult:
@@ -501,7 +534,12 @@ def lint_skill(skill_dir: Path | str, repo_root: Path | str | None = None) -> Li
     suchen; wird keine gefunden, sind die Repo-Regeln `unchecked`."""
     skill_dir = Path(skill_dir)
     root = Path(repo_root) if repo_root is not None else find_repo_root(skill_dir)
-    rules = [fn(skill_dir, root) for _, fn in RULES]
+    rules = []
+    for rule_id, fn in RULES:
+        try:
+            rules.append(fn(skill_dir, root))
+        except Exception as exc:  # noqa: BLE001 — ein Traceback wäre ein Lint ohne Artefakt
+            rules.append(RuleResult(rule_id, "finding", f"Regel abgebrochen ({type(exc).__name__}: {str(exc)[:80]}) — Eingabe prüfen"))
     return LintReport(skill_dir.name, skill_dir, root, rules)
 
 
@@ -511,9 +549,10 @@ class DiffError(RuntimeError):
     """Kein Diff-Modus möglich: kein Git, unbekannte Revision, Ordner nicht im Repo."""
 
 
-def _git(repo_root: Path, *args: str) -> str:
+def _git(cwd: Path, *args: str) -> str:
     try:
-        proc = subprocess.run(["git", "-C", str(repo_root), *args], capture_output=True, text=True, check=False)
+        proc = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True,
+                              encoding="utf-8", errors="replace", check=False)
     except OSError as exc:
         raise DiffError(f"git nicht ausführbar: {exc}") from exc
     if proc.returncode != 0:
@@ -521,54 +560,86 @@ def _git(repo_root: Path, *args: str) -> str:
     return proc.stdout
 
 
+def _git_toplevel(repo_root: Path) -> Path:
+    """Die Git-Wurzel — sie kann über der Repo-Wurzel liegen (Sammlung als Unterordner
+    eines größeren Repos). Alle Pfade im Diff-Modus sind relativ zu ihr."""
+    return Path(_git(repo_root, "rev-parse", "--show-toplevel").strip()).resolve()
+
+
+@dataclass
+class DiffLines:
+    texts: list[str]                  # alle hinzugefügten und entfernten Zeilen
+    new_lines: dict[str, list[int]]   # Pfad (relativ zur Git-Wurzel) -> Zeilennummern im neuen Stand
+    old_lines: dict[str, list[int]]   # Pfad -> Zeilennummern im alten Stand
+    files: list[str]
+
+
 def lint_at_base(skill_dir: Path | str, repo_root: Path | str, rev: str) -> LintReport:
     """Der Skill-Ordner, wie er bei `rev` war, gelintet gegen das heutige Repo. Nur der
     Ordner kommt aus Git; `docs/`, `evals/` und Nachbarn sind der Arbeitsstand — die
     Frage lautet „hat *diese Änderung* etwas gebrochen", nicht „wie sah das Repo aus"."""
     skill_dir, repo_root = Path(skill_dir).resolve(), Path(repo_root).resolve()
-    if not skill_dir.is_relative_to(repo_root):
-        raise DiffError(f"{skill_dir} liegt nicht unter {repo_root}")
-    rel = skill_dir.relative_to(repo_root).as_posix()
-    listing = _git(repo_root, "ls-tree", "-r", "--name-only", rev, "--", rel)
+    top = _git_toplevel(repo_root)
+    if not skill_dir.is_relative_to(top):
+        raise DiffError(f"{skill_dir} liegt nicht unter der Git-Wurzel {top}")
+    rel = skill_dir.relative_to(top).as_posix()
+    listing = _git(top, "ls-tree", "-r", "--name-only", "--full-name", rev, "--", rel)
     with tempfile.TemporaryDirectory() as tmp:
         base_dir = Path(tmp) / rel
         for path in listing.split("\n"):
             if not path.strip():
                 continue
-            content = _git(repo_root, "show", f"{rev}:{path}")
+            content = _git(top, "show", f"{rev}:{path}")
             target = Path(tmp) / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
         if not base_dir.is_dir():
             raise DiffError(f"{rel} existiert bei {rev} nicht — keine Basis, alle Befunde sind neu")
-        # Regeln, die den Repo-Kontext brauchen, sehen das echte Repo; Regeln über den
-        # Ordner selbst sehen den Basisstand. `neighbors` schaut in `skill_dir.parent`
-        # — dafür liegt der Basisordner an derselben relativen Stelle unter tmp.
-        base_rules = lint_skill(base_dir, repo_root)
-    return base_rules
+        return lint_skill(base_dir, repo_root)
 
 
-def _changed_lines(repo_root: Path, rev: str, skill_dir: Path) -> tuple[list[str], dict[str, list[int]], dict[str, list[int]]]:
-    """Geänderte Zeilen aus `git diff rev -- skill_dir`: (Texte, neue Zeilennummern je
-    Datei, alte Zeilennummern je Datei)."""
-    rel = skill_dir.resolve().relative_to(repo_root.resolve()).as_posix()
-    diff = _git(repo_root, "diff", rev, "--", rel)
+def changed_lines(repo_root: Path, rev: str, skill_dir: Path) -> DiffLines:
+    """Geänderte Zeilen aus `git diff <rev> --no-renames -- <skill_dir>` plus alle
+    Zeilen untrackter Dateien im Ordner (der Lint läuft vor dem Commit; was noch nicht
+    `git add` gesehen hat, ist trotzdem Teil der Änderung). Eine Umbenennung erscheint
+    als gelöscht plus neu — die konservative Richtung."""
+    top = _git_toplevel(repo_root)
+    rel = skill_dir.resolve().relative_to(top).as_posix()
+    diff = _git(top, "diff", "--no-renames", rev, "--", rel)
     texts: list[str] = []
     new_lines: dict[str, list[int]] = {}
     old_lines: dict[str, list[int]] = {}
+    files: list[str] = []
     current: str | None = None
+    expect_header = False
     old_no = new_no = 0
     for line in diff.split("\n"):
-        if line.startswith("+++ "):
-            current = line[4:].removeprefix("b/").strip()
+        if line.startswith("diff --git "):
+            expect_header = True
+            current = None
             continue
-        if line.startswith("--- ") or line.startswith("diff ") or line.startswith("index "):
-            continue
+        if expect_header:
+            # Nur direkt nach `diff --git` sind `---`/`+++` Kopfzeilen; danach sind es Inhalt.
+            if line.startswith("+++ "):
+                name = line[4:].strip()
+                current = None if name == "/dev/null" else name.removeprefix("b/")
+                if current:
+                    files.append(current)
+                expect_header = False
+                continue
+            if line.startswith("--- ") and current is None:
+                name = line[4:].strip()
+                if name != "/dev/null":
+                    current = name.removeprefix("a/")  # gelöschte Datei: `+++ /dev/null` folgt
+                continue
+            if line.startswith(("index ", "old mode", "new mode", "deleted file", "new file", "similarity", "rename ")):
+                continue
         hunk = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
         if hunk:
+            expect_header = False
             old_no, new_no = int(hunk.group(1)), int(hunk.group(2))
             continue
-        if current is None:
+        if current is None or expect_header:
             continue
         if line.startswith("+"):
             texts.append(line[1:])
@@ -583,7 +654,17 @@ def _changed_lines(repo_root: Path, rev: str, skill_dir: Path) -> tuple[list[str
         else:
             old_no += 1
             new_no += 1
-    return texts, new_lines, old_lines
+    untracked = _git(top, "ls-files", "--others", "--exclude-standard", "--", rel)
+    for path in untracked.split("\n"):
+        if not path.strip():
+            continue
+        full = top / path
+        if full.is_file():
+            content = _read(full).split("\n")
+            files.append(path)
+            texts.extend(content)
+            new_lines[path] = list(range(1, len(content) + 1))
+    return DiffLines(texts, new_lines, old_lines, files)
 
 
 def _protected_ranges(text: str) -> list[tuple[int, int]]:
@@ -597,15 +678,15 @@ def _protected_ranges(text: str) -> list[tuple[int, int]]:
     return ranges
 
 
-def evals_due(diff_lines: list[str], skill_dir: Path | str, repo_root: Path | str | None = None,
+def evals_due(diff: DiffLines | list[str], skill_dir: Path | str, repo_root: Path | str | None = None,
               rev: str | None = None) -> tuple[bool | str, str]:
-    """(true/false/'unchecked', Grund). Mit `repo_root` und `rev` werden Frontmatter- und
-    Contract-Bereich per Zeilennummer geprüft; ohne beides nur die Pattern-Treffer
-    auf den Zeilentexten."""
+    """(true/false/'unchecked', Grund). Mit `DiffLines`, `repo_root` und `rev` werden
+    Frontmatter- und Contract-Bereich per Zeilennummer geprüft (alter und neuer
+    Stand); eine nackte Zeilenliste erlaubt nur den Pattern-Zweig."""
     skill_dir = Path(skill_dir)
     root = Path(repo_root) if repo_root else find_repo_root(skill_dir)
     evals_path = _evals_path(skill_dir, root)
-    reasons = []
+    reasons: list[str] = []
     if evals_path is None or not evals_path.is_file():
         return "unchecked", "keine evals.json — ohne Assertions ist nicht bestimmbar, was eine Eval-relevante Änderung ist"
     evals, err = load_evals_file(evals_path)
@@ -618,36 +699,43 @@ def evals_due(diff_lines: list[str], skill_dir: Path | str, repo_root: Path | st
                 if a.get("type") in PATTERN_TYPES and isinstance(a.get("pattern"), str):
                     patterns.append(a["pattern"])
     md = skill_dir / "SKILL.md"
-    if root is not None and rev is not None and md.is_file():
-        _, new_nos, old_nos = _changed_lines(root, rev, skill_dir)
-        rel_md = md.resolve().relative_to(root.resolve()).as_posix()
-        current_ranges = _protected_ranges(_read(md))
+    lines = diff if isinstance(diff, DiffLines) else DiffLines(list(diff), {}, {}, [])
+    if root is not None and rev is not None and (lines.new_lines or lines.old_lines):
+        top = _git_toplevel(root)
+        rel_md = (md.resolve().relative_to(top).as_posix() if md.resolve().is_relative_to(top)
+                  else md.as_posix())
+        current_ranges = _protected_ranges(_read(md)) if md.is_file() else []
         try:
-            base_text = _git(root, "show", f"{rev}:{rel_md}")
+            base_text = _git(top, "show", f"{rev}:{rel_md}")
         except DiffError:
             base_text = ""
         base_ranges = _protected_ranges(base_text)
-        for nos, ranges, label in ((new_nos.get(rel_md, []), current_ranges, "neu"), (old_nos.get(rel_md, []), base_ranges, "alt")):
-            for no in nos:
-                for start, end in ranges:
-                    if start <= no <= end:
-                        what = "Frontmatter" if start == 1 else "Contract-Abschnitt"
-                        reasons.append(f"{what} geändert (Zeile {no}, {label})")
-                        break
-        if not CONTRACT_HEADING_RE.search(_read(md)):
+        for nos, ranges, label in ((lines.new_lines.get(rel_md, []), current_ranges, "neu"),
+                                   (lines.old_lines.get(rel_md, []), base_ranges, "alt")):
+            hit = next(((no, start) for no in nos for start, end in ranges if start <= no <= end), None)
+            if hit:
+                what = "Frontmatter" if hit[1] == 1 else "Contract-Abschnitt"
+                reasons.append(f"{what} geändert (Zeile {hit[0]}, {label})")
+        if md.is_file() and not CONTRACT_HEADING_RE.search(_read(md)):
             reasons.append("Hinweis: kein Abschnitt „## … Contract\" in SKILL.md — nur Frontmatter und Patterns geprüft")
-    for line in diff_lines:
+        if not md.is_file():
+            reasons.append("SKILL.md gelöscht")
+    invalid = 0
+    for line in lines.texts:
         for pattern in patterns:
             try:
                 if re.search(pattern, line):
                     reasons.append(f"Pattern {pattern!r} trifft geänderte Zeile {line.strip()[:50]!r}")
                     break
             except re.error:
-                continue
+                invalid += 1
+    if invalid:
+        reasons.append(f"Hinweis: {invalid} Pattern-Prüfung(en) mit ungültigem Regex übersprungen")
     due = any(not r.startswith("Hinweis") for r in reasons)
-    if not reasons:
-        return False, f"keine Änderung an Frontmatter, Contract oder einer Zeile, auf die eines von {len(patterns)} Patterns greift"
-    return due, "; ".join(reasons)
+    if not due:
+        base = f"keine Änderung an Frontmatter, Contract oder einer Zeile, auf die eines von {len(patterns)} Patterns greift"
+        return False, base + ("; " + "; ".join(reasons) if reasons else "")
+    return True, "; ".join(reasons)
 
 
 # --- Artefakt und CLI -------------------------------------------------------------
@@ -709,8 +797,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             base_report = lint_at_base(skill_dir, report.repo_root, args.base)
-            texts, _, _ = _changed_lines(report.repo_root, args.base, skill_dir)
-            due, due_reason = evals_due(texts, skill_dir, report.repo_root, args.base)
+            diff = changed_lines(report.repo_root, args.base, skill_dir)
+            due, due_reason = evals_due(diff, skill_dir, report.repo_root, args.base)
         except DiffError as exc:
             print(f"Diff-Modus nicht möglich: {exc}", file=sys.stderr)
             return 2

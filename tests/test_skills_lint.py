@@ -65,7 +65,7 @@ def test_nothing_is_unchecked_for_lack_of_repo_context(skill: Path):
     """Im Repo sind alle Dateien sichtbar. `unchecked` darf hier nur aus dem Skill
     selbst kommen (kein Abgrenzungsabschnitt, keine evals.json), nie aus dem Workspace."""
     report = _report(skill)
-    workspace_gaps = [r.id for r in report.rules if r.status == "unchecked" and "Workspace" in r.reason]
+    workspace_gaps = [r.id for r in report.rules if r.status == "unchecked" and "nicht im Workspace" in r.reason]
     assert workspace_gaps == [], workspace_gaps
 
 

@@ -1,4 +1,4 @@
 {
-  "git": false,
-  "description": "Skill gate-demo, deren Contract „blockiert den Commit\" sagt, ohne assets/hooks/. Kein evals/, kein docs/ — nur Regeln 1–5 sind hier prüfbar; gate-language muss finding sein."
+  "git": true,
+  "description": "Skill gate-demo, deren Contract „blockiert den Commit\" sagt, ohne assets/hooks/. Kein evals/, kein docs/ — nur Regeln 1–5 sind hier prüfbar; gate-language muss finding sein. git: true, damit der vorgeschriebene Aufruf mit --base HEAD einen Basisstand hat."
 }

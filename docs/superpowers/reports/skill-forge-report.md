@@ -14,10 +14,10 @@ skills/skill-forge/references/form-selection.md „Match the Form to the Failure
 skills/skill-forge/references/evals.md          Diskriminator, Judge, Fixtures, Trigger-Eval-Set, Baseline-Forderung
 skills/skill-forge/references/reviewer-prompt.md Bau-Review mit Nachmessen
 skills/skill-forge/assets/skill-template/       SKILL.md, evals.json, report.md — bestehen den eigenen Lint
-skills/skill-forge/scripts/lint_skill.py        743 Zeilen, Tier 1, dreizehn Regeln, Diff-Modus
+skills/skill-forge/scripts/lint_skill.py        830 Zeilen, Tier 1, dreizehn Regeln, Diff-Modus
 evals/skill-forge/evals.json                    5 contract-Evals
 evals/fixtures/sf-existing, sf-gate, sf-noanti, sf-spec
-tests/test_skill_forge_lint.py                  29 Tests
+tests/test_skill_forge_lint.py                  40 Tests
 tests/test_skills_lint.py                       Repo-Test, 5 Tests (2 parametrisiert über 21 Skills)
 tests/test_skill_forge_evals_schema.py          8 Tests
 ```
@@ -48,25 +48,62 @@ Schema-Test prüft, dass sie ohne Befund und ohne `unchecked` ist.
 
 ## Was gemessen wurde
 
-- **Volle Suite: 1123 bestanden**, einer fremd rot
+- **Volle Suite: 1123 bestanden beim Bau, 1134 nach der Fix-Runde**, einer fremd rot
   (`test_rest_api_architect_gate.py::test_main_exit_zero_when_degraded_but_checklist_clean`,
   vorbestehend, erwartet ein fehlendes Spectral, das hier über `npx` erreichbar ist).
-  42 neue Tests in drei Dateien, dazu 21 Skills zweimal parametrisiert im Repo-Test.
+  42 neue Tests in drei Dateien beim Bau, 53 nach der Fix-Runde, dazu 21 Skills zweimal
+  parametrisiert im Repo-Test.
 - **Erster Lint-Lauf über alle Skills (2026-09-10):** 20 Skills mit Befund, 79
-  (Skill, Regel)-Paare im Register. Je Regel: `report-section` 20, `description` 18,
-  `routing` 15, `anti-ceremony-eval` 11, `neighbors` 11, `evals-exist` 3,
+  (Skill, Regel)-Paare im Register. Je Regel: `report-section` 19, `description` 18,
+  `routing` 14, `anti-ceremony-eval` 11, `neighbors` 11, `evals-exist` 3,
   `asset-headers` 2, `gate-language` 1; `script-tier`, `frontmatter`, `skill-md-lines`,
   `fixture-git` 0. Gegen die Spec-Erwartung: `anti-ceremony-eval` 11 statt 14, weil die
-  drei Skills ohne `evals.json` nur unter `evals-exist` zählen; `routing` 15 statt „7
-  und 6", weil beide Matrizen gefordert sind; `neighbors` 11 statt 13.
-- **Selbstbezug:** `lint_skill.py skills/skill-forge` — dreizehn Regeln `pass`, kein
-  Register-Eintrag. Während des Baus war die Skill in `_UNDER_CONSTRUCTION` des
-  Repo-Tests statt im Register; mit diesem Report ist das entfernt.
+  drei Skills ohne `evals.json` nur unter `evals-exist` zählen; `routing` 14 statt „7
+  und 6", weil beide Matrizen gefordert sind; `neighbors` 11 statt 13. (Die erste
+  Fassung dieses Reports nannte 20 und 15 — sie hatte `skill-forge` selbst mitgezählt.)
+- **Selbstbezug:** `lint_skill.py skills/skill-forge` — zwölf Regeln `pass`, `neighbors`
+  `unchecked`, weil die Abgrenzung `skill-creator` nennt und der Lint eine fremde Skill
+  nicht von einer fehlenden unterscheiden kann; kein Register-Eintrag. Während des Baus
+  war die Skill in `_UNDER_CONSTRUCTION` des Repo-Tests statt im Register; mit diesem
+  Report ist das entfernt.
 - **Jedes `lint.json`-Muster der Evals** greift an einer echten Skript-Ausgabe: Eval 3
   an `sf-gate`, Eval 4 an `sf-noanti`, keines an der sauberen `sf-existing`; Eval 1 und
   2 nachgespielt mit der Änderung aus dem Prompt und `--base HEAD`.
 - **Das Template** besteht als Skill in einem Temp-Ordner die Regeln 1–5 und
   `anti-ceremony-eval`; seine `evals.json` lädt über `evalkit`.
+
+## Fix-Runde nach dem Review (2026-09-10)
+
+Zwei unabhängige Reviews — ein Subagent mit frischem Kontext nach dem eigenen
+`reviewer-prompt.md`, dazu `/code-review` über den Diff — fanden keinen Spec-Bruch,
+aber zwei schwere Löcher im Skript und eine Reihe Präzisionsfehler. Alles behoben,
+jeder Punkt mit Test:
+
+- **`neighbors` war fail-open:** Ein genannter Nachbar ohne Ordner im Workspace ergab
+  `pass` über eine leere Menge — das `all([])`-Muster aus den Pitfalls, in allen vier
+  Fixtures sichtbar. Jetzt zählen genannte Namen (`**name**`, die Hausform), ein
+  fehlender Name ist `unchecked`, der Rückverweis wird wortgebunden geprüft
+  („unexplained" erwidert `explain` nicht).
+- **Traceback statt Befund** bei `fixture.json` als Liste, Verzeichnissen oder toten
+  Symlinks unter `scripts/` und `assets/`, Latin-1 in `artifact-header.md`, Binärdateien
+  im Diff-Modus. Jede Regel läuft jetzt in einem Fangnetz („Regel abgebrochen" ist ein
+  Befund), Dateilisten filtern auf `is_file()`, Git-Ausgabe wird als UTF-8 mit Ersatz
+  gelesen.
+- **Eval 2 maß nicht, was seine Notiz sagte:** Das Pattern traf die Zeile wegen eines
+  Backticks nicht, `evals_due: true` kam allein aus dem Contract. Der Token steht jetzt
+  im Ablauf, das Pattern hat keinen Anker, und der Schema-Test bindet den Grund.
+- **Eval 3 und 4** bekamen `"git": true`, damit der vorgeschriebene Aufruf mit
+  `--base HEAD` eine `lint.json` schreibt statt mit Exit 2 zu enden.
+- **`gate-language`:** umbrochene Listenpunkte bleiben eine Einheit, Groß-/Kleinschreibung
+  ignoriert, „ohne" ist keine Negation mehr.
+- **Diff-Modus:** Pfade relativ zur Git-Wurzel (`rev-parse --show-toplevel`), damit eine
+  Sammlung als Unterordner eines größeren Repos funktioniert; `---`/`+++` nur direkt nach
+  `diff --git` als Kopfzeile; `--no-renames` (Umbenennung = gelöscht plus neu, wie Spec 17
+  sagt); untrackte Dateien zählen; ungültige Regexe stehen im Grund; ein `git diff` statt
+  zwei.
+- Kleineres: `description: >` als YAML-Block, `Use whenever`; `evals-exist` lehnt leere
+  Listen ab wie `evalkit`; `asset-headers`-Ausnahme nur per Pfad; Git-Helfer der Tests
+  in `conftest.py`; Register-Zahlen 19 und 14 korrigiert.
 
 ## Was nicht gemessen wurde
 
@@ -81,10 +118,9 @@ Description-Doktrin ist eine Entscheidung mit je einem Beleg pro Seite; das
 Trigger-Eval-Set in `references/evals.md` wartet auf einen Harness außerhalb eines
 Root-Containers.
 
-**Das Register wurde einmal gemessen, nicht zweimal.** Die 79 Paare stammen aus einem
-Lauf des Skripts, das in derselben Sitzung entstand. Eine Regel mit systematischem
-Falsch-Rot würde das Register still füllen; die Unterschiede zur Spec-Erwartung sind
-erklärt, nicht unabhängig geprüft.
+**Das Register wurde zweimal gemessen, von zwei Seiten.** Die 79 Paare stammen aus dem
+Bau; beide Reviewer haben sie unabhängig nachgezählt und dabei die falschen Summen je
+Regel gefunden (20/15 statt 19/14). Das Register selbst hielt, die Prosa darüber nicht.
 
 **Die Heuristiken haben bekannte Löcher.** Zwölf Prozessverben, drei Trigger-Formen,
 Negation im Absatz — `references/checklist.md` und `known-limits` nennen die Fälle,

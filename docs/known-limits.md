@@ -1614,9 +1614,9 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 
 - **Das Register ist ein Schuldenregister.** `tests/test_skills_lint.py` friert je
   Skill die Regel-IDs ein, die beim ersten Lauf rot waren: 20 Skills, 79 Paare.
-  Gemessen: `report-section` 20 (Report-Sektion unter anderem Namen oder kein
+  Gemessen: `report-section` 19 (Report-Sektion unter anderem Namen oder kein
   known-limits-Abschnitt), `description` 18 (Prozessverben; `cad-parts` und
-  `ui-architect` ohne Abgrenzung), `routing` 15 (beide Matrizen gefordert, meist
+  `ui-architect` ohne Abgrenzung), `routing` 14 (beide Matrizen gefordert, meist
   fehlt eine), `anti-ceremony-eval` 11 (Eval vorhanden, ID ohne Präfix), `neighbors`
   11 (Nennung ohne Rückverweis), `evals-exist` 3, `asset-headers` 2, `gate-language` 1
   (`verified-research`: „erzwingt das mechanisch" ohne Hook). Die Menge darf nur
@@ -1647,8 +1647,13 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 - **Heuristiken mit bekannter Unschärfe.** `description` erkennt zwölf Prozessverben
   und drei Trigger-Formen — „Use when a plan exists" ist eine Prozessbeschreibung ohne
   Verb der Liste und geht durch. `gate-language` entkräftet per Negation im Absatz —
-  „nicht nur blockiert, sondern …" ginge ebenfalls durch. Beides fängt der Reviewer,
-  nicht der Lint.
+  „nicht nur blockiert, sondern …" ginge ebenfalls durch. `neighbors` erkennt genannte
+  Skills nur als `**name**` (die Hausform der Abgrenzung); ein Nachbar in Prosa oder in
+  Backticks zählt nicht. Ein
+  genannter Name ohne Ordner unter `skills/` ist `unchecked` — im Repo heißt das
+  „fremde Skill" (`skill-creator`), im Eval-Workspace „nicht installiert"; der Lint
+  kann beides nicht unterscheiden und behauptet deshalb nichts. Beides fängt der
+  Reviewer, nicht der Lint.
 - **Im Eval-Workspace ist die Hälfte `unchecked`.** `asset-headers`, `routing`,
   `report-section` brauchen `docs/` und `README.md`, `neighbors` fremde Skills. Die
   fünf Evals binden nur an Regeln, die in ihrer Fixture geprüft sind; ein Eval, der

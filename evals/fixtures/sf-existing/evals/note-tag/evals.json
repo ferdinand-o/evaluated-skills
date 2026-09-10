@@ -14,7 +14,7 @@
       "must_not": [
         {
           "type": "output_matches",
-          "pattern": "Untagged:\\s*$"
+          "pattern": "Untagged:"
         }
       ],
       "notes": "Pflicht-Anti-Zeremonie-Eval. Diskriminator: das Hausvokabular #idea/#task/#ref in der ersten Zeile; ein Basismodell schreibt ein Wort, keinen Tag."

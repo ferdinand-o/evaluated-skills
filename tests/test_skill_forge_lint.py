@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import load_script
+from conftest import git, load_script
 
 ls = load_script("skills/skill-forge/scripts/lint_skill.py")
 
@@ -302,12 +302,11 @@ def test_unchecked_is_reported_loudly_and_never_counted_as_pass(tmp_path, capsys
 VERB_DESC = "Use when a note needs a tag. Generates the tag. Not for writing the note (use handoff)."
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
+_git = git
 
 
-def make_git_repo(tmp_path: Path, skill_md: str) -> tuple[Path, Path]:
-    root, skill = make_repo(tmp_path, skill_md)
+def make_git_repo(tmp_path: Path, skill_md: str, evals: dict | None = GOOD_EVALS) -> tuple[Path, Path]:
+    root, skill = make_repo(tmp_path, skill_md, evals=evals)
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "t")
@@ -361,9 +360,7 @@ def test_contract_section_change_makes_evals_due_with_any_contract_heading(tmp_p
 
 def test_pattern_hit_on_changed_line_makes_evals_due(tmp_path):
     evals = {"evals": [dict(GOOD_EVALS["evals"][0], must_not=[{"type": "output_matches", "pattern": "Untagged:\\s*$"}])]}
-    root, skill = make_repo(tmp_path, GOOD_SKILL_MD, evals=evals)
-    _git(root, "init", "-q"); _git(root, "config", "user.email", "t@x"); _git(root, "config", "user.name", "t")
-    _git(root, "add", "-A"); _git(root, "commit", "-q", "-m", "basis")
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD, evals=evals)
     md = skill / "SKILL.md"
     md.write_text(md.read_text(encoding="utf-8").replace("1. Tag wählen.", "1. Tag wählen, sonst Untagged:"), encoding="utf-8")
     rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
@@ -394,3 +391,128 @@ def test_base_lint_sees_neighbors_of_the_real_repo(tmp_path):
     _git(root, "add", "-A"); _git(root, "commit", "-q", "-m", "nachbar schweigt")
     base = ls.lint_at_base(skill, root, "HEAD")
     assert status_of(base, "neighbors")[0] == "finding"
+
+
+# --- Fix-Runde nach dem Review ----------------------------------------------------
+
+def test_gate_language_keeps_wrapped_list_items_together_and_ignores_case(tmp_path):
+    wrapped = GOOD_SKILL_MD + "\n- Nichts in dieser Skill\n  blockiert den Commit; das Skript meldet nur.\n"
+    root, skill = make_repo(tmp_path, wrapped)
+    assert status_of(ls.lint_skill(skill, root), "gate-language")[0] == "pass"
+    (skill / "SKILL.md").write_text(GOOD_SKILL_MD + "\nBlockiert den Commit, wenn die ID fehlt.\n", encoding="utf-8")
+    assert status_of(ls.lint_skill(skill, root), "gate-language")[0] == "finding"
+    (skill / "SKILL.md").write_text(GOOD_SKILL_MD + "\nDer Hook blockiert den Push ohne Rückfrage.\n", encoding="utf-8")
+    assert status_of(ls.lint_skill(skill, root), "gate-language")[0] == "finding", "„ohne\" ist keine Negation"
+
+
+def test_neighbors_absent_named_skill_is_unchecked_and_reciprocity_is_word_bounded(tmp_path):
+    root, skill = make_repo(tmp_path, GOOD_SKILL_MD.replace("- **handoff** — Sitzungsende, nicht Notiz.",
+                                                              "- **handoff** — Sitzungsende.\n- **skill-creator** — außerhalb dieser Sammlung."))
+    status, reason = status_of(ls.lint_skill(skill, root), "neighbors")
+    assert status == "unchecked" and "skill-creator" in reason and "erwidert von: handoff" in reason
+    # Rückverweis nur als ganzes Wort: „unexplained" erwidert „explain" nicht
+    root, skill = make_repo(tmp_path / "b", GOOD_SKILL_MD.replace("note-tag", "explain").replace("- **handoff** — Sitzungsende, nicht Notiz.", "- **handoff** — Sitzungsende."), name="explain")
+    (root / "skills" / "handoff" / "SKILL.md").write_text("---\nname: handoff\ndescription: Use when a session ends. Not for unexplained notes.\n---\n", encoding="utf-8")
+    status, reason = status_of(ls.lint_skill(skill, root), "neighbors")
+    assert status == "finding" and "handoff" in reason
+    # Prosa oder Backticks ohne **name** nennen niemanden
+    root, skill = make_repo(tmp_path / "c", GOOD_SKILL_MD.replace("- **handoff** — Sitzungsende, nicht Notiz.", "Die Übergabe ist Sache von handoff, geprüft mit `evalkit`."))
+    assert status_of(ls.lint_skill(skill, root), "neighbors")[0] == "pass"
+
+
+def test_broken_inputs_yield_findings_never_tracebacks(tmp_path):
+    """Pitfalls: ein Lint, der abstürzt, hinterlässt kein Artefakt — und die Übergabe
+    „Lint nicht verfügbar\" greift nicht, weil das Skript existiert."""
+    root, skill = make_repo(tmp_path)
+    (root / "evals" / "fixtures" / "nt-one" / "fixture.json").write_text("[]", encoding="utf-8")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "dir.py").mkdir()
+    (skill / "scripts" / "dead.py").symlink_to(skill / "scripts" / "nope.py")
+    (skill / "scripts" / "ok.py").write_text('"""Tier 1"""\nimport os\n', encoding="utf-8")
+    (skill / "assets").mkdir()
+    (skill / "assets" / "dir.md").mkdir()
+    (root / "docs" / "artifact-header.md").write_bytes("# Kopfzeile\n\n## Begründete Ausnahme: `x`\n\xe4\xf6\n".encode("latin-1"))
+    (skill / "assets" / "t.md").write_text("<!-- skill: note-tag | schema: 1 | generated: x -->\n", encoding="utf-8")
+    out = tmp_path / "lint.json"
+    rc = ls.main([str(skill), "--repo-root", str(root), "--out", str(out)])
+    assert rc in (0, 1) and out.is_file()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert [r["id"] for r in data["rules"]] == list(ls.RULE_IDS)
+    assert not any("abgebrochen" in r["reason"] for r in data["rules"]), [r for r in data["rules"] if "abgebrochen" in r["reason"]]
+
+
+def test_rule_exception_becomes_a_finding_not_a_crash(tmp_path, monkeypatch):
+    root, skill = make_repo(tmp_path)
+    def boom(skill_dir, repo_root):
+        raise RuntimeError("kaputt")
+    monkeypatch.setattr(ls, "RULES", [(rid, boom if rid == "routing" else fn) for rid, fn in ls.RULES])
+    status, reason = status_of(ls.lint_skill(skill, root), "routing")
+    assert status == "finding" and "abgebrochen" in reason and "kaputt" in reason
+
+
+def test_description_accepts_yaml_block_scalars_and_use_whenever(tmp_path):
+    block = GOOD_SKILL_MD.replace(f"description: {GOOD_DESC}", "description: >\n  Use whenever a note needs a tag.\n  Not for writing the note.")
+    root, skill = make_repo(tmp_path, block)
+    assert status_of(ls.lint_skill(skill, root), "description")[0] == "pass"
+    assert status_of(ls.lint_skill(skill, root), "frontmatter")[0] == "pass"
+
+
+def test_evals_exist_rejects_empty_lists_like_evalkit(tmp_path):
+    root, skill = make_repo(tmp_path, evals={"evals": []})
+    assert status_of(ls.lint_skill(skill, root), "evals-exist")[0] == "finding"
+    root, skill = make_repo(tmp_path / "b", evals={"evals": [dict(GOOD_EVALS["evals"][0], must=[])]})
+    status, reason = status_of(ls.lint_skill(skill, root), "evals-exist")
+    assert status == "finding" and "must" in reason
+
+
+def test_asset_header_exception_needs_the_path_not_just_the_name(tmp_path):
+    root, skill = make_repo(tmp_path)
+    (skill / "assets").mkdir()
+    (skill / "assets" / "handoff.md").write_text("# kein Header\n", encoding="utf-8")
+    status, reason = status_of(ls.lint_skill(skill, root), "asset-headers")
+    assert status == "finding" and "handoff.md" in reason  # der Name steht in artifact-header.md, der Pfad nicht
+
+
+def test_diff_mode_works_when_repo_root_is_below_the_git_toplevel(tmp_path):
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    _git(outer, "init", "-q"); _git(outer, "config", "user.email", "t@x"); _git(outer, "config", "user.name", "t")
+    root, skill = make_repo(outer / "sub")
+    # make_repo legt "sub/repo" an
+    root = outer / "sub" / "repo"; skill = root / "skills" / "note-tag"
+    _git(outer, "add", "-A"); _git(outer, "commit", "-q", "-m", "basis")
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("name: note-tag", "name: note-tag\nversion: 2"), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["findings_mode"] == "new-vs-base" and data["evals_due"] is True and "Frontmatter" in data["evals_due_reason"]
+
+
+def test_diff_mode_content_lines_starting_with_dashes_do_not_shift_line_numbers(tmp_path):
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD.replace("## Contract\n", "## Contract\n\n-- Vorbemerkung --\n"))
+    md = skill / "SKILL.md"
+    text = md.read_text(encoding="utf-8").replace("-- Vorbemerkung --\n", "").replace("- Genau ein Tag.", "- Genau ein Tag, nie zwei.")
+    md.write_text(text, encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "Contract" in data["evals_due_reason"]
+
+
+def test_untracked_and_renamed_files_count_in_evals_due(tmp_path):
+    evals = {"evals": [dict(GOOD_EVALS["evals"][0], must_not=[{"type": "output_matches", "pattern": "Untagged:"}])]}
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD, evals=evals)
+    (skill / "references").mkdir()
+    (skill / "references" / "x.md").write_text("Untagged: wenn nichts passt\n", encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "Pattern" in data["evals_due_reason"]
+    (skill / "references" / "x.md").unlink(); (skill / "references").rmdir()
+    _git(root, "mv", "skills/note-tag/SKILL.md", "skills/note-tag/SKILL2.md")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is True and "SKILL.md gelöscht" in data["evals_due_reason"]
+
+
+def test_invalid_regex_pattern_is_reported_not_swallowed(tmp_path):
+    evals = {"evals": [dict(GOOD_EVALS["evals"][0], must=[{"type": "output_matches", "pattern": "^#(idea"}])]}
+    root, skill = make_git_repo(tmp_path, GOOD_SKILL_MD, evals=evals)
+    md = skill / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("1. Tag wählen.", "1. Tag wählen, sonst nichts."), encoding="utf-8")
+    rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
+    assert data["evals_due"] is False and "ungültigem Regex" in data["evals_due_reason"]

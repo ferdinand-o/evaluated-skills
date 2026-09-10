@@ -12,13 +12,13 @@ Keinen zweiten, keinen neuen.
 
 1. Notiz lesen, Tag aus der Tabelle wählen.
 2. Tag als erste Zeile schreiben: `#idea`, `#task` oder `#ref`.
-3. Fertig. Keine Zusammenfassung, keine Rückfrage.
+3. Passt keiner: erste Zeile Untagged: mit einem Wort Begründung, nie ein vierter Tag.
+4. Fertig. Keine Zusammenfassung, keine Rückfrage.
 
 ## Contract
 
 - Genau ein Tag je Notiz. Die Skill verlangt es; ein Hook fehlt, nichts blockiert.
-- Passt kein Tag, steht in der ersten Zeile `Untagged:` mit einem Wort Begründung —
-  nie ein vierter Tag.
+- Kein vierter Tag, keine Zusammenfassung unter dem Tag.
 
 ## Abgrenzung
 

@@ -36,7 +36,7 @@
       "id": "token-change-makes-evals-due",
       "class": "contract",
       "fixture": "sf-existing",
-      "prompt": "Nutze skill-forge: ändere in skills/note-tag/SKILL.md den Token `Untagged:` zu `Untagged →`.",
+      "prompt": "Nutze skill-forge: ändere in skills/note-tag/SKILL.md in Ablauf-Schritt 3 den Token Untagged: zu Untagged →",
       "must": [
         {
           "type": "file_matches",
@@ -45,7 +45,7 @@
         }
       ],
       "must_not": [],
-      "notes": "Gegenstück zu anti-ceremony-one-sentence-change-lints-only, eigener Prompt (ein Prompt je Eval). Der Token steht in einem must_not-Pattern der evals.json (Untagged:\\s*$); die geänderte Zeile trifft es per re.search, also evals_due: true. Diskriminator: Ein Basismodell sieht keinen Zusammenhang zwischen einem Wort in der SKILL.md und einer Assertion in einer anderen Datei — der Zusammenhang existiert nur im Diff-Modus des Lints."
+      "notes": "Gegenstück zu anti-ceremony-one-sentence-change-lints-only, eigener Prompt (ein Prompt je Eval). Die Zeile liegt im Ablauf, nicht im Contract und nicht im Frontmatter — evals_due: true entsteht allein aus dem Pattern-Zweig: das must_not-Pattern Untagged: der evals.json trifft die geänderte Zeile per re.search. Der Schema-Test bindet den Grund (evals_due_reason nennt das Pattern), nicht nur den Wert. Diskriminator: Ein Basismodell sieht keinen Zusammenhang zwischen einem Wort in der SKILL.md und einer Assertion in einer anderen Datei — der Zusammenhang existiert nur im Diff-Modus des Lints."
     },
     {
       "id": "gate-word-without-hook-is-reported",

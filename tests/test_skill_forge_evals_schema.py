@@ -8,10 +8,9 @@ voraussetzen.
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
-from conftest import REPO_ROOT, load_script
+from conftest import REPO_ROOT, git, load_script
 from evalkit.schema import load_evals
 
 ls = load_script("skills/skill-forge/scripts/lint_skill.py")
@@ -82,18 +81,14 @@ def test_gate_and_noanti_patterns_grip_real_script_output(tmp_path):
         assert not re.search(pattern, clean, re.MULTILINE)
 
 
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
-
-
 def _existing_repo(tmp_path: Path) -> Path:
     root = tmp_path / "ws"
     shutil.copytree(FIXTURES / "sf-existing", root, ignore=shutil.ignore_patterns("fixture.json"))
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "t")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "fixture baseline")
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "t@example.com")
+    git(root, "config", "user.name", "t")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "fixture baseline")
     return root
 
 
@@ -105,7 +100,7 @@ def test_diff_mode_patterns_grip_real_script_output_for_both_prompts(tmp_path):
     md = root / "skills" / "note-tag" / "SKILL.md"
     original = md.read_text(encoding="utf-8")
 
-    sentence = original.replace("3. Fertig. Keine Zusammenfassung, keine Rückfrage.", "3. Fertig — keine Zusammenfassung, keine Rückfrage.")
+    sentence = original.replace("4. Fertig. Keine Zusammenfassung, keine Rückfrage.", "4. Fertig — keine Zusammenfassung, keine Rückfrage.")
     assert sentence != original
     md.write_text(sentence, encoding="utf-8")
     text = _lint_json(root / "skills" / "note-tag", root / LINT_PATH, "--base", "HEAD", "--repo-root", str(root))
@@ -113,12 +108,15 @@ def test_diff_mode_patterns_grip_real_script_output_for_both_prompts(tmp_path):
         assert bool(re.search(pattern, text, re.MULTILINE)) is expected, pattern
     assert json.loads(text)["new_findings"] == []
 
-    token = original.replace("`Untagged:`", "`Untagged →`")
+    token = original.replace("erste Zeile Untagged: mit", "erste Zeile Untagged → mit")
     assert token != original
     md.write_text(token, encoding="utf-8")
     text = _lint_json(root / "skills" / "note-tag", root / LINT_PATH, "--base", "HEAD", "--repo-root", str(root))
     for pattern, expected in _lint_patterns(evals["token-change-makes-evals-due"]):
         assert bool(re.search(pattern, text, re.MULTILINE)) is expected, pattern
+    # Der Grund ist der Pattern-Zweig, nicht der Contract — sonst misst Eval 2 nichts Eigenes.
+    reason = json.loads(text)["evals_due_reason"]
+    assert "Pattern" in reason and "Contract" not in reason, reason
 
 
 def test_routing_eval_binds_to_house_vocabulary_the_fixture_does_not_name():
