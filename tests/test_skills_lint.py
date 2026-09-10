@@ -42,17 +42,10 @@ KNOWN_FINDINGS: dict[str, frozenset[str]] = {
 KNOWN_FINDINGS_MAX_PAIRS = 79
 
 
-# Bis Task 13 des Plans (Nachbarn, known-limits, Report) fehlen skill-forge noch die
-# Repo-Dateien, die routing und report-section prüfen. Solange steht die Skill hier
-# statt im Register — ein Register-Eintrag wäre ein Altbefund, das hier ist ein Bau.
-_UNDER_CONSTRUCTION = {"skill-forge"}
-
-
 def _skills() -> list[Path]:
     """Ein Skill ist ein Ordner mit SKILL.md. Ein Ordner, der nur Skripte trägt, ist
     noch keiner — er wird gelintet, sobald seine SKILL.md existiert."""
-    return sorted(p for p in SKILLS_DIR.iterdir()
-                  if p.is_dir() and (p / "SKILL.md").is_file() and p.name not in _UNDER_CONSTRUCTION)
+    return sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir() and (p / "SKILL.md").is_file())
 
 
 def _report(skill: Path):
@@ -90,7 +83,6 @@ def test_register_never_grows():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="skill-forge ist bis Task 13 des Plans im Bau (SKILL.md, Nachbarn, known-limits, Report)")
 def test_skill_forge_itself_is_clean_with_an_empty_register():
     """Selbstbezug (Spec 17): die Skill besteht ihren eigenen Lint ohne Register."""
     assert "skill-forge" not in KNOWN_FINDINGS

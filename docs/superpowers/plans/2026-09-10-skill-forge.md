@@ -317,7 +317,7 @@ aufrufen können.
 - Consumes: `known_findings`, `skill_forge_evals`, `skill_forge_skill`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — was entstanden ist, die Entscheidungen (Diff-Modus,
+- [x] **Step 1: Report** — was entstanden ist, die Entscheidungen (Diff-Modus,
       `hint`-Status, Skriptpfad), die Messung des ersten Lint-Laufs über alle Skills mit
       Datum, „Was nicht gemessen wurde". Danach `lint_skill.py skills/skill-forge`
       vollständig sauber. Commit.
