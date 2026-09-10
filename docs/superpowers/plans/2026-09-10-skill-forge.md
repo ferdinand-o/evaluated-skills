@@ -191,11 +191,11 @@ aufrufen können.
 - Consumes: `file:skills/impl-plan/references/reviewer-prompt.md`
 - Produces: `reviewer_prompt_md`
 
-- [ ] **Step 1: Schreiben** — Bau-Review durch einen Subagenten mit frischem Kontext:
+- [x] **Step 1: Schreiben** — Bau-Review durch einen Subagenten mit frischem Kontext:
       Eingaben Spec, Plan, Skill-Ordner, `lint.json`; Kategorien Spec-Abgleich,
       Diskriminator je Eval, Gate-Ehrlichkeit, Nachbarn, Zahlen nachmessen; Kalibrierung
       und Ausgabeformat wie in `impl-plan`s Reviewer-Prompt.
-- [ ] **Step 2: Prüfen** — Prompt verlangt Belege (Datei:Zeile) und eigene Messung; kein
+- [x] **Step 2: Prüfen** — Prompt verlangt Belege (Datei:Zeile) und eigene Messung; kein
       Platzhalterwort. Commit.
 
 ### Task 8: assets/skill-template
