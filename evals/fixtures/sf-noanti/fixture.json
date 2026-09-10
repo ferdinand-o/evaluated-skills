@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Skill quiet-log mit evals.json ohne eine ID mit Präfix anti-ceremony-; evals/ liegt im Workspace, damit die Regel geprüft ist und finding meldet."
+}

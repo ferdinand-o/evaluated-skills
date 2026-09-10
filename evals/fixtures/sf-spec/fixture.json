@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Routing-Fixture: gekürzte Spec 00 ohne §2 und ohne das Eval-Vokabular (class, must, anti-ceremony), dazu eine Zwei-Absatz-Spec für eine Tier-0-Skill reminder. Nichts unter evals/ — der Glob evals/*/evals.json trifft nur, was die Skill schreibt."
+}

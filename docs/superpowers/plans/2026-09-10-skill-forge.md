@@ -232,7 +232,7 @@ aufrufen können.
 - Consumes: `token:evals_due`, `token:findings_mode`
 - Produces: `skill_forge_evals`
 
-- [ ] **Step 1: Fixtures** — `sf-existing`: Mini-Skill `note-tag` mit `evals.json`
+- [x] **Step 1: Fixtures** — `sf-existing`: Mini-Skill `note-tag` mit `evals.json`
       (ID-Präfix `anti-ceremony-`, Pattern `Untagged:`), Report mit Pflichtsektion,
       `docs/known-limits.md` mit `## note-tag`, `"git": true`, ein Commit — an der Basis
       lint-sauber, gemessen mit dem Skript; `sf-gate`: Skill `gate-demo` mit „blockiert
@@ -240,14 +240,14 @@ aufrufen können.
       `sf-noanti`: Skill mit `evals.json` ohne Präfix; `sf-spec`: gekürzte Spec 00 (§3–§5,
       ohne §2, ohne Eval-Vokabular) und `specs/Spec 30 – reminder.md`, nichts unter
       `evals/`. Keine Fixture bringt `.skills/cache/` mit.
-- [ ] **Step 2: Fünf Evals** wie in Spec 17, alle `contract`, ein Prompt je Eval,
+- [x] **Step 2: Fünf Evals** wie in Spec 17, alle `contract`, ein Prompt je Eval,
       `notes` mit Diskriminator: `anti-ceremony-one-sentence-change-lints-only`,
       `token-change-makes-evals-due`, `gate-word-without-hook-is-reported`,
       `missing-anti-ceremony-eval-is-reported`, `routing-new-skill-gets-house-evals`.
       Die `file_matches`-Muster escapen Klammern und Anführungszeichen; jedes Muster wird
       gegen eine vom Skript erzeugte `lint.json` getestet, nicht gegen eine von Hand
       geschriebene.
-- [ ] **Step 3: Schema-Test** — `load_evals` lädt fünf contract-Evals; Anti-Zeremonie-Eval
+- [x] **Step 3: Schema-Test** — `load_evals` lädt fünf contract-Evals; Anti-Zeremonie-Eval
       bindet an `lint.json`; jedes `lint.json`-Muster greift an einer echten Ausgabe des
       Skripts aus `sf-gate` und `sf-noanti` und nicht an der Ausgabe für `sf-existing`;
       keine Fixture enthält `.skills/cache/`; `sf-spec` enthält nichts unter `evals/`.

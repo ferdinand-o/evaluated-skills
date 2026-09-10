@@ -1,0 +1,19 @@
+{
+  "evals": [
+    {
+      "id": "log-line-is-written",
+      "class": "contract",
+      "fixture": "ql-empty",
+      "prompt": "Halte fest: Wir nehmen Postgres.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "LOG.md",
+          "pattern": "Postgres"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: LOG.md an diesem Ort."
+    }
+  ]
+}

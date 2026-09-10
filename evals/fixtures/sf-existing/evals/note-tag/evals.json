@@ -1,0 +1,23 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-one-note-gets-one-tag",
+      "class": "contract",
+      "fixture": "nt-one",
+      "prompt": "Tagge diese Notiz: „Wir könnten die Suche cachen.\"",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "^#(idea|task|ref)"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "output_matches",
+          "pattern": "Untagged:\\s*$"
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval. Diskriminator: das Hausvokabular #idea/#task/#ref in der ersten Zeile; ein Basismodell schreibt ein Wort, keinen Tag."
+    }
+  ]
+}
