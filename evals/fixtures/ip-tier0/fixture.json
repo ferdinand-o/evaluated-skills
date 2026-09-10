@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Spec einer Tier-0-Skill ohne Skript, die zwei wörtliche Ausgabe-Tokens mandatiert (Recap:, Open:). Die Evals sind hier das einzige Messinstrument — der Plan muss sie vor der SKILL.md bauen und die Tokens als token:-Interfaces führen. Nichts unter docs/superpowers/plans/."
+}

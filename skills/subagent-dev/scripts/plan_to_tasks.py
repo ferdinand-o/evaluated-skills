@@ -19,6 +19,7 @@ import argparse
 import ast
 import json
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -45,6 +46,11 @@ FILE_LIKE_SUFFIXES = (".py", ".md", ".json", ".yaml", ".yml", ".txt", ".sh")
 # "Consumes:"/"Produces:" ohne Backtick-Symbol, aber auch keine echte Prosa —
 # der explizite Leerfall, den der Plan selbst so benennt.
 NOTHING_NEW_RE = re.compile(r"^\(?nichts neues\)?\.?$", re.IGNORECASE)
+# Interface-Vokabular (Spec 16): `fn:name(args)`, `token:Name`, `file:pfad`.
+# Additiv zu nackten Bezeichnern; jedes andere Präfix bleibt fail-closed.
+PREFIXED_SYMBOL_RE = re.compile(r"`(fn|token|file):([^`]+)`")
+# Kopfzeile eines impl-plan-Plans (docs/artifact-header.md, Spec 16).
+PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*impl-plan\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
 # Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
 GLOB_CHARS = frozenset("*?[")
 
@@ -69,6 +75,9 @@ class PlanTask:
     produces: str
     interfaces_unknown: bool
     steps: list[str]
+    # `file:`-Konsumpfade aus Consumes (Spec 16) — fließen in die Pfad-Überlappung
+    # des Gates ein, nicht in den Symbolabgleich.
+    consumed_files: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -163,7 +172,7 @@ def _parse_files(block: str) -> tuple[list[FileRef], bool]:
 
 def _has_unrecognized_prose(text: str) -> bool:
     """True, wenn `text` etwas außer Backtick-Symbolen oder dem expliziten
-    Leerfall "nichts Neues" enthält — Prosa, aus der `extract_produced_symbols`
+    Leerfall "nichts Neues" enthält — Prosa, aus der `extract_symbols`
     kein Symbol ziehen kann, aber die trotzdem eine echte Abhängigkeit benennen
     könnte (Fix D3). Enthält der Text ein Backtick, gilt er als geparst, auch
     wenn drumherum Prosa steht — sonst wäre "Consumes: `parse()` aus Task 1"
@@ -177,18 +186,64 @@ def _has_unrecognized_prose(text: str) -> bool:
     return "`" not in stripped
 
 
-def _parse_interfaces(block: str) -> tuple[str, str, bool]:
+BACKTICK_SPAN_RE = re.compile(r"`([^`]+)`")
+
+
+def _interface_lines(block: str) -> tuple[str, str, list[str]]:
+    """Consumes-/Produces-Zeile und alle übrigen nicht-leeren Zeilen des
+    Interfaces-Blocks. Zeilengenau: Früher lief `Produces:` bis zum ersten Step
+    und schluckte erklärende Prosa darunter — das machte die Task unbekannt und
+    erzeugte ein `sequential` mit falscher Begründung (known-limits, Einsatz an
+    Spec 15). Die Prosa wird jetzt separat zurückgegeben, damit `lint` sie
+    benennen kann, statt dass sie das Verdikt still verschiebt.
+    """
     text = _section(block, "**Interfaces:**", ("\n- [ ]", "\n- [x]", "\n- [X]"))
-    consumes = ""
-    produces = ""
-    consumes_start = text.find("- Consumes:")
-    produces_start = text.find("- Produces:")
-    if consumes_start != -1:
-        end = produces_start if produces_start > consumes_start else len(text)
-        consumes = text[consumes_start + len("- Consumes:"):end].strip()
-    if produces_start != -1:
-        produces = text[produces_start + len("- Produces:"):].strip()
-    interfaces_unknown = _has_unrecognized_prose(consumes) or _has_unrecognized_prose(produces)
+    fields: dict[str, list[str]] = {"consumes": [], "produces": []}
+    active: str | None = None
+    stray: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- Consumes:"):
+            active = "consumes"
+            fields[active].append(stripped[len("- Consumes:"):].strip())
+        elif stripped.startswith("- Produces:"):
+            active = "produces"
+            fields[active].append(stripped[len("- Produces:"):].strip())
+        elif stripped.startswith("-") and active is not None:
+            # Unter-Bullet je Symbol — die übliche Form in diesem Repo
+            # (`- Produces:` allein auf der Zeile, darunter eingerückt je ein
+            # Symbol). Gehört zum aktiven Feld, nie zur Prosa.
+            fields[active].append(stripped)
+        else:
+            stray.append(stripped)
+    consumes = " ".join(s for s in fields["consumes"] if s).strip()
+    produces = " ".join(s for s in fields["produces"] if s).strip()
+    return consumes, produces, stray
+
+
+def unextractable_backtick_spans(text: str) -> list[str]:
+    """Backtick-Ausdrücke, aus denen `extract_symbols` kein Symbol zieht.
+
+    Das ist die Lücke, die das Gate still geöffnet hat (known-limits, Einsatz an
+    Spec 15): ``Unverified:``, ``Next:``, ``effort-ladder`` sind keine
+    gültigen Bezeichner, liefern null Symbole — und galten trotzdem nicht als
+    unbekannt, weil ein Backtick vorhanden war. Kein Symbol *und* nichts
+    Unbekanntes hieß: keine Abhängigkeit. Jetzt gilt jeder solche Ausdruck als
+    unbekannt (fail-closed), und `lint` sagt, welcher.
+    """
+    return [span for span in BACKTICK_SPAN_RE.findall(text) if symbol_kind(span) is None]
+
+
+def _parse_interfaces(block: str) -> tuple[str, str, bool]:
+    consumes, produces, _stray = _interface_lines(block)
+    interfaces_unknown = (
+        _has_unrecognized_prose(consumes)
+        or _has_unrecognized_prose(produces)
+        or bool(unextractable_backtick_spans(consumes))
+        or bool(unextractable_backtick_spans(produces))
+    )
     return consumes, produces, interfaces_unknown
 
 
@@ -237,10 +292,11 @@ def parse_plan(text: str) -> PlanDoc:
         files, files_unknown = _parse_files(block)
         consumes, produces, interfaces_unknown = _parse_interfaces(block)
         steps = _parse_steps(block)
+        consumed_files = [name for kind, name, _ in extract_symbols(consumes) if kind == "file"]
         tasks.append(PlanTask(
             id=task_id, title=title, files=files, files_unknown=files_unknown,
             consumes=consumes, produces=produces, interfaces_unknown=interfaces_unknown,
-            steps=steps,
+            steps=steps, consumed_files=consumed_files,
         ))
 
     seen: set[int] = set()
@@ -298,30 +354,69 @@ def _paths_overlap(a: str, b: str) -> bool:
     return longer[: len(shorter)] == shorter or longer[len(longer) - len(shorter):] == shorter
 
 
-def extract_produced_symbols(text: str) -> list[tuple[str, int | None]]:
-    """Name + Arity aus \\`name(a, b)\\`-Backtick-Spans; bloße Symbole ohne Klammern
-    (Klassen, Konstanten) liefern Arity `None` — nur Präsenz wird geprüft."""
-    symbols: list[tuple[str, int | None]] = []
-    seen_names: set[str] = set()
-    for name, args in CALLABLE_RE.findall(text):
+def extract_symbols(text: str) -> list[tuple[str, str, int | None]]:
+    """Alle Interface-Symbole eines Consumes-/Produces-Texts als (kind, name, arity).
+
+    Drei Präfixe (Spec 16): `fn:parse(line)` — Aufrufbares mit Arity;
+    `token:Next` — wörtlicher Ausgabe-Token einer Doktrin; `file:docs/x.md` —
+    Lese-Abhängigkeit auf eine Datei. Ohne Präfix gilt die bisherige Regel:
+    ``name(a, b)`` ist ein Aufrufbares, ``Name`` ein Symbol ohne Arity, ein
+    Dateipfad kein Symbol. Jedes andere Präfix (`foo:bar`) bleibt unerkannt —
+    und damit fail-closed über `unextractable_backtick_spans`.
+    """
+    symbols: list[tuple[str, str, int | None]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(kind: str, name: str, arity: int | None) -> None:
+        if (kind, name) not in seen:
+            seen.add((kind, name))
+            symbols.append((kind, name, arity))
+
+    for kind, body in PREFIXED_SYMBOL_RE.findall(text):
+        body = body.strip()
+        if kind == "fn":
+            call = re.match(r"([A-Za-z_][A-Za-z0-9_.]*)\(([^)]*)\)$", body)
+            if call:
+                args = call.group(2).strip()
+                add("fn", call.group(1), 0 if not args else len([a for a in args.split(",") if a.strip()]))
+            elif re.match(r"[A-Za-z_][A-Za-z0-9_.]*$", body):
+                add("fn", body, None)
+        elif kind == "token" and body:
+            add("token", body, None)
+        elif kind == "file" and body:
+            add("file", body, None)
+
+    rest = PREFIXED_SYMBOL_RE.sub("", text)
+    for name, args in CALLABLE_RE.findall(rest):
         args = args.strip()
-        arity = 0 if not args else len([a for a in args.split(",") if a.strip()])
-        symbols.append((name, arity))
-        seen_names.add(name)
-    for name in BARE_SYMBOL_RE.findall(text):
-        if name in seen_names:
-            continue
+        add("fn", name, 0 if not args else len([a for a in args.split(",") if a.strip()]))
+    for name in BARE_SYMBOL_RE.findall(rest):
         if "/" in name or any(name.endswith(suf) for suf in FILE_LIKE_SUFFIXES):
             continue
-        symbols.append((name, None))
-        seen_names.add(name)
+        if ("fn", name) in seen:
+            continue
+        add("fn", name, None)
     return symbols
+
+
+def symbol_kind(span: str) -> str | None:
+    """Kind eines einzelnen Backtick-Inhalts, oder None, wenn er kein Symbol ist."""
+    found = extract_symbols(f"`{span}`")
+    return found[0][0] if found else None
+
+
+def _symbol_pattern(name: str) -> str:
+    """Wortgrenzen-sicheres Muster auch für Namen, die auf Nicht-Wortzeichen enden
+    (`Unverified:`) — `\\b` würde dort nie greifen."""
+    return rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])"
 
 
 def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
     """Name des Symbols, falls `consumer` etwas konsumiert, das `producer` produziert."""
-    for name, _ in extract_produced_symbols(producer.produces):
-        if re.search(rf"\b{re.escape(name)}\b", consumer.consumes):
+    for kind, name, _ in extract_symbols(producer.produces):
+        if kind == "file":
+            continue  # Pfad-Überlappung, siehe build_overlap_graph
+        if re.search(_symbol_pattern(name), consumer.consumes):
             return name
     return None
 
@@ -344,6 +439,13 @@ def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
                             break
                     if reason:
                         break
+                # `file:`-Konsumpfade (Spec 16): Wer eine Datei liest, die ein
+                # anderer Task schreibt, hängt von ihm ab — Pfad gegen Files:.
+                if not reason:
+                    for consumed, writer in ((ta.consumed_files, tb.files), (tb.consumed_files, ta.files)):
+                        if any(_paths_overlap(c, f.path) for c in consumed for f in writer):
+                            reason = True
+                            break
 
             if not reason:
                 if ta.interfaces_unknown or tb.interfaces_unknown:
@@ -464,7 +566,7 @@ def _header(command: str) -> str:
 
 def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
     allowlist = [f.path for f in task.files]
-    produces = extract_produced_symbols(task.produces)
+    produces = [s for s in extract_symbols(task.produces) if s[0] != "file"]
     others = [f"Task {t.id} – {t.title}" for t in doc.tasks if t.id != task.id]
 
     allowlist_md = "\n".join(f"- `{p}`" for p in allowlist) if allowlist else (
@@ -477,7 +579,7 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
         "task_id": task.id,
         "plan": plan_path,
         "allowlist": allowlist,
-        "produces": [{"name": n, "arity": a} for n, a in produces],
+        "produces": [{"kind": k, "name": n, "arity": a} for k, n, a in produces],
     }
 
     return (
@@ -588,8 +690,14 @@ def check_allowlist(worktree: Path, base_ref: str, allowlist: list[str]) -> list
     return [path for path in changed if not any(_paths_overlap(path, allowed) for allowed in allowlist)]
 
 
-def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple[str, int | None]]) -> list[dict]:
-    """Prüfe deklarierte Produces-Symbole per `ast` gegen die Allowlist-Dateien.
+def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) -> list[dict]:
+    """Prüfe deklarierte Produces-Symbole gegen die Allowlist-Dateien, nach kind.
+
+    `fn` per `ast` (Name + Arity), `token` per Textsuche des Namens in den
+    Allowlist-Dateien — ein Doktrin-Token steht in einer SKILL.md, nicht in einem
+    Funktionskopf, und `ast` würde ihn für jeden Doktrin-Task als `missing`
+    melden (Spec-16-Review). Einträge dürfen (name, arity) oder (kind, name,
+    arity) sein; ohne kind gilt `fn`.
 
     Nie ein Import — fremder Code aus einem gerade dispatchten Agenten wird
     ausschließlich statisch gelesen (Vorab-Entscheidung A3).
@@ -621,8 +729,28 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple[st
             elif isinstance(node, ast.ClassDef):
                 found.setdefault(node.name, []).append(-1)  # -1: keine Arity, nur Präsenz
 
+    normalized: list[tuple[str, str, int | None]] = [
+        (entry[0], entry[1], entry[2]) if len(entry) == 3 else ("fn", entry[0], entry[1]) for entry in produces
+    ]
+    text_cache: dict[str, str] = {}
     results: list[dict] = []
-    for name, expected_arity in produces:
+    for kind, name, expected_arity in normalized:
+        if kind == "token":
+            hit = False
+            for relpath in allowlist:
+                path = worktree / relpath
+                if not path.is_file():
+                    continue
+                if relpath not in text_cache:
+                    text_cache[relpath] = path.read_text(encoding="utf-8", errors="replace")
+                if name in text_cache[relpath]:
+                    hit = True
+                    break
+            results.append({
+                "name": name, "status": "present" if hit else "missing",
+                "detail": f"token {'gefunden' if hit else 'in keiner Allowlist-Datei gefunden'} (Textsuche)",
+            })
+            continue
         if name not in found:
             results.append({"name": name, "status": "missing", "detail": "in keiner Allowlist-Datei gefunden"})
             continue
@@ -698,7 +826,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     worktree = Path(args.worktree)
     allowlist = block["allowlist"]
-    produces = [(p["name"], p["arity"]) for p in block["produces"]]
+    # `kind` fehlt in Task-Dateien vor Spec 16 — dann gilt `fn`, wie bisher.
+    produces = [(p.get("kind", "fn"), p["name"], p["arity"]) for p in block["produces"]]
 
     # Fix D1: Ohne --base wird die Allowlist-Prüfung nicht "bestanden", sondern
     # übersprungen — und ein übersprungenes Gate meldet nie stillschweigend
@@ -756,6 +885,323 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+
+# --------------------------------------------------------------------------
+# Lint — sagt, *warum* das Gate eine Task für unsicher hält (G2: meldet, blockiert nicht)
+# --------------------------------------------------------------------------
+
+PLACEHOLDER_RE = re.compile(r"\b(TBD|TODO|FIXME|XXX)\b|\?\?\?|<platzhalter>|<placeholder>", re.IGNORECASE)
+SPEC_LINE_RE = re.compile(r"^\*\*Spec:\*\*\s*`([^`]+)`", re.MULTILINE)
+KNOWN_FILE_VERBS = ("Create", "Modify", "Test", "Delete", "Rename")
+
+
+@dataclass(frozen=True)
+class LintFinding:
+    task_id: int | None  # None = Plan-Ebene
+    message: str
+
+    def render(self) -> str:
+        where = "Plan" if self.task_id is None else f"Task {self.task_id}"
+        return f"{where}: {self.message}"
+
+
+def _explain_files(block: str) -> list[str]:
+    files_text = _section(block, "**Files:**", ("**Interfaces:**", "\n- [ ]", "\n- [x]", "\n- [X]"))
+    if "**Files:**" not in block:
+        return ["files_unknown: kein **Files:**-Block"]
+    reasons: list[str] = []
+    for line in BULLET_LINE_RE.findall(files_text):
+        if FILE_LINE_RE.match(line) or RENAME_LINE_RE.match(line):
+            continue
+        reasons.append(
+            f"files_unknown: Bullet-Zeile ohne bekanntes Verb {KNOWN_FILE_VERBS}: {line.strip()!r}"
+        )
+    if not BULLET_LINE_RE.findall(files_text):
+        reasons.append("files_unknown: **Files:**-Block ohne Bullet-Zeilen")
+    return reasons
+
+
+def check_header(text: str) -> str | None:
+    """Befund, falls die erste nicht-leere Zeile keine impl-plan-Kopfzeile ist."""
+    for line in text.splitlines():
+        if line.strip():
+            if PLAN_HEADER_RE.match(line.strip()):
+                return None
+            if line.strip().startswith("<!--"):
+                return f"Kopfzeile fremd oder fehlerhaft: {line.strip()[:70]!r}"
+            return "Kopfzeile fehlt (docs/artifact-header.md, skill: impl-plan)"
+    return "Datei leer, keine Kopfzeile"
+
+
+# Überschrift des Evals-Abschnitts: ab Ebene 2 (ein H1-Titel, der „Evals" nennt,
+# machte sonst das ganze Dokument zum Abschnitt) und mit dem ganzen Wort — „Evaluation
+# der Alternativen" ist kein Evals-Abschnitt, „Eval-Tabelle" und „§2 Evals" schon.
+EVAL_HEADING_RE = re.compile(r"^(#{2,6})\s+.*\bevals?\b", re.IGNORECASE)
+_ID_CELL_RE = re.compile(r"`([^`]+)`")
+
+
+def spec_eval_table(spec_text: str) -> tuple[list[str], list[str]] | None:
+    """Eval-Tabelle einer Spec: die erste Tabelle mit einer Spalte `id` **unter
+    einer Überschrift, die „Eval" enthält** (`### Evals`, `## §2 Evals`). Tabellen
+    anderswo — ein Contract mit einer Spalte `user_id` — zählen nicht. Liefert
+    (ids, fehlerhafte Zeilen): eine Zeile, deren id-Zelle gefüllt ist, aber keinen
+    Backtick-Wert trägt, wird gemeldet statt still übergangen. None, wenn es keine
+    solche Tabelle gibt — ältere Specs nennen Evals in Prosa, dort wird nicht geraten.
+    Codezäune sind maskiert: ein `# Kommentar` in einem Beispielblock ist keine
+    Überschrift. Tiefere Unterüberschriften schließen den Abschnitt nicht."""
+    lines = _mask_fenced_blocks(spec_text).splitlines()
+    in_evals, level = False, 0
+    for i, line in enumerate(lines):
+        heading = re.match(r"^(#{1,6})\s", line)
+        if heading:
+            depth = len(heading.group(1))
+            if in_evals and depth <= level:
+                in_evals = False
+            if not in_evals and EVAL_HEADING_RE.match(line):
+                in_evals, level = True, depth
+            continue
+        if not in_evals or not line.lstrip().startswith("|"):
+            continue
+        cells = [c.strip().strip("`").lower() for c in line.strip().strip("|").split("|")]
+        if "id" not in cells:
+            continue
+        idx = cells.index("id")
+        ids: list[str] = []
+        malformed: list[str] = []
+        for row in lines[i + 1:]:
+            if not row.lstrip().startswith("|"):
+                break
+            row_cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if len(row_cells) <= idx or set(row_cells[idx]) <= set("-: "):
+                continue
+            match = _ID_CELL_RE.search(row_cells[idx])
+            if match:
+                ids.append(match.group(1))
+            elif row_cells[idx]:
+                malformed.append(row_cells[idx])
+        return ids, malformed
+    return None
+
+
+def spec_eval_ids(spec_text: str) -> list[str] | None:
+    """Nur die IDs der Eval-Tabelle (siehe `spec_eval_table`); None ohne Tabelle."""
+    table = spec_eval_table(spec_text)
+    return None if table is None else table[0]
+
+
+def _task_blocks(masked: str) -> list[tuple[int, re.Match, str]]:
+    """(task_id, header, block) je Task. Ein Block endet am nächsten `### Task`-Header
+    oder an der nächsten Überschrift bis Ebene 3 — ein `## Notizen` hinter dem letzten
+    Task gehört zu keinem Task, und was dort steht, deckt keine Eval-ID."""
+    headers = list(TASK_HEADER_RE.finditer(masked))
+    stops = [m.start() for m in re.finditer(r"^#{1,3}\s", masked, re.MULTILINE)]
+    blocks = []
+    for header in headers:
+        end = next((s for s in stops if s > header.start()), len(masked))
+        blocks.append((int(header.group(1)), header, masked[header.end():end]))
+    return blocks
+
+
+def _id_pattern(eval_id: str) -> str:
+    """Eine Eval-ID zählt nur als ganzes Wort — `note-carries-header` steckt sonst
+    in `stale-note-carries-header-foo` und gälte als abgedeckt."""
+    return rf"(?<![A-Za-z0-9_-]){re.escape(eval_id)}(?![A-Za-z0-9_-])"
+
+
+def lint_meta(plan_path: Path | str, spec: Path | str | None = None, skill: str | None = None) -> dict:
+    """`generated` ist das Kommando, so wie man es erneut eintippen würde
+    (docs/artifact-header.md) — mit `--spec`/`--skill`, sonst reproduziert es
+    die Befunde nicht."""
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py lint {shlex.quote(str(plan_path))}"
+    if spec is not None:
+        cmd += f" --spec {shlex.quote(str(spec))}"
+    if skill:
+        cmd += f" --skill {shlex.quote(skill)}"
+    return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
+
+
+def _resolve_near(plan_path: Path | None, rel: Path) -> Path | None:
+    candidates = [rel]
+    if plan_path is not None:
+        candidates += [parent / rel for parent in plan_path.resolve().parents]
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def _explain_interfaces(block: str) -> list[str]:
+    if "**Interfaces:**" not in block:
+        return ["interfaces_unknown: kein **Interfaces:**-Block"]
+    consumes, produces, stray = _interface_lines(block)
+    reasons: list[str] = []
+    for label, text in (("Consumes", consumes), ("Produces", produces)):
+        if _has_unrecognized_prose(text):
+            reasons.append(f"interfaces_unknown: {label} ist Prosa ohne Backtick-Symbol: {text!r}")
+        for span in unextractable_backtick_spans(text):
+            reasons.append(
+                f"interfaces_unknown: {label} nennt `{span}` — kein gültiger Bezeichner "
+                f"([A-Za-z_][A-Za-z0-9_.]*), kein Symbol extrahierbar (fail-closed)"
+            )
+    for kind, name, _ in extract_symbols(produces):
+        if kind == "file":
+            reasons.append(f"Produces nennt `file:{name}` — eine erzeugte Datei gehört in **Files:**, nicht in Produces")
+    for line in stray:
+        reasons.append(f"Prosa im Interfaces-Block, weder Consumes noch Produces: {line!r}")
+    return reasons
+
+
+@dataclass
+class LintReport:
+    findings: list[LintFinding]
+    coverage: dict
+
+
+def lint_report(
+    text: str,
+    plan_path: Path | None = None,
+    spec_path: Path | None = None,
+    skill: str | None = None,
+) -> LintReport:
+    """Befunde plus Coverage-Status. Wirft `PlanParseError` bei unparsbarem Plan
+    — das ist kein Befund, das ist das Ende der Prüfung.
+
+    Spec-Coverage (jede Eval-ID der Eval-Tabelle kommt in einem Task-Block vor)
+    läuft gegen `spec_path` oder, ohne `--spec`, gegen die Datei aus der eigenen
+    `**Spec:**`-Zeile — Coverage ist eine Eigenschaft des Plans, nicht des
+    Aufrufs. `coverage["status"]` sagt `checked` oder `unchecked` mit Grund;
+    ein übersprungener Abgleich sieht nie aus wie ein bestandener.
+    `skill`: IDs aus `evals/<skill>/evals.json` müssen in der Spec vorkommen.
+    Alles Befunde, keine Abbrüche (G2: meldet)."""
+    doc = parse_plan(text)
+    findings: list[LintFinding] = []
+    masked = _mask_fenced_blocks(text)
+
+    header_problem = check_header(text)
+    if header_problem:
+        findings.append(LintFinding(None, header_problem))
+
+    for field_name in ("**Goal:**", "**Spec:**"):
+        if field_name not in masked:
+            findings.append(LintFinding(None, f"Kopffeld {field_name} fehlt"))
+    spec_match = SPEC_LINE_RE.search(masked)
+    if spec_match:
+        spec_ref = Path(spec_match.group(1))
+        resolved = _resolve_near(plan_path, spec_ref)
+        if resolved is None:
+            findings.append(LintFinding(None, f"**Spec:** zeigt auf {spec_ref} — Datei nicht gefunden"))
+        elif spec_path is None:
+            spec_path = resolved
+        elif resolved.resolve() != Path(spec_path).resolve():
+            findings.append(LintFinding(None, f"--spec {spec_path} weicht von der **Spec:**-Zeile ab ({spec_ref}) — eines von beiden ist falsch"))
+    elif "**Spec:**" in masked:
+        findings.append(LintFinding(None, "**Spec:** ohne Backtick-Pfad — der Lint kann die Spec nicht auflösen, Coverage bleibt ungeprüft"))
+
+    coverage: dict = {
+        "spec": str(spec_path) if spec_path is not None else None,
+        "eval_table": False,
+        "ids_checked": 0,
+        "evals_file": None,
+        "status": "unchecked",
+        "reason": "keine Spec: weder --spec noch eine auflösbare **Spec:**-Zeile",
+    }
+    blocks = _task_blocks(masked)
+    task_region = "\n".join(block for _, _, block in blocks)
+    if spec_path is not None:
+        spec_text = spec_path.read_text(encoding="utf-8")
+        table = spec_eval_table(spec_text)
+        if table is None:
+            coverage["reason"] = "keine Eval-Tabelle mit Spalte `id` unter einer Evals-Überschrift in der Spec"
+        else:
+            ids, malformed = table
+            coverage.update(eval_table=True, ids_checked=len(ids), status="checked", reason=None)
+            for cell in malformed:
+                findings.append(LintFinding(None, f"Eval-Tabelle der Spec: id-Zelle ohne Backtick-Wert, nicht prüfbar: {cell!r}"))
+            for eval_id in ids:
+                if not re.search(_id_pattern(eval_id), task_region):
+                    findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus der Spec hat keinen Task"))
+        if skill:
+            evals_file = _resolve_near(plan_path, Path("evals") / skill / "evals.json")
+            if evals_file is None:
+                findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht gefunden (--skill)"))
+            else:
+                coverage["evals_file"] = str(evals_file)
+                try:
+                    listed = [e.get("id", "") for e in json.loads(evals_file.read_text(encoding="utf-8")).get("evals", [])]
+                except (json.JSONDecodeError, AttributeError) as exc:
+                    listed = []
+                    findings.append(LintFinding(None, f"evals/{skill}/evals.json nicht lesbar: {exc}"))
+                for eval_id in listed:
+                    if eval_id and not re.search(_id_pattern(eval_id), spec_text):
+                        findings.append(LintFinding(None, f"Eval-ID `{eval_id}` aus evals/{skill}/evals.json fehlt in der Spec"))
+    elif skill:
+        findings.append(LintFinding(None, f"--skill {skill} ohne Spec: Abgleich evals/{skill}/evals.json ↔ Spec nicht möglich"))
+
+    for m in PLACEHOLDER_RE.finditer(masked):
+        line_no = masked.count("\n", 0, m.start()) + 1
+        findings.append(LintFinding(None, f"Platzhalter {m.group(0)!r} in Zeile {line_no}"))
+
+    for task_id, header, block in blocks:
+        task = next(t for t in doc.tasks if t.id == task_id)
+        if task.files_unknown:
+            findings.extend(LintFinding(task_id, r) for r in _explain_files(block))
+        for r in _explain_interfaces(block):
+            findings.append(LintFinding(task_id, r))
+        if not task.steps:
+            findings.append(LintFinding(task_id, "keine Steps im Format `- [ ] **Step N: …**`"))
+    return LintReport(findings, coverage)
+
+
+def lint_plan(
+    text: str,
+    plan_path: Path | None = None,
+    spec_path: Path | None = None,
+    skill: str | None = None,
+) -> list[LintFinding]:
+    """Nur die Befunde — siehe `lint_report` für den Coverage-Status."""
+    return lint_report(text, plan_path, spec_path=spec_path, skill=skill).findings
+
+
+def _cmd_lint(args: argparse.Namespace) -> int:
+    plan_path = Path(args.plan)
+    try:
+        text = plan_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Plan nicht lesbar: {exc}", file=sys.stderr)
+        return 2
+    spec_path = Path(args.spec) if args.spec else None
+    if spec_path is not None and not spec_path.is_file():
+        print(f"Spec nicht gefunden: {spec_path}", file=sys.stderr)
+        return 2
+    try:
+        report = lint_report(text, plan_path, spec_path=spec_path, skill=args.skill)
+    except PlanParseError as exc:
+        print(f"Plan nicht parsbar: {exc}", file=sys.stderr)
+        return 2
+    findings = report.findings
+    if report.coverage["status"] != "checked":
+        print(f"Hinweis: Spec-Coverage NICHT geprüft — {report.coverage['reason']}.")
+    else:
+        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} Eval-ID(s) aus {report.coverage['spec']}.")
+
+    if findings:
+        for f in findings:
+            print(f.render())
+        print(f"{len(findings)} Befund(e). Das Gate wertet jede unsichere Task als Abhängigkeit — "
+              f"Befunde beheben, nicht umformulieren, bis es 'parallel' sagt.")
+    else:
+        print("Keine Befunde — Plan ist für das Gate vollständig lesbar.")
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "_meta": lint_meta(plan_path, spec=args.spec, skill=args.skill),
+            "plan": str(plan_path),
+            "coverage": report.coverage,
+            "findings": [{"task": f.task_id, "message": f.message} for f in findings],
+            "status": "clean" if not findings else "findings",
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return 1 if findings else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan -> Tasks für subagent-dev")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -765,6 +1211,13 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--tasks", help="Kommagetrennte Task-IDs, sonst alle")
     gen.add_argument("--out-dir", default=str(Path(".skills") / "cache" / "tasks"))
     gen.set_defaults(func=_cmd_generate)
+
+    lint = sub.add_parser("lint", help="Plan prüfen: warum ist eine Task unsicher, wo stehen Platzhalter, fehlt etwas im Kopf")
+    lint.add_argument("plan", help="Pfad zum Plan")
+    lint.add_argument("--spec", help="Spec-Datei: jede Eval-ID ihrer Eval-Tabelle braucht einen Task")
+    lint.add_argument("--skill", help="Skill-Name: IDs aus evals/<skill>/evals.json müssen in der Spec vorkommen")
+    lint.add_argument("--out", help="Befunde zusätzlich als JSON-Artefakt schreiben")
+    lint.set_defaults(func=_cmd_lint)
 
     ver = sub.add_parser("verify", help="Allowlist + Produces-Signaturen gegen einen Worktree prüfen")
     ver.add_argument("--task-file", required=True)

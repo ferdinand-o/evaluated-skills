@@ -1,6 +1,6 @@
 ---
 name: subagent-dev
-description: Use when a superpowers:writing-plans plan exists and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that superpowers:subagent-driven-development does not have. Not for writing the plan itself (use superpowers:writing-plans) and not for auftragslose ad-hoc delegation without a plan (use superpowers:subagent-driven-development directly, or writing-plans first).
+description: Use when an impl-plan plan exists (or a superpowers:writing-plans plan, for repos without impl-plan) and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that superpowers:subagent-driven-development does not have. Not for writing the plan itself (use impl-plan) and not for auftragslose ad-hoc delegation without a plan (use superpowers:subagent-driven-development directly, or impl-plan first).
 ---
 
 # subagent-dev — Gate vor Dispatch, Task-Datei statt Historie
@@ -11,14 +11,18 @@ kein Fehlschlag.
 
 ## Ablauf
 
-1. **Plan vorhanden?** Kein Plan → `superpowers:writing-plans` zuerst. Diese
-   Skill parst nur `### Task N:`-Blöcke im `writing-plans`-Format.
+1. **Plan vorhanden?** Kein Plan → `impl-plan` zuerst. Diese Skill parst nur
+   `### Task N:`-Blöcke im Format des impl-plan-Templates (aus `writing-plans`
+   übernommen).
 2. **Gate fällen und Task-Dateien erzeugen:**
    ```bash
    python skills/subagent-dev/scripts/plan_to_tasks.py generate docs/superpowers/plans/<plan>.md
    ```
    Schreibt `.skills/cache/tasks/gate.json` (Verdikt + Begründung) und je Task
-   eine Handoff-Datei. `--tasks 3,4,5` beschränkt auf eine Teilmenge, z. B. die
+   eine Handoff-Datei. Sagt das Gate `sequential` und du verstehst nicht warum:
+   `plan_to_tasks.py lint <plan>` nennt pro Task den Grund für
+   `files_unknown`/`interfaces_unknown`, Prosa im Interfaces-Block, Platzhalter
+   und fehlende Steps — und endet mit Exit 2, wenn der Plan gar nicht parst. `--tasks 3,4,5` beschränkt auf eine Teilmenge, z. B. die
    noch offenen Tasks eines laufenden Plans.
 3. **Verdikt lesen, nicht überstimmen:**
    - `parallel` → die genannte `parallel_group` läuft je in einem eigenen
@@ -79,8 +83,13 @@ kein Fehlschlag.
   existieren und keine eindeutig zur erwarteten Signatur passt.
 - **Überlappung ist konservativ:** unparsbare/leere `Files:`, eine
   Files:-Zeile mit unbekanntem Vokabular, Prosa ohne Backtick-Symbol in
-  `Consumes:`/`Produces:`, oder ein Interface-Symbol, das eine andere Task
-  konsumiert, gilt jeweils als Abhängigkeit. Datei-Pfade werden dabei
+  `Consumes:`/`Produces:`, ein Backtick-Ausdruck, der weder Bezeichner noch
+  bekanntes Präfix ist (fail-closed), ein Interface-Symbol, das eine andere Task
+  konsumiert, oder eine `file:`-Abhängigkeit auf eine Datei, die eine andere Task
+  schreibt, gilt jeweils als Abhängigkeit. Drei Präfixe sind bekannt:
+  `fn:parse(line)` (Aufrufbares, `verify` prüft per `ast`), `token:Next`
+  (Doktrin-Token, `verify` prüft per Textsuche), `file:docs/x.md`
+  (Lese-Abhängigkeit, geht in die Pfad-Überlappung, nie in Produces). Datei-Pfade werden dabei
   Groß-/Kleinschreibungs- und Backslash-normalisiert und absolut gegen
   relativ sowie Glob-Muster gegen ihre Wurzel verglichen. Im Zweifel keine
   Parallelisierung.
@@ -95,12 +104,14 @@ kein Fehlschlag.
 | „Review pro Task ist zu teuer" | Ein kollidierter Merge kostet mehr als alle Reviews zusammen. |
 | „Recherche mache ich schnell selbst" | Flutet das Rohmaterial den Hauptkontext, ist Fan-out billiger. |
 | „Die zwei Tasks teilen sich ja nur eine Konfigdatei, das ist doch harmlos" | Genau das ist die Überlappung, die das Gate suchen soll. |
+| „Ich formuliere die Interfaces um, bis das Gate `parallel` sagt" | Das Gate ist nur so hart wie die Disziplin dessen, der `Files:`/`Interfaces:` schreibt. Ein Verdikt, das durch Umformulieren kippt, ohne dass sich ein Aufgabenzuschnitt ändert, ist kein Verdikt — `lint` zeigt, was das Gate wirklich sieht; behebe das, statt es zu umgehen. |
 | „Ich erkläre kurz, wie ich gesucht habe, das hilft beim Nachvollziehen" | Das Vorgehen gehört nicht in die Findings-Datei — sie ist für Ergebnisse, nicht für den Prozess. Eine Datei mit drei Funden und fünfzig Zeilen Beiwerk hat den Zweck des Fan-outs verfehlt, selbst wenn jeder Satz stimmt. |
 
 ## Abgrenzung
 
-- **superpowers:writing-plans** — erzeugt den Plan, den diese Skill konsumiert.
-  Kein Plan vorhanden → dort zuerst.
+- **impl-plan** — erzeugt den Plan, den diese Skill konsumiert, lint-sauber.
+  Kein Plan vorhanden → dort zuerst. `superpowers:writing-plans` bleibt die
+  Ausnahme für Repos ohne diese Sammlung.
 - **superpowers:subagent-driven-development** — die 503-Zeilen-Referenz für
   den *Ablauf* (Fix-Loop, Modellwahl, Ledger). Diese Skill ersetzt sie nicht,
   sondern liefert ihr vorgeschaltet: ein mechanisches Gate statt einer

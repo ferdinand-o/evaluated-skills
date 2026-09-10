@@ -1117,13 +1117,30 @@ mit vertretbarem Aufwand behebbar waren:
 
 ## subagent-dev — Befunde aus dem Einsatz an Spec 15 (2026-09-01)
 
+**Beide Parser-Defekte unten sind behoben** (Fix-Runde nach der Prüfung
+`docs/assessment-writing-skills-writing-plans.md`, Schritt 1): Ein
+Backtick-Ausdruck ohne gültigen Bezeichner macht die Task jetzt unbekannt
+(fail-closed), Prosa unter dem Interfaces-Block wird getrennt geführt statt in
+`Produces:` zu laufen, und `plan_to_tasks.py lint` nennt pro Task den Grund.
+Gemessen über alle 17 Pläne: **8 parsen nicht** (Exit 2), 8 tragen zwischen 14
+und 78 Befunde, einer ist sauber (der explain-Plan, nach Verschieben eines
+Prosa-Absatzes). Die Bedienbarkeits-Lehre
+steht jetzt als Zeile in der Anti-Rationalisierungs-Tabelle. Was bleibt: Der
+Fail-Closed-Fix ist **laut** — beschreibende Backticks in Interfaces
+(`\`(git_range, end_label)\``, `\`facts.json\``) machen eine Task unbekannt, obwohl
+sie kein Symbol meinen. Das ist die richtige Richtung, aber die saubere Lösung ist
+ein erklärtes Interface-Vokabular (`token:`, `file:`, `fn:`), und das gehört zu
+Spec 16, nicht in diesen Fix — dort ist es inzwischen gebaut (Abschnitt
+`impl-plan`). Der historische Befund darunter bleibt stehen.
+
+
 Beim ersten produktiven Einsatz des Gates an einem fremden Plan (`explain`) kippte
 das Verdikt dreimal — `sequential`, `parallel`, `sequential` — allein durch
 Umformulierungen im `**Interfaces:**`-Block, ohne dass sich an der tatsächlichen
 Kopplung der Tasks etwas änderte. Zwei benennbare Ursachen:
 
 - **Ein Backtick-Symbol, das kein gültiger Bezeichner ist, öffnet das Gate
-  still.** `extract_produced_symbols()` verlangt `[A-Za-z_][A-Za-z0-9_.]*`;
+  still.** Die Symbol-Extraktion (heute `extract_symbols()`) verlangte `[A-Za-z_][A-Za-z0-9_.]*`;
   Namen mit Doppelpunkt oder Bindestrich (`` `Unverified:` ``, `` `Next:` ``,
   `` `effort-ladder` ``) liefern **null Symbole**. `_has_unrecognized_prose()`
   wiederum meldet sie *nicht* als unsicher, weil ein Backtick vorhanden ist. Die
@@ -1536,6 +1553,59 @@ behoben zu werden:
   Ausschluss struktureller (das Feld existiert nicht mehr, es gibt nichts
   mehr zu widersprechen), aber auch das ist erst bewiesen, wenn ein echter
   Lauf es bestätigt, nicht vorher.
+
+## impl-plan
+
+Gebaut nach Spec 16 (2026-09-02). Tier 1 ohne eigenes Skript: Der einzige Code,
+den die Skill braucht, ist `plan_to_tasks.py lint` in `subagent-dev`, und der wird
+per Kommando aufgerufen, nie importiert. Was daraus folgt, in vier Punkten:
+
+- **Der Lint ist im Eval-Workspace nicht verfügbar.** `evalkit/workspace.py::prepare()`
+  kopiert nur das Skill-Verzeichnis nach `.claude/skills/impl-plan/`; das Skript von
+  `subagent-dev` liegt dort nicht. Ein Agent, der die SKILL.md befolgt, landet im
+  Eval-Lauf zwangsläufig in der Degradationszeile („Lint nicht verfügbar, Plan
+  ungeprüft"). Deshalb hängt **kein Eval an `lint.json`**; alle fünf prüfen die
+  Plandatei direkt — Kopfzeile, kanonische Titel, `token:`-Vokabular, Reihenfolge.
+  Die Lint-Disziplin selbst wird vom Repo-Test und von `subagent-dev`s 66 Tests
+  gemessen, nicht von Agentenläufen. Was ein Eval-Lauf also messen könnte, ist, ob
+  die Skill das Template befolgt; ob sie den Lint *benutzt*, misst er strukturell nicht.
+- **Das Legacy-Register ist ein Schuldenregister, kein Freibrief.** `tests/test_plans_lint.py`
+  friert 16 Pläne vor Spec 15 nach Dateinamen ein; sie werden nicht gelintet. Stand
+  heute parsen 8 davon nicht (`PlanParseError`, Exit 2) und die übrigen 8 tragen
+  zwischen 15 und 79 Befunde — die Zahlen sind seit dem Befund an Spec 15 um je eins
+  gestiegen, weil die Kopfzeilen-Prüfung dazukam. Genau deshalb friert der Test nach
+  Namen ein und nicht nach Befund-Zahl: Jede Schärfung des Lints trifft nur neue
+  Pläne. Die Menge darf nur schrumpfen; ein Plan verlässt sie, wenn ihn jemand
+  lint-sauber macht. Niemand hat das vor, und das ist in Ordnung: Die 16 haben keinen
+  Konsumenten mehr.
+- **Der Repo-Test ist G2 ohne CI.** Diese Sammlung hat keinen CI-Lauf; `pytest` läuft,
+  wenn jemand ihn startet. Ein Plan, der die Regel bricht, wird gemeldet, sobald
+  jemand die Suite fährt — nicht beim Commit. Die SKILL.md sagt deshalb „verlangt"
+  (G1) und verweist auf den Test als Zähne; sie sagt nirgends „blockiert".
+- **Die fünf Evals sind ungefahren** — derselbe Grund wie bei `explain` (Abschnitt
+  „Betrieb": `bypassPermissions` unter uid 0). Schema-valide, gegen einen
+  templatekonformen Beispielplan regex-geprüft (`tests/test_impl_plan_evals_schema.py`),
+  aber ohne einen einzigen Agentenlauf. Der Routing-Eval
+  (`routing-house-header-not-superpowers`) ist zudem stochastisch: Ob „schreib mir den
+  Implementierungsplan" bei `impl-plan` oder bei `superpowers:writing-plans` landet,
+  entscheidet der Harness pro Lauf, und ein grüner Lauf beweist nichts.
+
+**Nach der Fix-Runde (2026-09-03):** Der Lint löst die Spec aus der `Spec:`-Zeile
+selbst auf, der Repo-Test prüft damit auch die Coverage jedes nicht eingefrorenen Plans;
+`lint.json` trägt `coverage.status`, ein übersprungener Abgleich meldet sich als
+`unchecked` mit Grund. Was bleibt: Die Coverage findet eine ID, die irgendwo in einem
+Task-Block steht — nicht, ob der Task sie *baut*. Das prüft der Reviewer, kein Regex.
+Und die Eval-Tabelle wird nur unter einer Überschrift ab Ebene 2 mit dem Wort
+„Eval(s)" gefunden; eine Spec, die ihre Tabelle anders betitelt, gilt als tabellenlos
+und bleibt `unchecked` — sichtbar in `lint.json`, aber ohne Befund. Ein Task-Block
+endet an der nächsten Überschrift bis Ebene 3; eine ID, die nur in einer
+Zwischenüberschrift der Ebene 4 innerhalb eines Tasks steht, zählt deshalb noch.
+
+Dazu eine Lehre aus dem Bau selbst: Das Template musste dreimal umgeschrieben werden,
+bis es lint-sauber war — `fn:…(…)` und `evals_…` sind für den Parser keine Bezeichner,
+und ein Sammel-Task `Pflicht` im Fließtext wurde als echter Task geparst, bis er in
+einen Codeblock wanderte. Ein Template, das der eigene Lint ablehnt, wäre der
+peinlichste Fehler dieser Skill gewesen; der Repo-Test lintet es deshalb mit.
 
 ## Verweise
 

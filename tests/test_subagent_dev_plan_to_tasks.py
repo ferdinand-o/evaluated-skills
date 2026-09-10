@@ -245,7 +245,7 @@ def test_render_task_file_contains_required_sections():
     assert "src/parser.py" in rendered
     block = ptt.parse_task_machine_block(rendered)
     assert block["allowlist"] == ["src/parser.py", "tests/test_parser.py"]
-    assert {"name": "parse", "arity": 1} in block["produces"]
+    assert {"kind": "fn", "name": "parse", "arity": 1} in block["produces"]
 
 
 def test_write_tasks_creates_gate_and_task_files(tmp_path):
@@ -260,7 +260,7 @@ def test_write_tasks_creates_gate_and_task_files(tmp_path):
 
 
 def test_extract_produced_symbols_reads_name_and_arity():
-    symbols = ptt.extract_produced_symbols("- Produces:\n  - `parse(line: str) -> dict`\n  - `Config`")
+    symbols = [(n, a) for _, n, a in ptt.extract_symbols("- Produces:\n  - `parse(line: str) -> dict`\n  - `Config`")]
     names = {s[0]: s[1] for s in symbols}
     assert names["parse"] == 1
     assert names["Config"] is None
@@ -775,3 +775,413 @@ def test_check_allowlist_uncommitted_rename_outside_allowlist_is_a_legible_viola
     violations = ptt.check_allowlist(tmp_path, base, ["src/unrelated.py"])
     assert " -> " not in " ".join(violations)
     assert set(violations) == {"src/old_name.py", "src/new_name.py"}
+
+
+# --- Fail-Closed für Backtick-Ausdrücke ohne Bezeichner + Lint (Einsatz an Spec 15) ---
+
+def _task_block(interfaces: str) -> str:
+    return (
+        "### Task 1: X\n\n**Files:**\n- Create: `a.py`\n\n**Interfaces:**\n"
+        + interfaces + "\n\n- [ ] **Step 1: tun**\n"
+    )
+
+
+def test_backtick_span_without_identifier_makes_interfaces_unknown():
+    """Das Fail-Open aus known-limits: `Unverified:` liefert kein Symbol, wurde
+    aber nicht als unbekannt markiert, weil ein Backtick vorhanden war."""
+    doc = ptt.parse_plan(_task_block("- Consumes: (nichts Neues)\n- Produces: `Unverified:`, `token_next`"))
+    assert doc.tasks[0].interfaces_unknown is True
+    assert ptt.unextractable_backtick_spans("`Unverified:`, `token_next`") == ["Unverified:"]
+
+
+def test_valid_identifier_symbols_keep_interfaces_known():
+    doc = ptt.parse_plan(_task_block("- Consumes: (nichts Neues)\n- Produces: `marker_unverified`, `token_next`"))
+    assert doc.tasks[0].interfaces_unknown is False
+
+
+def test_sub_bullets_under_produces_are_symbols_not_prose():
+    """Die übliche Form im Repo: `- Produces:` allein, darunter je Symbol ein
+    eingerückter Bullet. Muss Symbole liefern, keine Prosa-Befunde."""
+    block = _task_block(
+        "- Consumes: `evalkit`\n- Produces:\n  - `collect.commits(repo, rev)`\n  - `collect.main(argv)`"
+    )
+    consumes, produces, stray = ptt._interface_lines(block)
+    assert stray == []
+    assert [n for _, n, _ in ptt.extract_symbols(produces)] == ["collect.commits", "collect.main"]
+    assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
+
+
+def test_prose_paragraph_after_produces_is_stray_not_swallowed():
+    """Der zweite Defekt aus known-limits: Prosa unter dem Interfaces-Block lief
+    in Produces hinein und machte die Task unbekannt — sequential mit falscher
+    Begründung."""
+    block = _task_block("- Consumes: (nichts Neues)\n- Produces: `token_next`\nOhne diesen Task ist nichts erreichbar.")
+    consumes, produces, stray = ptt._interface_lines(block)
+    assert produces == "`token_next`"
+    assert stray == ["Ohne diesen Task ist nichts erreichbar."]
+    assert ptt.parse_plan(block).tasks[0].interfaces_unknown is False
+
+
+HEADER = "<!-- skill: impl-plan | schema: 1 | generated: von Hand nach skills/impl-plan/assets/plan-template.md -->"
+
+CLEAN_PLAN = HEADER + """
+
+# P
+
+**Goal:** x
+**Spec:** `spec.md`
+
+### Task 1: A
+
+**Files:**
+- Create: `a.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `parse(line)`
+
+- [ ] **Step 1: tun**
+"""
+
+DIRTY_PLAN = """# P
+
+**Goal:** x
+**Spec:** `fehlt.md`
+
+### Task 1: A
+
+**Files:**
+- Create: `a.py`
+- Touch: `b.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `Unverified:`
+Prosa hier.
+
+- [ ] **Step 1: tun** TBD
+
+### Task 2: B
+
+**Files:**
+- Create: `c.py`
+
+**Interfaces:**
+- Consumes: `parse(line)`
+- Produces: (nichts Neues)
+
+- [ ] ohne Step-Format
+"""
+
+
+def test_lint_clean_plan_has_no_findings(tmp_path):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(CLEAN_PLAN, encoding="utf-8")
+    assert ptt.lint_plan(CLEAN_PLAN, plan) == []
+
+
+def test_lint_names_every_reason(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(DIRTY_PLAN, encoding="utf-8")
+    messages = [f.render() for f in ptt.lint_plan(DIRTY_PLAN, plan)]
+    joined = "\n".join(messages)
+    assert "fehlt.md" in joined and "nicht gefunden" in joined
+    assert "Platzhalter 'TBD'" in joined
+    assert "Touch:" in joined and "files_unknown" in joined
+    assert "`Unverified:`" in joined and "fail-closed" in joined
+    assert "Prosa im Interfaces-Block" in joined and "Prosa hier." in joined
+    assert "Task 2: keine Steps" in joined
+    assert "Kopfzeile fehlt" in joined
+
+
+def test_main_lint_exit_codes(tmp_path, capsys):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    clean = tmp_path / "clean.md"; clean.write_text(CLEAN_PLAN, encoding="utf-8")
+    dirty = tmp_path / "dirty.md"; dirty.write_text(DIRTY_PLAN, encoding="utf-8")
+    broken = tmp_path / "broken.md"; broken.write_text("# kein Task\n", encoding="utf-8")
+    out = tmp_path / "lint.json"
+
+    assert ptt.main(["lint", str(clean)]) == 0
+    assert "Keine Befunde" in capsys.readouterr().out
+    assert ptt.main(["lint", str(dirty), "--out", str(out)]) == 1
+    assert "nicht umformulieren, bis es 'parallel' sagt" in capsys.readouterr().out
+    assert json.loads(out.read_text(encoding="utf-8"))["status"] == "findings"
+    assert ptt.main(["lint", str(broken)]) == 2
+    assert "nicht parsbar" in capsys.readouterr().err
+
+
+# --- Spec 16: Interface-Vokabular, Kopfzeile, Spec-Coverage, _meta --------------
+
+def test_prefixed_symbols_are_extracted_with_kind():
+    got = ptt.extract_symbols("`fn:parse(line)`, `token:Next`, `file:docs/x.md`, `bare_name`")
+    assert ("fn", "parse", 1) in got
+    assert ("token", "Next", None) in got
+    assert ("file", "docs/x.md", None) in got
+    assert ("fn", "bare_name", None) in got
+
+
+def test_unknown_prefix_stays_fail_closed():
+    assert ptt.symbol_kind("foo:bar") is None
+    assert ptt.unextractable_backtick_spans("`foo:bar`") == ["foo:bar"]
+    assert ptt.unextractable_backtick_spans("`token:Next`, `file:a.md`") == []
+
+
+def test_token_with_trailing_colon_is_matched_as_dependency():
+    """`Unverified:` endet auf ein Nicht-Wortzeichen — ein \\b-Muster griffe nie."""
+    plan = (
+        "### Task 1: A\n\n**Files:**\n- Create: `a.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: `token:Unverified:`\n\n- [ ] **Step 1: x**\n"
+        "### Task 2: B\n\n**Files:**\n- Create: `b.md`\n\n**Interfaces:**\n"
+        "- Consumes: `token:Unverified:`\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: y**\n"
+    )
+    doc = ptt.parse_plan(plan)
+    assert 2 in ptt.build_overlap_graph(doc.tasks)[1]
+
+
+def test_file_consumption_overlaps_with_the_task_that_writes_it():
+    plan = (
+        "### Task 1: A\n\n**Files:**\n- Create: `docs/x.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: x**\n"
+        "### Task 2: B\n\n**Files:**\n- Create: `other.md`\n\n**Interfaces:**\n"
+        "- Consumes: `file:docs/x.md`\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: y**\n"
+    )
+    doc = ptt.parse_plan(plan)
+    assert doc.tasks[1].consumed_files == ["docs/x.md"]
+    assert doc.tasks[1].interfaces_unknown is False
+    assert 1 in ptt.build_overlap_graph(doc.tasks)[2]
+
+
+def test_check_produces_token_by_text_search(tmp_path):
+    (tmp_path / "SKILL.md").write_text("Teil 3 beginnt mit `Next:`.\n", encoding="utf-8")
+    present, missing = ptt.check_produces(tmp_path, ["SKILL.md"], [("token", "Next:", None), ("token", "Absent:", None)])
+    assert present["status"] == "present"
+    assert missing["status"] == "missing"
+
+
+def test_check_produces_accepts_legacy_pairs_as_fn(tmp_path):
+    (tmp_path / "a.py").write_text("def parse(line):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "present"
+
+
+def test_machine_block_carries_kind_and_verify_reads_it_back(tmp_path, monkeypatch):
+    """Die Verdrahtung: kind aus dem Plan landet im Maschinenblock und verify
+    prüft einen token per Textsuche — nicht per ast, das ihn nie fände."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "### Task 1: Doktrin\n\n**Files:**\n- Create: `SKILL.md`\n\n**Interfaces:**\n"
+        "- Consumes: (nichts Neues)\n- Produces: `token:Next:`\n\n- [ ] **Step 1: x**\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "tasks"
+    assert ptt.main(["generate", str(plan), "--out-dir", str(out)]) == 0
+    task_file = next(out.glob("task-1-*.md"))
+    assert ptt.parse_task_machine_block(task_file.read_text(encoding="utf-8"))["produces"] == [
+        {"kind": "token", "name": "Next:", "arity": None}
+    ]
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    (worktree / "SKILL.md").write_text("Teil 3: `Next:`\n", encoding="utf-8")
+    result_file = tmp_path / "verify.json"
+    ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree), "--out", str(result_file)])
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["produces"] == [{"name": "Next:", "status": "present", "detail": result["produces"][0]["detail"]}]
+    assert result["verdict"] == "unverified"  # kein --base: Allowlist ungeprüft, nie "pass"
+
+    (worktree / "SKILL.md").write_text("Teil 3 ohne den Token\n", encoding="utf-8")
+    ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree), "--out", str(result_file)])
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["produces"][0]["status"] == "missing" and result["verdict"] == "fail"
+
+
+def test_file_in_produces_is_a_lint_finding(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: A\n\n**Files:**\n- Create: `a.md`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `file:a.md`\n\n- [ ] **Step 1: x**\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("gehört in **Files:**" in m for m in msgs)
+
+
+def test_check_header_variants():
+    assert ptt.check_header(HEADER + "\n# P\n") is None
+    assert "fehlt" in ptt.check_header("# P\n")
+    assert "fremd" in ptt.check_header("<!-- skill: subagent-dev | schema: 1 | generated: x -->\n")
+
+
+SPEC_WITH_TABLE = """# Spec
+
+## Contract
+
+| Feld | id | Typ |
+| --- | --- | --- |
+| Nutzer | `user_id` | int |
+
+### Evals
+
+| # | id | Klasse | Fixture |
+| --- | --- | --- | --- |
+| 1 | `alpha-eval` | contract | `f` |
+| 2 | `beta-eval` | contract | `f` |
+"""
+
+
+def test_spec_eval_ids_reads_id_column_under_the_evals_heading_only():
+    """Die Contract-Tabelle mit `user_id` davor zählt nicht — sonst meldete der Lint
+    `user_id` als fehlenden Task und prüfte die echten IDs nie."""
+    assert ptt.spec_eval_ids(SPEC_WITH_TABLE) == ["alpha-eval", "beta-eval"]
+    assert ptt.spec_eval_ids("# Spec\n\n**Evals:** (1) … (2) …\n") is None
+    no_heading = SPEC_WITH_TABLE.replace("### Evals", "### Tabelle")
+    assert ptt.spec_eval_ids(no_heading) is None
+
+
+def test_spec_eval_heading_is_level_two_or_deeper_whole_word_and_fence_safe():
+    """Drei Fail-open-Pfade aus dem zweiten Review: ein H1-Titel mit „Evals" machte
+    das ganze Dokument zum Abschnitt; ein `# Kommentar` in einem Codezaun schloss ihn;
+    „Evaluation der Alternativen" öffnete ihn."""
+    h1_title = "# Spec 00: Artefakt-Vertrag, Evals, Tiers\n\n## Contract\n\n| Feld | id |\n| --- | --- |\n| x | `user_id` |\n"
+    assert ptt.spec_eval_ids(h1_title) is None
+    fenced = "### Evals\n\n```bash\n# run all\n```\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(fenced) == ["a"]
+    evaluation = "## Evaluation der Alternativen\n\n| Option | id |\n| --- | --- |\n| x | `opt-1` |\n"
+    assert ptt.spec_eval_ids(evaluation) is None
+    deeper = "### Evals\n\n#### Eval-Fixtures\n\nProsa.\n\n#### Tabelle\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(deeper) == ["a"]
+    closed = "### Evals\n\nProsa.\n\n### Nachbarn\n\n| # | id |\n| --- | --- |\n| 1 | `a` |\n"
+    assert ptt.spec_eval_ids(closed) is None
+
+
+def test_spec_eval_table_reports_id_cells_without_backticks():
+    spec = SPEC_WITH_TABLE + "| 3 | gamma-eval | contract | `f` |\n"
+    ids, malformed = ptt.spec_eval_table(spec)
+    assert ids == ["alpha-eval", "beta-eval"] and malformed == ["gamma-eval"]
+
+
+def _plan_with_steps(step_text: str, spec_ref: str = "spec.md") -> str:
+    return (
+        HEADER + f"\n\n**Goal:** x\n**Spec:** `{spec_ref}`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n" + step_text
+    )
+
+
+def test_lint_resolves_coverage_from_the_plans_own_spec_line(tmp_path):
+    """Coverage ist eine Eigenschaft des Plans, nicht des Aufrufs: ohne --spec
+    zählt die Datei aus der **Spec:**-Zeile — so sieht der Repo-Test sie auch."""
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval anlegen**\n"), encoding="utf-8")
+    report = ptt.lint_report(plan.read_text(encoding="utf-8"), plan)
+    assert report.coverage["status"] == "checked" and report.coverage["ids_checked"] == 2
+    assert any("`beta-eval` aus der Spec hat keinen Task" in f.message for f in report.findings)
+
+
+def test_lint_coverage_counts_whole_ids_inside_task_blocks_only(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    text = _plan_with_steps("- [ ] **Step 1: stale-alpha-eval-foo anlegen**\n")
+    text = text.replace("**Goal:** x", "**Goal:** x — beta-eval steht hier im Kopf, nicht in einem Task")
+    plan.write_text(text, encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("`alpha-eval` aus der Spec hat keinen Task" in m for m in msgs)
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+
+
+def test_lint_coverage_ignores_prose_after_the_last_task(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        _plan_with_steps("- [ ] **Step 1: alpha-eval anlegen**\n") + "\n## Notizen\n\nbeta-eval kommt später.\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+
+
+def test_lint_spec_line_without_backticks_is_a_finding(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n").replace("**Spec:** `spec.md`", "**Spec:** spec.md"), encoding="utf-8")
+    report = ptt.lint_report(plan.read_text(encoding="utf-8"), plan)
+    assert any("**Spec:** ohne Backtick-Pfad" in f.message for f in report.findings)
+    assert report.coverage["status"] == "unchecked"
+
+
+def test_lint_explicit_spec_that_differs_from_the_spec_line_is_a_finding(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    (tmp_path / "other.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval, beta-eval**\n"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "other.md")]
+    assert any("weicht von der **Spec:**-Zeile ab" in m for m in msgs)
+    same = ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md")
+    assert not any("weicht" in f.message for f in same)
+
+
+def test_lint_malformed_id_row_is_a_finding(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE + "| 3 | gamma-eval | contract | `f` |\n", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: alpha-eval, beta-eval, gamma-eval**\n"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan)]
+    assert any("id-Zelle ohne Backtick-Wert" in m and "gamma-eval" in m for m in msgs)
+
+
+def test_lint_skill_without_any_spec_is_a_finding_not_silence(tmp_path):
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n", spec_ref="missing.md"), encoding="utf-8")
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, skill="x")]
+    assert any("--skill x ohne Spec" in m for m in msgs)
+
+
+def test_lint_out_json_marks_unchecked_coverage_and_full_command(tmp_path):
+    (tmp_path / "spec ohne tabelle.md").write_text("# Spec\n\nEvals in Prosa.\n", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(_plan_with_steps("- [ ] **Step 1: x**\n", spec_ref="spec ohne tabelle.md"), encoding="utf-8")
+    out = tmp_path / "lint.json"
+    assert ptt.main(["lint", str(plan), "--spec", str(tmp_path / "spec ohne tabelle.md"), "--skill", "x", "--out", str(out)]) == 1
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["coverage"]["status"] == "unchecked" and "keine Eval-Tabelle" in data["coverage"]["reason"]
+    assert "--spec" in data["_meta"]["generated"] and "--skill x" in data["_meta"]["generated"]
+    assert "tabelle.md'" in data["_meta"]["generated"]  # Pfad mit Leerzeichen ist shell-quotiert
+    assert any("evals/x/evals.json nicht gefunden" in f["message"] for f in data["findings"])
+
+
+def test_lint_reports_uncovered_spec_eval_ids(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n- [ ] **Step 1: alpha-eval anlegen**\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md")]
+    assert any("`beta-eval` aus der Spec hat keinen Task" in m for m in msgs)
+    assert not any("`alpha-eval`" in m for m in msgs)
+
+
+def test_lint_skill_flag_reports_ids_missing_from_spec(tmp_path):
+    (tmp_path / "spec.md").write_text(SPEC_WITH_TABLE, encoding="utf-8")
+    (tmp_path / "evals" / "x").mkdir(parents=True)
+    (tmp_path / "evals" / "x" / "evals.json").write_text(
+        json.dumps({"evals": [{"id": "alpha-eval"}, {"id": "gamma-eval"}]}), encoding="utf-8"
+    )
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        HEADER + "\n\n**Goal:** x\n**Spec:** `spec.md`\n\n### Task 1: Evals\n\n**Files:**\n- Create: `e.json`\n\n"
+        "**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `evals`\n\n- [ ] **Step 1: alpha-eval, beta-eval**\n",
+        encoding="utf-8",
+    )
+    msgs = [f.message for f in ptt.lint_plan(plan.read_text(encoding="utf-8"), plan, spec_path=tmp_path / "spec.md", skill="x")]
+    assert any("`gamma-eval` aus evals/x/evals.json fehlt in der Spec" in m for m in msgs)
+
+
+def test_lint_out_json_carries_meta(tmp_path, capsys):
+    (tmp_path / "spec.md").write_text("s", encoding="utf-8")
+    plan = tmp_path / "plan.md"
+    plan.write_text(CLEAN_PLAN, encoding="utf-8")
+    out = tmp_path / "lint.json"
+    assert ptt.main(["lint", str(plan), "--out", str(out)]) == 0
+    meta = json.loads(out.read_text(encoding="utf-8"))["_meta"]
+    assert meta["skill"] == "subagent-dev" and meta["schema"] == 1 and "lint" in meta["generated"]
