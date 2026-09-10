@@ -60,7 +60,7 @@ aufrufen können.
 - Consumes: (nichts Neues)
 - Produces: `fn:lint_skill(skill_dir, repo_root)`, `fn:render_lint_json(report, meta)`, `fn:main(argv)`, `token:unchecked`, `token:hint`
 
-- [ ] **Step 1: Tests schreiben** — je Regel ein Skill-Ordner in `tmp_path`, der sie
+- [x] **Step 1: Tests schreiben** — je Regel ein Skill-Ordner in `tmp_path`, der sie
       reißt, und einer, der sie besteht; dazu: `gate-language` mit Negation im selben
       Absatz ist `pass`, in einer Tabellenzeile ohne Negation `finding`; `script-tier`
       nimmt die erste Nennung und erlaubt Sibling-Importe; `neighbors` ohne
@@ -68,15 +68,15 @@ aufrufen können.
       `hint`; ohne `docs/` sind `asset-headers`, `routing`, `report-section` `unchecked`;
       `lint.json` hat je Regel die Zeile `{"id": "…", "status": "…", "reason": "…"}` in
       dieser Reihenfolge; Exit 0/1/2.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_skill_forge_lint.py`.
-- [ ] **Step 3: Implementieren** — Modul-Docstring „Tier 1: nur Stdlib"; `RULES` als
+- [x] **Step 2: Rot sehen** — `pytest tests/test_skill_forge_lint.py`.
+- [x] **Step 3: Implementieren** — Modul-Docstring „Tier 1: nur Stdlib"; `RULES` als
       Liste `(id, fn)`; jede `fn(skill_dir, repo_root) -> RuleResult(id, status, reason)`;
       `repo_root` ist der nächste Elternordner mit `specs/` oder `evals/`, sonst `None`
       und alle Repo-Regeln `unchecked`; `render_lint_json` schreibt `_meta` nach
       `docs/artifact-header.md`, dann die Regelzeilen; `main` mit `skill_dir`, `--out`.
-- [ ] **Step 4: Grün sehen**, volle Suite; Skript einmal gegen `skills/impl-plan` fahren
+- [x] **Step 4: Grün sehen**, volle Suite; Skript einmal gegen `skills/impl-plan` fahren
       und die Ausgabe von Hand gegen die Regeltabelle der Spec lesen.
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 2: Diff-Modus und evals_due
 
