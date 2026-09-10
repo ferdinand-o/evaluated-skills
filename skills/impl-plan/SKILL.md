@@ -95,5 +95,5 @@ Vor der Übergabe, ohne Subagent, mit frischem Blick auf die Spec:
   Parser und den Lint, die diese Skill aufruft.
 - **superpowers:writing-plans** — für Repos ohne `subagent-dev`. Sein Kopf
   (`REQUIRED SUB-SKILL: subagent-driven-development`) ist hier falsch.
-- **skill-forge** (Spec 17, geplant) — baut eine Skill Ende-zu-Ende und konsumiert
+- **skill-forge** (Spec 17) — baut eine Skill Ende-zu-Ende und konsumiert
   diese Skill für den Plan-Schritt.

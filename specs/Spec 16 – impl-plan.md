@@ -106,7 +106,7 @@ Vier Ergänzungen an `plan_to_tasks.py`, jede mit Test dort:
 | Implementierungsplan zu einer Spec dieser Sammlung | **impl-plan (16)** | superpowers:writing-plans (fremde Repos), brainstorming (die Spec davor) |
 | Spec schreiben | brainstorming, feature-spec (03) | impl-plan |
 | Plan in Pakete zerlegen, dispatchen, abnehmen | subagent-dev (09) | impl-plan |
-| Skill bauen, Ende-zu-Ende | skill-forge (17, geplant) — konsumiert impl-plan | impl-plan |
+| Skill bauen, Ende-zu-Ende | skill-forge (17) — konsumiert impl-plan | impl-plan |
 
 `subagent-dev` verweist an **vier** Stellen auf `writing-plans`: in der Description („Use when a superpowers:writing-plans plan exists", „Not for writing the plan itself (use superpowers:writing-plans)", „or writing-plans first") und im Body (`SKILL.md:14` „Kein Plan → `superpowers:writing-plans` zuerst", `:108` „Kein Plan vorhanden → dort zuerst"). Alle vier zeigen nach dem Bau auf `impl-plan`. Dazu die Routing-Matrix an beiden Orten (Spec 00 §5, `README.md`).
 

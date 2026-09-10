@@ -287,11 +287,11 @@ aufrufen können.
 - Consumes: `skill_forge_skill`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Spec 00** — §5 Description-Satz („keine Prozessbeschreibung"), §2
+- [x] **Step 1: Spec 00** — §5 Description-Satz („keine Prozessbeschreibung"), §2
       ID-Präfix `anti-ceremony-`, Routing-Zeile „Skill bauen oder ändern → skill-forge
       (17), nicht skill-creator, nicht superpowers:writing-skills".
-- [ ] **Step 2: README** — dieselbe Routing-Zeile.
-- [ ] **Step 3: impl-plan** — „skill-forge (17, geplant)" wird „skill-forge (17)".
+- [x] **Step 2: README** — dieselbe Routing-Zeile.
+- [x] **Step 3: impl-plan** — „skill-forge (17, geplant)" wird „skill-forge (17)".
       `lint_skill.py skills/skill-forge`: `routing` und `neighbors` jetzt `pass`. Commit.
 
 ### Task 12: known-limits
