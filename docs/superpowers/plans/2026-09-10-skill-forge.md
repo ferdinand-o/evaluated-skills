@@ -172,14 +172,14 @@ aufrufen können.
 - Consumes: `token:hint`
 - Produces: `evals_md`
 
-- [ ] **Step 1: Schreiben** — Diskriminator-Frage mit dem Muster aus
+- [x] **Step 1: Schreiben** — Diskriminator-Frage mit dem Muster aus
       `evals/explain/evals.json` und `evals/impl-plan/evals.json`; Judge-Zerlegung nach
       known-limits „Judge" (ein Claim, eine Zahl statt Adjektiv; warum die Konjunktion
       nur ein `hint` ist); Fixture-Vorbedingungen (`"git": true`, nichts unter dem Glob,
       den die Skill schreibt); Trigger-Eval-Set nach `skill-creator` (20 Anfragen, 8–10
       Beinahe-Treffer) als Vorgehen für den Tag, an dem der Harness außerhalb eines
       Root-Containers läuft; der Baseline-Lauf ohne Skill als Forderung an eine eigene Spec.
-- [ ] **Step 2: Prüfen** — kein Platzhalterwort; jede zitierte known-limits-Überschrift
+- [x] **Step 2: Prüfen** — kein Platzhalterwort; jede zitierte known-limits-Überschrift
       existiert. Commit.
 
 ### Task 7: references/reviewer-prompt.md
