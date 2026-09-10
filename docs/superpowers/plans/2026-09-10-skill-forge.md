@@ -114,20 +114,20 @@ aufrufen können.
 - Consumes: `fn:lint_skill(skill_dir, repo_root)`
 - Produces: `known_findings`
 
-- [ ] **Step 1: Ersten Lauf messen** — `lint_skill` über jeden Ordner unter `skills/`,
+- [x] **Step 1: Ersten Lauf messen** — `lint_skill` über jeden Ordner unter `skills/`,
       Befund-IDs je Skill notieren; Erwartung laut Spec: `description` 18,
       `anti-ceremony-eval` 14, `evals-exist` 3, `report-section` 19, `neighbors` 13,
       `routing` 7, `asset-headers` 2, `gate-language` 1. Abweichungen sind entweder ein
       Skript-Fehler (zurück zu Task 1) oder eine Korrektur der Spec-Zahl — beides wird
       im Commit benannt.
-- [ ] **Step 2: Register** — `KNOWN_FINDINGS: dict[str, frozenset[str]]` aus dem Lauf,
+- [x] **Step 2: Register** — `KNOWN_FINDINGS: dict[str, frozenset[str]]` aus dem Lauf,
       `KNOWN_FINDINGS_MAX_PAIRS` als Paarzahl, Kommentar mit Datum und dem Satz „darf
       nur schrumpfen".
-- [ ] **Step 3: Vier Tests** — kein Befund außerhalb des Registers; Register nennt nur
+- [x] **Step 3: Vier Tests** — kein Befund außerhalb des Registers; Register nennt nur
       existierende Skills und existierende Regel-IDs; Paarzahl ≤ Maximum; `skill-forge`
       hat ein leeres Register (bis Task 10 existiert der Ordner nur mit Skript — der Test
       überspringt fehlende Ordner nicht, er erwartet ihn).
-- [ ] **Step 4: Grün sehen**, volle Suite. Commit.
+- [x] **Step 4: Grün sehen**, volle Suite. Commit.
 
 ### Task 4: references/checklist.md
 
