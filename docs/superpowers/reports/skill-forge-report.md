@@ -105,18 +105,67 @@ jeder Punkt mit Test:
   Listen ab wie `evalkit`; `asset-headers`-Ausnahme nur per Pfad; Git-Helfer der Tests
   in `conftest.py`; Register-Zahlen 19 und 14 korrigiert.
 
+## Erster Eval-Lauf (2026-09-11) — außerhalb des Harness
+
+Der Harness fährt hier nicht (root-Container). Ersatz: je Eval ein Workspace über
+`evalkit.workspace.prepare()` (Skill installiert unter `.claude/skills/skill-forge/`,
+Fixture an der Wurzel, Baseline-Commit), ein Opus-Subagent mit nichts als dem
+Eval-Prompt und dem Hinweis „Skills liegen unter `.claude/skills/`", danach Bewertung
+mit `evalkit.runner.grade()` gegen die Baseline — dieselben Assertionen wie im Harness.
+
+| Eval | Ergebnis | Beobachtung |
+| --- | --- | --- |
+| 1 Anti-Zeremonie | bestanden | eine Zeile, Lint mit `--base HEAD`, `evals_due: false`, Commit; ausdrücklich kein Eval, kein Report, kein Review |
+| 2 Token-Wechsel | bestanden | `evals_due: true` über den Pattern-Zweig; Agent zog die Assertion in `evals.json` nach, sonst nichts |
+| 3 Gate-Wort | bestanden | Befund gemeldet, nicht repariert; fuhr den Lint mit und ohne `--base`, weil der Befund im Diff-Modus ein Altbefund ist |
+| 4 fehlender Anti-Zeremonie-Eval | bestanden | Befund als Altbefund gemeldet, `unchecked` als „nicht bestanden" wiedergegeben |
+| 5 Routing ohne Skill-Namen | bestanden | wählte `skill-forge` über die Routing-Matrix statt `skill-creator`; Evals vor der SKILL.md; Report mit Pflichtsektion |
+
+Fünf von fünf, **ein Lauf je Eval** — eine Stichprobe, kein Beweis (known-limits,
+„Stichprobe"). Der Aufbau ist stärker als der Harness: Der Hinweis auf
+`.claude/skills/` ersetzt das automatische Laden, und ein Subagent sieht daneben die
+Skills des Nutzerprofils, darunter `skill-creator`. Eval 5 hat trotzdem `skill-forge`
+gewählt, mit der Routing-Matrix der Fixture als Begründung.
+
+Drei Funde aus den Läufen, in der Folgerunde behoben:
+
+- **„Prüfe die Skill X" mit `--base HEAD` ist grün, weil jeder Befund ein Altbefund
+  ist.** Der Agent in Eval 3 erkannte das und fuhr beide Aufrufe. Die SKILL.md sagt jetzt:
+  Prüfen ohne Änderung läuft ohne `--base`.
+- **Wo eine neue Skill liegt, stand nirgends.** Eval 5 legte `reminder` unter
+  `.claude/skills/` an, weil der Workspace keinen `skills/`-Ordner hatte. Die SKILL.md
+  nennt jetzt `skills/<name>/`.
+- **Der Lint las Frontmatter per Regex und meldete YAML-ungültige Descriptions grün.**
+  Der Agent in Eval 5 fand es an seiner eigenen Skill; nachgemessen mit PyYAML über alle
+  21 Skills: `impl-plan` und `debug-ledger` luden nicht (unquotiertes „: " in der
+  description). Beide Descriptions stehen jetzt in Anführungszeichen, Wortlaut
+  unverändert; `frontmatter` prüft die vier Fälle, in denen ein unquotierter Skalar
+  nicht lädt, und `split_frontmatter` liefert Werte ohne Anführungszeichen. Ob der
+  Skill-Loader von Claude Code strikt parst, ist weiterhin nicht gemessen — falls ja,
+  war `impl-plan` seit seinem Merge nicht ladbar.
+
+### Zweiter Lauf nach der Folgerunde (2026-09-11)
+
+Derselbe Aufbau, frische Workspaces, die Skill aus der Folgerunde: wieder fünf von
+fünf. Die drei Änderungen sind im Verhalten sichtbar — die Prüf-Agenten (Eval 3 und 4)
+fuhren den Lint ohne `--base` und nannten dafür den Satz aus der SKILL.md; der
+Routing-Agent legte `reminder` unter `skills/` an, mit YAML-gültiger Description
+(PyYAML gegengeprüft) und vier `evalkit`-ladbaren Evals. Eval 1 und 2 verliefen wie im
+ersten Lauf: eine Zeile plus Commit, beziehungsweise `evals_due: true` plus nachgezogene
+Assertion, sonst nichts.
+
 ## Was nicht gemessen wurde
 
-**Kein einziger der fünf Evals ist gefahren** — derselbe Grund wie bei `explain` und
-`impl-plan` (`docs/known-limits.md`, „Betrieb"). Die Muster greifen an echten
-Skript-Ausgaben, aber ob ein Agent den Lint im Diff-Modus *aufruft* statt „schnell
-alles aufzuräumen", ist genau die Frage von Eval 1, und sie ist unbeantwortet.
+**Die fünf Evals sind zweimal gefahren, außerhalb des Harness.** Zwei Läufe je Eval,
+mit einem Aufbau, der das Laden der Skill stärker nahelegt als der Harness. Ob ein
+Agent den Lint im Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist an zwei
+Stichproben positiv beantwortet — zehn von zehn, und trotzdem kein Beweis.
 
-**Der Trigger ist ungemessen — und er war die Diagnose.** Ob „bau mir eine Skill" bei
-`skill-forge` oder bei `skill-creator` landet, entscheidet der Harness pro Lauf. Die
-Description-Doktrin ist eine Entscheidung mit je einem Beleg pro Seite; das
-Trigger-Eval-Set in `references/evals.md` wartet auf einen Harness außerhalb eines
-Root-Containers.
+**Der Trigger ist an einer Stichprobe gemessen — und er war die Diagnose.** Ein Lauf
+von „bau mir eine Skill" landete bei `skill-forge`, mit dem Hinweis auf
+`.claude/skills/` im Prompt. Ob er ohne diesen Hinweis und in fünf Wiederholungen dort
+landet, entscheidet der Harness; das Trigger-Eval-Set in `references/evals.md` wartet
+auf einen Harness außerhalb eines Root-Containers.
 
 **Das Register wurde zweimal gemessen, von zwei Seiten.** Die 79 Paare stammen aus dem
 Bau; beide Reviewer haben sie unabhängig nachgezählt und dabei die falschen Summen je

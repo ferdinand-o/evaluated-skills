@@ -1629,12 +1629,20 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 - **`judge-claims` ist ein Hinweis.** 24 von 47 Judge-Claims im Repo tragen „ und ",
   „ statt " oder „ sowie "; die meisten sind legitim. Die Regel meldet `hint`, nie
   `finding`, und steht nicht im Register — sie prüft nichts, sie erinnert.
-- **Die Evals sind ungefahren.** Derselbe Grund wie bei `explain` und `impl-plan`
-  (Abschnitt „Betrieb"). Schema-valide, und jedes `lint.json`-Muster ist gegen eine
-  echte Skript-Ausgabe getestet (`tests/test_skill_forge_evals_schema.py` spielt Eval 1
-  und 2 mit `--base HEAD` nach) — aber kein Agentenlauf. Ob ein Agent den Lint im
-  Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist genau die Frage von Eval 1,
-  und sie ist unbeantwortet.
+- **Die Evals sind einmal gefahren, außerhalb des Harness** (Report, „Erster
+  Eval-Lauf"): fünf Workspaces über `prepare()`, Opus-Subagenten mit dem Eval-Prompt,
+  Bewertung mit `evalkit.runner.grade()`. Zehn von zehn bestanden, je zwei Läufe (vor
+  und nach der Folgerunde) — eine Stichprobe. Der Aufbau nennt den Ort der installierten Skills im Prompt, was der
+  Harness implizit tut; ein Subagent sieht zusätzlich die Skills des Nutzerprofils.
+  Ob ein Agent den Lint im Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist
+  damit einmal positiv beantwortet, nicht bewiesen.
+- **Der Lint parst kein YAML.** `split_frontmatter` liest zeilenweise per Regex und
+  prüft seit der Folgerunde die vier Fälle, in denen ein unquotierter Skalar nicht lädt
+  („: ", „:" am Ende, „ #", Sonderzeichen am Anfang). Gefunden hat das der Agent in
+  Eval 5 an seiner eigenen Skill; nachgemessen mit PyYAML luden `impl-plan` und
+  `debug-ledger` nicht — jetzt quotiert. Was der Regex weiterhin nicht sieht:
+  mehrzeilige Flow-Skalare, Tabs, Unicode-Sonderfälle. Ob der Skill-Loader von Claude
+  Code strikt parst, ist nicht gemessen; der Lint nimmt es an.
 - **Der Trigger ist ungemessen.** Ob „bau mir eine Skill" bei `skill-forge` oder bei
   `skill-creator` landet, entscheidet der Harness pro Lauf; Eval 5 ist stochastisch.
   Die Description-Doktrin („keine Prozessbeschreibung") ist eine Entscheidung mit je
