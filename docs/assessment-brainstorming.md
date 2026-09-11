@@ -13,9 +13,11 @@ unabhängig geprüft wurden (15, 16, 17), brauchten je eine Überarbeitung von 1
 Messung. Die Spec-Reviews sind der wirksamste Mechanismus der Pipeline, und sie stehen
 nirgends: kein Prompt im Repo, kein Pflichtschritt, ihr Ergebnis nur in Commit-Bodies.
 Dazu hat das Spec-Format keinen Eigentümer — `impl-plan` liest die Eval-Tabelle aus
-3 von 17 Specs. Empfehlung: keine Spec 18, sondern drei Ergänzungen in `skill-forge`
-und `impl-plan` (Spec-Template und Fragenliste als Eingabe für `brainstorming`,
-Spec-Review mit Nachmessen als Pflichtschritt, `lint_spec` im Parser der Pläne).
+3 von 17 Specs. Empfehlung: keine Spec 18, sondern drei Ergänzungen bei den
+bestehenden Eigentümern — in `skill-forge` Spec-Template und Fragenliste als Eingabe
+für `brainstorming` sowie der Spec-Review mit Nachmessen als Pflichtschritt, in
+`subagent-dev` ein `lint_spec` neben dem Plan-Lint, das auch den Review-Vermerk der
+Kopfzeile prüft und den Pflichtschritt damit von G1 auf G2 hebt.
 
 Alles Weitere ist Beleg. Was ich gemessen habe, steht mit Zahl; was ich nur gelesen
 oder vermutet habe, ist so markiert (§9).
@@ -24,7 +26,7 @@ oder vermutet habe, ist so markiert (§9).
 
 | Quelle | Stand | Umfang |
 | --- | --- | --- |
-| `obra/superpowers`, `skills/brainstorming` | b36e082, 2026-08-12 (v6.3.0) | SKILL.md 250 Zeilen (2.277 Wörter) mit Drei-Pfad-Router, `spec-document-reviewer-prompt.md` (49), `visual-companion.md` (299), vier Skripte für den Browser-Begleiter (1.432 Zeilen, Node) |
+| `obra/superpowers`, `skills/brainstorming` | b36e082, 2026-08-12 (v6.3.0) | SKILL.md 250 Zeilen (2.277 Wörter) mit Drei-Pfad-Router, `spec-document-reviewer-prompt.md` (49), `visual-companion.md` (299), fünf Dateien für den Browser-Begleiter (1.432 Zeilen: vier Skripte und ein HTML-Template, Node) |
 | eigene `brainstorming`-Skill | Nutzerprofil, `~/.claude/skills/synced/…/brainstorming`, `source: custom`, 2026-08-05 | SKILL.md 157 Zeilen (1.648 Wörter), keine Skripte, kein Reviewer-Prompt |
 | Dieses Repo | 34af3ac (`main`) plus Branch `claude/assessment-writing-skills-plans` | 18 Specs, 19 Pläne, 16 Reports, `docs/superpowers/specs/` und `validation/` (cad-parts), Git-Historie der Specs, `plan_to_tasks.py` (`spec_eval_table`) |
 | Kontext | `feature-spec` (03) als Haus-Spec-Skill, `skill-forge` (17) Ablauf Schritt 1, `impl-plan` (16) Schritt 1 | — |
@@ -49,7 +51,11 @@ Vorlage. Alle 18 Specs unter `specs/` tragen die sieben Abschnitte in dieser
 Reihenfolge; Spec 04 hat zusätzlich `## Status`, Spec 00 Unterabschnitte.
 
 Damit ist die Ausgangsfrage schon halb beantwortet: Die Sammlung hat
-`superpowers:brainstorming` seit Zyklus 1 nicht benutzt. Was bleibt, ist ein
+`superpowers:brainstorming` seit Zyklus 1 nicht benutzt. Für 01–14 ist der tragende
+Grund nicht das Template, sondern der Ort: In claude.ai kann ein Claude-Code-Plugin
+gar nicht laden, dort gibt es nur die Profil-Skills. Das Template ist Zusatzindiz; das
+Datum der Profil-Skill (2026-08-05) ist ein Änderungsdatum und beweist nicht, dass sie
+vor den Specs existierte (§10). Was bleibt, ist ein
 **Namensproblem**: Auf dem Rechner des Nutzers sind beide installiert, die Description
 von superpowers ist die pushigere („You MUST use this before any creative work"), und
 `skill-forge` Schritt 1, `impl-plan` Abgrenzung und die Routing-Matrix sagen nur
@@ -66,7 +72,7 @@ entscheidet der Harness — gemessen ist es nicht (§9).
 | Gate | `<HARD-GATE>`: keine Implementierung ohne Zustimmung, auf jedem Pfad | keins; „Spec is written — have a look" | G1 durchgehend; `skill-forge` verlangt den Review, nichts prüft die Spec |
 | Ablage | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, committet | „a markdown file", Ort frei | `specs/Spec NN – <skill>.md` mit Kopfzeile „Skill-Spezifikation · Zyklus N · Entscheidung: …" — ungeschriebene Konvention, 17 von 18 halten sie (Spec 17 nicht) |
 | Spec-Inhalt | frei; Sektionen skaliert; Selbst-Review in vier Fragen | Sieben-Abschnitte-Template; Selbst-Review in fünf Fragen, darunter „unearned specificity" | dazu: Eval-Tabelle mit `id`, Klasse, Fixture, Mechanismus; Skill-Struktur-Block; Abgrenzung mit Rückverweis; Tier je Skript; Gate-Sprache |
-| Review | `spec-document-reviewer-prompt.md`: Subagent, Fokus auf „gaps that would block implementation", nichts über Faktenprüfung | keiner außer dem Selbst-Review | der Review, der 15/16/17 gerettet hat: ein Subagent, der **Behauptungen nachmisst** — Prompt nicht im Repo |
+| Review | `spec-document-reviewer-prompt.md`: Subagent, „Only flag issues that would cause real problems during implementation planning", nichts über Faktenprüfung — und die SKILL.md ruft die Datei an keiner Stelle auf (null Verweise) | keiner außer dem Selbst-Review | der Review, der 15/16/17 gerettet hat: ein Subagent, der **Behauptungen nachmisst** — Prompt nicht im Repo |
 | Übergabe | `writing-plans`, ausschließlich („Do NOT invoke any other skill") | keine | `impl-plan` (16), dann `skill-forge` (17) |
 | Visuelles | Browser-Begleiter mit eigenem Node-Server, 1.432 Zeilen | „Show it when showing beats telling", ohne Werkzeug | nicht gebraucht: Specs hier sind Text und Tabellen |
 | Sprache | Englisch | Englisch | Deutsch, englische Bezeichner |
@@ -79,20 +85,23 @@ Skill-Specs dieser Sammlung passt sie schlechter als die eigene: Jede Skill-Spec
 der Terminalzustand ruft `writing-plans` statt `impl-plan`; die Ablage widerspricht
 `specs/`; und die eigene Fassung hat die zwei Stücke, die die 18 Specs geprägt haben —
 das Template und den Vier-Optionen-Zwang. Was sich aus superpowers lohnt, ist genau
-eines: der **Reviewer-Prompt als eigene Datei** — nicht sein Inhalt, sondern die Idee,
-dass er im Repo liegt.
+eines: der **Reviewer-Prompt als eigene Datei** — und zugleich die Warnung, die daran
+hängt: Die Datei liegt im Repo, der eigene Ablauf ruft sie nie auf, also passiert der
+Review dort nur, wenn jemand daran denkt. Ein Prompt allein ist G0; er wird erst mit
+einem Pflichtschritt und einem prüfbaren Vermerk zu etwas.
 
 ## 4 · Gemessen: Wo die Specs brechen
 
 ### 4.1 Behauptungen ohne Messung — das Review korrigiert sie jedes Mal
 
-Drei Specs wurden vor dem Bau von einem Subagenten mit frischem Kontext geprüft. Die
-Commit-Bodies der Überarbeitungen sind die genaueste Quelle für das, was Brainstorming
-allein nicht liefert:
+Drei Specs wurden vor dem Bau von einem Subagenten mit frischem Kontext geprüft (die
+cad-parts-Spec hatte ebenfalls einen Review-Commit, 7a12e7f, vor dem Harness und ohne
+Fundliste im Body — sie bleibt hier außen vor). Die Commit-Bodies der Überarbeitungen
+sind die genaueste Quelle für das, was Brainstorming allein nicht liefert:
 
 | Spec | Review | geänderte Zeilen (Diff-Stat) | Umfang danach | Zahlen neu / weg |
 | --- | --- | --- | --- | --- |
-| 15 explain (f1b2b6d) | 5 blockierende Funde, 3 sachliche Fehler über Nachbarskills, 1 abgelehnt | 123 von 128 → 160 | +25 % | +3 / 0 |
+| 15 explain (f1b2b6d) | 5 blockierende Funde, 3 sachliche Fehler über Nachbarskills, 1 abgelehnt | 123 von 133 → 160 | +20 % | +3 / 0 |
 | 16 impl-plan (d6d456e) | 23 Funde, 3 blockierend | 119 von 156 → 165 | +6 % | +9 / 2 |
 | 17 skill-forge (0ecccfa) | Zahl nicht protokolliert („alle Zahlen nachgemessen") | 217 von 265 → 324 | +22 % | +6 / 1 |
 
@@ -131,10 +140,10 @@ war jedenfalls nie nachgezogen.
 
 ### 4.2 Evals als Prosa
 
-Spec 00 §2 nennt es im Problem selbst: „rund sechzig adversariale Szenarien als
-unbepreister Posten". Gemessen an den Specs 01–14: 13 zählen ihre Evals als „(1) …
-(4)" in einem Absatz auf, ohne ID, Klasse, Fixture oder Assertion; keine trägt eine
-Tabelle. `plan_to_tasks.py`s `spec_eval_table` — der Leser, den `impl-plan` für die
+Spec 00 nennt es in ihrem Problem-Abschnitt selbst: „rund sechzig adversariale
+Szenarien als unbepreister Posten". Gemessen an den Specs 01–14: alle 14 zählen ihre
+Evals als „(1) … (4)" in einem Absatz auf, ohne ID, Klasse, Fixture oder Assertion;
+keine trägt eine Tabelle. `plan_to_tasks.py`s `spec_eval_table` — der Leser, den `impl-plan` für die
 Coverage-Prüfung braucht — findet Eval-IDs in **3 von 17** Specs (15, 16, 17: 8, 5, 5
 IDs). In 8 von 14 Fällen hat die spätere `evals.json` mehr Evals als die Spec nennt
 (learning-coach: 5 genannt, 11 gebaut); die Spec war für die Evals nie die Vorlage,
@@ -147,15 +156,15 @@ Modell besteht, weil es IDs abschreibt"). Das ist die Diskriminator-Frage aus
 
 ### 4.3 Offene Fragen und die Entscheidungen dazwischen
 
-Die Specs 01–14 hinterlassen je ein bis vier offene Fragen als Prosa; drei davon
-verweisen aufeinander („Spec 10 stellt dieselbe Monorepo-Frage") und wurden nie
-gemeinsam entschieden. Die Reports zeigen, wo sie landeten: learning-coach entschied
+Die Specs 01–14 hinterlassen je ein bis vier offene Fragen als Prosa; drei Specs
+verweisen dabei auf eine andere (01 auf 03, 07 und 10 aufeinander: „Spec 10 stellt
+dieselbe Monorepo-Frage"), und keine der Fragen wurde gemeinsam entschieden. Die Reports zeigen, wo sie landeten: learning-coach entschied
 seine drei beim Bau („Offene Fragen aus Spec 14, hier entschieden"), subagent-dev ließ
 beide offen („nicht Teil dieses Auftrags"). Dazu führt jeder Report einen Abschnitt
 „Zusätzliche Entscheidungen" oder „Abweichungen von der Spec" — grob gezählt 3 bis
-10 Einträge pro Report, 87 über 16 Reports. Sechs Pläne und vier Reports berufen sich
+10 Einträge pro Report, 87 über 16 Reports. Sechs Pläne und fünf Reports berufen sich
 außerdem auf `brief-common.md` und `rulings-final-four.md`: eine Entscheidungsschicht
-*zwischen* Spec und Bau, die im Repo nicht existiert (zwei Reports melden die Datei
+*zwischen* Spec und Bau, die im Repo nicht existiert (vier Reports melden die Datei
 als fehlend). Die Specs waren also durchgängig unterbestimmt — was in Ordnung ist,
 solange es markiert ist. Die Markierung dafür hat das Repo (`Annahme:`-Zeilen aus
 Spec 03); in den Specs steht sie in 00 und 03, sonst nirgends.
@@ -170,9 +179,9 @@ Specs und in dem, was `impl-plan` liest:
 | Kopfzeile „Skill-Spezifikation · Zyklus N · Entscheidung: …" | Konvention | 17 von 18 (Spec 17 beginnt mit `## Problem`) |
 | Skill-Struktur-Block | `impl-plan` Schritt 1 | 17 von 17 |
 | Eval-Tabelle mit `id` unter einer Eval-Überschrift | `impl-plan` Schritt 1, `spec_eval_table` | 3 von 17 |
-| Abgrenzung als eigener Abschnitt | `impl-plan` (Nachbarn-Task), `skill-forge` (`neighbors`) | 4 von 17 (11, 15, 16, 17); die übrigen als „Description schärfen"-Satz in Next steps (3) oder gar nicht |
+| Abgrenzung als eigener Abschnitt | `impl-plan` (Nachbarn-Task), `skill-forge` (`neighbors`) | 2 von 17 (15, 16); Spec 17 verteilt sie auf Prosa unter Approach, Spec 11 nennt das Wort nur in einer Formatbeschreibung; bei den übrigen ein „Description schärfen"-Satz in Next steps (3) oder nichts |
 | Tier je Skript | Spec 00 §3 | 15 von 17 |
-| G1/G2/G3-Sprache | Spec 00 §4 | 12 von 17 |
+| G1/G2/G3-Sprache | Spec 00 §4 | 12 von 17 (gezählt als Token `G1`, `G2`, `G3`; wer „Grad N" mitzählt, kommt auf 11) |
 
 Das ist dieselbe Lage wie bei den Plänen vor `impl-plan`: Der Konsument setzt ein
 Format voraus, der Erzeuger kennt es nicht, und der Lint des Konsumenten meldet das
@@ -189,15 +198,17 @@ Angenommen, die nächste Spec entstünde mit der superpowers-Fassung statt der e
 - **Ein-Frage-Interview:** genau das Muster, das Spec 03 für Solo-Arbeit als zu
   langsam verworfen und die eigene Skill durch eine gebündelte Runde ersetzt hat. Die
   drei Brainstormings zu 15–17 kamen mit je einer Runde aus (17: drei Entscheidungen
-  per Auswahlfrage).
+  per Auswahlfrage) — Beobachtung aus den Sessions, im Repo nicht messbar (§10).
 - **HARD-GATE:** in Claude Code sinnvoll; hier stellt ihn die Übergabe an `impl-plan`
   ohnehin her, weil niemand baut, bevor der Plan steht.
 - **Ablage und Übergabe:** `docs/superpowers/specs/` und `writing-plans` — beides
   falsch für dieses Repo, beides müsste jedes Mal übersteuert werden (die eine Spec,
   die so entstand, liegt bis heute an dem anderen Ort).
-- **Reviewer-Prompt:** vorhanden, aber auf Implementierungslücken kalibriert; von den
-  in §4.1 gezählten Funden hätte er die Konsistenzklasse erfasst, die Faktenklasse
-  nicht — er sagt nichts über Nachmessen.
+- **Reviewer-Prompt:** vorhanden, aber auf Implementierungslücken kalibriert und vom
+  eigenen Ablauf nie aufgerufen; von den in §4.1 gezählten Funden hätte er die
+  Konsistenzklasse erfasst, die Faktenklasse nicht — er sagt nichts über Nachmessen.
+  Der eine superpowers-Fall hier hatte trotzdem einen Review-Commit (cad-parts,
+  7a12e7f) — auf Zuruf, wie die drei Reviews danach.
 - **Browser-Begleiter:** 1.432 Zeilen Node für Mockups. Keine Spec dieser Sammlung
   hatte eine visuelle Frage.
 
@@ -229,19 +240,33 @@ davor (Orientieren als Messen), danach (Review mit Nachmessen) und im Format
    ein prüfbares Muster, Diskriminator beantwortet), Widersprüche gegen Spec 00 §3/§4.
    Ergebnis als Liste „blockierend / wichtig / abgelehnt mit Grund" — das Format, das
    die Commit-Bodies d6d456e und f1b2b6d bereits haben.
-3. **`lint_spec` im Parser der Pläne** (`plan_to_tasks.py` oder daneben, derselbe
-   `spec_eval_table`): Kopfzeile, sieben Abschnitte, Eval-Tabelle mit Pflichtspalten
-   und `anti-ceremony-`-Präfix, Skill-Struktur-Block, Abgrenzung mit mindestens zwei
+3. **`lint_spec` in `plan_to_tasks.py`** — bei `subagent-dev`, nicht bei `impl-plan`:
+   dessen Contract sagt ausdrücklich, dass der Lint dem Konsumenten gehört und jede
+   Format-Erweiterung dort gebaut wird; `spec_eval_table` liegt schon da. Geprüft:
+   Kopfzeile, sieben Abschnitte, Eval-Tabelle mit Pflichtspalten und
+   `anti-ceremony-`-Präfix, Skill-Struktur-Block, Abgrenzung mit mindestens zwei
    Backtick-Namen, die als Skill existieren, `Annahme:`-Zeilen statt unmarkierter
-   Festlegungen in Open questions, Tier je `scripts/`-Eintrag, Gate-Wörter. Exit ≠ 0
-   für Specs ab 18; Specs ≤ 17 sind Historie ohne Konsumenten und stehen nicht im
-   Register — ein Nummern-Cutoff ist ehrlicher als 14 Register-Einträge für Dateien,
-   die niemand mehr ändert.
+   Festlegungen in Open questions, Tier je `scripts/`-Eintrag, Gate-Wörter — **und der
+   Review-Vermerk**: Spec 15 und 16 tragen in der Kopfzeile „Überarbeitet nach
+   unabhängigem Review". Der Lint verlangt den Vermerk ab Spec 18 und meldet sein
+   Fehlen; erst damit ist Punkt 2 mehr als ein Satz im Ablauf. Exit ≠ 0 für Specs ab
+   18; Specs ≤ 17 sind Historie ohne Konsumenten und stehen nicht im Register — ein
+   Nummern-Cutoff ist ehrlicher als 14 Register-Einträge für Dateien, die niemand
+   mehr ändert.
 
 Das Verhältnis der drei: Punkt 1 senkt, was der Review findet; Punkt 2 fängt, was
 Punkt 1 nicht senkt (Fakten); Punkt 3 macht das Format zur Regel statt zur Erinnerung.
-Punkt 2 ist der mit dem gemessenen Hebel — 119 bis 217 Diff-Zeilen an Specs von 128
+Punkt 2 ist der mit dem gemessenen Hebel — 119 bis 217 Diff-Zeilen an Specs von 133
 bis 265 Zeilen — und kostet am wenigsten: ein Prompt, ein Satz im Ablauf.
+
+**Gate-Grade nach Spec 00 §4, ausgesprochen:** Punkt 1 ist für sich G1 — die Dateien
+müssen dem Brainstorming mitgegeben werden, und das ist dieselbe Schwäche wie der
+Review auf Zuruf. Prüfbar wird er über Punkt 3: Eine Spec, die Kopfzeile, Tabelle und
+Abgrenzung trägt, hat das Template benutzt, sonst meldet der Lint. Punkt 2 ist für
+sich G1 („verlangt"); mit dem Review-Vermerk als Lint-Regel wird er G2 („meldet"). Ein
+Vermerk ist fälschbar — aber er ist ein Token in einer Datei, den ein Diff zeigt, statt
+einer Erinnerung. Punkt 3 ist G2. G3 gibt es nicht: Eine ungeprüfte Spec richtet
+keinen irreversiblen Schaden an, sie kostet eine Fix-Runde.
 
 **Anti-Zeremonie:** Eine Spec-Änderung um eine Entscheidung (ein Satz in Open
 questions wird zur Festlegung) löst `lint_spec` und den Commit aus, keinen zweiten
@@ -283,11 +308,13 @@ verschiebt, ist eine Stichprobe wie jeder Routing-Eval.
 
 ## 8 · Gegenargumente
 
-- **„Der Review passiert doch schon."** Dreimal, jedes Mal auf Zuruf („Von einem
-  Fable Subagent reviewen lassen"), mit einem Prompt, der jedes Mal neu geschrieben
-  wurde und nirgends liegt. Vierzehn Specs davor hatten keinen; ihre Fehler wurden zu
-  Fix-Runden (bis zu fünf, exercise-forge). Ein Schritt, der nur stattfindet, wenn der
-  Nutzer daran denkt, ist G0.
+- **„Der Review passiert doch schon."** Viermal — cad-parts (7a12e7f) und 15, 16, 17
+  —, jedes Mal auf Zuruf („Von einem Fable Subagent reviewen lassen"), mit einem
+  Prompt, der jedes Mal neu geschrieben wurde und nirgends liegt. Vierzehn Specs
+  hatten keinen; was sie offen ließen, tauchte beim Bau auf: der fehlende
+  Anti-Zeremonie-Eval von feature-spec steht im Report als „Spec-Lücke", den Eval-Pfad
+  aus Spec 09 überstimmte Spec 00 erst beim Bau. Ein Schritt, der nur stattfindet,
+  wenn der Nutzer daran denkt, ist G0.
 - **„Ein Template macht die Specs länger."** Die drei Specs mit Tabelle sind 160–324
   Zeilen gegen 53–65 bei den vierzehn davor. Der Zuwachs ist aber nicht das Template,
   sondern der Inhalt, den die kurzen Specs nicht hatten und der Bau dann erfand (§4.3:
@@ -303,23 +330,28 @@ verschiebt, ist eine Stichprobe wie jeder Routing-Eval.
   `impl-plan` hat gezeigt, dass Template plus Lint beim Konsumenten zwei Drittel des
   Werts bringt. Der Rest wäre der Dialog, und den gibt es.
 - **Selbstbezug:** Die Ergänzungen an `skill-forge` sind eine Skill-Änderung und
-  laufen durch `lint_skill.py`; `spec-brief.md` und das Template tragen die Kopfzeile
-  oder stehen in `artifact-header.md` als Ausnahme (das SKILL.md-Template ist dort
-  bereits ausgenommen, weil es mit Frontmatter beginnt).
+  laufen durch `lint_skill.py`; `spec-brief.md` und das Spec-Template tragen die
+  Kopfzeile (das Spec-Template darf sie tragen, es beginnt nicht mit Frontmatter — die
+  Ausnahme für das SKILL.md-Gerüst lebt in der Regel `asset-headers` des Lints, nicht in
+  `artifact-header.md`, dessen drei Ausnahmen `handoff.md`, die Stubs und die Anki-CSV
+  sind).
 
 ## 9 · Empfehlung und Reihenfolge
 
 1. **Sofort, ohne Spec:** `references/spec-reviewer-prompt.md` in `skill-forge` aus
    den drei Commit-Bodies destillieren; Schritt 1 des Ablaufs um „1b Review der Spec
    durch einen Subagenten mit frischem Kontext, Behauptungen nachgemessen" erweitern;
-   die vier „brainstorming"-Nennungen um „(die eigene, nicht superpowers)" ergänzen.
-   Ein Nachmittag, eine Skill-Änderung mit `evals_due: true` (Ablauf ist kein
-   Contract — prüfen, ob der Lint das so sieht).
+   die sieben „brainstorming"-Nennungen um „(die eigene, nicht superpowers)" ergänzen.
+   Ein Nachmittag, eine Skill-Änderung; `evals_due` bleibt dabei `false`, weil ein
+   Ablaufschritt weder Frontmatter noch Contract berührt — Evals werden erst fällig,
+   wenn der Contract den Satz „kein Fertig ohne Spec-Review" bekommt, und dann gehört
+   ein sechster Eval dazu (Spec ohne Vermerk → Übergabe sagt „ungeprüft").
 2. **Danach:** `assets/spec-template.md` und `references/spec-brief.md` in
-   `skill-forge`; `lint_spec` im Parser der Pläne mit Nummern-Cutoff. Ein Vormittag
-   Tier-1-Code plus ein Repo-Test, der alle Specs ≥ 18 lintet. Beides zusammen als
-   Folgerunde von `skill-forge`, nicht als Spec — es ändert keinen Contract, es füllt
-   Schritt 1.
+   `skill-forge`; `lint_spec` in `plan_to_tasks.py` bei `subagent-dev` mit
+   Nummern-Cutoff und Review-Vermerk. Ein Vormittag Tier-1-Code plus ein Repo-Test, der
+   alle Specs ≥ 18 lintet. Zwei Folgerunden (`skill-forge`, `subagent-dev`), keine
+   Spec — der Contract-Satz aus Punkt 1 ist die einzige Contract-Änderung, und die
+   trägt ihren Eval selbst.
 3. **Beobachten:** Die nächste Spec (18 oder was kommt) mit den Eingabedateien
    brainstormen und messen, wie viele Review-Funde der Faktenklasse bleiben. Bleibt
    die Zahl in der Größenordnung der 23 von Spec 16, ist der Review das eigentliche
@@ -366,10 +398,18 @@ neue Skill" → Datei unter `specs/` mit Kopfzeile und Eval-Tabelle, nicht unter
   Größenordnung stimmt nach Lektüre von vier Reports, die Einzelzahlen nicht sicher.
 - Ob die Specs 01–14 vor dem Import bereinigt wurden (Spec 00s „Blocker"-Befund),
   zeigt die Historie nicht; die Zählung gilt dem heutigen Text.
-- Dass die Specs 01–14 in claude.ai entstanden, ist aus dem escapten Markdown und dem
-  Datum der Profil-Skill geschlossen, nicht beobachtet. Dass 15–17 mit der eigenen
-  Skill entstanden, folgt daraus, dass im Container nur sie installiert ist; für die
-  Session zu Spec 15 ist das nicht geprüft.
+- Dass die Specs 01–14 in claude.ai entstanden, ist aus dem escapten Markdown
+  geschlossen, nicht beobachtet. Dass dort die eigene `brainstorming`-Skill das
+  Template lieferte, ist die naheliegende, nicht die einzige Erklärung: Eine
+  Projektanweisung oder eine frühere Fassung der Skill könnte dieselben sieben
+  Abschnitte vorgegeben haben; das Repo zeigt nur das Änderungsdatum der Skill. Dass
+  15–17 mit der eigenen Skill entstanden, folgt daraus, dass im Container nur sie
+  installiert ist; für die Session zu Spec 15 ist das nicht geprüft. Dass die drei
+  Brainstormings mit einer Fragerunde auskamen, ist Erinnerung an die Sessions, kein
+  Repo-Befund.
+- Die Zahlenvergleiche vor/nach Review (§4.1, letzte Spalte) hängen an der Zählregel
+  für „Zahl im Text"; eine andere Regex liefert für Spec 16 statt 17→24 etwa 18→24.
+  Die Richtung ist stabil, die Einzelwerte nicht.
 - Die Aufwandsschätzungen sind Erfahrungswerte aus den Folgerunden dieses Repos, keine
   Telemetrie.
 - Die Vorgänger-Prüfung, auf die §6 verweist, liegt weiter nur auf ihrem Branch
