@@ -4,9 +4,11 @@
 **Kurzantwort.** Nein — und die Frage ist anders gestellt, als der Befund sie
 beantwortet. `superpowers:brainstorming` hat in diesem Repo genau eine Spec geschrieben
 (`cad-parts`, 2026-07-10); die siebzehn Skill-Specs seit Zyklus 1 stammen aus der
-**eigenen** `brainstorming`-Skill im Nutzerprofil (`source: custom`), deren Template
-alle 18 Specs tragen. Die Nachfolgerin existiert also; sie heißt nur genauso wie das
-Original, und die Routing-Matrix sagt nicht, welche von beiden gemeint ist. Was gemessen
+**eigenen** `brainstorming`-Skill im Nutzerprofil (`source: custom`) — als Ersatz für
+superpowers gebaut, weil Plugins in claude.ai und im Cloud-Container nicht laden, mit
+eigenem Text und eigenem Template, das alle 18 Specs tragen. Die Nachfolgerin
+existiert also; sie heißt nur genauso wie das Original, und die Routing-Matrix sagt
+nicht, welche von beiden gemeint ist. Was gemessen
 fehlt, liegt nicht im Dialog, sondern danach: Die drei Specs, die vor dem Bau
 unabhängig geprüft wurden (15, 16, 17), brauchten je eine Überarbeitung von 119 bis
 217 Zeilen — sachliche Fehler über das eigene Repo, unfahrbare Evals, Zahlen ohne
@@ -27,7 +29,7 @@ oder vermutet habe, ist so markiert (§9).
 | Quelle | Stand | Umfang |
 | --- | --- | --- |
 | `obra/superpowers`, `skills/brainstorming` | b36e082, 2026-08-12 (v6.3.0) | SKILL.md 250 Zeilen (2.277 Wörter) mit Drei-Pfad-Router, `spec-document-reviewer-prompt.md` (49), `visual-companion.md` (299), fünf Dateien für den Browser-Begleiter (1.432 Zeilen: vier Skripte und ein HTML-Template, Node) |
-| eigene `brainstorming`-Skill | Nutzerprofil, `~/.claude/skills/synced/…/brainstorming`, `source: custom`, 2026-08-05 | SKILL.md 157 Zeilen (1.648 Wörter), keine Skripte, kein Reviewer-Prompt |
+| eigene `brainstorming`-Skill | Nutzerprofil, `~/.claude/skills/synced/…/brainstorming`, `source: custom`, 2026-08-05; laut Nutzer als Ersatz für `superpowers:brainstorming` gebaut, weil Plugins in claude.ai und im Cloud-Container nicht laden | SKILL.md 157 Zeilen (1.648 Wörter), keine Skripte, kein Reviewer-Prompt; keine der 27 superpowers-Fassungen seit 2025-10-16 enthält ihren Text (Nachbildung des Zwecks, nicht des Wortlauts) |
 | Dieses Repo | 34af3ac (`main`) plus Branch `claude/assessment-writing-skills-plans` | 18 Specs, 19 Pläne, 16 Reports, `docs/superpowers/specs/` und `validation/` (cad-parts), Git-Historie der Specs, `plan_to_tasks.py` (`spec_eval_table`) |
 | Kontext | `feature-spec` (03) als Haus-Spec-Skill, `skill-forge` (17) Ablauf Schritt 1, `impl-plan` (16) Schritt 1 | — |
 
@@ -47,7 +49,13 @@ Keine Evals gefahren; die beiden Skills wurden nicht gegeneinander gemessen (§9
 Das Template Problem / Constraints / Approach / Alternatives considered / Out of scope /
 Open questions / Next steps steht wörtlich in der eigenen Skill (Abschnitt 5) und in
 keiner superpowers-Datei — superpowers schreibt nach `docs/superpowers/specs/` ohne
-Vorlage. Alle 18 Specs unter `specs/` tragen die sieben Abschnitte in dieser
+Vorlage. Die eigene Skill ist nach Auskunft des Nutzers als Ersatz für
+`superpowers:brainstorming` entstanden, weil Plugins in claude.ai und im
+Cloud-Container von Claude Code nicht laden. Gemessen über die volle Historie von
+`obra/superpowers` (27 Fassungen der `brainstorming/SKILL.md` seit 2025-10-16): Keine
+enthält „just go", „the boring one", „Alternatives considered", „Out of scope" oder
+„unearned specificity". Die Nachbildung übernimmt den Zweck, nicht den Text — sie ist
+eine eigene Fassung mit eigener Doktrin, und genau die hat die Specs geprägt. Alle 18 Specs unter `specs/` tragen die sieben Abschnitte in dieser
 Reihenfolge; Spec 04 hat zusätzlich `## Status`, Spec 00 Unterabschnitte.
 
 Damit ist die Ausgangsfrage schon halb beantwortet: Die Sammlung hat
@@ -400,9 +408,10 @@ neue Skill" → Datei unter `specs/` mit Kopfzeile und Eval-Tabelle, nicht unter
   zeigt die Historie nicht; die Zählung gilt dem heutigen Text.
 - Dass die Specs 01–14 in claude.ai entstanden, ist aus dem escapten Markdown
   geschlossen, nicht beobachtet. Dass dort die eigene `brainstorming`-Skill das
-  Template lieferte, ist die naheliegende, nicht die einzige Erklärung: Eine
-  Projektanweisung oder eine frühere Fassung der Skill könnte dieselben sieben
-  Abschnitte vorgegeben haben; das Repo zeigt nur das Änderungsdatum der Skill. Dass
+  Template lieferte, stützt sich auf die Auskunft des Nutzers (als Ersatz für
+  superpowers gebaut) und das wörtliche Template; das Repo selbst zeigt nur das
+  Änderungsdatum der Skill, eine frühere Fassung mit demselben Template ist nicht
+  ausgeschlossen. Dass kein superpowers-Stand den Text enthält, ist gemessen. Dass
   15–17 mit der eigenen Skill entstanden, folgt daraus, dass im Container nur sie
   installiert ist; für die Session zu Spec 15 ist das nicht geprüft. Dass die drei
   Brainstormings mit einer Fragerunde auskamen, ist Erinnerung an die Sessions, kein
