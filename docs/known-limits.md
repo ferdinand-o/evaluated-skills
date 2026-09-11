@@ -1224,6 +1224,16 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   und `config.py` tatsächlich zwei verschiedene Dateien sein könnten, führt
   das zu einer unnötigen Serialisierung, nie zu einem übersehenen Konflikt
   (bewusst konservativ, B2).
+- **`lint-spec` prüft Form über Überschriften und Tokens.** Die sieben Abschnitte
+  müssen `## `-Überschriften sein, die mit dem Template-Namen beginnen; die
+  Abgrenzung braucht eine Überschrift mit dem Wort, und als Nachbar zählt nur ein
+  Ordner unter `skills/` oder ein Name mit Namensraum (`superpowers:x`) — eine
+  Abgrenzung gegen eine nur im Nutzerprofil installierte Skill (`skill-creator`)
+  zählt nicht, das ist derselbe Blindfleck wie bei `lint_skill.py` `neighbors`. Die
+  Tier-Regel liest nur die Zeile des Skripts im Struktur-Block; Gate-Wörter werden
+  zeilenweise mit Negation geprüft, ein „blockiert" im Absatz nach dem „nicht" geht
+  durch. Der Review-Vermerk ist ein String, kein Nachweis. Specs ohne Nummer im
+  Dateinamen gelten als neu (Exit 1 bei Befund).
 ## architecture-map
 
 Nach der ersten Review-Runde (3 Defekte, 3 Lücken, 2 Anmerkungen behoben — siehe
@@ -1669,13 +1679,15 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 - **Gefordert, nicht gebaut:** `--without-skill` in `evals/run_evals.py` — derselbe
   Prompt ohne installierte Skill. Erst damit wird die Diskriminator-Frage gemessen statt
   beantwortet. Eigene, kleine Spec.
-- **Der Spec-Review in Schritt 1 ist G1.** `references/spec-reviewer-prompt.md` und der
-  Kopfzeilen-Vermerk „Überarbeitet nach unabhängigem Review" sind verlangt; nichts
-  prüft, ob der Vermerk steht oder ob ein Review hinter ihm liegt. Der Vermerk ist ein
-  Token in einer Datei — fälschbar, aber im Diff sichtbar. Ein `lint_spec` im Parser
-  der Pläne (`subagent-dev`) würde das Fehlen melden und den Schritt auf G2 heben
-  (`docs/assessment-brainstorming.md` §6); bis dahin zeigt nur die Historie einer Spec,
-  ob der Review stattfand.
+- **Der Spec-Review in Schritt 1 ist G2 nur über einen Token.**
+  `plan_to_tasks.py lint-spec` (subagent-dev) meldet ab Spec 18 das Fehlen des
+  Kopfzeilen-Vermerks „Überarbeitet nach unabhängigem Review"; ob ein Review hinter
+  dem Vermerk liegt, prüft nichts — er ist fälschbar, aber im Diff sichtbar, und der
+  Commit-Body mit der Fundliste ist die Konvention dazu. Specs ≤ 17 sind vom Cutoff
+  ausgenommen und tragen ihre Restbefunde (`tests/test_subagent_dev_spec_lint.py`
+  nennt sie). `spec-brief.md` und `spec-template.md` sind Eingaben, die jemand dem
+  Brainstorming mitgeben muss (G1); ob sie benutzt wurden, zeigt nur die Form der
+  Spec, die der Lint prüft.
 
 ## Verweise
 

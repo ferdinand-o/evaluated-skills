@@ -194,18 +194,28 @@ diese SKILL.md, `impl-plan`) sagen, dass die eigene Profil-Skill gemeint ist, ni
 Gemessen: Lint `--base HEAD` ohne neuen Befund für `skill-forge` und `impl-plan`;
 SKILL.md 102 Zeilen. `evals_due: true`, weil das Muster `(?i)diskriminator` eine Zeile
 der neuen Referenz trifft — die Evals sind unverändert und schema-valide (118 Tests
-grün), nicht gefahren. Der Review-Schritt ist G1: Der Vermerk steht in der Kopfzeile,
-kein Lint prüft ihn; das ist der `lint_spec` aus §6 der Prüfung, der zu `subagent-dev`
-gehört und offen bleibt. `impl-plan`s Description blieb unverändert — sie nennt
+grün), nicht gefahren. `impl-plan`s Description blieb unverändert — sie nennt
 `brainstorming` als Nachbarn, nicht als Route, und eine Frontmatter-Änderung hätte dort
 Evals fällig gemacht, ohne den Trigger zu ändern.
 
+**Punkt 2 der Prüfung, gleiche Runde:** `assets/spec-template.md` (Kopfzeile, sieben
+Abschnitte, Skill-Struktur mit Tier je Skript, Abgrenzung gegen zwei Nachbarn,
+Eval-Tabelle mit den Spalten id / Klasse / Fixture / Assertions / Diskriminator) und
+`references/spec-brief.md` (was vor der ersten Frage zu lesen ist, die sechs
+Hausfragen) als Eingaben für `brainstorming`; dazu `plan_to_tasks.py lint-spec` bei
+`subagent-dev` — dem Eigentümer des Formats nach dem `impl-plan`-Contract — mit neun
+Regeln (header, review-note, sections, eval-table, skill-structure, tier, abgrenzung,
+gate-language, placeholders), Nummern-Cutoff 18 und `tests/test_specs_lint.py` als
+Repo-Test. Kalibriert an den Specs 15–17: je ein bis zwei benannte Restbefunde
+(Tabelle ohne Fixture-Spalte, Skript ohne Tier, fehlende Kopfzeile und Abgrenzung in
+Spec 17), keine erfundenen. Das Template lintet bis auf den Review-Vermerk sauber,
+der Test hält das fest. Damit ist der Review-Schritt ab Spec 18 G2: Fehlt der
+Vermerk, meldet der Lint.
+
 ## Offen für die nächste Runde
 
-- `lint_spec` in `plan_to_tasks.py` (Spec-Template, Eval-Tabelle mit Pflichtspalten,
-  Review-Vermerk ab Spec 18) und `assets/spec-template.md` plus
-  `references/spec-brief.md` als Eingaben für `brainstorming` — §6 und §9 der
-  Prüfung `docs/assessment-brainstorming.md`.
+- Die erste Spec ab 18 durch Brief, Template, `lint-spec` und Review führen und
+  zählen, wie viele Review-Funde der Faktenklasse bleiben (§9 Punkt 3 der Prüfung).
 - Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer

@@ -13,6 +13,11 @@ statisch gelesen (Vorab-Entscheidung A3).
 Überlappung ist konservativ: Was nicht sicher ausgeschlossen werden kann, gilt
 als Abhängigkeit (Vorab-Entscheidung B2) — ein übersehener Konflikt zerstört
 Arbeitsstand, eine überflüssige Serialisierung kostet nur Zeit.
+
+`lint` prüft einen Plan auf das Format, das `generate` liest; `lint-spec` prüft
+die Skill-Spec davor (Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle,
+Skill-Struktur, Tier, Abgrenzung) mit demselben Parser — der Konsument des Formats
+ist sein Eigentümer (impl-plan Contract). Beides G2: meldet, blockiert nicht.
 """
 
 import argparse
@@ -1202,9 +1207,265 @@ def _cmd_lint(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+# ---------------------------------------------------------------------------
+# lint-spec: eine Skill-Spec dieser Sammlung prüfen, bevor impl-plan sie liest
+# (docs/assessment-brainstorming.md §6 Punkt 3). Geprüft wird Form, nicht Inhalt:
+# Kopfzeile, die sieben Abschnitte, Eval-Tabelle mit Pflichtspalten, Skill-Struktur,
+# Tier je Skript, Abgrenzung gegen zwei Nachbarn, Gate-Wörter, Platzhalter — und der
+# Review-Vermerk in der Kopfzeile, an dem Schritt 1 von skill-forge (Review der Spec
+# durch einen Subagenten) erkennbar wird. Der Lint gehört dem Konsumenten des
+# Formats (impl-plan Contract), derselbe Parser wie `spec_eval_table`. G2: meldet.
+
+SPEC_SECTIONS = ("Problem", "Constraints", "Approach", "Alternatives considered",
+                 "Out of scope", "Open questions", "Next steps")
+SPEC_HEADER_RE = re.compile(r"^Skill-Spezifikation\s*·\s*Zyklus\s*(\d+|NN)\b")  # NN: das Gerüst von skill-forge
+SPEC_REVIEW_NOTE = "Überarbeitet nach unabhängigem Review"
+# Pflichtspalten der Eval-Tabelle (Specs 16/17); ein Tupel = eine von beiden genügt.
+SPEC_EVAL_COLUMNS: tuple = ("id", "klasse", "fixture", ("assertions", "mechanismus"), "diskriminator")
+SPEC_NUMBER_RE = re.compile(r"Spec\s+(\d+)")
+SPEC_LINT_CUTOFF = 18  # Specs ab dieser Nummer müssen sauber sein; ältere sind Historie
+SPEC_GATE_WORD_RE = re.compile(r"\b(blockier\w*|erzwing\w*|stellt sicher)\b", re.IGNORECASE)
+SPEC_NEGATION_RE = re.compile(r"\b(nicht|nichts|nie|niemals|kein\w*|statt|verworfen)\b", re.IGNORECASE)
+SPEC_NAME_RE = re.compile(r"(?<![\w/.])([a-z][a-z0-9]*(?:-[a-z0-9]+)+|[a-z][a-z0-9-]*:[a-z][a-z0-9-]+)(?![\w/])")
+SPEC_SCRIPT_RE = re.compile(r"scripts/[\w./-]+\.py")
+SPEC_TIER_RE = re.compile(r"\bTier\s*[0-3]\b")
+SPEC_FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+SPEC_QUOTE_SPAN_RE = re.compile(r"„[^„“\"\n]{1,40}[\"“]")  # „TBD" in Prosa ist eine Erwähnung, kein Platzhalter
+
+
+@dataclass(frozen=True)
+class SpecFinding:
+    rule: str
+    message: str
+
+    def render(self) -> str:
+        return f"{self.rule}: {self.message}"
+
+
+def spec_number(spec_path: Path | str | None) -> int | None:
+    """Nummer aus dem Dateinamen (`Spec 17 – skill-forge.md` → 17); None ohne Nummer."""
+    if spec_path is None:
+        return None
+    match = SPEC_NUMBER_RE.search(Path(spec_path).name)
+    return int(match.group(1)) if match else None
+
+
+def _spec_headings(masked: str) -> list[tuple[int, str]]:
+    out = []
+    for line in masked.splitlines():
+        match = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if match:
+            out.append((len(match.group(1)), match.group(2)))
+    return out
+
+
+def _spec_section(masked: str, title_re: str, min_level: int = 2) -> str | None:
+    """Text unter der ersten Überschrift (Ebene ≥ min_level), die `title_re` trifft,
+    bis zur nächsten Überschrift gleicher oder höherer Ebene; None ohne Treffer."""
+    lines = masked.splitlines()
+    level = None
+    body: list[str] = []
+    for line in lines:
+        match = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if match:
+            depth = len(match.group(1))
+            if level is not None and depth <= level:
+                break
+            if level is None and depth >= min_level and re.search(title_re, match.group(2), re.IGNORECASE):
+                level = depth
+            continue
+        if level is not None:
+            body.append(line)
+    return "\n".join(body) if level is not None else None
+
+
+def _spec_eval_header_cells(masked: str) -> list[str] | None:
+    """Spaltennamen der Eval-Tabelle (dieselbe Suche wie `spec_eval_table`)."""
+    lines = masked.splitlines()
+    in_evals, level = False, 0
+    for line in lines:
+        heading = re.match(r"^(#{1,6})\s", line)
+        if heading:
+            depth = len(heading.group(1))
+            if in_evals and depth <= level:
+                in_evals = False
+            if not in_evals and EVAL_HEADING_RE.match(line):
+                in_evals, level = True, depth
+            continue
+        if in_evals and line.lstrip().startswith("|"):
+            cells = [c.strip().strip("`").lower() for c in line.strip().strip("|").split("|")]
+            if "id" in cells:
+                return cells
+    return None
+
+
+def _spec_own_name(text: str, spec_path: Path | str | None) -> str | None:
+    if spec_path is not None:
+        match = re.search(r"Spec\s+\d+\s*[–-]\s*([a-z][a-z0-9-]*)", Path(spec_path).name)
+        if match:
+            return match.group(1)
+    match = re.search(r"^```[^\n]*\n\s*skills/([a-z][a-z0-9-]*)/", text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _spec_repo_root(spec_path: Path | str | None) -> Path | None:
+    if spec_path is None:
+        return None
+    for parent in Path(spec_path).resolve().parents:
+        if (parent / "skills").is_dir():
+            return parent
+    return None
+
+
+def lint_spec(text: str, spec_path: Path | str | None = None, repo_root: Path | str | None = None) -> list[SpecFinding]:
+    """Formbefunde einer Skill-Spec. Alles Befunde, keine Abbrüche (G2: meldet).
+    `repo_root` (sonst aus `spec_path` hergeleitet) entscheidet, welche Namen in
+    der Abgrenzung als Skills zählen: Ordner unter `skills/` oder ein Name mit
+    Namensraum (`superpowers:writing-skills`). Ohne Root wird die Abgrenzung nur
+    auf Vorhandensein geprüft, und der Befund sagt das."""
+    findings: list[SpecFinding] = []
+    masked = _mask_fenced_blocks(text)
+    root = Path(repo_root) if repo_root is not None else _spec_repo_root(spec_path)
+
+    # Kopfzeile und Review-Vermerk
+    header = None
+    for line in text.splitlines()[:8]:
+        if SPEC_HEADER_RE.match(line.strip()):
+            header = line.strip()
+            break
+    if header is None:
+        findings.append(SpecFinding("header", 'Kopfzeile „Skill-Spezifikation · Zyklus N · Entscheidung: …" fehlt in den ersten acht Zeilen'))
+    elif SPEC_REVIEW_NOTE not in header:
+        findings.append(SpecFinding("review-note", f'Kopfzeile ohne „{SPEC_REVIEW_NOTE}" — skill-forge Schritt 1: Review durch einen Subagenten (references/spec-reviewer-prompt.md), dann Vermerk'))
+
+    # Die sieben Abschnitte, in dieser Reihenfolge
+    h2 = [title for depth, title in _spec_headings(masked) if depth == 2]
+    positions = []
+    for name in SPEC_SECTIONS:
+        idx = next((i for i, t in enumerate(h2) if t.lower().startswith(name.lower())), None)
+        if idx is None:
+            findings.append(SpecFinding("sections", f'Abschnitt „## {name}" fehlt'))
+        else:
+            positions.append(idx)
+    if positions != sorted(positions):
+        findings.append(SpecFinding("sections", "Abschnitte nicht in der Reihenfolge des Templates: " + " / ".join(SPEC_SECTIONS)))
+
+    # Eval-Tabelle
+    table = spec_eval_table(text)
+    if table is None:
+        findings.append(SpecFinding("eval-table", "keine Tabelle mit Spalte `id` unter einer Evals-Überschrift — ohne sie prüft impl-plan keine Coverage"))
+    else:
+        ids, malformed = table
+        cells = _spec_eval_header_cells(masked) or []
+        missing = []
+        for col in SPEC_EVAL_COLUMNS:
+            options = col if isinstance(col, tuple) else (col,)
+            if not any(any(c.startswith(o) for c in cells) for o in options):
+                missing.append(" oder ".join(options))
+        if missing:
+            findings.append(SpecFinding("eval-table", "Pflichtspalten fehlen: " + ", ".join(missing)))
+        if malformed:
+            findings.append(SpecFinding("eval-table", "id-Zellen ohne Backtick-Wert: " + ", ".join(malformed[:3])))
+        if not ids:
+            findings.append(SpecFinding("eval-table", "Eval-Tabelle ohne Zeilen"))
+        elif not any(i.startswith("anti-ceremony-") for i in ids):
+            findings.append(SpecFinding("eval-table", "keine ID mit Präfix `anti-ceremony-` (Spec 00 §2, Pflicht-Eval)"))
+
+    # Skill-Struktur-Block und Tier je Skript
+    structure = None
+    for fence in SPEC_FENCE_RE.findall(text):
+        if "SKILL.md" in fence and re.search(r"skills/[a-z][a-z0-9-]*/", fence):
+            structure = fence
+            break
+    if structure is None:
+        findings.append(SpecFinding("skill-structure", "kein Codeblock mit `skills/<name>/` und `SKILL.md` — impl-plan leitet daraus die Tasks ab"))
+    else:
+        for line in structure.splitlines():
+            script = SPEC_SCRIPT_RE.search(line)
+            if script and not SPEC_TIER_RE.search(line):
+                findings.append(SpecFinding("tier", f'{script.group(0)} ohne „Tier N" in derselben Zeile der Skill-Struktur (Spec 00 §3)'))
+
+    # Abgrenzung gegen mindestens zwei Nachbarn
+    own = _spec_own_name(text, spec_path)
+    section = _spec_section(masked, r"\bAbgrenzung\b", min_level=2)
+    if section is None:
+        findings.append(SpecFinding("abgrenzung", 'keine Überschrift „Abgrenzung" — zwei Konkurrenten mit Rückverweis (Spec 00 §5)'))
+    else:
+        names = {n for n in SPEC_NAME_RE.findall(section) if n != own}
+        if root is not None:
+            names = {n for n in names if ":" in n or (root / "skills" / n).is_dir()}
+            if len(names) < 2:
+                findings.append(SpecFinding("abgrenzung", f"weniger als zwei Nachbarn erkannt (Ordner unter skills/ oder Name mit Namensraum): {sorted(names) or 'keiner'}"))
+        elif len(names) < 2:
+            findings.append(SpecFinding("abgrenzung", f"weniger als zwei Namen in der Abgrenzung: {sorted(names) or 'keiner'} (ohne Repo-Root nicht gegen skills/ geprüft)"))
+
+    # Gate-Wörter ohne Hook und ohne Negation in der Zeile
+    if "assets/hooks" not in text:
+        hits = [line.strip() for line in masked.splitlines()
+                if SPEC_GATE_WORD_RE.search(line) and not SPEC_NEGATION_RE.search(line)]
+        for hit in hits[:3]:
+            findings.append(SpecFinding("gate-language", f"G3-Wort ohne assets/hooks/ und ohne Negation (Spec 00 §4): {hit[:90]!r}"))
+
+    # Platzhalter — Inline-Code ist maskiert: eine Spec, die den Platzhalter-Scan
+    # ihres Lints beschreibt (`TBD`), trägt keinen Platzhalter
+    prose = "\n".join(BACKTICK_SPAN_RE.sub("`…`", line) for line in masked.splitlines())  # zeilenweise: ein einzelner Backtick weiter oben verschiebt sonst die Paarung
+    prose = SPEC_QUOTE_SPAN_RE.sub("„…\"", prose)
+    placeholders = sorted({m.group(0) for m in PLACEHOLDER_RE.finditer(prose)})
+    if placeholders:
+        findings.append(SpecFinding("placeholders", "Platzhalter: " + ", ".join(placeholders)))
+
+    return findings
+
+
+def spec_lint_meta(spec_path: Path | str, repo_root: Path | str | None = None) -> dict:
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec {shlex.quote(str(spec_path))}"
+    if repo_root is not None:
+        cmd += f" --repo-root {shlex.quote(str(repo_root))}"
+    return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
+
+
+def _cmd_lint_spec(args: argparse.Namespace) -> int:
+    spec_path = Path(args.spec)
+    try:
+        text = spec_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Spec nicht lesbar: {exc}", file=sys.stderr)
+        return 2
+    findings = lint_spec(text, spec_path, repo_root=args.repo_root)
+    number = spec_number(spec_path)
+    legacy = number is not None and number < args.cutoff
+    for f in findings:
+        print(f.render())
+    if not findings:
+        print("Keine Befunde — Spec trägt alles, was impl-plan und skill-forge lesen.")
+    elif legacy:
+        print(f"{len(findings)} Befund(e) — Spec {number} liegt vor dem Cutoff {args.cutoff}: Historie, kein Fehlschlag.")
+    else:
+        print(f"{len(findings)} Befund(e). Beheben, bevor impl-plan den Plan schreibt.")
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "_meta": spec_lint_meta(spec_path, args.repo_root),
+            "spec": str(spec_path),
+            "number": number,
+            "cutoff": args.cutoff,
+            "findings": [{"rule": f.rule, "message": f.message} for f in findings],
+            "status": "clean" if not findings else ("legacy" if legacy else "findings"),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return 1 if findings and not legacy else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan -> Tasks für subagent-dev")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    spec_lint = sub.add_parser("lint-spec", help="Skill-Spec prüfen: Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle, Skill-Struktur, Tier, Abgrenzung, Gate-Wörter")
+    spec_lint.add_argument("spec", help="Pfad zur Spec (specs/Spec NN – <name>.md)")
+    spec_lint.add_argument("--repo-root", help="Repo-Wurzel für die Nachbarn-Prüfung; sonst aus dem Spec-Pfad hergeleitet")
+    spec_lint.add_argument("--cutoff", type=int, default=SPEC_LINT_CUTOFF, help=f"Specs ab dieser Nummer müssen sauber sein (Default {SPEC_LINT_CUTOFF}); ältere melden, scheitern nicht")
+    spec_lint.add_argument("--out", help="Befunde zusätzlich als JSON-Artefakt schreiben")
+    spec_lint.set_defaults(func=_cmd_lint_spec)
 
     gen = sub.add_parser("generate", help="Plan parsen, Gate fällen, Task-Dateien schreiben")
     gen.add_argument("plan", help="Pfad zum superpowers:writing-plans-Plan")

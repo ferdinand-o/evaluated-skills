@@ -23,7 +23,11 @@ kein Fehlschlag.
    `plan_to_tasks.py lint <plan>` nennt pro Task den Grund für
    `files_unknown`/`interfaces_unknown`, Prosa im Interfaces-Block, Platzhalter
    und fehlende Steps — und endet mit Exit 2, wenn der Plan gar nicht parst. `--tasks 3,4,5` beschränkt auf eine Teilmenge, z. B. die
-   noch offenen Tasks eines laufenden Plans.
+   noch offenen Tasks eines laufenden Plans. Denselben Parser nutzt
+   `plan_to_tasks.py lint-spec <spec>` für die Spec davor (Kopfzeile mit
+   Review-Vermerk, Eval-Tabelle, Skill-Struktur, Abgrenzung; ab Spec 18 Exit 1 bei
+   Befund, ältere melden nur) — Eigentum beim Konsumenten des Formats, Aufruf aus
+   `skill-forge` Schritt 1.
 3. **Verdikt lesen, nicht überstimmen:**
    - `parallel` → die genannte `parallel_group` läuft je in einem eigenen
      Git-Worktree (Isolation ist Default bei parallelen Schreibzugriffen).

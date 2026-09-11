@@ -15,8 +15,11 @@ Register lintet, sobald jemand `pytest` fährt (G2).
 
 1. **Spec** — `brainstorming` für Neues (die eigene Profil-Skill, nicht
    `superpowers:brainstorming`: andere Ablage, andere Übergabe), `feature-spec` (03) mit
-   Codebase-Bezug. Die Spec trägt eine Eval-Tabelle mit `id`-Spalte; ohne sie prüft
-   niemand Coverage. **Dann Review der Spec** durch einen Subagenten mit frischem
+   Codebase-Bezug. Dem Brainstorming `references/spec-brief.md` (was vorher zu lesen
+   und zu fragen ist) und `assets/spec-template.md` mitgeben; danach
+   `python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec "specs/Spec NN – <name>.md"`
+   — Kopfzeile, sieben Abschnitte, Eval-Tabelle mit `id`-Spalte, Skill-Struktur, Tier,
+   Abgrenzung. Ohne Eval-Tabelle prüft niemand Coverage. **Dann Review der Spec** durch einen Subagenten mit frischem
    Kontext (`references/spec-reviewer-prompt.md`), der jede Behauptung über das Repo
    nachmisst; die Kopfzeile trägt danach „Überarbeitet nach unabhängigem Review". Drei
    von drei so geprüften Specs brauchten 119–217 Diff-Zeilen — vor dem Plan ist das
