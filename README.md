@@ -43,6 +43,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan | superpowers:writing-plans (fremde Repos), brainstorming (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Skill bauen oder ändern | skill-forge | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
 
 ## Konventionen

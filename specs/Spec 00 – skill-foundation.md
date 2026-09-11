@@ -46,7 +46,7 @@ Ein Eval ist ein Objekt aus: `id`, `class` (siehe unten), `fixture` (optional), 
 
 Zwei Klassen halten die Kosten beherrschbar: **Contract-Evals** prüfen mechanisch (ist Datei X entstanden? hat das Gate ein Urteil geloggt? trägt das Artefakt seine Kopfzeile?) und laufen billig bei jeder Änderung. **Verhaltens-Evals** sind die Trap-Szenarien der Einzel-Specs, brauchen den Judge und laufen vor Release.
 
-**Pflicht-Eval für jede Skill:** mindestens ein **Anti-Zeremonie-Eval** — der triviale Fall, bei dem die Skill klein bleiben muss (Spec 01s Tippfehler-Bug, Spec 05s Einzeltest, Spec 04s Mini-Diff). Zeremonie ist das systemische Risiko dieser Sammlung, weil jede einzelne Skill ihre eigene Gründlichkeit für gerechtfertigt hält. Fixtures sind minimal-synthetisch (10–50 Dateien), nicht echte Repos — sie sollen die Falle enthalten, nicht Realismus beweisen.
+**Pflicht-Eval für jede Skill:** mindestens ein **Anti-Zeremonie-Eval** — der triviale Fall, bei dem die Skill klein bleiben muss (Spec 01s Tippfehler-Bug, Spec 05s Einzeltest, Spec 04s Mini-Diff). Seine ID beginnt mit `anti-ceremony-`; daran erkennt ihn `skill-forge`s Lint (Spec 17), kein Schema-Zwang in `evalkit` — ältere `evals.json` ohne das Präfix stehen im Register des Repo-Tests. Zeremonie ist das systemische Risiko dieser Sammlung, weil jede einzelne Skill ihre eigene Gründlichkeit für gerechtfertigt hält. Fixtures sind minimal-synthetisch (10–50 Dateien), nicht echte Repos — sie sollen die Falle enthalten, nicht Realismus beweisen.
 
 ### 3 · Dependency-Tiers
 
@@ -75,7 +75,7 @@ Drei Durchsetzungsgrade, die jede Skill pro Gate deklariert — und eine Sprachr
 
 Frontmatter: `name` und `description` verpflichtend, `license`/`version`/`metadata`/`allowed-tools` optional, nichts Harness-Spezifisches — das ist die Auflösung des in allen Specs zitierten „portablen Frontmatters". SKILL.md ≤ 150 Zeilen (die drei gebauten Skills liegen bei 73–103, die Konvention ist also gelebt); alles Weitere in `references/`.
 
-Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärksten Konkurrenten. Die zentrale Matrix lebt hier und im Plugin-README, nicht verteilt in vierzehn „Next steps":
+Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärksten Konkurrenten. Sie nennt Trigger und Abgrenzung, **keine Prozessbeschreibung** — was die Skill *tut*, steht im Body, nicht in der Description; sonst folgt der Agent der Description statt dem Body (Spec 17, Entscheidung 1; bestehende Descriptions mit Prozessverben stehen im Register von `tests/test_skills_lint.py`). Die zentrale Matrix lebt hier und im Plugin-README, nicht verteilt in vierzehn „Next steps":
 
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
@@ -88,6 +88,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | ad-hoc „fass zusammen" | visual-summary (11) | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Skill bauen oder ändern | skill-forge (17) | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 
 *Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `superpowers:writing-plans`. *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
 

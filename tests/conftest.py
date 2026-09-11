@@ -23,3 +23,9 @@ def load_script(relpath: str):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def git(root: Path, *args: str) -> str:
+    """Git im gegebenen Ordner, mit check=True — für Tests, die ein Repo aufbauen."""
+    import subprocess
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
