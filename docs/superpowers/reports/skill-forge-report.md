@@ -217,7 +217,7 @@ Damit ist der Review-Schritt ab Spec 18 G2: Fehlt der Vermerk, meldet der Lint.
 fanden unabhängig: Die Gate-Wort-Regel war für jede Spec aus dem Template tot, weil
 das Template selbst „G3 nur mit `assets/hooks/`" sagt und der Lint nur den String im
 Text suchte — jetzt zählt nur ein Hook im Skill-Struktur-Baum, und Negation gilt im
-Absatz wie in `lint_skill.py`. Der Struktur-Block ist jetzt der Zaun, der mit der
+Absatz. Der Struktur-Block ist jetzt der Zaun, der mit der
 Baumwurzel `skills/<name>/` beginnt, nicht der erste, der `SKILL.md` erwähnt; Zäune
 werden mit derselben Erkennung wie `_mask_fenced_blocks` gefunden (eingerückt
 erlaubt). Die Tier-Regel liest flache und verschachtelte `scripts/`, überspringt aber
@@ -230,6 +230,25 @@ laufen, nicht davor. Der Kalibrierungstest prüft Teilmengen, damit eine nachgeb
 Alt-Spec ihn nicht rot macht. Zahlen korrigiert: sechs von sieben Nennungen.
 Nachgemessen vom Reviewer: SKILL.md-Zeilen, Testzahlen, Diff-Zeilen, Restbefunde,
 Commit-Zitate im Reviewer-Prompt, Descriptions unverändert.
+
+**Zweite Fix-Runde nach erneutem Doppel-Review, 2026-09-11.** Sieben der acht Funde
+bestätigt behoben, einer „anders als behauptet": Die Negation galt absatzweise, aber
+eine Tabelle war ein Absatz — die Spalte „nicht" im Kopf der Abgrenzungstabelle
+negierte jede Zeile darunter. Jetzt sind Tabellen- und Listenzeilen eigene Einheiten,
+mit derselben Logik wie `_units` in `lint_skill.py`; die Paritätsbehauptung stimmt
+damit erst jetzt. Der Baum wird über Pfad-Token gelesen (erstes Wort nach dem
+Präfix) statt über Substrings: `scripts/check.py` in einem Zeilenkommentar ist kein
+Skript, `assets/hooks/` in einem Kommentar kein Hook, ein fremder Pfad im Kommentar
+der eigenen Skriptzeile macht sie nicht fremd. Dateiname und Baumwurzel gelten beide
+als „diese Skill", damit `Spec 18 – subagent-dev-lint.md` mit Wurzel
+`skills/subagent-dev/` sich nicht selbst als Nachbar zählt. Dazu: „Blocker" und
+„Abnahme-Blocker" als Gate-Wörter (Spec 00 §4 nennt sie), „Assertion" im Singular
+als gültige Spalte, `.sh` unter `scripts/` mit Tier, Wurzelzeile mit Anhang, ein
+offener Zaun als eigener Befund. Die Eval-Tabelle wird je Lauf einmal gesucht,
+`lint_meta` und `spec_lint_meta` teilen `_artifact_meta`. Der Reviewer-Prompt
+beschreibt das Protokollformat selbst, statt auf Commits zu zeigen, die nur auf
+ungemergten Branches liegen; das Brief sagt über Spec 16 und 17 nur, was die
+Git-Historie belegt.
 
 ## Offen für die nächste Runde
 

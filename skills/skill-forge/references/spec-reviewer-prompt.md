@@ -21,7 +21,7 @@ Subagent (general-purpose, frischer Kontext):
     **Grundlage:** specs/Spec 00 – skill-foundation.md (§2 Eval-Vertrag, §3 Tiers, §4 Gate-Sprache, §5 Routing)
     **Nachbarn:** skills/<name>/SKILL.md jeder in der Abgrenzung genannten Skill, dazu ihr Abschnitt in docs/known-limits.md
     **Harness:** evalkit/schema.py (welche Assertion-Typen es gibt), evalkit/workspace.py (was `prepare()` in einen Eval-Workspace kopiert — nur Skill-Ordner und Fixture)
-    **Vorbild:** die Commit-Bodies d6d456e und f1b2b6d zeigen, wie Funde und Ablehnungen protokolliert werden
+    **Vorbild für das Protokoll:** je Fund eine Zeile Befund — Beleg — Folge; abgelehnte Funde mit Grund (etwa: „xhigh sollte gestrichen werden — abgelehnt, es ist eine reale Effort-Stufe und war ausdrücklich angefragt"); eigene Nachmessungen ausdrücklich als solche („alle fünf strukturellen Behauptungen nachgeprüft — sie stimmen")
 
     ## Was zu prüfen ist
 

@@ -1234,14 +1234,24 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   (`superpowers:x`) — eine Abgrenzung gegen eine nur im Nutzerprofil installierte
   Skill (`skill-creator`) zählt nicht, das ist derselbe Blindfleck wie bei
   `lint_skill.py` `neighbors`; umgekehrt zählt jedes `wort:wort` als Namensraum.
-- **Der Struktur-Block ist der Zaun, der mit `skills/<name>/` beginnt.** Ein Baum,
-  dessen erste Zeile ein Kommentar ist, wird nicht gefunden (`skill-structure`). Die
-  Tier-Regel liest die Zeile des Skripts, flach oder unter `scripts/`; Skripte anderer
-  Skills im Baum werden übersprungen, auch wenn die Spec sie neu einführt.
-- **Gate-Wörter gelten absatzweise mit Negation**, ein „blockiert" zwei Absätze nach
-  dem „nicht" ist ein Befund, ein „blockiert … verworfen" im selben Absatz keiner —
-  in beide Richtungen unscharf, wie bei `lint_skill.py`. Der Hook zählt nur, wenn er
-  als `assets/hooks/…` im Struktur-Baum steht.
+- **Der Struktur-Block ist der Zaun, der mit `skills/<name>/` beginnt** (ein Anhang
+  hinter der Wurzel ist erlaubt). Ein Baum, dessen erste Zeile ein Kommentar ist, wird
+  nicht gefunden (`skill-structure`). Jeder Eintrag wird über sein Pfad-Token gelesen,
+  das erste Wort nach dem Baum-Präfix; Kommentare dahinter zählen nicht — weder als
+  Skript noch als Hook noch als fremder Pfad. Ein Baum, der statt `├──`/`└──` andere
+  Zeichen oder Tabs zur Einrückung nutzt, wird falsch verschachtelt. Skripte (`.py`,
+  `.sh`) zählen nur unter `scripts/`; Skripte anderer Skills im Baum werden
+  übersprungen, auch wenn die Spec sie neu einführt. Als „diese Skill" gelten
+  Dateiname und Baumwurzel; weichen beide voneinander ab und ist ein dritter Name
+  gemeint, zählt er als Nachbar.
+- **Gate-Wörter gelten je Einheit mit Negation** — Absatz, Tabellenzeile oder
+  Listenpunkt, wie `_units` in `lint_skill.py`. Ein „blockiert" zwei Absätze nach dem
+  „nicht" ist ein Befund, ein „blockiert … verworfen" im selben Absatz keiner — in
+  beide Richtungen unscharf. Substantive („Blocker", „Abnahme-Blocker") zählen wie
+  Verben. Der Hook zählt nur als Pfad-Token `assets/hooks/…` im Struktur-Baum.
+- **Ein offener Zaun** (``` ohne Gegenstück) wird als eigener Befund `fence`
+  gemeldet; die übrigen Befunde derselben Spec sind dann unzuverlässig, weil alles
+  hinter dem Marker als Code gilt.
 - **Platzhalter:** Inline-Code und „…"-Zitate sind maskiert, also geht „TODO:
   nachtragen" in Anführungszeichen durch. Template-Reste werden nur in der Kopfzeile
   (`Zyklus NN`) und in Eval-IDs (`<fall>`) gemeldet; ein `<zusage>` in Prosa nicht.

@@ -4,8 +4,9 @@ Eingabe für `brainstorming` (die eigene Profil-Skill), zusammen mit
 `assets/spec-template.md`. Die Skizzen in §7 der Prüfung
 `docs/assessment-writing-skills-writing-plans.md` (Branch
 `claude/assessment-writing-skills-plans`, bis zum Merge nicht auf `main`) waren die
-Eingabe für Spec 16 und 17; Spec 17 ist die einzige, deren Plan mit `impl-plan` ohne
-Format-Nacharbeit entstand. Dieses Brief ist die Verallgemeinerung: erst lesen, dann
+Eingabe für Spec 16 und 17; Spec 17s Plan entstand mit `impl-plan` und ging
+lint-sauber durch, Spec 16s Plan ist älter als `impl-plan` (Git-Historie: Plan 1dd8386,
+impl-plan Task 1 5442374). Dieses Brief ist die Verallgemeinerung: erst lesen, dann
 fragen, dann schreiben.
 
 ## 1 · Vorher lesen — Orientieren heißt hier messen
