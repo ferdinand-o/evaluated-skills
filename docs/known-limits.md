@@ -1669,6 +1669,13 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 - **Gefordert, nicht gebaut:** `--without-skill` in `evals/run_evals.py` — derselbe
   Prompt ohne installierte Skill. Erst damit wird die Diskriminator-Frage gemessen statt
   beantwortet. Eigene, kleine Spec.
+- **Der Spec-Review in Schritt 1 ist G1.** `references/spec-reviewer-prompt.md` und der
+  Kopfzeilen-Vermerk „Überarbeitet nach unabhängigem Review" sind verlangt; nichts
+  prüft, ob der Vermerk steht oder ob ein Review hinter ihm liegt. Der Vermerk ist ein
+  Token in einer Datei — fälschbar, aber im Diff sichtbar. Ein `lint_spec` im Parser
+  der Pläne (`subagent-dev`) würde das Fehlen melden und den Schritt auf G2 heben
+  (`docs/assessment-brainstorming.md` §6); bis dahin zeigt nur die Historie einer Spec,
+  ob der Review stattfand.
 
 ## Verweise
 

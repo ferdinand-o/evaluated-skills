@@ -90,7 +90,9 @@ Vor der Übergabe, ohne Subagent, mit frischem Blick auf die Spec:
 
 ## Abgrenzung
 
-- **brainstorming**, **feature-spec** — schreiben die Spec, die hier Eingabe ist.
+- **brainstorming**, **feature-spec** — schreiben die Spec, die hier Eingabe ist
+  (brainstorming: die eigene Profil-Skill, nicht `superpowers:brainstorming` — die legt
+  nach `docs/superpowers/specs/` ab und übergibt an `writing-plans`).
 - **subagent-dev** — zerlegt den Plan, fällt das Gate, dispatcht, nimmt ab. Besitzt den
   Parser und den Lint, die diese Skill aufruft.
 - **superpowers:writing-plans** — für Repos ohne `subagent-dev`. Sein Kopf

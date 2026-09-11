@@ -13,8 +13,14 @@ Register lintet, sobald jemand `pytest` fährt (G2).
 
 ## Ablauf
 
-1. **Spec** — `brainstorming` für Neues, `feature-spec` (03) mit Codebase-Bezug. Die
-   Spec trägt eine Eval-Tabelle mit `id`-Spalte; ohne sie prüft niemand Coverage.
+1. **Spec** — `brainstorming` für Neues (die eigene Profil-Skill, nicht
+   `superpowers:brainstorming`: andere Ablage, andere Übergabe), `feature-spec` (03) mit
+   Codebase-Bezug. Die Spec trägt eine Eval-Tabelle mit `id`-Spalte; ohne sie prüft
+   niemand Coverage. **Dann Review der Spec** durch einen Subagenten mit frischem
+   Kontext (`references/spec-reviewer-prompt.md`), der jede Behauptung über das Repo
+   nachmisst; die Kopfzeile trägt danach „Überarbeitet nach unabhängigem Review". Drei
+   von drei so geprüften Specs brauchten 119–217 Diff-Zeilen — vor dem Plan ist das
+   eine Überarbeitung, danach eine Fix-Runde.
 2. **Plan** mit `impl-plan` (16). Bei Tier 0 stehen die Evals vor der SKILL.md.
 3. **Bau** im Hauptkontext oder in Paketen mit `subagent-dev` (09), eine neue Skill
    unter `skills/<name>/` (nie unter `.claude/skills/`, das ist der Installationsort). Vorher

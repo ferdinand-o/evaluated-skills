@@ -178,8 +178,34 @@ die durchgehen. Der Reviewer fängt sie, wenn er sie sucht.
 **Die Baseline ohne Skill fehlt.** Die Diskriminator-Frage wird je Eval beantwortet,
 nicht gemessen. `--without-skill` bleibt eine eigene Spec.
 
+## Folgerunde: Spec-Review als Teil von Schritt 1 (2026-09-11)
+
+Aus `docs/assessment-brainstorming.md` §9 Punkt 1. Drei Specs (15, 16, 17) waren vor
+dem Bau von einem Subagenten mit frischem Kontext geprüft worden, jedes Mal auf Zuruf
+und mit einem Prompt, der nirgends lag; jede brauchte danach 119–217 Diff-Zeilen. Jetzt:
+`references/spec-reviewer-prompt.md` (Kategorien: Fakten über das Repo, Zitate, Zahlen
+ohne Quelle, Evals fahrbar, Spec-00-Konsistenz, Widersprüche, stille Entscheidungen,
+Schnittstellen — destilliert aus den Commit-Bodies f1b2b6d, d6d456e, 0ecccfa), Schritt 1
+des Ablaufs verlangt den Review und den Kopfzeilen-Vermerk „Überarbeitet nach
+unabhängigem Review", und die sieben Nennungen von `brainstorming` (Spec 00 §5, README,
+diese SKILL.md, `impl-plan`) sagen, dass die eigene Profil-Skill gemeint ist, nicht
+`superpowers:brainstorming`.
+
+Gemessen: Lint `--base HEAD` ohne neuen Befund für `skill-forge` und `impl-plan`;
+SKILL.md 102 Zeilen. `evals_due: true`, weil das Muster `(?i)diskriminator` eine Zeile
+der neuen Referenz trifft — die Evals sind unverändert und schema-valide (118 Tests
+grün), nicht gefahren. Der Review-Schritt ist G1: Der Vermerk steht in der Kopfzeile,
+kein Lint prüft ihn; das ist der `lint_spec` aus §6 der Prüfung, der zu `subagent-dev`
+gehört und offen bleibt. `impl-plan`s Description blieb unverändert — sie nennt
+`brainstorming` als Nachbarn, nicht als Route, und eine Frontmatter-Änderung hätte dort
+Evals fällig gemacht, ohne den Trigger zu ändern.
+
 ## Offen für die nächste Runde
 
+- `lint_spec` in `plan_to_tasks.py` (Spec-Template, Eval-Tabelle mit Pflichtspalten,
+  Review-Vermerk ab Spec 18) und `assets/spec-template.md` plus
+  `references/spec-brief.md` als Eingaben für `brainstorming` — §6 und §9 der
+  Prüfung `docs/assessment-brainstorming.md`.
 - Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer
