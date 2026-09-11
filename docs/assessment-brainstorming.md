@@ -31,6 +31,7 @@ oder vermutet habe, ist so markiert (§9).
 | `obra/superpowers`, `skills/brainstorming` | b36e082, 2026-08-12 (v6.3.0) | SKILL.md 250 Zeilen (2.277 Wörter) mit Drei-Pfad-Router, `spec-document-reviewer-prompt.md` (49), `visual-companion.md` (299), fünf Dateien für den Browser-Begleiter (1.432 Zeilen: vier Skripte und ein HTML-Template, Node) |
 | eigene `brainstorming`-Skill | Nutzerprofil, `~/.claude/skills/synced/…/brainstorming`, `source: custom`, 2026-08-05; laut Nutzer als Ersatz für `superpowers:brainstorming` gebaut, weil Plugins in claude.ai und im Cloud-Container nicht laden | SKILL.md 157 Zeilen (1.648 Wörter), keine Skripte, kein Reviewer-Prompt; keine der 27 superpowers-Fassungen seit 2025-10-16 enthält ihren Text (Nachbildung des Zwecks, nicht des Wortlauts) |
 | Dieses Repo | 34af3ac (`main`) plus Branch `claude/assessment-writing-skills-plans` | 18 Specs, 19 Pläne, 16 Reports, `docs/superpowers/specs/` und `validation/` (cad-parts), Git-Historie der Specs, `plan_to_tasks.py` (`spec_eval_table`) |
+| 20 superpowers-Specs aus anderen Repos des Nutzers | Upload, 2026-06-19 bis 2026-08-29, ohne Git-Historie | 148–885 Zeilen, zusammen 45.869 Wörter; darunter ein Paar Fassung 2 / Fassung 3 desselben Entwurfs (§5.1) |
 | Kontext | `feature-spec` (03) als Haus-Spec-Skill, `skill-forge` (17) Ablauf Schritt 1, `impl-plan` (16) Schritt 1 | — |
 
 Methode: Zählung über alle Specs (Zeilen, Wörter, Abschnitte, Hausinhalte), Parser-Lauf
@@ -220,9 +221,69 @@ Angenommen, die nächste Spec entstünde mit der superpowers-Fassung statt der e
 - **Browser-Begleiter:** 1.432 Zeilen Node für Mockups. Keine Spec dieser Sammlung
   hatte eine visuelle Frage.
 
-Urteil zu dieser Teilfrage: Die eigene Skill *ist* für diese Sammlung die bessere
-Fassung; ein Nachbau von superpowers wäre ein Rückschritt. Als Konkurrentin im Routing
-bleibt superpowers trotzdem — und das ist das einzige, was an ihr zu lösen ist.
+### 5.1 Gemessen: zwanzig superpowers-Specs aus anderen Repos
+
+Der Nutzer hat zwanzig Specs nachgereicht, die zwischen 2026-06-19 und 2026-08-29 mit
+`superpowers:brainstorming` in Claude Code entstanden sind (kein escaptes Markdown in
+keiner Datei), ohne Git-Historie und ohne die Pläne und Reports danach. Sie sind
+Code-Feature-Specs (Sandbox, WebSocket-Protokoll, VPN-Gateway, Benchmark-Runner), keine
+Skill-Specs — der Vergleich gilt also der Arbeitsweise, nicht dem Zuschnitt.
+
+| Merkmal | superpowers-Specs (20) | Specs 01–14 hier | Specs 15–17 hier |
+| --- | --- | --- | --- |
+| Zeilen (min / Median / max) | 148 / 224 / 885 | 53–65 | 160–324 |
+| Wörter (Median) | 1.679 | 627–822 | 2.305–3.185 |
+| gemeinsames Template | keines; sechs Juni-Specs teilen ein eigenes (Kontext / Ziel & Scope / Architektur / … / Fehlerbehandlung / Testing / Bewusst aufgeschoben / Entscheidungs-Log), drei englische das superpowers-Muster Goal / Decisions (locked) / Architecture / Components / Error handling / Testing / Out of scope, elf sind frei | Sieben-Abschnitte-Template, 14/14 | dito, 3/3 |
+| Abschnitt Test/Verifikation | 18 von 20 | 0 (Evals als Absatz) | 3 (Eval-Tabelle) |
+| Abschnitt Fehlerbehandlung/-klassen | 13 von 20 | 0 | 0 |
+| Abschnitt für bewusst Ausgelassenes | 16 von 20 | 14 (Out of scope) | 3 |
+| Abschnitt Alternativen | 0 von 20; in den sechs Entscheidungs-Logs nennen 3 von 42 Einträgen die verworfene Option | 14 (Alternatives considered) | 3 |
+| Abschnitt offene Fragen/Risiken | 4 von 20 | 14 | 3 |
+| Status „freigegeben"/„Approved" im Kopf | 11 von 20 (7 davon „wartet auf finales Spec-Review") | 0 | 0 |
+| `TBD`/`TODO` | 1 in 20 Dateien | 0 | 0 |
+| Zahlen mit Einheit (ms, MB, %, Tokens …) | in 9 von 20; „gemessen/ausgezählt" in 7, „geschätzt" in 5, „kalibrieren" in 3 | Tier-Angaben, sonst kaum | viele, vor Review teils erfunden (§4.1) |
+| unabhängiger Review nachweisbar | 1 Paar: Fassung 2 → 3 „nach zwei unabhängigen Reviews" | 0 | 3 von 3 |
+
+Drei Beobachtungen tragen:
+
+1. **Dasselbe Fehlerbild unter Review.** Das eine Paar mit Historie — Agent-Task-Broker,
+   Fassung 2 (559 Zeilen) zu Fassung 3 (864 Zeilen, 589 Diff-Zeilen) — listet neunzehn
+   behobene Defekte in einer Tabelle, zwei Funde begründet verworfen. Darunter genau die
+   zwei Klassen aus §4.1: Konsistenz (ein Zähler widerspricht der Fehlerklassen-Tabelle,
+   ein Zustand ohne Transition, ein Begriff undefiniert) und Fakten (Preistabelle auf zwei
+   Preisständen, Dollar gegen Euro, eine Kapazitätsformel mit gestrichener Schätzung).
+   superpowers' Selbst-Review hat sie so wenig gefangen wie der eigene bei 15–17. Was sie
+   fand, waren zwei Reviews mit frischem Kontext — derselbe Mechanismus, denselben Weg
+   organisiert: auf Zuruf, Prompt nicht in der Spec-Skill.
+2. **Zahlen werden dort markiert, wo die Spec aus einem Lauf kommt.** Die
+   Führerscheintheorie-Spec beginnt mit „Machbarkeit — gemessene Befunde" („alle Zahlen
+   … ausgezählt, nicht geschätzt"), die Benchmark-Runner-Spec endet mit „Gesetzte Zahlen
+   und offene Punkte" und trägt nach, was der erste echte Lauf geklärt hat. Das ist die
+   Praxis, die §6 als `Annahme:`-Pflicht und Orientieren-als-Messen vorschlägt — sie
+   existiert in den superpowers-Specs des Nutzers als Gewohnheit, nicht als Regel: 7 von
+   20 nennen Gemessenes, 3 von 20 halten fest, was zu kalibrieren bleibt.
+3. **Was superpowers strukturell nicht liefert, fehlt auch hier:** keine Alternativen als
+   Abschnitt (0 von 20), offene Fragen oder Risiken selten (4 von 20), stattdessen „Decisions (locked)"
+   und ein Status „freigegeben". Das ist der Ein-Frage-Dialog in Dokumentform: Die Spec
+   protokolliert, was entschieden wurde, nicht, wogegen. Die eigene Skill erzwingt beides
+   per Template und liefert es in 14 von 14 Specs — kürzer, aber mit den Stellen, an denen
+   ein Leser später widersprechen kann.
+
+Was die zwanzig Specs *nicht* zeigen, weil Historie und Folgeartefakte fehlen: wie viele
+Entscheidungen der Bau noch treffen musste (§4.3 kennt für die Hausspecs 3–10 je
+Report), ob die sieben „wartet auf finales Spec-Review" ihn bekamen, und welche
+superpowers-Fassung jeweils lief (nur drei Specs liegen nach v6.3.0 mit dem
+Drei-Pfad-Router).
+
+Urteil zu dieser Teilfrage, nach der Messung: Die superpowers-Specs sind im Ergebnis
+nicht schlechter — länger, mit Fehlerbehandlung und Test-Abschnitt, in den späteren mit
+markierten Messwerten. Sie sind anders geschnitten: für Code-Features in bestehenden
+Repos, ohne Alternativen und ohne offene Fragen, mit Übergabe an `writing-plans`. Für
+Skill-Specs dieser Sammlung bleibt die eigene Fassung die passendere; ein Nachbau von
+superpowers wäre ein Rückschritt im Zuschnitt, nicht in der Qualität. Und die Lücke, um
+die es in §6 geht, ist bei beiden dieselbe: Der Review mit Nachmessen hat in beiden
+Welten je einmal bis dreimal stattgefunden, immer auf Zuruf. Als Konkurrentin im Routing
+bleibt superpowers — und das ist das einzige, was an ihr zu lösen ist.
 
 ## 6 · Urteil
 
@@ -416,6 +477,11 @@ neue Skill" → Datei unter `specs/` mit Kopfzeile und Eval-Tabelle, nicht unter
   installiert ist; für die Session zu Spec 15 ist das nicht geprüft. Dass die drei
   Brainstormings mit einer Fragerunde auskamen, ist Erinnerung an die Sessions, kein
   Repo-Befund.
+- Die zwanzig superpowers-Specs (§5.1) liegen ohne Git-Historie, Pläne und Reports vor;
+  Nacharbeit und Zusatzentscheidungen sind dort nur für das eine Paar Fassung 2/3
+  messbar, und die Tabellenzeilen zu Abschnitten beruhen auf Überschriften — ein
+  Abschnitt „Prüfung" zählt als Test-Abschnitt, Prosa ohne Überschrift nicht. Welche
+  superpowers-Fassung jede Spec erzeugt hat, ist nicht bekannt.
 - Die Zahlenvergleiche vor/nach Review (§4.1, letzte Spalte) hängen an der Zählregel
   für „Zahl im Text"; eine andere Regex liefert für Spec 16 statt 17→24 etwa 18→24.
   Die Richtung ist stabil, die Einzelwerte nicht.
