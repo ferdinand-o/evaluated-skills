@@ -16,7 +16,8 @@ Register lintet, sobald jemand `pytest` fährt (G2).
 1. **Spec** — `brainstorming` für Neues, `feature-spec` (03) mit Codebase-Bezug. Die
    Spec trägt eine Eval-Tabelle mit `id`-Spalte; ohne sie prüft niemand Coverage.
 2. **Plan** mit `impl-plan` (16). Bei Tier 0 stehen die Evals vor der SKILL.md.
-3. **Bau** im Hauptkontext oder in Paketen mit `subagent-dev` (09). Vorher
+3. **Bau** im Hauptkontext oder in Paketen mit `subagent-dev` (09), eine neue Skill
+   unter `skills/<name>/` (nie unter `.claude/skills/`, das ist der Installationsort). Vorher
    `references/checklist.md`, nur den Abschnitt der Phase — nicht die ganze
    Pitfalls-Datei. Für Doktrin-Text: `references/form-selection.md` (welche Form gegen
    welches Versagen). Gerüste: `assets/skill-template/`.
@@ -26,8 +27,10 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    # installiert: python .claude/skills/skill-forge/scripts/lint_skill.py skills/<name> --base HEAD --out …
    ```
    `--base HEAD` vergleicht mit dem letzten Commit; nur neue Befunde zählen. Ohne
-   `--base` zählt alles (neue Skill), und `evals_due` ist ungeprüft, nie „nein". Fehlt
-   das Skript, lautet die Übergabe „ungeprüft — Lint nicht verfügbar", nie „fertig".
+   `--base` zählt alles: bei einer neuen Skill und beim reinen Prüfen ohne Änderung
+   („prüfe die Skill X") — dort wäre jeder Befund ein Altbefund und der Lint grün.
+   `evals_due` ist ohne `--base` ungeprüft, nie „nein". Fehlt das Skript, lautet die
+   Übergabe „ungeprüft — Lint nicht verfügbar", nie „fertig".
 5. **Evals**, wenn `evals_due: true` oder neue Skill — nach `references/evals.md`:
    `evalkit`-Schema, ein Prompt je Eval, Diskriminator-Frage in `notes`, ein Eval mit
    ID-Präfix `anti-ceremony-`. Vor jeder Fix-Runde ein zweiter Lauf.

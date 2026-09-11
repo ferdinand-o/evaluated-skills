@@ -516,3 +516,29 @@ def test_invalid_regex_pattern_is_reported_not_swallowed(tmp_path):
     md.write_text(md.read_text(encoding="utf-8").replace("1. Tag wählen.", "1. Tag wählen, sonst nichts."), encoding="utf-8")
     rc, data = _run(root, skill, tmp_path / "lint.json", "--base", "HEAD")
     assert data["evals_due"] is False and "ungültigem Regex" in data["evals_due_reason"]
+
+
+# --- Folgerunde nach dem ersten Eval-Lauf -----------------------------------------
+
+def test_frontmatter_rejects_unquoted_yaml_mapping_colon_and_accepts_quoted(tmp_path):
+    """Eval-Lauf 5 fand es: Ein unquotiertes „: \" in der description lädt bei einem
+    YAML-Parser nicht — zwei Skills der Sammlung hatten genau das."""
+    bad = GOOD_SKILL_MD.replace(GOOD_DESC, "Use when a note needs a tag: one of three. Not for writing (use handoff).")
+    root, skill = make_repo(tmp_path, bad)
+    status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
+    assert status == "finding" and "YAML" in reason and "description" in reason
+    quoted = GOOD_SKILL_MD.replace(GOOD_DESC, '"Use when a note needs a tag: one of three, say \\"tag it\\". Not for writing (use handoff)."')
+    (skill / "SKILL.md").write_text(quoted, encoding="utf-8")
+    report = ls.lint_skill(skill, root)
+    assert status_of(report, "frontmatter")[0] == "pass"
+    assert status_of(report, "description")[0] == "pass"  # die Regeln sehen den Text ohne Anführungszeichen
+    fields, _ = ls.split_frontmatter(quoted)
+    assert fields["description"].startswith("Use when") and '"tag it"' in fields["description"]
+
+
+@pytest.mark.parametrize("value, ok", [
+    ("Use when x. Not for y.", True), ("Use when x: y", False), ("Ends with colon:", False),
+    ("has # comment", False), ("[list]", False), ('"quoted: fine"', True), (">", True),
+])
+def test_yaml_plain_scalar_problem(value, ok):
+    assert (ls.yaml_plain_scalar_problem(value) is None) is ok

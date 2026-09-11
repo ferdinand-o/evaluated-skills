@@ -107,8 +107,38 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+# Ein unquotierter YAML-Skalar darf weder `: ` noch ` #` enthalten, nicht auf `:` enden
+# und nicht mit einem dieser Zeichen beginnen — sonst lädt das Frontmatter nicht, und der
+# Loader kennt die Skill nicht. Der Lint parst kein YAML (Stdlib), er prüft die Fälle.
+YAML_PLAIN_FORBIDDEN_START = tuple("[{&*!%@`|>")
+
+
+def yaml_plain_scalar_problem(value: str) -> str | None:
+    """Grund, warum `value` als unquotierter YAML-Skalar nicht lädt — oder None."""
+    if not value or value[0] in "\"'":
+        return None
+    if ": " in value or value.endswith(":"):
+        return "enthält „: \" oder endet auf „:\" — als YAML ein Mapping, nicht ein Text"
+    if " #" in value:
+        return "enthält „ #\" — als YAML beginnt dort ein Kommentar"
+    if value[0] in YAML_PLAIN_FORBIDDEN_START and value not in (">", "|", ">-", "|-"):
+        return f"beginnt mit „{value[0]}\" — als YAML ein Sonderzeichen"
+    return None
+
+
+def _unquote(value: str) -> str:
+    """Doppelte und einfache YAML-Anführungszeichen entfernen, Escapes auflösen."""
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return value
+
+
 def split_frontmatter(text: str) -> tuple[dict[str, str] | None, int]:
-    """(Felder, Zeilenindex hinter dem Frontmatter). None, wenn kein Frontmatter."""
+    """(Felder, Zeilenindex hinter dem Frontmatter). None, wenn kein Frontmatter.
+    Werte kommen ohne Anführungszeichen zurück; die Rohform prüft `rule_frontmatter`
+    über `raw_frontmatter_values`."""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return None, 0
@@ -121,7 +151,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, str] | None, int]:
         if m:
             current = m.group(1)
             value = m.group(2).strip()
-            fields[current] = "" if value in (">", "|", ">-", "|-") else value
+            fields[current] = "" if value in (">", "|", ">-", "|-") else _unquote(value)
         elif current is not None and lines[i].startswith((" ", "\t")):
             # Fortsetzung eines Blockskalars (`description: >`) oder eingerückte Folgezeile
             fields[current] = (fields[current] + " " + lines[i].strip()).strip()
@@ -202,14 +232,22 @@ def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
         return RuleResult("frontmatter", "finding", "kein Frontmatter (--- … ---) am Dateianfang")
     missing = [k for k in FRONTMATTER_REQUIRED if not fields.get(k)]
     extra = sorted(set(fields) - FRONTMATTER_ALLOWED)
-    if missing or extra:
+    invalid = []
+    for line in _read(md).split("\n")[1:]:
+        if line.strip() == "---":
+            break
+        m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", line)
+        if m and (problem := yaml_plain_scalar_problem(m.group(2).strip())):
+            invalid.append(f"{m.group(1)} {problem} — in Anführungszeichen setzen")
+    if missing or extra or invalid:
         parts = []
         if missing:
             parts.append("fehlt: " + ", ".join(missing))
         if extra:
             parts.append("nicht erlaubt (Spec 00 §5): " + ", ".join(extra))
+        parts.extend("YAML lädt nicht: " + i for i in invalid)
         return RuleResult("frontmatter", "finding", "; ".join(parts))
-    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder")
+    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder, YAML-Skalare gültig")
 
 
 def rule_skill_md_lines(skill_dir: Path, repo_root: Path | None) -> RuleResult:
