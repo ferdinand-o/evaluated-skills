@@ -38,11 +38,14 @@ def test_spec_is_clean(path):
     assert findings == [], [f.render() for f in findings]
 
 
-def test_template_lints_up_to_the_review_note():
-    """Das Spec-Gerüst von skill-forge trägt alles außer dem Review-Vermerk — der
-    entsteht erst nach Schritt 1 und darf nicht vorab im Template stehen."""
+def test_template_lints_up_to_review_note_and_its_own_residues():
+    """Das Spec-Gerüst von skill-forge trägt alles außer dem Review-Vermerk (der
+    entsteht erst nach dem Review und darf nicht vorab im Template stehen) — und
+    seine Platzhalter `Zyklus NN` und `<fall>` werden als Template-Reste gemeldet,
+    damit eine unfertig kopierte Spec nie sauber durchgeht."""
     findings = ptt.lint_spec(SPEC_TEMPLATE.read_text(encoding="utf-8"), Path("specs/Spec 99 – muster.md"), repo_root=REPO_ROOT)
-    assert [f.rule for f in findings] == ["review-note"], [f.render() for f in findings]
+    assert [f.rule for f in findings] == ["review-note", "placeholders"], [f.render() for f in findings]
+    assert "Zyklus NN" in findings[1].message and "<fall>" in findings[1].message
 
 
 def test_legacy_specs_still_parse_without_crash():

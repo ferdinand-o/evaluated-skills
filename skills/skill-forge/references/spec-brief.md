@@ -2,14 +2,17 @@
 
 Eingabe für `brainstorming` (die eigene Profil-Skill), zusammen mit
 `assets/spec-template.md`. Die Skizzen in §7 der Prüfung
-`docs/assessment-writing-skills-writing-plans.md` waren die Eingabe für Spec 16 und 17
-— die beiden Specs, die ohne Format-Nacharbeit durch `impl-plan` gingen. Dieses Brief
-ist die Verallgemeinerung: erst lesen, dann fragen, dann schreiben.
+`docs/assessment-writing-skills-writing-plans.md` (Branch
+`claude/assessment-writing-skills-plans`, bis zum Merge nicht auf `main`) waren die
+Eingabe für Spec 16 und 17; Spec 17 ist die einzige, deren Plan mit `impl-plan` ohne
+Format-Nacharbeit entstand. Dieses Brief ist die Verallgemeinerung: erst lesen, dann
+fragen, dann schreiben.
 
 ## 1 · Vorher lesen — Orientieren heißt hier messen
 
-Die Review-Funde der Faktenklasse (§4.1 der Prüfung `docs/assessment-brainstorming.md`)
-waren Aussagen über Dateien, die niemand geöffnet hatte. Vor der ersten Frage:
+Die Review-Funde der Faktenklasse (§4.1 der Prüfung `docs/assessment-brainstorming.md`,
+Branch `claude/assessment-brainstorming`, bis zum Merge nicht auf `main`) waren Aussagen
+über Dateien, die niemand geöffnet hatte. Vor der ersten Frage:
 
 | Was | Wo | Wofür |
 | --- | --- | --- |
@@ -47,7 +50,7 @@ einzeln widersprechbar.
 
 ## 3 · Danach
 
-Die Spec nach `assets/spec-template.md` unter `specs/Spec NN – <name>.md`; dann
-`python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec "specs/Spec NN – <name>.md"`;
-dann der Review nach `references/spec-reviewer-prompt.md` und der Vermerk in der
-Kopfzeile. Erst danach `impl-plan`.
+Die Spec nach `assets/spec-template.md` unter `specs/Spec NN – <name>.md`; dann der
+Review nach `references/spec-reviewer-prompt.md` und der Vermerk in der Kopfzeile;
+dann `python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec "specs/Spec NN – <name>.md"`
+— der Lint verlangt den Vermerk, deshalb diese Reihenfolge. Erst danach `impl-plan`.

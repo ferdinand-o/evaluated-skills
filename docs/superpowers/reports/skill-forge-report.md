@@ -187,9 +187,10 @@ und mit einem Prompt, der nirgends lag; jede brauchte danach 119–217 Diff-Zeil
 ohne Quelle, Evals fahrbar, Spec-00-Konsistenz, Widersprüche, stille Entscheidungen,
 Schnittstellen — destilliert aus den Commit-Bodies f1b2b6d, d6d456e, 0ecccfa), Schritt 1
 des Ablaufs verlangt den Review und den Kopfzeilen-Vermerk „Überarbeitet nach
-unabhängigem Review", und die sieben Nennungen von `brainstorming` (Spec 00 §5, README,
-diese SKILL.md, `impl-plan`) sagen, dass die eigene Profil-Skill gemeint ist, nicht
-`superpowers:brainstorming`.
+unabhängigem Review", und sechs der sieben Nennungen von `brainstorming` (Spec 00 §5
+zweimal, README zweimal, diese SKILL.md, `impl-plan` Abgrenzung) sagen, dass die eigene
+Profil-Skill gemeint ist, nicht `superpowers:brainstorming`; die siebte, `impl-plan`s
+Description, blieb absichtlich (siehe unten und `docs/known-limits.md`).
 
 Gemessen: Lint `--base HEAD` ohne neuen Befund für `skill-forge` und `impl-plan`;
 SKILL.md 102 Zeilen. `evals_due: true`, weil das Muster `(?i)diskriminator` eine Zeile
@@ -206,11 +207,29 @@ Hausfragen) als Eingaben für `brainstorming`; dazu `plan_to_tasks.py lint-spec`
 `subagent-dev` — dem Eigentümer des Formats nach dem `impl-plan`-Contract — mit neun
 Regeln (header, review-note, sections, eval-table, skill-structure, tier, abgrenzung,
 gate-language, placeholders), Nummern-Cutoff 18 und `tests/test_specs_lint.py` als
-Repo-Test. Kalibriert an den Specs 15–17: je ein bis zwei benannte Restbefunde
-(Tabelle ohne Fixture-Spalte, Skript ohne Tier, fehlende Kopfzeile und Abgrenzung in
-Spec 17), keine erfundenen. Das Template lintet bis auf den Review-Vermerk sauber,
-der Test hält das fest. Damit ist der Review-Schritt ab Spec 18 G2: Fehlt der
-Vermerk, meldet der Lint.
+Repo-Test. Kalibriert an den Specs 15–17: Spec 15 Tabelle ohne Fixture- und
+Diskriminator-Spalte, Spec 16 sauber, Spec 17 ohne Kopfzeile und ohne
+Abgrenzungs-Überschrift — keine erfundenen Befunde. Das Template lintet bis auf den
+Review-Vermerk und seine eigenen Template-Reste sauber, der Test hält beides fest.
+Damit ist der Review-Schritt ab Spec 18 G2: Fehlt der Vermerk, meldet der Lint.
+
+**Fix-Runde nach zwei Reviews (Fable-Subagent, `/code-review`), 2026-09-11.** Beide
+fanden unabhängig: Die Gate-Wort-Regel war für jede Spec aus dem Template tot, weil
+das Template selbst „G3 nur mit `assets/hooks/`" sagt und der Lint nur den String im
+Text suchte — jetzt zählt nur ein Hook im Skill-Struktur-Baum, und Negation gilt im
+Absatz wie in `lint_skill.py`. Der Struktur-Block ist jetzt der Zaun, der mit der
+Baumwurzel `skills/<name>/` beginnt, nicht der erste, der `SKILL.md` erwähnt; Zäune
+werden mit derselben Erkennung wie `_mask_fenced_blocks` gefunden (eingerückt
+erlaubt). Die Tier-Regel liest flache und verschachtelte `scripts/`, überspringt aber
+Skripte anderer Skills, die eine Spec nur erweitert — Spec 16 ist damit sauber statt
+eines Fehlalarms. Nachbarn ohne Bindestrich (`explain`, `handoff`) zählen.
+Template-Reste (`Zyklus NN`, `<fall>` in einer Eval-ID) sind Befunde; `<name>` in einem
+Kommandobeispiel nicht. Die Tabellensuche teilen `spec_eval_table` und `lint-spec`
+über `_locate_eval_table`. Schritt 1 und das Brief lassen den Lint nach dem Vermerk
+laufen, nicht davor. Der Kalibrierungstest prüft Teilmengen, damit eine nachgebesserte
+Alt-Spec ihn nicht rot macht. Zahlen korrigiert: sechs von sieben Nennungen.
+Nachgemessen vom Reviewer: SKILL.md-Zeilen, Testzahlen, Diff-Zeilen, Restbefunde,
+Commit-Zitate im Reviewer-Prompt, Descriptions unverändert.
 
 ## Offen für die nächste Runde
 

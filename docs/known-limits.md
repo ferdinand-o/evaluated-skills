@@ -1224,15 +1224,28 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   und `config.py` tatsächlich zwei verschiedene Dateien sein könnten, führt
   das zu einer unnötigen Serialisierung, nie zu einem übersehenen Konflikt
   (bewusst konservativ, B2).
+
+## subagent-dev — `lint-spec` (2026-09-11)
+
 - **`lint-spec` prüft Form über Überschriften und Tokens.** Die sieben Abschnitte
-  müssen `## `-Überschriften sein, die mit dem Template-Namen beginnen; die
-  Abgrenzung braucht eine Überschrift mit dem Wort, und als Nachbar zählt nur ein
-  Ordner unter `skills/` oder ein Name mit Namensraum (`superpowers:x`) — eine
-  Abgrenzung gegen eine nur im Nutzerprofil installierte Skill (`skill-creator`)
-  zählt nicht, das ist derselbe Blindfleck wie bei `lint_skill.py` `neighbors`. Die
-  Tier-Regel liest nur die Zeile des Skripts im Struktur-Block; Gate-Wörter werden
-  zeilenweise mit Negation geprüft, ein „blockiert" im Absatz nach dem „nicht" geht
-  durch. Der Review-Vermerk ist ein String, kein Nachweis. Specs ohne Nummer im
+  müssen `## `-Überschriften sein, die mit dem Template-Namen beginnen (`## 1 ·
+  Problem` fällt durch); die Abgrenzung braucht eine Überschrift mit dem Wort, und
+  als Nachbar zählt nur ein Ordner unter `skills/` oder ein Name mit Namensraum
+  (`superpowers:x`) — eine Abgrenzung gegen eine nur im Nutzerprofil installierte
+  Skill (`skill-creator`) zählt nicht, das ist derselbe Blindfleck wie bei
+  `lint_skill.py` `neighbors`; umgekehrt zählt jedes `wort:wort` als Namensraum.
+- **Der Struktur-Block ist der Zaun, der mit `skills/<name>/` beginnt.** Ein Baum,
+  dessen erste Zeile ein Kommentar ist, wird nicht gefunden (`skill-structure`). Die
+  Tier-Regel liest die Zeile des Skripts, flach oder unter `scripts/`; Skripte anderer
+  Skills im Baum werden übersprungen, auch wenn die Spec sie neu einführt.
+- **Gate-Wörter gelten absatzweise mit Negation**, ein „blockiert" zwei Absätze nach
+  dem „nicht" ist ein Befund, ein „blockiert … verworfen" im selben Absatz keiner —
+  in beide Richtungen unscharf, wie bei `lint_skill.py`. Der Hook zählt nur, wenn er
+  als `assets/hooks/…` im Struktur-Baum steht.
+- **Platzhalter:** Inline-Code und „…"-Zitate sind maskiert, also geht „TODO:
+  nachtragen" in Anführungszeichen durch. Template-Reste werden nur in der Kopfzeile
+  (`Zyklus NN`) und in Eval-IDs (`<fall>`) gemeldet; ein `<zusage>` in Prosa nicht.
+- **Der Review-Vermerk ist ein String, kein Nachweis.** Specs ohne Nummer im
   Dateinamen gelten als neu (Exit 1 bei Befund).
 ## architecture-map
 
@@ -1688,6 +1701,12 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   nennt sie). `spec-brief.md` und `spec-template.md` sind Eingaben, die jemand dem
   Brainstorming mitgeben muss (G1); ob sie benutzt wurden, zeigt nur die Form der
   Spec, die der Lint prüft.
+- **`impl-plan`s Description nennt `brainstorming` ohne Zusatz.** Sechs der sieben
+  Nennungen sagen „die eigene Profil-Skill, nicht superpowers"; die Description von
+  `impl-plan` blieb, weil eine Frontmatter-Änderung dort Evals fällig macht, ohne den
+  Trigger zu ändern. Die Description ist aber die Stelle, die der Harness beim Routing
+  liest — wer die Routing-Kollision der zwei `brainstorming`-Skills misst, sollte sie
+  dort ebenfalls benennen und die impl-plan-Evals mitfahren.
 
 ## Verweise
 
