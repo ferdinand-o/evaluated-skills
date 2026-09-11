@@ -144,12 +144,22 @@ Drei Funde aus den Läufen, in der Folgerunde behoben:
   Skill-Loader von Claude Code strikt parst, ist weiterhin nicht gemessen — falls ja,
   war `impl-plan` seit seinem Merge nicht ladbar.
 
+### Zweiter Lauf nach der Folgerunde (2026-09-11)
+
+Derselbe Aufbau, frische Workspaces, die Skill aus der Folgerunde: wieder fünf von
+fünf. Die drei Änderungen sind im Verhalten sichtbar — die Prüf-Agenten (Eval 3 und 4)
+fuhren den Lint ohne `--base` und nannten dafür den Satz aus der SKILL.md; der
+Routing-Agent legte `reminder` unter `skills/` an, mit YAML-gültiger Description
+(PyYAML gegengeprüft) und vier `evalkit`-ladbaren Evals. Eval 1 und 2 verliefen wie im
+ersten Lauf: eine Zeile plus Commit, beziehungsweise `evals_due: true` plus nachgezogene
+Assertion, sonst nichts.
+
 ## Was nicht gemessen wurde
 
-**Die fünf Evals sind einmal gefahren, außerhalb des Harness.** Ein Lauf je Eval, mit
-einem Aufbau, der das Laden der Skill stärker nahelegt als der Harness. Ob ein Agent den
-Lint im Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist an genau einer
-Stichprobe positiv beantwortet — nicht mehr.
+**Die fünf Evals sind zweimal gefahren, außerhalb des Harness.** Zwei Läufe je Eval,
+mit einem Aufbau, der das Laden der Skill stärker nahelegt als der Harness. Ob ein
+Agent den Lint im Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist an zwei
+Stichproben positiv beantwortet — zehn von zehn, und trotzdem kein Beweis.
 
 **Der Trigger ist an einer Stichprobe gemessen — und er war die Diagnose.** Ein Lauf
 von „bau mir eine Skill" landete bei `skill-forge`, mit dem Hinweis auf

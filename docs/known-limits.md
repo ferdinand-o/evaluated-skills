@@ -1631,8 +1631,8 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   `finding`, und steht nicht im Register — sie prüft nichts, sie erinnert.
 - **Die Evals sind einmal gefahren, außerhalb des Harness** (Report, „Erster
   Eval-Lauf"): fünf Workspaces über `prepare()`, Opus-Subagenten mit dem Eval-Prompt,
-  Bewertung mit `evalkit.runner.grade()`. Fünf von fünf bestanden, je ein Lauf — eine
-  Stichprobe. Der Aufbau nennt den Ort der installierten Skills im Prompt, was der
+  Bewertung mit `evalkit.runner.grade()`. Zehn von zehn bestanden, je zwei Läufe (vor
+  und nach der Folgerunde) — eine Stichprobe. Der Aufbau nennt den Ort der installierten Skills im Prompt, was der
   Harness implizit tut; ein Subagent sieht zusätzlich die Skills des Nutzerprofils.
   Ob ein Agent den Lint im Diff-Modus *aufruft* statt „schnell alles aufzuräumen", ist
   damit einmal positiv beantwortet, nicht bewiesen.
