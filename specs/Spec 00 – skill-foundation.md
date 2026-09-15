@@ -35,14 +35,14 @@ Nicht projektgebundene Artefakte (`learner.md` aus 14, `research/<thema>.md` aus
 Ein Schema, ein Runner, geteilte Fixtures — nicht vierzehn Insellösungen.
 
 ```
+run_evals.py            (ein Runner für alle Skills, in der Repo-Wurzel; Kern in evalkit/)
 evals/
-├── run_evals.py        (ein Runner für alle Skills)
 ├── fixtures/           (geteilt: legacy-monolith/, chrome-extension/,
 │                        brownfield-api/, cyclic-imports/, big-table/ …)
 └── <skill>/evals.json  (die Szenarien der jeweiligen Skill)
 ```
 
-Ein Eval ist ein Objekt aus: `id`, `class` (siehe unten), `fixture` (optional), `prompt` (was der Nutzer wörtlich sagt), `must` (beobachtbare Muss-Assertions), `must_not` (Verbots-Assertions), `notes`. Assertions sind **falsifizierbare Beobachtungen**, nie Stimmungsurteile — dieselbe Härte, die Spec 04 für Findings verlangt („kein Finding ohne Failure-Szenario"), gilt hier für Evals. `run_evals.py` startet pro Eval einen Subagent mit frischem Kontext auf einem Fixture-Worktree, protokolliert den Verlauf und lässt einen zweiten Subagent als Judge gegen `must`/`must_not` urteilen. **Bestanden = alle `must` erfüllt und kein `must_not` verletzt.**
+Ein Eval ist ein Objekt aus: `id`, `class` (siehe unten), `fixture` (optional), `prompt` (was der Nutzer wörtlich sagt), `must` (beobachtbare Muss-Assertions), `must_not` (Verbots-Assertions), `notes`. Assertions sind **falsifizierbare Beobachtungen**, nie Stimmungsurteile — dieselbe Härte, die Spec 04 für Findings verlangt („kein Finding ohne Failure-Szenario"), gilt hier für Evals. `run_evals.py` startet pro Eval einen Subagent mit frischem Kontext auf einem Fixture-Worktree, protokolliert den Verlauf und lässt einen zweiten Subagent als Judge gegen `must`/`must_not` urteilen. **Bestanden = alle `must` erfüllt und kein `must_not` verletzt.** Derselbe Lauf mit `--without-skill` (Spec 18) fährt den Eval ohne installierte Skill: Ein Eval, der dort grün ist, misst nichts, was die Skill beiträgt — er wird an ein Artefakt der Skill gebunden oder gestrichen. Der Runner prüft dabei am `system.init`-Ereignis, ob der Agent die Skill sah; ein Lauf, in dem sie fehlte (mit Skill) oder trotzdem da war (ohne Skill), ist ein Harness-Fehler, kein Ergebnis.
 
 Zwei Klassen halten die Kosten beherrschbar: **Contract-Evals** prüfen mechanisch (ist Datei X entstanden? hat das Gate ein Urteil geloggt? trägt das Artefakt seine Kopfzeile?) und laufen billig bei jeder Änderung. **Verhaltens-Evals** sind die Trap-Szenarien der Einzel-Specs, brauchen den Judge und laufen vor Release.
 

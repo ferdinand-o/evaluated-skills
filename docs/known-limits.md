@@ -75,7 +75,13 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   plus dieselben 16. `--strict-mcp-config` schaltet MCP-Server korrekt ab, für Skills
   gibt es keine Entsprechung: `--disable-slash-commands` entfernt **alle** Skills
   einschließlich der zu testenden und ist damit unbrauchbar. Es existiert keine
-  Flaggen-Kombination, die nur die Projekt-Skill stehen lässt.
+  Flaggen-Kombination, die nur die Projekt-Skill stehen lässt. Nachgemessen am
+  2026-09-15 (CLI 2.1.272, Spec 18): 19 globale Einträge im `skills`-Feld statt 16,
+  und **keine** der 17 Skills aus `~/.claude/skills/synced/`, die gleich heißen wie
+  Ordner unter `skills/` — die Profil-Skills bleiben unter `--setting-sources project`
+  unsichtbar, die eingebauten nicht. Seit Spec 18 liest der Runner dieses Feld
+  (`evalkit/dispatch.py::visible_skills`) und macht daraus einen Befund je Lauf, statt
+  es einmal zu messen.
 
   Das beschädigt Eval-Ergebnisse in **beide** Richtungen, und die zweite ist die
   gefährlichere:
@@ -1699,9 +1705,17 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   `report-section` brauchen `docs/` und `README.md`, `neighbors` fremde Skills. Die
   fünf Evals binden nur an Regeln, die in ihrer Fixture geprüft sind; ein Eval, der
   `routing` prüfen wollte, müsste die Matrix mitbringen.
-- **Gefordert, nicht gebaut:** `--without-skill` in `evals/run_evals.py` — derselbe
-  Prompt ohne installierte Skill. Erst damit wird die Diskriminator-Frage gemessen statt
-  beantwortet. Eigene, kleine Spec.
+- **Die Baseline ohne Skill ist gebaut, aber hier nie gefahren** (Spec 18, 2026-09-15):
+  `run_evals.py --without-skill` fährt dieselben Evals ohne Installation und prüft am
+  `skills`-Feld des `system.init`-Ereignisses, ob der Agent die Skill sah — in beide
+  Richtungen (ohne Skill sichtbar → „Baseline unmöglich", mit Skill unsichtbar → „Skill
+  nicht sichtbar", je Exit 2). Nachweis sind Unit-Tests mit Fake-CLI; der Harness läuft
+  in diesem Container nicht (siehe „Betrieb"). Drei Grenzen: Das Feld ist nur mit CLI
+  2.1.272 gemessen — fehlt es, sagt der Report „Sichtbarkeit ungeprüft" und das Verdikt
+  bleibt wie ohne die Prüfung. Ob die 17 gleichnamigen Profil-Skills auf dem Rechner des
+  Nutzers unsichtbar bleiben wie im Container, ist ungemessen; der erste echte Lauf
+  meldet es sonst als „Baseline unmöglich". Und ein roter Lauf ohne Skill beweist
+  nichts (Stichprobe) — nur ein grüner ist ein Befund.
 - **Der Spec-Review in Schritt 1 ist G2 nur über einen Token.**
   `plan_to_tasks.py lint-spec` (subagent-dev) meldet ab Spec 18 das Fehlen des
   Kopfzeilen-Vermerks „Überarbeitet nach unabhängigem Review"; ob ein Review hinter
