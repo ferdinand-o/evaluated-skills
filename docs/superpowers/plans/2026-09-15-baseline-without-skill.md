@@ -61,17 +61,17 @@ wenn es kein solches Ereignis oder kein Feld gibt. `Transcript` trägt das Ergeb
 - Consumes: (nichts Neues)
 - Produces: `fn:visible_skills(raw)`, `skills`
 
-- [ ] **Step 1: Tests schreiben** — `skills`-Feld hinter führenden Fremd-Ereignissen
+- [x] **Step 1: Tests schreiben** — `skills`-Feld hinter führenden Fremd-Ereignissen
       (`active_goal`, `autocompact_state`) wird als `frozenset` gelesen; Stream ohne
       `init` liefert `None`; `init` ohne Feld liefert `None`; kaputte Zeilen werden
       übersprungen; `run_agent` füllt `Transcript.skills` aus dem Stream und lässt es
       bei einem Klartext-Fake-CLI auf `None`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_dispatch.py -k visible_skills`.
-- [ ] **Step 3: Implementieren** — `visible_skills(raw) -> frozenset[str] | None`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_dispatch.py -k visible_skills`.
+- [x] **Step 3: Implementieren** — `visible_skills(raw) -> frozenset[str] | None`;
       `Transcript.skills: frozenset[str] | None = None`; `run_agent` setzt es in beiden
       Rückgabepfaden (normal und Timeout).
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 2: Workspace ohne Skill
 
@@ -83,15 +83,15 @@ wenn es kein solches Ereignis oder kein Feld gibt. `Transcript` trägt das Ergeb
 - Consumes: (nichts Neues)
 - Produces: `fn:prepare(dest, skill_dir, fixture_dir)`
 
-- [ ] **Step 1: Tests schreiben** — `prepare(dest, None, fixture)` legt kein
+- [x] **Step 1: Tests schreiben** — `prepare(dest, None, fixture)` legt kein
       `.claude/skills/` an, die Baseline enthält keinen Schlüssel mit diesem Präfix,
       die Fixture liegt wie bisher an der Wurzel; `prepare(dest, None, None)` liefert
       einen leeren Workspace; ein fehlendes Skill-Verzeichnis wirft weiterhin.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_workspace.py -k without_skill`.
-- [ ] **Step 3: Implementieren** — `skill_dir: Path | None`; die SKILL.md-Prüfung und
+- [x] **Step 2: Rot sehen** — `pytest tests/test_workspace.py -k without_skill`.
+- [x] **Step 3: Implementieren** — `skill_dir: Path | None`; die SKILL.md-Prüfung und
       der Kopierschritt laufen nur mit Skill; Git-Baseline und Snapshot unverändert.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 3: Baseline-Modus im Report
 
@@ -103,17 +103,17 @@ wenn es kein solches Ereignis oder kein Feld gibt. `Transcript` trägt das Ergeb
 - Consumes: (nichts Neues)
 - Produces: `baseline`, `fn:format_report(results)`, `fn:exit_code(results)`
 
-- [ ] **Step 1: Tests schreiben** — `EvalResult(baseline=True)` wird als
+- [x] **Step 1: Tests schreiben** — `EvalResult(baseline=True)` wird als
       `[GRÜN OHNE SKILL] <id> — misst nichts` bzw. `[ROT OHNE SKILL] <id>` gerendert,
       SKIP bleibt SKIP; die Summenzeile zählt „grün ohne Skill — messen nichts", „rot
       ohne Skill", „übersprungen"; `exit_code` liefert 1, sobald ein Baseline-Ergebnis
       grün ist, 0 bei nur roten, 2 bei `skipped` mit `failures`; Ergebnisse ohne
       `baseline` verhalten sich wie heute (bestehende Tests unverändert).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_report.py -k baseline`.
-- [ ] **Step 3: Implementieren** — Feld `baseline: bool = False` an `EvalResult`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_report.py -k baseline`.
+- [x] **Step 3: Implementieren** — Feld `baseline: bool = False` an `EvalResult`;
       `format_report` und `exit_code` lesen es; keine neuen Parameter.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 4: --without-skill und Sichtbarkeitsprüfung im Runner
 
@@ -126,7 +126,7 @@ wenn es kein solches Ereignis oder kein Feld gibt. `Transcript` trägt das Ergeb
 - Consumes: `fn:visible_skills(raw)`, `skills`, `fn:prepare(dest, skill_dir, fixture_dir)`, `baseline`
 - Produces: `fn:run_one(ev, skill_name, skill_dir, fixtures_dir, cli, timeout, keep, without_skill)`, `token:--without-skill`
 
-- [ ] **Step 1: Tests schreiben** — Fake-CLI, das ein `init`-Ereignis mit dem
+- [x] **Step 1: Tests schreiben** — Fake-CLI, das ein `init`-Ereignis mit dem
       Skill-Namen schreibt, liefert mit `without_skill=True` ein `skipped`-Ergebnis mit
       „Baseline unmöglich" in `failures`; ein `init`-Ereignis ohne den Namen lässt
       `grade()` laufen und setzt `baseline=True`; im Normalmodus ist ein fehlender Name
@@ -135,15 +135,15 @@ wenn es kein solches Ereignis oder kein Feld gibt. `Transcript` trägt das Ergeb
       ungeprüft"; `main(["--without-skill", …])` gibt mit einem grünen Baseline-Lauf
       Exit 1 zurück; Judge-Aufrufe bleiben unberührt (kein Judge-Transcript wird
       geprüft).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_runner.py -k "without_skill or visible"`.
-- [ ] **Step 3: Implementieren** — `run_one` bekommt `skill_name` und
+- [x] **Step 2: Rot sehen** — `pytest tests/test_runner.py -k "without_skill or visible"`.
+- [x] **Step 3: Implementieren** — `run_one` bekommt `skill_name` und
       `without_skill`; `prepare(None, …)` im Baseline-Modus; nach `run_agent` die
       Sichtbarkeitsprüfung auf `transcript.skills` des Eval-Agenten, vor dem Judge;
       `EvalResult(…, baseline=without_skill)`; `main` mit `--without-skill`, Hinweis
       in der Kopfzeile des Laufs („ohne Skill — grün heißt: misst nichts"); Docstring
       von `run_evals.py` um den Aufruf ergänzt.
-- [ ] **Step 4: Grün sehen**, volle Suite; einmal `python run_evals.py --help` lesen.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite; einmal `python run_evals.py --help` lesen.
+- [x] **Step 5: Commit.**
 
 ### Task 5: SKILL.md und references von skill-forge
 
@@ -162,15 +162,15 @@ Lauf." und trägt weder „Diskriminator" noch `"id": "anti-ceremony-` noch
 - Consumes: `token:--without-skill`
 - Produces: `token:GRÜN OHNE SKILL`
 
-- [ ] **Step 1: SKILL.md** — Schritt 5: derselbe Aufruf mit `--without-skill`; ein Eval,
+- [x] **Step 1: SKILL.md** — Schritt 5: derselbe Aufruf mit `--without-skill`; ein Eval,
       der ohne Skill grün ist, wird umgebaut oder gestrichen; der Report nennt je Eval
       beide Läufe; ein grüner Lauf ohne Skill zeigt die Lücke, ein roter beweist nichts.
-- [ ] **Step 2: references/evals.md** — Abschnitt „Baseline ohne Skill": Aufruf, Lesart,
+- [x] **Step 2: references/evals.md** — Abschnitt „Baseline ohne Skill": Aufruf, Lesart,
       was mit einem grünen Eval passiert (umbauen an ein Artefakt oder streichen), Stichprobe.
-- [ ] **Step 3: report.md** — „Was gemessen wurde": Zeile „Baseline: … Evals mit
+- [x] **Step 3: report.md** — „Was gemessen wurde": Zeile „Baseline: … Evals mit
       `--without-skill` gefahren, … davon grün"; „Was nicht gemessen wurde": die
       Baseline, wenn sie nicht lief.
-- [ ] **Step 4: Prüfen** — `wc -l` unter 150;
+- [x] **Step 4: Prüfen** — `wc -l` unter 150;
       `python skills/skill-forge/scripts/lint_skill.py skills/skill-forge --base main`
       meldet keinen neuen Befund und `evals_due: true` mit genau einem Grund
       (`(?i)diskriminator` in `references/evals.md`); Commit.
@@ -209,11 +209,11 @@ dritten Lauf im Report.
 - Consumes: `token:--without-skill`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Spec 00 §2** — ein Satz zur Baseline hinter „Bestanden = …", und der
+- [x] **Step 1: Spec 00 §2** — ein Satz zur Baseline hinter „Bestanden = …", und der
       Runner-Pfad `run_evals.py` statt `evals/run_evals.py` im Baum.
-- [ ] **Step 2: README** — Aufrufzeile `run_evals.py --skill handoff --without-skill`
+- [x] **Step 2: README** — Aufrufzeile `run_evals.py --skill handoff --without-skill`
       mit der Lesart des Exit-Codes.
-- [ ] **Step 3: Abgrenzung skill-forge** — eine eigene Zeile hinter dem
+- [x] **Step 3: Abgrenzung skill-forge** — eine eigene Zeile hinter dem
       skill-creator-Absatz: seine Baseline-Läufe sind Subagenten, nicht der Harness.
       Zeile mit `expected_output` unverändert. Commit.
 
@@ -226,7 +226,7 @@ dritten Lauf im Report.
 - Consumes: `evals_json`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitte** — `## skill-forge`: „Gefordert, nicht gebaut" durch die
+- [x] **Step 1: Abschnitte** — `## skill-forge`: „Gefordert, nicht gebaut" durch die
       Grenzen des Gebauten ersetzen (Feld nur mit CLI 2.1.272 gemessen; Profil-Skills
       auf dem Rechner des Nutzers ungemessen; ein roter Lauf ohne Skill beweist nichts);
       „Isolation": das `skills`-Feld als Messstelle, 19 statt 16 globale Skills am
