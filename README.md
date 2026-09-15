@@ -48,6 +48,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Skill bauen oder ändern | skill-forge | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
+| Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (verdichtet, ändert keinen Stil), explain (erklärt mit eigenem Antwortvertrag) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
 
 ## Konventionen

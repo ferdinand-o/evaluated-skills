@@ -16,6 +16,8 @@ des Nutzers weiterarbeiten kann.
   Skill anfassen.
 - `handoff.md` = rollierender Sitzungszustand. Nur diese Datei schreiben.
 - Kein `git commit` — der Nutzer committet selbst.
+- **human-prose** überarbeitet auf Zuruf den Fließtext einer `handoff.md`; die
+  Kopfzeile `# Handoff — <Projektname>` und die sechs Sektionen bleiben.
 
 ## Vorgehen
 
