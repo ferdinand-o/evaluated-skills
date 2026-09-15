@@ -189,13 +189,13 @@ dritten Lauf im Report.
 - Consumes: `token:GRÜN OHNE SKILL`
 - Produces: `evals_json`
 
-- [ ] **Step 1: Schema** — `evals/skill-forge/evals.json` unverändert, Schema-Test grün.
-- [ ] **Step 2: Fahren** — je Eval ein Subagent mit frischem Kontext in einem
+- [x] **Step 1: Schema** — `evals/skill-forge/evals.json` unverändert, Schema-Test grün.
+- [x] **Step 2: Fahren** — je Eval ein Subagent mit frischem Kontext in einem
       Workspace aus `prepare()`, bewertet mit `grade()`; Ergebnis je Eval notiert
       (`anti-ceremony-one-sentence-change-lints-only`, `token-change-makes-evals-due`,
       `gate-word-without-hook-is-reported`, `missing-anti-ceremony-eval-is-reported`,
       `routing-new-skill-gets-house-evals`).
-- [ ] **Step 3: Zweiter Lauf vor jeder Fix-Runde**, falls einer rot ist; Commit der
+- [x] **Step 3: Zweiter Lauf vor jeder Fix-Runde**, falls einer rot ist; Commit der
       Ergebnisse im Report (Task 9).
 
 ### Task 7: Nachbarn
@@ -241,6 +241,6 @@ dritten Lauf im Report.
 - Consumes: `evals_json`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Folgerunde** — Abschnitt „Folgerunde: Baseline ohne Skill" mit dem
+- [x] **Step 1: Folgerunde** — Abschnitt „Folgerunde: Baseline ohne Skill" mit dem
       `lint.json`-Grund für `evals_due`, den Ergebnissen der fünf Läufe und der
       Sektion „Was nicht gemessen wurde" (der Flag selbst lief nicht im Harness). Commit.

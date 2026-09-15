@@ -286,6 +286,68 @@ fünf: Das Brief hat die Zahlen-Klasse getilgt, nicht die Klasse „etwas über 
 behauptet, statt ihn zu lesen" — der Reviewer bleibt das Instrument dafür. Eine
 Stichprobe; die zweite Spec ab 18 entscheidet, ob das Muster hält.
 
+## Folgerunde: Baseline ohne Skill (2026-09-15)
+
+Nach `specs/Spec 18 – baseline-without-skill.md` und
+`docs/superpowers/plans/2026-09-15-baseline-without-skill.md`, neun Tasks sequenziell im
+Hauptkontext (Gate: alle über den Runner gekoppelt). Der Code liegt im Harness, nicht
+in der Skill: `evalkit/dispatch.py::visible_skills()` liest das `skills`-Feld des
+`system.init`-Ereignisses (gesucht, nicht als erste Zeile erwartet — im gemessenen Lauf
+war es das dritte Ereignis), `evalkit/workspace.py::prepare(skill_dir=None)` baut den
+Workspace ohne Installation, `evalkit/report.py` markiert `[GRÜN OHNE SKILL] — misst
+nichts` und `[ROT OHNE SKILL]` und kehrt den Exit-Code um, `evalkit/runner.py` verbindet
+das zu `run_evals.py --without-skill` und prüft die Sichtbarkeit in beide Richtungen:
+Skill ohne Installation sichtbar → „Baseline unmöglich", mit Installation unsichtbar →
+„Skill nicht sichtbar", je Exit 2 mit Grund in `failures`, nie PASS oder FAIL. Ohne das
+Feld bleibt das Verdikt wie vorher, mit dem Zusatz „Sichtbarkeit ungeprüft". Geprüft
+wird nur das Transcript des Eval-Agenten, nie das des Judge.
+
+In der Skill: Schritt 5 verlangt den Baseline-Lauf nach dem zweiten Lauf mit der
+Lesart „ein grüner Lauf ohne Skill zeigt die Lücke, ein roter beweist nichts";
+`references/evals.md` ist von der Forderung zur Anleitung geworden; das Report-Gerüst
+nennt die Baseline unter „Was gemessen wurde" und „Was nicht gemessen wurde"; die
+Abgrenzung sagt, dass skill-creators Baseline-Läufe Subagenten sind, nicht der Harness.
+Spec 00 §2 trägt den Satz dazu und den richtigen Runner-Pfad, README den Aufruf,
+known-limits die Grenzen.
+
+**Was gemessen wurde.** 1194 Tests grün (28 neu: 8 dispatch, 4 workspace, 6 report,
+10 runner, davon einer für den Judge-Pfad), ein vorbestehender Fehlschlag außerhalb
+(`rest-api-architect`, Spectral). `lint_skill.py skills/skill-forge --base main`: kein
+neuer Befund, `evals_due: true` mit genau dem in der Spec erwarteten Grund —
+`(?i)diskriminator` trifft die geänderte Zeile „Die Diskriminator-Frage wird heute
+*beantwortet*" in `references/evals.md`; ein zweiter Treffer im Report-Gerüst wurde
+weggeschrieben, weil der Plan genau einen Grund verlangt hatte, nicht um den Lint zu
+umgehen. SKILL.md 112 Zeilen.
+
+### Vierter Lauf nach der Baseline-Folgerunde (2026-09-15)
+
+Derselbe Aufbau wie beim dritten Lauf (frische Workspaces per `prepare()`, ein
+Opus-Subagent je Eval, Bewertung mit den echten `evalkit`-Assertionen gegen die
+Baseline), die Skill vom Stand 68be662: **fünf von fünf.** Eval 1: eine Zeile, Lint
+13/13 mit `evals_due: false`, ein Commit — sonst nichts. Eval 2: `evals_due: true` mit
+dem Pattern-Grund, `evals.json` nachgezogen, zweiter Lint sauber, ein Commit mit beiden
+Dateien. Eval 3 und 4: Lint ohne `--base`, je ein Befund (`gate-language` bzw.
+`anti-ceremony-eval`), nichts eigenmächtig repariert; Eval 3 hat nachgemessen, dass es
+weder `assets/hooks/` noch einen aktiven Git-Hook gibt. Eval 4 nannte darüber hinaus
+den Reviewer-Befund, dass der einzige Eval von `quiet-log` an einem Artefakt hängt, das
+die Fixture vorgibt — genau die Frage, die die Baseline jetzt messen kann. Eval 5:
+Skill unter `skills/reminder/` mit vier Evals im `evalkit`-Schema, Report mit
+Pflichtsektion, known-limits, Routing-Zeile; der Agent benannte den fehlenden
+Review-Vermerk und die fehlende Eval-Tabelle von Spec 30 und dass `lint-spec` und
+`impl-plan` nicht installiert sind. Alle vier Agenten mit `evals_due`-Bezug erwähnten
+den Baseline-Lauf von selbst als nicht gefahren, weil `run_evals.py` im Workspace fehlt
+— der neue Schritt 5 ist damit im Wortlaut angekommen, sein Ergebnis in diesen Evals
+nicht messbar.
+
+**Was nicht gemessen wurde.** `--without-skill` selbst ist nie gegen den Harness
+gelaufen — root, `bypassPermissions` (known-limits, „Betrieb"); der Nachweis sind die
+Fake-CLI-Tests. Das `skills`-Feld ist nur mit CLI 2.1.272 gemessen. Ob die 17
+gleichnamigen Profil-Skills auf dem Rechner des Nutzers unsichtbar bleiben wie im
+Container, sagt erst der erste echte Lauf; meldet er „Baseline unmöglich", ist die
+`CLAUDE_CONFIG_DIR`-Variante aus Spec 18 an der Reihe. Und die Frage, die der Flag
+beantworten soll — wie viele der 97 Evals ohne Skill grün sind — ist offen, bis er
+fährt.
+
 ## Offen für die nächste Runde
 
 - Die zweite Spec ab 18 durch Brief, Template, Review und `lint-spec` führen und die
@@ -294,7 +356,7 @@ Stichprobe; die zweite Spec ab 18 entscheidet, ob das Muster hält.
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer
   registrierten Skill die `report-section` nachziehen und den Eintrag streichen.
-- `--without-skill` bauen: Spec 18 liegt reviewt und lint-sauber vor; Plan mit
-  `impl-plan`, dann Schritt 3 bis 7.
+- `run_evals.py --without-skill` einmal beim Nutzer fahren, zuerst über `skill-forge`,
+  `impl-plan` und `explain`; jeden grünen Eval ohne Skill umbauen oder streichen.
 - Die Prüfung `docs/assessment-writing-skills-writing-plans.md` von ihrem Branch nach
   main holen; `checklist.md` zitiert sie.
