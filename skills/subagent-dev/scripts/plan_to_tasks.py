@@ -13,6 +13,11 @@ statisch gelesen (Vorab-Entscheidung A3).
 Überlappung ist konservativ: Was nicht sicher ausgeschlossen werden kann, gilt
 als Abhängigkeit (Vorab-Entscheidung B2) — ein übersehener Konflikt zerstört
 Arbeitsstand, eine überflüssige Serialisierung kostet nur Zeit.
+
+`lint` prüft einen Plan auf das Format, das `generate` liest; `lint-spec` prüft
+die Skill-Spec davor (Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle,
+Skill-Struktur, Tier, Abgrenzung) mit demselben Parser — der Konsument des Formats
+ist sein Eigentümer (impl-plan Contract). Beides G2: meldet, blockiert nicht.
 """
 
 import argparse
@@ -950,6 +955,36 @@ def spec_eval_table(spec_text: str) -> tuple[list[str], list[str]] | None:
     Codezäune sind maskiert: ein `# Kommentar` in einem Beispielblock ist keine
     Überschrift. Tiefere Unterüberschriften schließen den Abschnitt nicht."""
     lines = _mask_fenced_blocks(spec_text).splitlines()
+    located = _locate_eval_table(lines)
+    if located is None:
+        return None
+    return _eval_table_rows(lines, located)
+
+
+def _eval_table_rows(lines: list[str], located: tuple[int, list[str]]) -> tuple[list[str], list[str]]:
+    """(ids, fehlerhafte Zeilen) der Tabelle, die `_locate_eval_table` gefunden hat."""
+    i, cells = located
+    idx = cells.index("id")
+    ids: list[str] = []
+    malformed: list[str] = []
+    for row in lines[i + 1:]:
+        if not row.lstrip().startswith("|"):
+            break
+        row_cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        if len(row_cells) <= idx or set(row_cells[idx]) <= set("-: "):
+            continue
+        match = _ID_CELL_RE.search(row_cells[idx])
+        if match:
+            ids.append(match.group(1))
+        elif row_cells[idx]:
+            malformed.append(row_cells[idx])
+    return ids, malformed
+
+
+def _locate_eval_table(lines: list[str]) -> tuple[int, list[str]] | None:
+    """(Zeilenindex der Kopfzeile, Spaltennamen) der ersten Tabelle mit Spalte `id`
+    unter einer Evals-Überschrift — die eine Definition, die `spec_eval_table` und
+    `lint-spec` teilen."""
     in_evals, level = False, 0
     for i, line in enumerate(lines):
         heading = re.match(r"^(#{1,6})\s", line)
@@ -963,23 +998,8 @@ def spec_eval_table(spec_text: str) -> tuple[list[str], list[str]] | None:
         if not in_evals or not line.lstrip().startswith("|"):
             continue
         cells = [c.strip().strip("`").lower() for c in line.strip().strip("|").split("|")]
-        if "id" not in cells:
-            continue
-        idx = cells.index("id")
-        ids: list[str] = []
-        malformed: list[str] = []
-        for row in lines[i + 1:]:
-            if not row.lstrip().startswith("|"):
-                break
-            row_cells = [c.strip() for c in row.strip().strip("|").split("|")]
-            if len(row_cells) <= idx or set(row_cells[idx]) <= set("-: "):
-                continue
-            match = _ID_CELL_RE.search(row_cells[idx])
-            if match:
-                ids.append(match.group(1))
-            elif row_cells[idx]:
-                malformed.append(row_cells[idx])
-        return ids, malformed
+        if "id" in cells:
+            return i, cells
     return None
 
 
@@ -1012,11 +1032,16 @@ def lint_meta(plan_path: Path | str, spec: Path | str | None = None, skill: str 
     """`generated` ist das Kommando, so wie man es erneut eintippen würde
     (docs/artifact-header.md) — mit `--spec`/`--skill`, sonst reproduziert es
     die Befunde nicht."""
-    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py lint {shlex.quote(str(plan_path))}"
-    if spec is not None:
-        cmd += f" --spec {shlex.quote(str(spec))}"
-    if skill:
-        cmd += f" --skill {shlex.quote(skill)}"
+    return _artifact_meta("lint", plan_path, spec=spec, skill=skill)
+
+
+def _artifact_meta(subcommand: str, path: Path | str, **flags: object) -> dict:
+    """Kopfzeile eines JSON-Artefakts (docs/artifact-header.md): `generated` ist das
+    Kommando mit allen gesetzten Flags, so wie man es erneut eintippen würde."""
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py {subcommand} {shlex.quote(str(path))}"
+    for name, value in flags.items():
+        if value:
+            cmd += f" --{name.replace('_', '-')} {shlex.quote(str(value))}"
     return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
 
 
@@ -1202,9 +1227,364 @@ def _cmd_lint(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+# ---------------------------------------------------------------------------
+# lint-spec: eine Skill-Spec dieser Sammlung prüfen, bevor impl-plan sie liest
+# (docs/assessment-brainstorming.md §6 Punkt 3, Branch claude/assessment-brainstorming).
+# Geprüft wird Form, nicht Inhalt: Kopfzeile, die sieben Abschnitte, Eval-Tabelle mit
+# Pflichtspalten, Skill-Struktur, Tier je Skript, Abgrenzung gegen zwei Nachbarn,
+# Gate-Wörter, Platzhalter — und der Review-Vermerk in der Kopfzeile, an dem Schritt 1
+# von skill-forge (Review der Spec durch einen Subagenten) erkennbar wird. Der Lint
+# gehört dem Konsumenten des Formats (impl-plan Contract), derselbe Parser wie
+# `spec_eval_table`. G2: meldet.
+
+SPEC_SECTIONS = ("Problem", "Constraints", "Approach", "Alternatives considered",
+                 "Out of scope", "Open questions", "Next steps")
+SPEC_HEADER_RE = re.compile(r"^Skill-Spezifikation\s*·\s*Zyklus\s*(\d+|NN)\b")  # NN: das Gerüst von skill-forge — als Platzhalter gemeldet
+SPEC_REVIEW_NOTE = "Überarbeitet nach unabhängigem Review"
+# Pflichtspalten der Eval-Tabelle (Specs 16/17); ein Tupel = eine von beiden genügt.
+# Verglichen wird als Präfix des Spaltennamens: „Assertion" und „Assertions" gelten beide.
+SPEC_EVAL_COLUMNS: tuple = ("id", "klasse", "fixture", ("assertion", "mechanismus"), "diskriminator")
+SPEC_NUMBER_RE = re.compile(r"Spec\s+(\d+)")
+SPEC_LINT_CUTOFF = 18  # Specs ab dieser Nummer müssen sauber sein; ältere sind Historie
+# G3-Wortwahl nach Spec 00 §4: Verb und Substantiv („blockiert", „Abnahme-Blocker").
+SPEC_GATE_WORD_RE = re.compile(r"\b(blockier\w*|\w*blocker\w*|erzwing\w*|stellt sicher)\b", re.IGNORECASE)
+SPEC_NEGATION_RE = re.compile(r"\b(nicht|nichts|nie|niemals|kein\w*|statt|verworfen)\b", re.IGNORECASE)
+# Nachbar-Kandidaten in der Abgrenzung: ein Skill-Name (auch ohne Bindestrich, wie
+# `explain`) oder ein Name mit Namensraum (`superpowers:writing-skills`). Ob ein Kandidat
+# zählt, entscheidet `skills/<name>/` unter der Repo-Wurzel bzw. der Namensraum.
+SPEC_NAME_RE = re.compile(r"(?<![\w/.:])([a-z][a-z0-9-]*:[a-z][a-z0-9-]+|[a-z][a-z0-9-]{2,})(?![\w/:])")
+SPEC_TREE_ROOT_RE = re.compile(r"^\s*skills/([a-z][a-z0-9-]*)/(?:\s+\S.*)?$")  # Anhang hinter der Wurzel erlaubt
+SPEC_TREE_PREFIX_RE = re.compile(r"^[\s│├└─]*")
+SPEC_TIER_RE = re.compile(r"\bTier\s*[0-3]\b")
+SPEC_SCRIPT_EXT = (".py", ".sh")
+SPEC_QUOTE_SPAN_RE = re.compile(r"„[^„“\"\n]{1,40}[\"“]")  # „TBD" in Prosa ist eine Erwähnung, kein Platzhalter
+SPEC_UNIT_MARKER_RE = re.compile(r"^\s*(\||[-*+]\s|\d+\.\s)")
+
+
+@dataclass(frozen=True)
+class SpecFinding:
+    rule: str
+    message: str
+
+    def render(self) -> str:
+        return f"{self.rule}: {self.message}"
+
+
+def spec_number(spec_path: Path | str | None) -> int | None:
+    """Nummer aus dem Dateinamen (`Spec 17 – skill-forge.md` → 17); None ohne Nummer."""
+    if spec_path is None:
+        return None
+    match = SPEC_NUMBER_RE.search(Path(spec_path).name)
+    return int(match.group(1)) if match else None
+
+
+def _spec_headings(masked: str) -> list[tuple[int, str]]:
+    out = []
+    for line in masked.splitlines():
+        match = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if match:
+            out.append((len(match.group(1)), match.group(2)))
+    return out
+
+
+def _spec_section(masked: str, title_re: str, min_level: int = 2) -> str | None:
+    """Text unter der ersten Überschrift (Ebene ≥ min_level), die `title_re` trifft,
+    bis zur nächsten Überschrift gleicher oder höherer Ebene; None ohne Treffer."""
+    lines = masked.splitlines()
+    level = None
+    body: list[str] = []
+    for line in lines:
+        match = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if match:
+            depth = len(match.group(1))
+            if level is not None and depth <= level:
+                break
+            if level is None and depth >= min_level and re.search(title_re, match.group(2), re.IGNORECASE):
+                level = depth
+            continue
+        if level is not None:
+            body.append(line)
+    return "\n".join(body) if level is not None else None
+
+
+def _spec_fences(text: str) -> tuple[list[list[str]], bool]:
+    """(Inhalt jedes Codezauns ohne Markerzeilen, Zaun offen geblieben?) — dieselbe
+    Zaun-Erkennung wie `_mask_fenced_blocks`: ein Marker darf eingerückt sein."""
+    fences: list[list[str]] = []
+    current: list[str] | None = None
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            if current is None:
+                current = []
+            else:
+                fences.append(current)
+                current = None
+            continue
+        if current is not None:
+            current.append(line)
+    return fences, current is not None
+
+
+def _spec_structure(text: str) -> tuple[str | None, list[str] | None]:
+    """(Skill-Name der Baumwurzel, Zeilen des Skill-Struktur-Blocks): der Zaun, dessen
+    erste Zeile die Baumwurzel `skills/<name>/` ist. Ein Kommando-Zaun, der
+    `skills/x/SKILL.md` nur nennt, ist kein Baum."""
+    for fence in _spec_fences(text)[0]:
+        content = [line for line in fence if line.strip()]
+        if not content:
+            continue
+        root = SPEC_TREE_ROOT_RE.match(content[0])
+        if root and any("SKILL.md" in line for line in content):
+            return root.group(1), fence
+    return None, None
+
+
+def _spec_tree_entries(structure: list[str]) -> list[tuple[str, str]]:
+    """(Pfad relativ zur Baumwurzel, Zeile) je Eintrag. Der Pfad-Token ist das erste
+    Wort nach dem Baum-Präfix; Kommentare dahinter zählen nicht. Ordner (Token endet
+    auf `/`) öffnen einen Kontext für tiefer eingerückte Zeilen, sodass `scripts/` +
+    `    └── check.py` denselben Pfad ergibt wie `scripts/check.py`."""
+    entries: list[tuple[str, str]] = []
+    stack: list[tuple[int, str]] = []  # (Einrückung, Ordnername)
+    root_seen = False
+    for line in structure:
+        if not line.strip():
+            continue
+        stripped = SPEC_TREE_PREFIX_RE.sub("", line, count=1)
+        token = stripped.split()[0] if stripped.split() else ""
+        if not token:
+            continue
+        if not root_seen and SPEC_TREE_ROOT_RE.match(line):
+            root_seen = True
+            continue
+        indent = len(SPEC_TREE_PREFIX_RE.match(line).group(0))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        path = "".join(d for _, d in stack) + token
+        entries.append((path, line))
+        if token.endswith("/"):
+            stack.append((indent, token))
+    return entries
+
+
+def _spec_tier_findings(entries: list[tuple[str, str]], own: set[str]) -> list[SpecFinding]:
+    """Jedes Skript unter `scripts/` trägt „Tier N" in seiner Zeile — flach
+    (`scripts/x.py Tier 1`) oder verschachtelt. Skripte anderer Skills
+    (`skills/<andere>/…`), die eine Spec nur erweitert, sind nicht ihr Tier."""
+    findings: list[SpecFinding] = []
+    for path, line in entries:
+        foreign = re.match(r"skills/([a-z][a-z0-9-]*)/", path)
+        if foreign and foreign.group(1) not in own:
+            continue
+        if not path.endswith(SPEC_SCRIPT_EXT) or "scripts/" not in path:
+            continue
+        if not SPEC_TIER_RE.search(line):
+            findings.append(SpecFinding("tier", f'{path} ohne „Tier N" in seiner Zeile der Skill-Struktur (Spec 00 §3)'))
+    return findings
+
+
+def _spec_own_names(text: str, spec_path: Path | str | None, tree_name: str | None) -> set[str]:
+    """Dateiname und Baumwurzel — beide sind „diese Skill", auch wenn sie abweichen."""
+    names = set()
+    if spec_path is not None:
+        match = re.search(r"Spec\s+\d+\s*[–-]\s*([a-z][a-z0-9-]*)", Path(spec_path).name)
+        if match:
+            names.add(match.group(1))
+    if tree_name:
+        names.add(tree_name)
+    return names
+
+
+def _spec_repo_root(spec_path: Path | str | None) -> Path | None:
+    if spec_path is None:
+        return None
+    for parent in Path(spec_path).resolve().parents:
+        if (parent / "skills").is_dir():
+            return parent
+    return None
+
+
+def _spec_units(masked: str) -> list[str]:
+    """Absätze, durch Leerzeilen getrennt; Tabellen- und Listenzeilen sind je eine
+    eigene Einheit (wie `_units` in lint_skill.py) — die Spalte „nicht" im Tabellenkopf
+    negiert nicht die Zeile darunter."""
+    units: list[str] = []
+    for para in re.split(r"\n\s*\n", masked):
+        lines = [l for l in para.split("\n") if l.strip()]
+        if not lines:
+            continue
+        if not any(SPEC_UNIT_MARKER_RE.match(l) for l in lines):
+            units.append(para)
+            continue
+        current: list[str] = []
+        for line in lines:
+            if SPEC_UNIT_MARKER_RE.match(line) and current:
+                units.append("\n".join(current))
+                current = []
+            current.append(line)  # eingerückte Fortsetzung eines Listenpunkts bleibt bei ihm
+        if current:
+            units.append("\n".join(current))
+    return units
+
+
+def lint_spec(text: str, spec_path: Path | str | None = None, repo_root: Path | str | None = None) -> list[SpecFinding]:
+    """Formbefunde einer Skill-Spec. Alles Befunde, keine Abbrüche (G2: meldet).
+    `repo_root` (sonst aus `spec_path` hergeleitet) entscheidet, welche Namen in
+    der Abgrenzung als Skills zählen: Ordner unter `skills/` oder ein Name mit
+    Namensraum (`superpowers:writing-skills`). Ohne Root zählen nur Namen mit
+    Bindestrich oder Namensraum, und der Befund sagt das."""
+    findings: list[SpecFinding] = []
+    lines = _mask_fenced_blocks(text).splitlines()
+    masked = "\n".join(lines)
+    root = Path(repo_root) if repo_root is not None else _spec_repo_root(spec_path)
+
+    # Offener Zaun: alles danach wäre maskiert, jede Meldung zeigte auf die falsche Stelle
+    fences, unclosed = _spec_fences(text)
+    if unclosed:
+        findings.append(SpecFinding("fence", "ein Codezaun (```) wird nicht geschlossen — der Rest der Spec gilt als Code, die übrigen Befunde sind bis dahin unzuverlässig"))
+
+    # Kopfzeile und Review-Vermerk
+    header = None
+    for line in text.splitlines()[:8]:
+        if SPEC_HEADER_RE.match(line.strip()):
+            header = line.strip()
+            break
+    if header is None:
+        findings.append(SpecFinding("header", 'Kopfzeile „Skill-Spezifikation · Zyklus N · Entscheidung: …" fehlt in den ersten acht Zeilen'))
+    elif SPEC_REVIEW_NOTE not in header:
+        findings.append(SpecFinding("review-note", f'Kopfzeile ohne „{SPEC_REVIEW_NOTE}" — skill-forge Schritt 1: Review durch einen Subagenten (references/spec-reviewer-prompt.md), dann Vermerk, dann dieser Lint'))
+
+    # Die sieben Abschnitte, in dieser Reihenfolge
+    h2 = [title for depth, title in _spec_headings(masked) if depth == 2]
+    positions = []
+    for name in SPEC_SECTIONS:
+        idx = next((i for i, t in enumerate(h2) if t.lower().startswith(name.lower())), None)
+        if idx is None:
+            findings.append(SpecFinding("sections", f'Abschnitt „## {name}" fehlt'))
+        else:
+            positions.append(idx)
+    if positions != sorted(positions):
+        findings.append(SpecFinding("sections", "Abschnitte nicht in der Reihenfolge des Templates: " + " / ".join(SPEC_SECTIONS)))
+
+    # Eval-Tabelle — einmal gesucht, Kopfzeile und IDs aus demselben Fund
+    located = _locate_eval_table(lines)
+    ids: list[str] = []
+    if located is None:
+        findings.append(SpecFinding("eval-table", "keine Tabelle mit Spalte `id` unter einer Evals-Überschrift — ohne sie prüft impl-plan keine Coverage"))
+    else:
+        cells = located[1]
+        ids, malformed = _eval_table_rows(lines, located)
+        missing = []
+        for col in SPEC_EVAL_COLUMNS:
+            options = col if isinstance(col, tuple) else (col,)
+            if not any(any(c.startswith(o) for c in cells) for o in options):
+                missing.append(" oder ".join(options))
+        if missing:
+            findings.append(SpecFinding("eval-table", "Pflichtspalten fehlen: " + ", ".join(missing)))
+        if malformed:
+            findings.append(SpecFinding("eval-table", "id-Zellen ohne Backtick-Wert: " + ", ".join(malformed[:3])))
+        if not ids:
+            findings.append(SpecFinding("eval-table", "Eval-Tabelle ohne Zeilen"))
+        elif not any(i.startswith("anti-ceremony-") for i in ids):
+            findings.append(SpecFinding("eval-table", "keine ID mit Präfix `anti-ceremony-` (Spec 00 §2, Pflicht-Eval)"))
+
+    # Skill-Struktur-Block, Tier je Skript, Hook im Baum
+    tree_name, structure = _spec_structure(text)
+    own = _spec_own_names(text, spec_path, tree_name)
+    entries = _spec_tree_entries(structure) if structure else []
+    if structure is None:
+        findings.append(SpecFinding("skill-structure", "kein Codeblock, der mit der Baumwurzel `skills/<name>/` beginnt und `SKILL.md` enthält — impl-plan leitet daraus die Tasks ab"))
+    else:
+        findings.extend(_spec_tier_findings(entries, own))
+    has_hook = any(path.startswith("assets/hooks") for path, _ in entries)
+
+    # Abgrenzung gegen mindestens zwei Nachbarn
+    section = _spec_section(masked, r"\bAbgrenzung\b", min_level=2)
+    if section is None:
+        findings.append(SpecFinding("abgrenzung", 'keine Überschrift „Abgrenzung" — zwei Konkurrenten mit Rückverweis (Spec 00 §5)'))
+    else:
+        candidates = {n for n in SPEC_NAME_RE.findall(section) if n not in own}
+        if root is not None:
+            names = {n for n in candidates if ":" in n or (root / "skills" / n).is_dir()}
+            if len(names) < 2:
+                findings.append(SpecFinding("abgrenzung", f"weniger als zwei Nachbarn erkannt (Ordner unter skills/ oder Name mit Namensraum): {sorted(names) or 'keiner'}"))
+        else:
+            names = {n for n in candidates if ":" in n or "-" in n}
+            if len(names) < 2:
+                findings.append(SpecFinding("abgrenzung", f"weniger als zwei Namen in der Abgrenzung: {sorted(names) or 'keiner'} (ohne Repo-Root zählen nur Namen mit Bindestrich oder Namensraum)"))
+
+    # Gate-Wörter: G3-Wortwahl nur, wenn der Baum einen Hook trägt (Pfad-Token
+    # `assets/hooks/…`, kein Kommentar). Negation gilt je Einheit: Absatz, Tabellen-
+    # oder Listenzeile — wie `_units` in lint_skill.py.
+    if not has_hook:
+        hits = [u for u in _spec_units(masked) if SPEC_GATE_WORD_RE.search(u) and not SPEC_NEGATION_RE.search(u)]
+        for hit in hits[:3]:
+            first = next(line.strip() for line in hit.splitlines() if line.strip())
+            findings.append(SpecFinding("gate-language", f"G3-Wort ohne Hook in der Skill-Struktur und ohne Negation in derselben Einheit (Spec 00 §4): {first[:90]!r}"))
+
+    # Platzhalter — Inline-Code und „Zitate" sind maskiert (eine Spec, die den
+    # Platzhalter-Scan beschreibt, trägt keinen).
+    prose = "\n".join(BACKTICK_SPAN_RE.sub("`…`", line) for line in lines)  # zeilenweise: ein einzelner Backtick weiter oben verschiebt sonst die Paarung
+    prose = SPEC_QUOTE_SPAN_RE.sub('„…"', prose)
+    placeholders = sorted({m.group(0) for m in PLACEHOLDER_RE.finditer(prose)})
+    # Template-Reste nur dort, wo sie Schaden tun: `Zyklus NN` in der Kopfzeile und
+    # `<…>` in einer Eval-ID (impl-plan macht daraus einen Task). `<name>` in einem
+    # Kommandobeispiel ist Konvention, kein Rest.
+    if header and re.search(r"Zyklus\s+NN\b", header):
+        placeholders.append("Zyklus NN")
+    placeholders += sorted(i for i in ids if "<" in i)
+    if placeholders:
+        findings.append(SpecFinding("placeholders", "Platzhalter oder Template-Reste: " + ", ".join(placeholders)))
+
+    return findings
+
+
+def spec_lint_meta(spec_path: Path | str, repo_root: Path | str | None = None) -> dict:
+    return _artifact_meta("lint-spec", spec_path, repo_root=repo_root)
+
+
+def _cmd_lint_spec(args: argparse.Namespace) -> int:
+    spec_path = Path(args.spec)
+    try:
+        text = spec_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Spec nicht lesbar: {exc}", file=sys.stderr)
+        return 2
+    findings = lint_spec(text, spec_path, repo_root=args.repo_root)
+    number = spec_number(spec_path)
+    legacy = number is not None and number < args.cutoff
+    for f in findings:
+        print(f.render())
+    if not findings:
+        print("Keine Befunde — Spec trägt alles, was impl-plan und skill-forge lesen.")
+    elif legacy:
+        print(f"{len(findings)} Befund(e) — Spec {number} liegt vor dem Cutoff {args.cutoff}: Historie, kein Fehlschlag.")
+    else:
+        print(f"{len(findings)} Befund(e). Beheben, bevor impl-plan den Plan schreibt.")
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "_meta": spec_lint_meta(spec_path, args.repo_root),
+            "spec": str(spec_path),
+            "number": number,
+            "cutoff": args.cutoff,
+            "findings": [{"rule": f.rule, "message": f.message} for f in findings],
+            "status": "clean" if not findings else ("legacy" if legacy else "findings"),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return 1 if findings and not legacy else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan -> Tasks für subagent-dev")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    spec_lint = sub.add_parser("lint-spec", help="Skill-Spec prüfen: Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle, Skill-Struktur, Tier, Abgrenzung, Gate-Wörter")
+    spec_lint.add_argument("spec", help="Pfad zur Spec (specs/Spec NN – <name>.md)")
+    spec_lint.add_argument("--repo-root", help="Repo-Wurzel für die Nachbarn-Prüfung; sonst aus dem Spec-Pfad hergeleitet")
+    spec_lint.add_argument("--cutoff", type=int, default=SPEC_LINT_CUTOFF, help=f"Specs ab dieser Nummer müssen sauber sein (Default {SPEC_LINT_CUTOFF}); ältere melden, scheitern nicht")
+    spec_lint.add_argument("--out", help="Befunde zusätzlich als JSON-Artefakt schreiben")
+    spec_lint.set_defaults(func=_cmd_lint_spec)
 
     gen = sub.add_parser("generate", help="Plan parsen, Gate fällen, Task-Dateien schreiben")
     gen.add_argument("plan", help="Pfad zum superpowers:writing-plans-Plan")

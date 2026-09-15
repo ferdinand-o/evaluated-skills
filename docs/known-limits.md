@@ -1224,6 +1224,39 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   und `config.py` tatsächlich zwei verschiedene Dateien sein könnten, führt
   das zu einer unnötigen Serialisierung, nie zu einem übersehenen Konflikt
   (bewusst konservativ, B2).
+
+## subagent-dev — `lint-spec` (2026-09-11)
+
+- **`lint-spec` prüft Form über Überschriften und Tokens.** Die sieben Abschnitte
+  müssen `## `-Überschriften sein, die mit dem Template-Namen beginnen (`## 1 ·
+  Problem` fällt durch); die Abgrenzung braucht eine Überschrift mit dem Wort, und
+  als Nachbar zählt nur ein Ordner unter `skills/` oder ein Name mit Namensraum
+  (`superpowers:x`) — eine Abgrenzung gegen eine nur im Nutzerprofil installierte
+  Skill (`skill-creator`) zählt nicht, das ist derselbe Blindfleck wie bei
+  `lint_skill.py` `neighbors`; umgekehrt zählt jedes `wort:wort` als Namensraum.
+- **Der Struktur-Block ist der Zaun, der mit `skills/<name>/` beginnt** (ein Anhang
+  hinter der Wurzel ist erlaubt). Ein Baum, dessen erste Zeile ein Kommentar ist, wird
+  nicht gefunden (`skill-structure`). Jeder Eintrag wird über sein Pfad-Token gelesen,
+  das erste Wort nach dem Baum-Präfix; Kommentare dahinter zählen nicht — weder als
+  Skript noch als Hook noch als fremder Pfad. Ein Baum, der statt `├──`/`└──` andere
+  Zeichen oder Tabs zur Einrückung nutzt, wird falsch verschachtelt. Skripte (`.py`,
+  `.sh`) zählen nur unter `scripts/`; Skripte anderer Skills im Baum werden
+  übersprungen, auch wenn die Spec sie neu einführt. Als „diese Skill" gelten
+  Dateiname und Baumwurzel; weichen beide voneinander ab und ist ein dritter Name
+  gemeint, zählt er als Nachbar.
+- **Gate-Wörter gelten je Einheit mit Negation** — Absatz, Tabellenzeile oder
+  Listenpunkt, wie `_units` in `lint_skill.py`. Ein „blockiert" zwei Absätze nach dem
+  „nicht" ist ein Befund, ein „blockiert … verworfen" im selben Absatz keiner — in
+  beide Richtungen unscharf. Substantive („Blocker", „Abnahme-Blocker") zählen wie
+  Verben. Der Hook zählt nur als Pfad-Token `assets/hooks/…` im Struktur-Baum.
+- **Ein offener Zaun** (``` ohne Gegenstück) wird als eigener Befund `fence`
+  gemeldet; die übrigen Befunde derselben Spec sind dann unzuverlässig, weil alles
+  hinter dem Marker als Code gilt.
+- **Platzhalter:** Inline-Code und „…"-Zitate sind maskiert, also geht „TODO:
+  nachtragen" in Anführungszeichen durch. Template-Reste werden nur in der Kopfzeile
+  (`Zyklus NN`) und in Eval-IDs (`<fall>`) gemeldet; ein `<zusage>` in Prosa nicht.
+- **Der Review-Vermerk ist ein String, kein Nachweis.** Specs ohne Nummer im
+  Dateinamen gelten als neu (Exit 1 bei Befund).
 ## architecture-map
 
 Nach der ersten Review-Runde (3 Defekte, 3 Lücken, 2 Anmerkungen behoben — siehe
@@ -1669,6 +1702,21 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 - **Gefordert, nicht gebaut:** `--without-skill` in `evals/run_evals.py` — derselbe
   Prompt ohne installierte Skill. Erst damit wird die Diskriminator-Frage gemessen statt
   beantwortet. Eigene, kleine Spec.
+- **Der Spec-Review in Schritt 1 ist G2 nur über einen Token.**
+  `plan_to_tasks.py lint-spec` (subagent-dev) meldet ab Spec 18 das Fehlen des
+  Kopfzeilen-Vermerks „Überarbeitet nach unabhängigem Review"; ob ein Review hinter
+  dem Vermerk liegt, prüft nichts — er ist fälschbar, aber im Diff sichtbar, und der
+  Commit-Body mit der Fundliste ist die Konvention dazu. Specs ≤ 17 sind vom Cutoff
+  ausgenommen und tragen ihre Restbefunde (`tests/test_subagent_dev_spec_lint.py`
+  nennt sie). `spec-brief.md` und `spec-template.md` sind Eingaben, die jemand dem
+  Brainstorming mitgeben muss (G1); ob sie benutzt wurden, zeigt nur die Form der
+  Spec, die der Lint prüft.
+- **`impl-plan`s Description nennt `brainstorming` ohne Zusatz.** Sechs der sieben
+  Nennungen sagen „die eigene Profil-Skill, nicht superpowers"; die Description von
+  `impl-plan` blieb, weil eine Frontmatter-Änderung dort Evals fällig macht, ohne den
+  Trigger zu ändern. Die Description ist aber die Stelle, die der Harness beim Routing
+  liest — wer die Routing-Kollision der zwei `brainstorming`-Skills misst, sollte sie
+  dort ebenfalls benennen und die impl-plan-Evals mitfahren.
 
 ## Verweise
 

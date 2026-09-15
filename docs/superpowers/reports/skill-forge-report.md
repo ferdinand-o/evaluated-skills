@@ -154,6 +154,25 @@ Routing-Agent legte `reminder` unter `skills/` an, mit YAML-gültiger Descriptio
 ersten Lauf: eine Zeile plus Commit, beziehungsweise `evals_due: true` plus nachgezogene
 Assertion, sonst nichts.
 
+### Dritter Lauf nach der Spec-Review-Folgerunde (2026-09-15)
+
+Derselbe Aufbau (frische Workspaces per `prepare()`, ein Opus-Subagent je Eval, Bewertung
+mit den echten `evalkit`-Assertionen gegen die Baseline), die Skill vom Stand c6ab874:
+fünf von fünf. Eval 1: eine Zeile, Lint 13/13 mit `evals_due: false`, Commit — sonst
+nichts. Eval 2: `evals_due: true` mit dem Pattern-Grund, `evals.json` nachgezogen,
+zweiter Lint sauber. Eval 3 und 4: Lint ohne `--base`, je ein Befund (`gate-language`
+bzw. `anti-ceremony-eval`), nichts eigenmächtig repariert („Auftrag war prüfen, nicht
+ändern"), die sieben bzw. drei `unchecked`-Regeln als ungeprüft benannt. Eval 5: Skill
+unter `skills/reminder/` mit vier Evals im `evalkit`-Schema auf einem eigenen Branch;
+der Agent meldete, dass `impl-plan` und `lint-spec` im Workspace nicht installiert sind
+und Spec 30 deshalb ungelintet übernommen wurde, und dass kein Werkzeug für einen
+Subagenten-Review vorlag — die Degradation nach Schritt 1 und 4, ausgesprochen statt
+verschwiegen. Nebenbefund des Agenten: ein `\z`-Anker in seinen eigenen Evals, den
+Pythons `re` nicht kennt; er fand ihn, weil er die Assertion-Regexe gegen Hand-Fixtures
+fuhr. Der neue Schritt 1 (Brief, Template, Review, `lint-spec`) ist in diesen Evals
+nicht messbar: Eval 5 bekommt die Spec fertig; ein Eval, der das Schreiben einer Spec
+prüft, existiert nicht.
+
 ## Was nicht gemessen wurde
 
 **Die fünf Evals sind zweimal gefahren, außerhalb des Harness.** Zwei Läufe je Eval,
@@ -178,8 +197,82 @@ die durchgehen. Der Reviewer fängt sie, wenn er sie sucht.
 **Die Baseline ohne Skill fehlt.** Die Diskriminator-Frage wird je Eval beantwortet,
 nicht gemessen. `--without-skill` bleibt eine eigene Spec.
 
+## Folgerunde: Spec-Review als Teil von Schritt 1 (2026-09-11)
+
+Aus `docs/assessment-brainstorming.md` §9 Punkt 1. Drei Specs (15, 16, 17) waren vor
+dem Bau von einem Subagenten mit frischem Kontext geprüft worden, jedes Mal auf Zuruf
+und mit einem Prompt, der nirgends lag; jede brauchte danach 119–217 Diff-Zeilen. Jetzt:
+`references/spec-reviewer-prompt.md` (Kategorien: Fakten über das Repo, Zitate, Zahlen
+ohne Quelle, Evals fahrbar, Spec-00-Konsistenz, Widersprüche, stille Entscheidungen,
+Schnittstellen — destilliert aus den Commit-Bodies f1b2b6d, d6d456e, 0ecccfa), Schritt 1
+des Ablaufs verlangt den Review und den Kopfzeilen-Vermerk „Überarbeitet nach
+unabhängigem Review", und sechs der sieben Nennungen von `brainstorming` (Spec 00 §5
+zweimal, README zweimal, diese SKILL.md, `impl-plan` Abgrenzung) sagen, dass die eigene
+Profil-Skill gemeint ist, nicht `superpowers:brainstorming`; die siebte, `impl-plan`s
+Description, blieb absichtlich (siehe unten und `docs/known-limits.md`).
+
+Gemessen: Lint `--base HEAD` ohne neuen Befund für `skill-forge` und `impl-plan`;
+SKILL.md 102 Zeilen. `evals_due: true`, weil das Muster `(?i)diskriminator` eine Zeile
+der neuen Referenz trifft — die Evals sind unverändert und schema-valide (118 Tests
+grün), nicht gefahren. `impl-plan`s Description blieb unverändert — sie nennt
+`brainstorming` als Nachbarn, nicht als Route, und eine Frontmatter-Änderung hätte dort
+Evals fällig gemacht, ohne den Trigger zu ändern.
+
+**Punkt 2 der Prüfung, gleiche Runde:** `assets/spec-template.md` (Kopfzeile, sieben
+Abschnitte, Skill-Struktur mit Tier je Skript, Abgrenzung gegen zwei Nachbarn,
+Eval-Tabelle mit den Spalten id / Klasse / Fixture / Assertions / Diskriminator) und
+`references/spec-brief.md` (was vor der ersten Frage zu lesen ist, die sechs
+Hausfragen) als Eingaben für `brainstorming`; dazu `plan_to_tasks.py lint-spec` bei
+`subagent-dev` — dem Eigentümer des Formats nach dem `impl-plan`-Contract — mit neun
+Regeln (header, review-note, sections, eval-table, skill-structure, tier, abgrenzung,
+gate-language, placeholders), Nummern-Cutoff 18 und `tests/test_specs_lint.py` als
+Repo-Test. Kalibriert an den Specs 15–17: Spec 15 Tabelle ohne Fixture- und
+Diskriminator-Spalte, Spec 16 sauber, Spec 17 ohne Kopfzeile und ohne
+Abgrenzungs-Überschrift — keine erfundenen Befunde. Das Template lintet bis auf den
+Review-Vermerk und seine eigenen Template-Reste sauber, der Test hält beides fest.
+Damit ist der Review-Schritt ab Spec 18 G2: Fehlt der Vermerk, meldet der Lint.
+
+**Fix-Runde nach zwei Reviews (Fable-Subagent, `/code-review`), 2026-09-11.** Beide
+fanden unabhängig: Die Gate-Wort-Regel war für jede Spec aus dem Template tot, weil
+das Template selbst „G3 nur mit `assets/hooks/`" sagt und der Lint nur den String im
+Text suchte — jetzt zählt nur ein Hook im Skill-Struktur-Baum, und Negation gilt im
+Absatz. Der Struktur-Block ist jetzt der Zaun, der mit der
+Baumwurzel `skills/<name>/` beginnt, nicht der erste, der `SKILL.md` erwähnt; Zäune
+werden mit derselben Erkennung wie `_mask_fenced_blocks` gefunden (eingerückt
+erlaubt). Die Tier-Regel liest flache und verschachtelte `scripts/`, überspringt aber
+Skripte anderer Skills, die eine Spec nur erweitert — Spec 16 ist damit sauber statt
+eines Fehlalarms. Nachbarn ohne Bindestrich (`explain`, `handoff`) zählen.
+Template-Reste (`Zyklus NN`, `<fall>` in einer Eval-ID) sind Befunde; `<name>` in einem
+Kommandobeispiel nicht. Die Tabellensuche teilen `spec_eval_table` und `lint-spec`
+über `_locate_eval_table`. Schritt 1 und das Brief lassen den Lint nach dem Vermerk
+laufen, nicht davor. Der Kalibrierungstest prüft Teilmengen, damit eine nachgebesserte
+Alt-Spec ihn nicht rot macht. Zahlen korrigiert: sechs von sieben Nennungen.
+Nachgemessen vom Reviewer: SKILL.md-Zeilen, Testzahlen, Diff-Zeilen, Restbefunde,
+Commit-Zitate im Reviewer-Prompt, Descriptions unverändert.
+
+**Zweite Fix-Runde nach erneutem Doppel-Review, 2026-09-11.** Sieben der acht Funde
+bestätigt behoben, einer „anders als behauptet": Die Negation galt absatzweise, aber
+eine Tabelle war ein Absatz — die Spalte „nicht" im Kopf der Abgrenzungstabelle
+negierte jede Zeile darunter. Jetzt sind Tabellen- und Listenzeilen eigene Einheiten,
+mit derselben Logik wie `_units` in `lint_skill.py`; die Paritätsbehauptung stimmt
+damit erst jetzt. Der Baum wird über Pfad-Token gelesen (erstes Wort nach dem
+Präfix) statt über Substrings: `scripts/check.py` in einem Zeilenkommentar ist kein
+Skript, `assets/hooks/` in einem Kommentar kein Hook, ein fremder Pfad im Kommentar
+der eigenen Skriptzeile macht sie nicht fremd. Dateiname und Baumwurzel gelten beide
+als „diese Skill", damit `Spec 18 – subagent-dev-lint.md` mit Wurzel
+`skills/subagent-dev/` sich nicht selbst als Nachbar zählt. Dazu: „Blocker" und
+„Abnahme-Blocker" als Gate-Wörter (Spec 00 §4 nennt sie), „Assertion" im Singular
+als gültige Spalte, `.sh` unter `scripts/` mit Tier, Wurzelzeile mit Anhang, ein
+offener Zaun als eigener Befund. Die Eval-Tabelle wird je Lauf einmal gesucht,
+`lint_meta` und `spec_lint_meta` teilen `_artifact_meta`. Der Reviewer-Prompt
+beschreibt das Protokollformat selbst, statt auf Commits zu zeigen, die nur auf
+ungemergten Branches liegen; das Brief sagt über Spec 16 und 17 nur, was die
+Git-Historie belegt.
+
 ## Offen für die nächste Runde
 
+- Die erste Spec ab 18 durch Brief, Template, `lint-spec` und Review führen und
+  zählen, wie viele Review-Funde der Faktenklasse bleiben (§9 Punkt 3 der Prüfung).
 - Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer

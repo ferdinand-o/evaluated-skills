@@ -24,7 +24,9 @@ macht die Testsuite rot. Das ist G2 — ein Skript meldet, sobald jemand `pytest
 
 1. **Spec lesen.** Eingaben sind die Eval-Tabelle (jede ID bekommt einen Task, der sie
    erzeugt), der Skill-Struktur-Block (jede Datei einen Task oder Teil eines Tasks) und
-   die Abgrenzung (der Nachbarn-Task).
+   die Abgrenzung (der Nachbarn-Task). Ob die Spec das alles trägt, sagt vorher
+   `plan_to_tasks.py lint-spec <spec>` (subagent-dev) — mit Befund dort zuerst
+   nachbessern, nicht im Plan raten.
 2. **Template kopieren:** `assets/plan-template.md` nach
    `docs/superpowers/plans/<datum>-<skill>.md`. Die Kopfzeile bleibt wörtlich; `Spec:`
    zeigt auf die eigene Spec. Im Anti-Zeremonie-Fall entfällt der Skill-Struktur-Block,
@@ -90,7 +92,9 @@ Vor der Übergabe, ohne Subagent, mit frischem Blick auf die Spec:
 
 ## Abgrenzung
 
-- **brainstorming**, **feature-spec** — schreiben die Spec, die hier Eingabe ist.
+- **brainstorming**, **feature-spec** — schreiben die Spec, die hier Eingabe ist
+  (brainstorming: die eigene Profil-Skill, nicht `superpowers:brainstorming` — die legt
+  nach `docs/superpowers/specs/` ab und übergibt an `writing-plans`).
 - **subagent-dev** — zerlegt den Plan, fällt das Gate, dispatcht, nimmt ab. Besitzt den
   Parser und den Lint, die diese Skill aufruft.
 - **superpowers:writing-plans** — für Repos ohne `subagent-dev`. Sein Kopf

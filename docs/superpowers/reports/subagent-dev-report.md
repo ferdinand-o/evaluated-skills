@@ -211,3 +211,16 @@ Läufen statt statischer Richtwerte gespeist werden soll.
 
 46 davon für diese Skill (`tests/test_subagent_dev_plan_to_tasks.py`; 26 aus
 der Erstfassung, 20 aus der Fix-Runde), 146 bestehend und unverändert grün.
+
+## Folgerunde: `lint-spec` (2026-09-11)
+
+Aus `docs/assessment-brainstorming.md` §6 Punkt 3 (Branch `claude/assessment-brainstorming`):
+`plan_to_tasks.py lint-spec <spec>` prüft die Skill-Spec, die `impl-plan` liest, mit
+demselben Parser wie den Plan — neun Regeln (header, review-note, sections, eval-table,
+skill-structure, tier, abgrenzung, gate-language, placeholders), Nummern-Cutoff 18,
+`tests/test_specs_lint.py` als Repo-Test, `tests/test_subagent_dev_spec_lint.py` für
+die Regeln. Eigentum hier, weil der Konsument des Formats sein Eigentümer ist
+(`impl-plan` Contract); der Aufruf steht in `skill-forge` Schritt 1 und `impl-plan`
+Schritt 1. Bau und Fix-Runde nach zwei Reviews sind im Report von `skill-forge`
+protokolliert (Abschnitt „Folgerunde: Spec-Review"); die Grenzen stehen in
+`docs/known-limits.md` unter „subagent-dev — `lint-spec`".
