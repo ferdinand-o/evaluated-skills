@@ -210,3 +210,151 @@ def test_untouched_home_reports_nothing(tmp_path, monkeypatch, capsys):
     state = runner_module._home_skills_state()
     runner_module._report_escapes(state, state, "irgendein-eval")
     assert capsys.readouterr().out == ""
+
+
+# --- Spec 18: --without-skill und Sichtbarkeitsprüfung --------------------------------
+
+def _init_line(skills):
+    return json.dumps({"type": "system", "subtype": "init", "skills": skills})
+
+
+def _verdict_line(claim, holds=True):
+    payload = json.dumps({"verdicts": [{"claim": claim, "holds": holds, "why": "x"}]})
+    return json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": payload}]}})
+
+
+def make_stream_cli(tmp_path: Path, skills, *, touch: str = "new.txt") -> str:
+    """Fake-CLI, das wie `claude -p` ein stream-json-Transcript schreibt: erst ein
+    Fremd-Ereignis, dann das init-Ereignis mit `skills`, dann legt es eine Datei an."""
+    body = (
+        "echo '" + json.dumps({"type": "active_goal", "value": None}) + "'\n"
+        "echo '" + _init_line(skills) + "'\n"
+        f"echo neu > {touch}\n"
+        "exit 0\n"
+    )
+    return make_fake_cli(tmp_path, body)
+
+
+def _file_eval(eval_id="e", path="new.txt"):
+    return Eval(id=eval_id, eval_class="contract", prompt="p", must=(Assertion(type="file_exists", path=path),))
+
+
+def _run(tmp_path, cli, ev, **kwargs):
+    skill_dir = tmp_path / "skills" / "s"
+    if not skill_dir.is_dir():
+        make_minimal_skill(tmp_path)
+    return run_one(ev, skill_dir=skill_dir, fixtures_dir=tmp_path / "fixtures", cli=cli, timeout=10, keep=False, **kwargs)
+
+
+def test_without_skill_visible_skill_is_harness_error(tmp_path):
+    """Die Skill ist ohne Installation sichtbar (Profil, Plugin, Fixture) — das ist
+    keine Baseline. Der Grund steht in `failures`, damit exit_code 2 liefert."""
+    cli = make_stream_cli(tmp_path, ["deep-research", "s"])
+    result = _run(tmp_path, cli, _file_eval(), without_skill=True)
+    assert result.skipped
+    assert result.baseline
+    assert "Baseline unmöglich" in result.failures[0]
+    assert "s" in result.failures[0]
+
+
+def test_without_skill_grades_when_skill_absent(tmp_path):
+    cli = make_stream_cli(tmp_path, ["deep-research", "verify"])
+    result = _run(tmp_path, cli, _file_eval(), without_skill=True)
+    assert not result.skipped
+    assert result.baseline
+    assert result.passed
+    assert result.note == ""
+
+
+def test_without_skill_installs_nothing_in_the_workspace(tmp_path):
+    """Der Agent darf im Baseline-Workspace kein .claude/skills/ vorfinden."""
+    body = (
+        "echo '" + _init_line(["verify"]) + "'\n"
+        "if [ -e .claude/skills ]; then echo installiert > seen.txt; fi\n"
+        "exit 0\n"
+    )
+    cli = make_fake_cli(tmp_path, body)
+    ev = Eval(id="e", eval_class="contract", prompt="p", must=(Assertion(type="file_absent", path="seen.txt"),))
+    assert _run(tmp_path, cli, ev, without_skill=True).passed
+
+
+def test_with_skill_missing_from_init_is_harness_error(tmp_path):
+    """Normalmodus: Der Agent sah die Skill nicht (Frontmatter, das die CLI nicht
+    parst; fehlgeschlagene Installation). Ein Verdikt wäre falsch rot oder falsch grün."""
+    cli = make_stream_cli(tmp_path, ["deep-research", "verify"])
+    result = _run(tmp_path, cli, _file_eval())
+    assert result.skipped
+    assert not result.baseline
+    assert "nicht sichtbar" in result.failures[0]
+
+
+def test_with_skill_visible_grades_normally(tmp_path):
+    cli = make_stream_cli(tmp_path, ["deep-research", "s"])
+    result = _run(tmp_path, cli, _file_eval())
+    assert result.passed and not result.skipped and not result.baseline
+    assert result.note == ""
+
+
+def test_without_skills_field_verdict_is_unchanged(tmp_path):
+    """Klartext-CLI, kein init-Ereignis: in beiden Modi das Verdikt wie heute, nur mit
+    dem Hinweis, dass die Sichtbarkeit ungeprüft blieb — nie ein SKIP."""
+    cli = make_fake_cli(tmp_path, 'echo "neu" > new.txt\necho "erledigt"\nexit 0\n')
+    plain = _run(tmp_path, cli, _file_eval())
+    base = _run(tmp_path, cli, _file_eval(), without_skill=True)
+    for result in (plain, base):
+        assert result.passed and not result.skipped
+        assert "ungeprüft" in result.note
+    assert not plain.baseline and base.baseline
+
+
+def test_skill_name_defaults_to_the_skill_dir_name(tmp_path):
+    """Bestehende Aufrufer geben keinen Namen mit — der Ordnername gilt."""
+    skill_dir = make_minimal_skill(tmp_path, "probe")
+    cli = make_stream_cli(tmp_path, ["probe"])
+    result = run_one(_file_eval(), skill_dir=skill_dir, fixtures_dir=tmp_path / "fixtures", cli=cli, timeout=10, keep=False)
+    assert result.passed and not result.skipped
+
+
+def test_visibility_is_checked_on_the_eval_agent_not_the_judge(tmp_path):
+    """Der Judge läuft über denselben run_agent in einem leeren Verzeichnis und sieht
+    nichts installiert. Würde sein Transcript geprüft, wäre jeder behavior-Eval SKIP."""
+    body = (
+        'case "$PWD" in\n'
+        "  *judge*) echo '" + _init_line([]) + "'; echo '" + _verdict_line("A") + "' ;;\n"
+        "  *) echo '" + _init_line(["s"]) + "'; echo neu > new.txt ;;\n"
+        "esac\nexit 0\n"
+    )
+    cli = make_fake_cli(tmp_path, body)
+    ev = Eval(id="e", eval_class="behavior", prompt="p", must=(Assertion(type="judge", claim="A"),))
+    result = _run(tmp_path, cli, ev)
+    assert result.passed, result.failures
+    assert not result.skipped
+
+
+def _evals_dir(tmp_path):
+    evals_dir = tmp_path / "evals"
+    (evals_dir / "s").mkdir(parents=True)
+    (evals_dir / "s" / "evals.json").write_text(
+        json.dumps({"evals": [{"id": "x", "class": "contract", "prompt": "p",
+                               "must": [{"type": "file_exists", "path": "new.txt"}]}]}),
+        encoding="utf-8",
+    )
+    return evals_dir
+
+
+def test_main_without_skill_exits_one_when_an_eval_is_green_without_skill(tmp_path, capsys):
+    make_minimal_skill(tmp_path)
+    cli = make_stream_cli(tmp_path, ["verify"])
+    args = ["--evals-dir", str(_evals_dir(tmp_path)), "--skills-dir", str(tmp_path / "skills"), "--cli", cli]
+    assert main(args + ["--without-skill"]) == 1
+    out = capsys.readouterr().out
+    assert "[GRÜN OHNE SKILL] x — misst nichts" in out
+    assert "ohne Skill" in out.splitlines()[0]
+
+
+def test_main_with_skill_exits_zero_for_the_same_green_eval(tmp_path, capsys):
+    make_minimal_skill(tmp_path)
+    cli = make_stream_cli(tmp_path, ["s"])
+    args = ["--evals-dir", str(_evals_dir(tmp_path)), "--skills-dir", str(tmp_path / "skills"), "--cli", cli]
+    assert main(args) == 0
+    assert "[PASS] x" in capsys.readouterr().out
