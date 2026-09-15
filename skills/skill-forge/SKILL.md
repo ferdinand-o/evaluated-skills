@@ -45,6 +45,10 @@ Register lintet, sobald jemand `pytest` fährt (G2).
 5. **Evals**, wenn `evals_due: true` oder neue Skill — nach `references/evals.md`:
    `evalkit`-Schema, ein Prompt je Eval, Diskriminator-Frage in `notes`, ein Eval mit
    ID-Präfix `anti-ceremony-`. Vor jeder Fix-Runde ein zweiter Lauf.
+   Danach derselbe Aufruf mit `--without-skill` (`run_evals.py`): Ein Eval, der ohne
+   Skill grün ist, misst nichts — umbauen oder streichen, nie weichspülen; der Report
+   nennt je Eval beide Läufe. Ein grüner Lauf ohne Skill zeigt die Lücke, ein roter
+   beweist nichts (Stichprobe).
 6. **Review** durch einen Subagenten mit frischem Kontext
    (`references/reviewer-prompt.md`); dessen tragende Befunde selbst nachmessen; jede
    Fix-Runde endet mit dem Lint.
@@ -99,6 +103,7 @@ Register des Repo-Tests und sind nicht Sache dieser Änderung.
 - **skill-creator** (Anthropic, im Nutzerprofil) — Skills außerhalb dieser Sammlung
   oder ohne `evalkit`. Sein `evals.json`-Schema (`expected_output`, `assertions`) ist
   mit `evalkit` inkompatibel; hier würde es die Eval-Datei überschreiben.
+  Seine Baseline-Läufe sind Subagenten mit und ohne Skill, nicht der Harness.
 - **superpowers:writing-skills** — Disziplin-Skills, die Druckszenarien und
   Rationalisierungstabellen brauchen; „Match the Form to the Failure" ist von dort
   übernommen (`references/form-selection.md`). Rechnet in Wörtern, diese Sammlung in

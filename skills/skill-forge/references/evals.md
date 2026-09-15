@@ -102,11 +102,27 @@ Harness außerhalb eines Root-Containers läuft (`docs/known-limits.md`, „Betr
 Bis dahin bleibt jede Aussage über Trigger Lektüre und Annahme, und der Report sagt
 das unter „Was nicht gemessen wurde".
 
-## Baseline ohne Skill — die Forderung
+## Baseline ohne Skill
 
-Die Diskriminator-Frage wird heute *beantwortet*, nicht *gemessen*. Ein
-`--without-skill`-Flag in `evals/run_evals.py` (derselbe Prompt, dieselbe Fixture,
-ohne installierte Skill) wäre die billigste Harness-Erweiterung mit dem größten
-Erkenntnisgewinn: Ein Eval, der ohne Skill genauso grün ist, misst nichts. Das ist eine
-eigene, kleine Spec; diese Skill fordert sie in `known-limits` ein und wartet nicht
-darauf.
+Die Antwort in `notes` bleibt Pflicht; gemessen wird sie mit demselben Aufruf ohne
+installierte Skill (Spec 18):
+
+```bash
+python run_evals.py --skill <name>                  # mit Skill: PASS/FAIL wie immer
+python run_evals.py --skill <name> --without-skill  # Baseline: derselbe Prompt, dieselbe Fixture, nichts installiert
+```
+
+Der Baseline-Lauf markiert je Eval `[GRÜN OHNE SKILL] … — misst nichts` oder
+`[ROT OHNE SKILL]` und endet mit Exit 1, sobald ein Eval ohne Skill grün war. Lesart,
+asymmetrisch wie bei Routing-Evals: **Ein grüner Lauf ohne Skill zeigt die Lücke** —
+die Assertion hängt an nichts, was die Skill beiträgt — **ein roter beweist nichts**
+(Stichprobe, siehe oben). Ein grüner Eval wird an ein Artefakt oder einen Token
+gebunden, das nur die Skill erzeugt, oder gestrichen; nie weichgespült.
+
+Der Runner prüft dabei am `skills`-Feld des `system.init`-Ereignisses, was der Agent
+sah: Ist die Skill ohne Installation sichtbar (Profil, Plugin, Fixture), ist der Lauf
+`SKIP — Baseline unmöglich`, kein Ergebnis; fehlt sie im Lauf mit Skill, ebenso
+(`Skill nicht sichtbar` — meist ein Frontmatter, das die CLI nicht parst). Fehlt das
+Feld, sagt der Report „Sichtbarkeit ungeprüft" und das Verdikt bleibt, wie es war.
+Der Report der Skill nennt je Eval beide Läufe; lief die Baseline nicht, steht sie
+unter „Was nicht gemessen wurde".
