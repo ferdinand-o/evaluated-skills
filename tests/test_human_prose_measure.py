@@ -321,3 +321,18 @@ def test_limits_carry_estimated_flag_in_json(tmp_path):
     m.main([str(src), "--out", str(out)])
     rows = json.loads(out.read_text(encoding="utf-8"))["text"]["checks"]
     assert any(r["estimated"] for r in rows) and any(not r["estimated"] for r in rows)
+
+
+# --- Task 4: rules.md trägt dieselben Muster wie das Skript -----------------------------
+
+def test_rules_md_patterns_match_the_script():
+    import re
+    from pathlib import Path
+    text = Path("skills/human-prose/references/rules.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"`(PHRASES_DE|PHRASES_EN)`.*?\n```\n(.*?)\n```", text, re.DOTALL)
+    found = {name: body.splitlines() for name, body in blocks}
+    assert found["PHRASES_DE"] == m.PHRASES_DE
+    assert found["PHRASES_EN"] == m.PHRASES_EN
+    for section in ("## 0. Grundsatz", "### R1.1", "### Fachtext", "### Kurzform", "## 9. Beispiele", "### R4.6"):
+        assert section[:12] in text, section
+    assert "## 7." not in text and "## 8." not in text and "## 10." not in text
