@@ -1593,6 +1593,45 @@ behoben zu werden:
   mehr zu widersprechen), aber auch das ist erst bewiesen, wenn ein echter
   Lauf es bestätigt, nicht vorher.
 
+## human-prose
+
+- **Die Schwellen sind geschätzt, kein Korpus liegt vor.** Satzlänge, 15 -ung je
+  1000, 20 Prozent Passiv, drei Hedges je 300 Wörter stammen aus dem Entwurf v0.1
+  (Abschnitt 10, erster Punkt); `measure.py` schreibt `"estimated": true` in jede
+  Zeile. Am eigenen Entwurf gemessen (1.530 Wörter ohne Zitate): 25,5 -ung je 1000 und
+  35 Doppelpunkte, beides rot — ein Regeldokument ist kein Fließtext, aber die Grenzen
+  sind eng. Erst fünf bis zehn eigene Texte des Nutzers machen daraus Messwerte.
+- **Vier Heuristiken zählen an den Beispieltexten des Entwurfs falsch, und die Tests
+  halten das fest** (`tests/test_human_prose_measure.py`): R2.1 meldet Beispiel 3
+  Nachher rot (kein Satz mit zwanzig Wörtern in einer Vier-Satz-Mail — die Regel ist
+  für Register `kurz` zu streng); R5.1 meldet Beispiel 2 Nachher rot (englischer
+  Fließtext ohne Ziffer, Pfad oder Großwort) und Beispiel 3 Nachher `unchecked` (zwei
+  Absätze mit je zwei Sätzen, kein Behauptungsabsatz ab drei Sätzen); Passiv erkennt
+  nur `werden`-Form plus Partizip, Fragmente nur Sätze bis fünf Wörter ohne finites
+  Verb aus einer kleinen Liste. Deutsche Substantive zählen bei R5.1 nicht als
+  konkret, sonst wäre jeder Absatz konkret.
+- **Die Phrasenliste trifft wörtlich fast nichts.** Beispiel 1 Vorher enthält aus R4.1
+  wörtlich eine Phrase; erst zwei Lückenmuster („spielt (\w+ ){0,2}eine entscheidende
+  rolle", „nicht nur .{1,80}, sondern auch") finden drei. Was eine andere Beugung oder
+  ein anderes Subjekt hat, geht durch. `robust` und `leverage` zählen immer; der
+  Fachkontext, den der Entwurf ausnimmt, ist ein Urteil.
+- **Fünf Regeln misst kein Skript** (R3.1, R5.3, R5.4, R2.3 zweiter Punkt, R5.2). Sie
+  stehen unter `judgement` im Artefakt; ob eine Zahl erfunden ist, sieht nur, wer
+  Original und Auftrag daneben hält.
+- **Die Rückfrage erreicht im `-p`-Modus niemanden.** Die Skill wartet nie, schreibt um,
+  lässt die Stelle allgemein und fragt am Ende; ohne zweite Runde bleibt die Lücke.
+  Das ist gewollt (Spec 19, Review-Befund 2), aber ein Text aus einem einzigen Lauf
+  trägt dann offene Stellen.
+- **Das Stilprofil ist ungetestet.** `my-writing-style` ist hier nicht installiert;
+  „das Profil gewinnt, das Skript bleibt" ist Doktrin ohne Lauf.
+- **Die Evals sind nicht im Harness gefahren** (root, `bypassPermissions`, siehe
+  „Betrieb"); Nachweis ist ein Lauf mit Subagenten außerhalb des Harness, siehe
+  Report. `--without-skill` (Spec 18) steht aus; bei Eval 1 entscheidet dann die
+  Register-Zeile, ob er etwas misst.
+- **`explain`s Rückverweis nennt die Tokens nicht wörtlich.** Eine Zeile mit `Next:`
+  in dessen Abgrenzung hätte `evals_due: true` ausgelöst, ohne dass sich sein Contract
+  ändert; der Satz sagt „die drei wörtlichen Tokens" und meint dieselben.
+
 ## impl-plan
 
 Gebaut nach Spec 16 (2026-09-02). Tier 1 ohne eigenes Skript: Der einzige Code,

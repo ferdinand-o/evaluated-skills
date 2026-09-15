@@ -78,4 +78,6 @@ Report rendert `facts.json`, nicht deine Erinnerung.
 
 - **visual-summary** — ad-hoc „fass das zusammen", beliebige Inhalte, gestaltete Ausgabe.
 - **handoff** — Sitzungszustand für die nächste Session, kein Bericht an Menschen.
+- **human-prose** — „mach den Wochenreport menschlicher": Modus B über den Fließtext;
+  Kopfzeilen und Marker des Reports bleiben.
 - Diese Skill braucht ein Git-Repository. Ohne Repo sagst du das und hörst auf.

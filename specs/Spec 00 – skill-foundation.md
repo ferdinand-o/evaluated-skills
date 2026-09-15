@@ -89,6 +89,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Skill bauen oder ändern | skill-forge (17) | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
+| Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose (19) | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (11, verdichtet, ändert keinen Stil), explain (15, erklärt mit eigenem Antwortvertrag) |
 
 *Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `superpowers:writing-plans`. *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
 

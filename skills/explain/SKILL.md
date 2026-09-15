@@ -98,4 +98,6 @@ ist Tier 0 und läuft in claude.ai, Cowork und Claude Code identisch.
   Skill.
 - **visual-summary** — verdichtet vorliegendes Material. `explain` erklärt einen
   Gegenstand, auch ohne dass etwas vorliegt.
+- **human-prose** (19) — formt Prosa auf Zuruf und überarbeitet Texte; die drei
+  wörtlichen Tokens dieser Skill bleiben stehen, auch wenn sie eine Erklärung umschreibt.
 - **verified-research** — Recherche mit Quellenregister und Stichprobenprüfung.

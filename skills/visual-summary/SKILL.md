@@ -137,5 +137,7 @@ decision-memo (Entscheidung steht an), Medium: HTML (zum Teilen)." ist Teil der
   Skill ist für Ad-hoc-Material jeder Art, nicht für wiederkehrende Reports.
 - **handoff** — Sitzungszustand für die nächste Claude-Session, kein Bericht an
   Menschen.
+- **human-prose** — „mach das menschlicher", auch über eine Zusammenfassung von hier;
+  diese Skill wählt das Format, human-prose den Stil.
 - Nicht diese Skill: Slides/Präsentationen, Langform-Dokumente, automatische
   Verteilung (Mail/Slack), Übersetzung.
