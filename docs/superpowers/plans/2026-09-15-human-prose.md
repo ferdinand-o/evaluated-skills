@@ -280,7 +280,7 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `evals_json`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** nach `skills/skill-forge/assets/skill-template/report.md`:
+- [x] **Step 1: Report** nach `skills/skill-forge/assets/skill-template/report.md`:
       Entscheidungen (nie warten, Phrasen als Muster, vierzehn statt zehn Zeilen),
       „Was gemessen wurde" mit der Tabelle Prüfpunkt × Beispieltext und dem Lauf über
       den Entwurf, „Was nicht gemessen wurde" (Evals, Trigger, Baseline, Profil),

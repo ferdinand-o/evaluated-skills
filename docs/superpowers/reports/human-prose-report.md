@@ -55,7 +55,7 @@ Umformulierung ist.
 
 ## Was gemessen wurde
 
-- **1235 Tests grün**, 36 neu; ein vorbestehender Fehlschlag außerhalb
+- **1234 Tests grün**, 36 neu; ein vorbestehender Fehlschlag außerhalb
   (`rest-api-architect`, Spectral über npx).
 - **Lint:** `lint_skill.py skills/human-prose` — 13 Regeln, alle `pass` nach Task 9;
   die vier Nachbarn mit `--base main` ohne neuen Befund und `evals_due: false`.
@@ -84,8 +84,9 @@ nicht über die Texte; die Schwellen sind geschätzt.
 ## Was nicht gemessen wurde
 
 **Die Evals im Harness** — nicht gefahren (root, `bypassPermissions`,
-`docs/known-limits.md`, „Betrieb"). Der Lauf mit Subagenten außerhalb des Harness
-steht unten.
+`docs/known-limits.md`, „Betrieb"). Stattdessen der Lauf unten: ein Aufbau, der das
+Laden der Skill stärker nahelegt als der Harness (die Skill ist im Prompt genannt,
+außer bei Eval 5).
 
 **Der Trigger** — ob „das klingt nach KI, überarbeite" bei dieser Skill landet und
 nicht bei `visual-summary`, entscheidet der Harness pro Lauf; Eval 5 misst es, wenn
@@ -99,6 +100,25 @@ bleibt" ist Doktrin ohne Lauf.
 
 **Die Heuristiken auf echten Texten** — Passiv, Fragment, Konkretion und Satzgrenze
 sind an sechs Beispielen geprüft, nicht an einem Korpus.
+
+### Erster Lauf außerhalb des Harness (2026-09-15)
+
+Frische Workspaces per `prepare()`, ein Opus-Subagent je Eval, Bewertung mit den
+echten `evalkit`-Assertionen gegen die Baseline und die Antwort des Agenten:
+**fünf von fünf.**
+
+| Eval | Ergebnis | Was der Agent tat |
+| --- | --- | --- |
+| 1 anti-ceremony-short-mail | PASS | `Register: kurz`, 46 Wörter, kein Skript, kein Artefakt, kein Geviertstrich, keine Floskel |
+| 2 revise-writes-before-and-after | PASS | vorher 4 Befunde, nachher 1 (R5.1: keine Zahl im Original, keine erfunden); drei Phrasen, Partizip, Rahmen weg; `Rückfrage:` mit zwei Stellen |
+| 3 vague-text-asks-instead-of-inventing | PASS | vage Formeln weg, keine Zahl gesetzt, `Rückfrage:` mit drei Stellen, `measure.json` mit before und after |
+| 4 long-draft-ends-with-measurement-line | PASS | 281 Wörter nach `draft.md`, `Nachgemessen: 13 pass, 0 Befunde, 1 ungeprüft`, Zahlen nur aus dem Auftrag |
+| 5 routing-sounds-like-ai | PASS | einzige installierte Skill gewählt, Modus B, vorher 4 nachher 1, `Rückfrage:`; im Harness konkurrieren 19 fremde Skills, hier keine |
+
+Was der Lauf zeigt: Der Ein-Zug-Ablauf trägt — in Eval 2, 3 und 5 blieb R5.1 offen,
+und kein Agent hat eine Zahl erfunden; alle drei fragten am Ende. Die Register-Wahl
+passte in allen fünf Läufen (`kurz` für die Mail, sonst `fach`). Eval 5 ist keine
+Routing-Messung, weil im Workspace nur diese Skill lag; das misst erst der Harness.
 
 ## Offen für die nächste Runde
 
