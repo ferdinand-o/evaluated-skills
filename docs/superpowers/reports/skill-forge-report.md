@@ -286,6 +286,22 @@ fünf: Das Brief hat die Zahlen-Klasse getilgt, nicht die Klasse „etwas über 
 behauptet, statt ihn zu lesen" — der Reviewer bleibt das Instrument dafür. Eine
 Stichprobe; die zweite Spec ab 18 entscheidet, ob das Muster hält.
 
+**Zweite Messung an Spec 19 (2026-09-15).** `specs/Spec 19 – human-prose.md`, aus einem
+276-Zeilen-Entwurf des Nutzers nach Brief und Template geschrieben: dreizehn Befunde,
+drei blockierend, acht Faktenklasse. Die Kernzahlen (Korpus 65 Dateien, 2.219
+Geviertstriche, Beispielstatistiken) hielten; gefallen sind eine Zahl ohne Methode
+(16 Semikolons statt 422 zwischen Buchstaben), zwei methodenabhängige Zählungen, eine
+überzogene Aussage über die Rhythmusregel, ein falsch bezeichnetes Regex-Muster, ein
+vorgeschriebener Wortlaut mit Geviertstrich, eine Zuordnung von Fixture-Text zum
+Entwurf und die Behauptung, die Phrasenliste treffe vier Phrasen, wo sie wörtlich eine
+trifft. Die drei blockierenden waren alle Harness-Fakten, die der Reviewer durch
+Ausführen fand: eine Git-Fixture ohne Datei scheitert in `prepare()`, ein Eval, dessen
+Skill auf eine Rückfrage wartet, kann in einem `-p`-Zug nicht grün werden, und die
+Wortliste trifft die Beispieltexte nicht so, wie die Spec behauptete. Fix-Runde: 275
+Diff-Zeilen bei 265 → 316 Zeilen. Zwei Stichproben, sechs und acht: Das Brief tilgt
+Zahlen ohne Quelle, nicht Behauptungen über Code, den niemand ausgeführt hat — der
+Reviewer bleibt das Instrument, und „laufen lassen" ist seine wirksamste Kategorie.
+
 ## Folgerunde: Baseline ohne Skill (2026-09-15)
 
 Nach `specs/Spec 18 – baseline-without-skill.md` und
@@ -350,8 +366,9 @@ fährt.
 
 ## Offen für die nächste Runde
 
-- Die zweite Spec ab 18 durch Brief, Template, Review und `lint-spec` führen und die
-  Faktenklasse erneut zählen (Spec 18: sechs von sieben).
+- Spec 19 (`human-prose`) bauen: Plan mit `impl-plan`, `measure.py` mit Tests an den
+  sechs Beispieltexten zuerst. Faktenklasse bisher: Spec 18 sechs von sieben, Spec 19
+  acht von dreizehn.
 - Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer
