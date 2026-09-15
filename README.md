@@ -19,9 +19,13 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest                                  # Harness-Unit-Tests
 .venv/bin/python run_evals.py --class contract    # billige Contract-Evals
 .venv/bin/python run_evals.py --skill handoff     # alles für eine Skill
+.venv/bin/python run_evals.py --skill handoff --without-skill   # Baseline: dieselben Evals, nichts installiert
 ```
 
 Exit-Codes: `0` alles grün, `1` mindestens ein Eval gefallen, `2` Harness-Fehler.
+Mit `--without-skill` umgekehrt: `1`, sobald ein Eval ohne Skill grün ist (er misst
+nichts, was die Skill beiträgt), `0`, wenn alle rot sind. Ein Lauf, in dem der Agent
+die Skill nicht sah (mit Skill) oder trotzdem sah (ohne Skill), ist `2`, kein Ergebnis.
 
 ## Routing
 
