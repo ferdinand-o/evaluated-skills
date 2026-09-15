@@ -269,14 +269,32 @@ beschreibt das Protokollformat selbst, statt auf Commits zu zeigen, die nur auf
 ungemergten Branches liegen; das Brief sagt über Spec 16 und 17 nur, was die
 Git-Historie belegt.
 
+**Erste Messung an Spec 18 (2026-09-15).** `specs/Spec 18 – baseline-without-skill.md`
+ist die erste Spec, die mit `spec-brief.md` und `spec-template.md` entstand und dann
+durch Reviewer-Prompt und `lint-spec` ging — gezählt wird, was die Prüfung §9 Punkt 3
+verlangt: Review-Funde der Faktenklasse. Ergebnis: sieben Befunde (einer blockierend),
+davon sechs Faktenklasse; keine der gemessenen Zahlen (97/18/79 Evals, 17 von 21
+Profil-Skills, 19 sichtbare Skills) fiel. Die sechs waren: die Reihenfolge der
+Stream-Ereignisse (`init` ist das dritte, nicht das erste), ein falsch zitiertes
+Assertion-Pattern, eine falsche Zitatstelle (Spec 00 §1 statt README), ein
+überdehntes Zitat aus known-limits „Isolation", eine ungeprüfte Behauptung über die
+CLI (die leere Skill steht nicht im `skills`-Feld) und der blockierende Widerspruch
+zwischen einer Constraint und dem eigenen Bauplan (`evals_due` difft den ganzen
+Skill-Ordner). Fix-Runde: 81 Diff-Zeilen bei 250 → 285 Zeilen Spec, gegenüber 119–217
+bei Spec 15–17. Sechs liegt weder in der Größenordnung der 23 von Spec 16 noch unter
+fünf: Das Brief hat die Zahlen-Klasse getilgt, nicht die Klasse „etwas über den Code
+behauptet, statt ihn zu lesen" — der Reviewer bleibt das Instrument dafür. Eine
+Stichprobe; die zweite Spec ab 18 entscheidet, ob das Muster hält.
+
 ## Offen für die nächste Runde
 
-- Die erste Spec ab 18 durch Brief, Template, `lint-spec` und Review führen und
-  zählen, wie viele Review-Funde der Faktenklasse bleiben (§9 Punkt 3 der Prüfung).
+- Die zweite Spec ab 18 durch Brief, Template, Review und `lint-spec` führen und die
+  Faktenklasse erneut zählen (Spec 18: sechs von sieben).
 - Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
   `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer
   registrierten Skill die `report-section` nachziehen und den Eintrag streichen.
-- `--without-skill` als eigene Spec.
+- `--without-skill` bauen: Spec 18 liegt reviewt und lint-sauber vor; Plan mit
+  `impl-plan`, dann Schritt 3 bis 7.
 - Die Prüfung `docs/assessment-writing-skills-writing-plans.md` von ihrem Branch nach
   main holen; `checklist.md` zitiert sie.
