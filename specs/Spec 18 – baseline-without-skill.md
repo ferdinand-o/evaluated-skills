@@ -1,6 +1,6 @@
 # Spec 18: Baseline ohne Skill — `--without-skill` im Harness, gelesen von skill-forge
 
-Skill-Spezifikation · Zyklus 18 · Entscheidung: ein Flag am Runner plus eine Sichtbarkeitsprüfung aus dem `system.init`-Ereignis; kein Artefakt, kein neuer Eval, kein Contract-Satz · Abgeglichen mit Spec 00
+Skill-Spezifikation · Zyklus 18 · Entscheidung: ein Flag am Runner plus eine Sichtbarkeitsprüfung aus dem `system.init`-Ereignis; kein Artefakt, kein neuer Eval, kein Contract-Satz · Abgeglichen mit Spec 00 · Überarbeitet nach unabhängigem Review
 
 ## Problem
 
@@ -28,7 +28,8 @@ Zwei Messungen vom 2026-09-15, auf denen der Zuschnitt steht:
   der Runner.
 - **Die CLI sagt, was der Agent sieht.** Ein `claude -p`-Lauf (2.1.272, leeres
   Verzeichnis, `--setting-sources project --strict-mcp-config`, `--output-format
-  stream-json`) liefert als erstes Ereignis `{"type":"system","subtype":"init",…}` mit
+  stream-json`) liefert unter den ersten Ereignissen `{"type":"system","subtype":"init",…}`
+  — im gemessenen Lauf als drittes, nach `active_goal` und `autocompact_state` — mit
   dem Feld `skills`: hier 19 Einträge (`deep-research`, `dataviz`, `code-review`,
   `debug`, `verify`, …), **keine** der 17 gleichnamigen Profil-Skills. Der Runner liest
   dieses Feld heute nicht (`evalkit/dispatch.py::assistant_text` überspringt alles
@@ -42,18 +43,28 @@ Zwei Messungen vom 2026-09-15, auf denen der Zuschnitt steht:
   5 (G1). Der Runner *meldet* (G2): Exit-Code und Report-Zeile je Eval, ein
   unmöglicher Baseline-Lauf als Harness-Fehler, nie als Ergebnis. Kein Hook — nichts
   hier blockiert einen Commit.
-- **Kein Contract-Satz, kein neuer Eval für skill-forge.** Die Ergänzung liegt im
-  Ablauf (Schritt 5) und in `references/evals.md`. Sie darf keine Zeile berühren, auf
-  die ein Pattern der eigenen `evals/skill-forge/evals.json` greift — `(?i)diskriminator`
-  und `anti-ceremony-` stehen dort als `file_matches` — sonst meldet `lint_skill.py`
-  `evals_due: true`, und die fünf Evals sind zu fahren. Das ist der Mechanismus aus
-  Spec 17, nicht eine Ausnahme davon.
+- **Kein Contract-Satz, kein neuer Eval für skill-forge — aber `evals_due: true`, und
+  die fünf Evals werden gefahren.** `lint_skill.py::evals_due` legt die neun Patterns
+  der eigenen `evals/skill-forge/evals.json` (darunter `(?i)diskriminator`,
+  `"id": "anti-ceremony-`, `expected_output`) auf jede geänderte Zeile im ganzen
+  Skill-Ordner, alte wie neue (`changed_lines`: `git diff <rev> -- skills/skill-forge`).
+  Der Abschnitt „Baseline ohne Skill — die Forderung" in `references/evals.md` beginnt
+  mit „Die Diskriminator-Frage wird heute *beantwortet*" (Zeile 107); ihn umzuschreiben
+  trifft `(?i)diskriminator` — nachgemessen im Klon: `evals_due: True`. Die Spec nimmt
+  das an, statt den Satz zu umschreiben, bis der Lint schweigt (das wäre die
+  Rationalisierung aus `subagent-dev`s Tabelle): Die fünf Evals werden nach dem Bau
+  gefahren, außerhalb des Harness wie beim dritten Lauf im Report, und der Report
+  nennt den Grund aus `lint.json` wörtlich. Der Rückverweis in der Abgrenzung kommt
+  als eigene Zeile hinter den skill-creator-Absatz, damit Zeile 100 (`expected_output`)
+  unberührt bleibt und `evals_due_reason` genau den einen erwarteten Treffer nennt.
 - **Abwärtskompatibel:** Ohne `--without-skill` und ohne `skills`-Feld im
   `init`-Ereignis ändert sich kein Verdikt. Die bestehenden Fake-CLI-Tests
   (`tests/test_runner.py`, Shell-Skripte ohne stream-json) bleiben grün, ohne Änderung.
 - **SKILL.md ≤ 150 Zeilen:** `skills/skill-forge/SKILL.md` hat 107; die Ergänzung sind
   drei bis vier Zeilen.
-- **Ablage nach Spec 00 §1:** Harness-Code unter `evalkit/`, Tests unter `tests/`,
+- **Ablage nach `README.md` („Aufbau"):** Harness-Code unter `evalkit/`, der Runner
+  als `run_evals.py` in der Wurzel (Spec 00 §2 nennt noch `evals/run_evals.py` — der
+  Satz, den diese Spec dort ergänzt, zieht den Pfad nach), Tests unter `tests/`,
   Doktrin unter `skills/skill-forge/`. Kein neues Artefakt auf Platte — der Runner
   schreibt heute nichts (known-limits, „Kein Transcript wird persistiert"), und das
   bleibt außerhalb dieser Spec.
@@ -96,7 +107,10 @@ Im Harness, je Eval mit `--without-skill`:
    `.claude/skills/`. Bringt die Fixture selbst einen mit, bleibt er; Schritt 3 fängt
    das.
 2. Derselbe Prompt, derselbe Judge, dieselbe Baseline (Snapshot) wie mit Skill.
-3. `Transcript.skills` aus dem `init`-Ereignis. Enthält es den Skill-Namen: Ergebnis
+3. `Transcript.skills` aus dem `init`-Ereignis — der Runner sucht im Stream nach
+   `type: system, subtype: init`, nicht in der ersten Zeile; geprüft wird nur das
+   Transcript des Eval-Agenten, nie das des Judge (`judge()` läuft über denselben
+   `run_agent` in einem leeren Verzeichnis). Enthält es den Skill-Namen: Ergebnis
    `SKIP — Baseline unmöglich: <name> ohne Installation sichtbar (Profil, Plugin oder
    Fixture)`, Exit 2. Fehlt das Feld: Zusatz „Sichtbarkeit ungeprüft", weiter mit 4.
 4. `grade()` wie bisher. Der Report markiert `[GRÜN OHNE SKILL] <id> — misst nichts`
@@ -105,9 +119,12 @@ Im Harness, je Eval mit `--without-skill`:
 
 Ohne `--without-skill` gilt dieselbe Prüfung gespiegelt: Fehlt der Skill-Name im
 `skills`-Feld, ist der Lauf `SKIP — Skill nicht sichtbar (Installation oder
-Frontmatter?)`, Exit 2 — ein Eval, dessen Skill der Agent nie sah, war bisher falsch
-Rot (Ablauf nie geladen) oder falsch Grün (fremde Skill hat die Arbeit getan;
-known-limits, „Isolation"). Fehlt das Feld, bleibt alles wie heute.
+Frontmatter?)`, Exit 2. Das fängt genau die Klasse „Skill wurde nie geladen": ein
+Frontmatter, das die CLI nicht parst (known-limits, `## skill-forge`, „Der Lint parst
+kein YAML": `impl-plan` und `debug-ledger` luden so nicht), eine fehlgeschlagene
+Installation. Es fängt **nicht** die Fälle aus known-limits „Isolation" — dort war die
+getestete Skill sichtbar, und eine fremde fing den Prompt ab oder erledigte die
+Arbeit. Fehlt das Feld, bleibt alles wie heute.
 
 In `skill-forge`, Schritt 5, nach „Vor jeder Fix-Runde ein zweiter Lauf": derselbe
 Aufruf mit `--without-skill`. Ein Eval, der ohne Skill grün ist, wird umgebaut oder
@@ -126,8 +143,9 @@ Eval-Ergebnis ist eine Stichprobe").
 - **Grün ohne Skill ist Exit 1.** Der Baseline-Modus kehrt die Bedeutung des
   Exit-Codes um und sagt es in der Summenzeile („2 grün ohne Skill — messen nichts").
 - **Ein übersprungener Lauf meldet nie Erfolg.** Baseline unmöglich und Skill nicht
-  sichtbar sind `skipped=True` mit Grund, Exit 2 — wie heute Timeout und
-  Schema-Fehler.
+  sichtbar sind `skipped=True` mit dem Grund in `failures`, Exit 2 — wie heute Timeout
+  und Schema-Fehler (`exit_code` liefert 2 nur bei `skipped` *und* `failures`,
+  `evalkit/report.py`; ein Grund nur in `note` gäbe Exit 0).
 - **Anti-Zeremonie-Fall:** Ein geänderter Satz in einer SKILL.md (`evals_due: false`)
   löst keinen Baseline-Lauf aus; die Baseline gehört zu Schritt 5 und läuft nur, wenn
   Evals fällig sind oder die Skill neu ist. Ein Skill, dessen Evals alle rot ohne Skill
@@ -147,24 +165,26 @@ dort kommt der Halbsatz „seine Baseline-Läufe sind Subagenten, nicht der Harn
 
 | Test | Datei | prüft |
 | --- | --- | --- |
-| `test_visible_skills_reads_init_event` | `tests/test_dispatch.py` | `skills`-Feld → Menge; ohne `init`-Ereignis → `None`; kaputte Zeilen übersprungen |
+| `test_visible_skills_reads_init_event` | `tests/test_dispatch.py` | `skills`-Feld → Menge, auch hinter führenden Fremd-Ereignissen (`active_goal`, `autocompact_state`); ohne `init`-Ereignis → `None`; kaputte Zeilen übersprungen |
 | `test_prepare_without_skill_installs_nothing` | `tests/test_workspace.py` | `prepare(dest, None, fixture)`: kein `.claude/skills/`, Baseline ohne diesen Präfix |
 | `test_without_skill_visible_skill_is_harness_error` | `tests/test_runner.py` | Fake-CLI schreibt ein `init`-Ereignis mit dem Skill-Namen → `skipped`, Grund nennt „Baseline unmöglich" |
 | `test_without_skill_grades_when_skill_absent` | `tests/test_runner.py` | `init`-Ereignis ohne den Namen → `grade()` läuft, Note „ohne Skill" |
 | `test_with_skill_missing_from_init_is_harness_error` | `tests/test_runner.py` | Normalmodus, Name fehlt im Feld → `skipped`, Exit 2 |
 | `test_without_skills_field_verdict_is_unchanged` | `tests/test_runner.py` | Fake-CLI ohne stream-json → Verdikt wie heute, Note „Sichtbarkeit ungeprüft" |
-| `test_baseline_report_marks_and_exit_code` | `tests/test_report.py` | `[GRÜN OHNE SKILL]`/`[ROT OHNE SKILL]`, Summenzeile, Exit 1 bei grün, 0 bei nur rot, 2 bei skip |
+| `test_baseline_report_marks_and_exit_code` | `tests/test_report.py` | `EvalResult.baseline=True`: `[GRÜN OHNE SKILL]`/`[ROT OHNE SKILL]`, Summenzeile, Exit 1 bei grün, 0 bei nur rot, 2 bei skip |
 
 ### Evals
 
 Keine neue Eval-Zeile: Das Eval-Schema kann den Harness nicht fahren (kein
 `evalkit` im Workspace, den `prepare()` anlegt), und die Ergänzung an `skill-forge`
-ändert weder Frontmatter noch Contract — `lint_skill.py --base` muss `evals_due: false`
-melden, sonst ist die Ergänzung an der falschen Stelle.
+ändert weder Frontmatter noch Contract. Gefahren werden trotzdem alle fünf bestehenden
+Evals von skill-forge, weil `evals_due: true` erwartet ist (Constraints) — außerhalb
+des Harness, zwei Läufe je Eval wie im dritten Lauf des Reports.
 
 | # | id | Klasse | Fixture | Assertions | Diskriminator |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `anti-ceremony-one-sentence-change-lints-only` | contract | `sf-existing` (unverändert) | unverändert: `file_exists lint.json`, `file_matches "evals_due": false`, `file_unchanged evals.json` und Report | unverändert — bleibt der Pflicht-Eval; er ist zugleich der Anti-Zeremonie-Fall dieser Spec: ein Satz löst keinen Baseline-Lauf aus |
+| 2–5 | `token-change-makes-evals-due`, `gate-word-without-hook-is-reported`, `missing-anti-ceremony-eval-is-reported`, `routing-new-skill-gets-house-evals` | contract | unverändert | unverändert | unverändert — werden gefahren, nicht geändert |
 
 Erste Kandidaten für einen echten Baseline-Lauf, sobald der Harness beim Nutzer läuft:
 die 79 Evals ohne Diskriminator-Notiz, beginnend bei den drei Evals mit ID-Präfix
@@ -176,8 +196,10 @@ grep) — dort ist Rot ohne Skill die Erwartung und Grün der Befund.
 **`--skills-dir` mit leerer `SKILL.md`** — funktioniert heute ohne Code:
 `mkdir -p /tmp/leer/<name> && touch /tmp/leer/<name>/SKILL.md && python run_evals.py
 --skill <name> --skills-dir /tmp/leer`; `prepare()` verlangt nur, dass die Datei
-existiert. Verworfen: Der Name bleibt für den Agenten sichtbar (die CLI listet die
-leere Skill), der Report sagt `PASS` für einen Eval, der nichts misst, und Exit 0.
+existiert, und die leere Skill erscheint nicht im `skills`-Feld (Reviewer-Messung,
+2.1.272: nur in `slash_commands`) — als Baseline taugt der Trick also. Verworfen, weil
+der Runner nicht weiß, dass es einer ist: Der Report sagt `PASS` für einen Eval, der
+nichts misst, Exit 0, keine Sichtbarkeitsprüfung, kein Wort „ohne Skill" im Report.
 Gewonnen hätte er, wenn es um einen einmaligen Blick statt um Schritt 5 ginge.
 
 **`--baseline` als Doppellauf** — je Eval mit und ohne Skill in einem Aufruf, drei
@@ -228,11 +250,23 @@ nicht, und wo sie steht, hat sie derselbe Kontext geschrieben wie die Assertion.
   CI-Aufruf mit `--without-skill` wird damit rot, sobald ein Eval nichts misst —
   widersprich, wenn Grün ohne Skill nur eine Warnung sein soll.
 - *Annahme:* Kein Artefakt, keine Kopfzeile; der Report bleibt stdout.
+- *Annahme:* Vier Schnittstellen, die die Tests brauchen: `run_one()` bekommt den
+  Skill-Namen und `without_skill` als Parameter; `EvalResult` bekommt ein Feld
+  `baseline: bool = False`, das `format_report()` und `exit_code()` lesen (keine neuen
+  Parameter dort); `Transcript` bekommt `skills: frozenset[str] | None = None`; die
+  Sichtbarkeitsprüfung liegt in `run_one()` und sieht nur das Transcript des
+  Eval-Agenten. Widersprich, wenn der Modus lieber ein Parameter der Report-Funktionen
+  sein soll.
 - **Ungemessen auf dem Rechner des Nutzers:** ob die synchronisierten Profil-Skills
   dort unter `--setting-sources project` ebenfalls unsichtbar sind. Die Messung hier
   stammt aus dem Container; der erste echte `--without-skill`-Lauf beantwortet die
   Frage über Schritt 3 des Ablaufs — er meldet sonst „Baseline unmöglich" für 17 von
   21 Skills, und dann ist die `CLAUDE_CONFIG_DIR`-Variante an der Reihe.
+- **Ungemessen:** ob die CLI im `skills`-Feld den Frontmatter-`name` oder den
+  Ordnernamen listet — im Repo sind beide bei allen 21 Skills gleich (Reviewer-Zählung);
+  der Runner vergleicht mit dem Ordnernamen. Und warum die Zahl globaler Skills von 16
+  (known-limits, 2026-08-15) auf 19 stieg — für die Baseline ohne Belang, für
+  „Isolation" eine Notiz.
 - **Ungemessen:** der Flag selbst im Harness (root, `bypassPermissions`); Nachweis
   sind die sieben Tests oben. Der erste echte Lauf gehört in den Report der
   Folgerunde.
@@ -244,7 +278,8 @@ nicht, und wo sie steht, hat sie derselbe Kontext geschrieben wie die Assertion.
 
 Plan mit `impl-plan` (16); Bau nach `skill-forge` (17) Schritt 3 bis 7 im Hauptkontext —
 unter drei überlappungsfreien Paketen, `subagent-dev` sagt dann `sequential`. Danach
-`lint_skill.py skills/skill-forge --base main` mit `evals_due: false` als Nachweis für
-die Constraint oben; Folgerunde im Report von `skill-forge`; known-limits
+`lint_skill.py skills/skill-forge --base main`: erwartet `evals_due: true` mit genau
+dem Grund `(?i)diskriminator` in `references/evals.md`, dann die fünf Evals fahren;
+Folgerunde im Report von `skill-forge`; known-limits
 (`## skill-forge`, „Gefordert, nicht gebaut" streichen; „Isolation" um das
 `skills`-Feld ergänzen); Spec 00 §2 um den Satz zur Baseline.
