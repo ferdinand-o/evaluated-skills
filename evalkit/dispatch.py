@@ -43,16 +43,48 @@ def assistant_text(raw: str) -> str:
     return "\n".join(parts)
 
 
+def visible_skills(raw: str) -> frozenset[str] | None:
+    """Die Skills, die der Agent laut `system.init`-Ereignis sah — oder None.
+
+    Das Ereignis `{"type": "system", "subtype": "init", "skills": [...]}` ist nicht die
+    erste Zeile des Streams (gemessen mit CLI 2.1.272: `active_goal` und
+    `autocompact_state` gehen voraus), also wird gesucht, nicht erwartet. None heißt
+    „ungeprüft" — kein init-Ereignis (Klartext-CLI, abgeschnittener Stream) oder eine
+    CLI ohne das Feld — und darf nie als „nicht sichtbar" gelesen werden; eine leere
+    Liste dagegen ist ein Befund: der Agent sah keine Skill. Ein Lauf ohne
+    installierte Skill, in dem sie trotzdem sichtbar ist, und ein Lauf mit Skill, in
+    dem sie fehlt, sind Harness-Fehler (Spec 18) — diese Funktion liefert nur die
+    Beobachtung, das Urteil fällt der Runner.
+    """
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "system" or event.get("subtype") != "init":
+            continue
+        skills = event.get("skills")
+        if not isinstance(skills, list):
+            return None
+        return frozenset(s for s in skills if isinstance(s, str))
+    return None
+
+
 @dataclass(frozen=True)
 class Transcript:
     """`stdout` ist das rohe stream-json-Transcript (Diagnose), `text` die daraus
-    zusammengesetzte Assistant-Ausgabe aller Züge (Bewertungsgrundlage)."""
+    zusammengesetzte Assistant-Ausgabe aller Züge (Bewertungsgrundlage), `skills`
+    die Sichtbarkeitsbeobachtung aus dem init-Ereignis (None = ungeprüft)."""
 
     stdout: str
     stderr: str
     exit_code: int
     timed_out: bool
     text: str = ""
+    skills: frozenset[str] | None = None
 
 
 def run_agent(
@@ -115,6 +147,7 @@ def run_agent(
             exit_code=124,
             timed_out=True,
             text=assistant_text(partial or ""),
+            skills=visible_skills(partial or ""),
         )
     except FileNotFoundError:
         return Transcript(stdout="", stderr=f"CLI nicht gefunden: {cli}", exit_code=127, timed_out=False)
@@ -127,4 +160,5 @@ def run_agent(
         exit_code=done.returncode,
         timed_out=False,
         text=assistant_text(done.stdout),
+        skills=visible_skills(done.stdout),
     )

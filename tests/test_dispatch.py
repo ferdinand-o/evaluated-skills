@@ -3,7 +3,7 @@ import os
 import stat
 from pathlib import Path
 
-from evalkit.dispatch import assistant_text, run_agent
+from evalkit.dispatch import assistant_text, run_agent, visible_skills
 
 
 def fake_cli(tmp_path: Path, body: str) -> str:
@@ -134,3 +134,76 @@ def test_run_agent_fills_text_from_the_stream(tmp_path):
     result = run_agent("prompt", tmp_path, cli=cli)
     assert result.text == "hallo"
     assert "assistant" in result.stdout
+
+
+# --- visible_skills: das skills-Feld des init-Ereignisses (Spec 18) -------------------
+
+def _init_event(skills=None, **extra):
+    event = {"type": "system", "subtype": "init", **extra}
+    if skills is not None:
+        event["skills"] = skills
+    return json.dumps(event)
+
+
+def test_visible_skills_reads_init_event_behind_leading_foreign_events():
+    """Das init-Ereignis ist nicht die erste Zeile: ein echter Lauf (CLI 2.1.272) schickt
+    `active_goal` und `autocompact_state` davor. Der Parser sucht, statt zu erwarten."""
+    raw = "\n".join([
+        json.dumps({"type": "active_goal", "value": None}),
+        json.dumps({"type": "autocompact_state", "value": {"enabled": True}}),
+        _init_event(skills=["deep-research", "handoff", "verify"]),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "OK"}]}}),
+    ])
+    assert visible_skills(raw) == frozenset({"deep-research", "handoff", "verify"})
+
+
+def test_visible_skills_is_none_without_init_event():
+    """Kein init-Ereignis (Klartext-CLI, abgeschnittener Stream) heißt „ungeprüft",
+    nie „nicht sichtbar" — None, nicht die leere Menge."""
+    raw = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "OK"}]}})
+    assert visible_skills(raw) is None
+    assert visible_skills("nur Klartext\n") is None
+    assert visible_skills("") is None
+
+
+def test_visible_skills_is_none_when_init_has_no_skills_field():
+    """Eine CLI-Version ohne das Feld ändert kein Verdikt (Spec 18, Constraints)."""
+    assert visible_skills(_init_event()) is None
+    assert visible_skills(_init_event(skills="kein Array")) is None
+
+
+def test_visible_skills_empty_list_is_an_empty_set_not_none():
+    """Ein Agent, der ausdrücklich keine Skill sah, ist geprüft — die Menge ist leer."""
+    assert visible_skills(_init_event(skills=[])) == frozenset()
+
+
+def test_visible_skills_skips_broken_lines_and_non_strings():
+    raw = "\n".join([
+        '{"type": "system", "subtype": "in',
+        _init_event(skills=["a", 3, None, "b"]),
+    ])
+    assert visible_skills(raw) == frozenset({"a", "b"})
+
+
+def test_run_agent_fills_skills_from_the_stream(tmp_path):
+    event = _init_event(skills=["probe", "verify"])
+    cli = fake_cli(tmp_path, f"echo '{event}'\n")
+    result = run_agent("prompt", tmp_path, cli=cli)
+    assert result.skills == frozenset({"probe", "verify"})
+
+
+def test_run_agent_leaves_skills_none_for_plaintext_cli(tmp_path):
+    """Die bestehenden Fake-CLIs schreiben Klartext — sie dürfen kein Urteil über
+    Sichtbarkeit erzeugen (Spec 18, „Abwärtskompatibel")."""
+    cli = fake_cli(tmp_path, 'echo "hallo"\nexit 0\n')
+    assert run_agent("prompt", tmp_path, cli=cli).skills is None
+
+
+def test_run_agent_fills_skills_on_timeout(tmp_path):
+    """Auch ein abgebrochener Lauf trägt sein init-Ereignis — die Prüfung darf nicht
+    daran hängen, ob der Agent fertig wurde."""
+    event = _init_event(skills=["probe"])
+    cli = fake_cli(tmp_path, f"echo '{event}'\nsleep 5\n")
+    result = run_agent("prompt", tmp_path, cli=cli, timeout=1)
+    assert result.timed_out
+    assert result.skills == frozenset({"probe"})
