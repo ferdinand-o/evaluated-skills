@@ -154,6 +154,25 @@ Routing-Agent legte `reminder` unter `skills/` an, mit YAML-gültiger Descriptio
 ersten Lauf: eine Zeile plus Commit, beziehungsweise `evals_due: true` plus nachgezogene
 Assertion, sonst nichts.
 
+### Dritter Lauf nach der Spec-Review-Folgerunde (2026-09-15)
+
+Derselbe Aufbau (frische Workspaces per `prepare()`, ein Opus-Subagent je Eval, Bewertung
+mit den echten `evalkit`-Assertionen gegen die Baseline), die Skill vom Stand c6ab874:
+fünf von fünf. Eval 1: eine Zeile, Lint 13/13 mit `evals_due: false`, Commit — sonst
+nichts. Eval 2: `evals_due: true` mit dem Pattern-Grund, `evals.json` nachgezogen,
+zweiter Lint sauber. Eval 3 und 4: Lint ohne `--base`, je ein Befund (`gate-language`
+bzw. `anti-ceremony-eval`), nichts eigenmächtig repariert („Auftrag war prüfen, nicht
+ändern"), die sieben bzw. drei `unchecked`-Regeln als ungeprüft benannt. Eval 5: Skill
+unter `skills/reminder/` mit vier Evals im `evalkit`-Schema auf einem eigenen Branch;
+der Agent meldete, dass `impl-plan` und `lint-spec` im Workspace nicht installiert sind
+und Spec 30 deshalb ungelintet übernommen wurde, und dass kein Werkzeug für einen
+Subagenten-Review vorlag — die Degradation nach Schritt 1 und 4, ausgesprochen statt
+verschwiegen. Nebenbefund des Agenten: ein `\z`-Anker in seinen eigenen Evals, den
+Pythons `re` nicht kennt; er fand ihn, weil er die Assertion-Regexe gegen Hand-Fixtures
+fuhr. Der neue Schritt 1 (Brief, Template, Review, `lint-spec`) ist in diesen Evals
+nicht messbar: Eval 5 bekommt die Spec fertig; ein Eval, der das Schreiben einer Spec
+prüft, existiert nicht.
+
 ## Was nicht gemessen wurde
 
 **Die fünf Evals sind zweimal gefahren, außerhalb des Harness.** Zwei Läufe je Eval,
