@@ -122,11 +122,19 @@ def _apply_commits(root: Path, commits: object) -> None:
             _git(root, "tag", tag)
 
 
-def prepare(dest: Path, skill_dir: Path, fixture_dir: Path | None) -> Workspace:
-    """Baue einen frischen Workspace unter `dest` auf und liefere seine Baseline."""
-    skill_dir = Path(skill_dir)
-    if not (skill_dir / "SKILL.md").is_file():
-        raise WorkspaceError(f"Skill-Verzeichnis ohne SKILL.md: {skill_dir}")
+def prepare(dest: Path, skill_dir: Path | None, fixture_dir: Path | None) -> Workspace:
+    """Baue einen frischen Workspace unter `dest` auf und liefere seine Baseline.
+
+    `skill_dir=None` ist der Baseline-Workspace für `--without-skill` (Spec 18):
+    dieselbe Fixture, dieselbe Git-Historie, derselbe Snapshot — nur wird nichts nach
+    `.claude/skills/` installiert. Bringt die Fixture selbst einen Skill-Ordner mit,
+    bleibt er; ob der Agent dadurch die Skill sieht, prüft der Runner am
+    `skills`-Feld des Transcripts, nicht der Workspace.
+    """
+    if skill_dir is not None:
+        skill_dir = Path(skill_dir)
+        if not (skill_dir / "SKILL.md").is_file():
+            raise WorkspaceError(f"Skill-Verzeichnis ohne SKILL.md: {skill_dir}")
 
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -166,14 +174,15 @@ def prepare(dest: Path, skill_dir: Path, fixture_dir: Path | None) -> Workspace:
             raise WorkspaceError("fixture.json: 'commits' verlangt \"git\": true")
         _apply_commits(dest, declared_commits)
 
-    skill_target = dest / ".claude" / "skills" / skill_dir.name
-    if skill_target.exists():
-        # Eine Fixture, die selbst schon einen .claude/skills/<name>/-Unterbaum
-        # mitbringt, wird von der echten Skill stillschweigend überschrieben — das
-        # verdient eine sichtbare Warnung statt eines lautlosen Verlusts (Punkt 5).
-        print(f"Warnung: Fixture bringt bereits {skill_target.relative_to(dest)} mit — wird überschrieben")
-    skill_target.parent.mkdir(parents=True, exist_ok=True)
-    _copytree(skill_dir, skill_target, what="Skill", dirs_exist_ok=True)
+    if skill_dir is not None:
+        skill_target = dest / ".claude" / "skills" / skill_dir.name
+        if skill_target.exists():
+            # Eine Fixture, die selbst schon einen .claude/skills/<name>/-Unterbaum
+            # mitbringt, wird von der echten Skill stillschweigend überschrieben — das
+            # verdient eine sichtbare Warnung statt eines lautlosen Verlusts (Punkt 5).
+            print(f"Warnung: Fixture bringt bereits {skill_target.relative_to(dest)} mit — wird überschrieben")
+        skill_target.parent.mkdir(parents=True, exist_ok=True)
+        _copytree(skill_dir, skill_target, what="Skill", dirs_exist_ok=True)
 
     baseline = snapshot(dest)
     baseline[GIT_HEAD_KEY] = current_git_head(dest) if wants_git else None

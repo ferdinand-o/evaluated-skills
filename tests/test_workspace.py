@@ -269,3 +269,38 @@ def test_dump_omits_binary_content_but_names_the_file(tmp_path):
     assert "modul.pyc" in dump
     assert "binär" in dump
     assert "lesbarer Inhalt" in dump
+
+
+# --- prepare() ohne Skill: der Baseline-Workspace (Spec 18) --------------------------
+
+def test_prepare_without_skill_installs_nothing(tmp_path):
+    """`--without-skill`: derselbe Workspace, nur ohne `.claude/skills/<name>/`.
+    Die Baseline darf keinen Schlüssel unter .claude/ tragen — sie trug ohnehin nie
+    einen, aber jetzt gibt es dort auch nichts, was ein Snapshot übersehen könnte."""
+    ws = prepare(tmp_path / "ws", None, make_fixture(tmp_path))
+    assert not (ws.root / ".claude").exists()
+    assert (ws.root / "README.md").is_file()
+    assert not any(key.startswith(".claude/") for key in ws.baseline)
+    assert "README.md" in ws.baseline
+
+
+def test_prepare_without_skill_and_without_fixture_is_empty(tmp_path):
+    ws = prepare(tmp_path / "ws", None, None)
+    assert ws.root.is_dir()
+    assert list(ws.root.iterdir()) == []
+
+
+def test_prepare_without_skill_keeps_git_baseline(tmp_path):
+    ws = prepare(tmp_path / "ws", None, make_fixture(tmp_path, git=True))
+    assert (ws.root / ".git").is_dir()
+    assert ws.baseline["__git_head__"]
+
+
+def test_prepare_without_skill_leaves_a_fixture_provided_skill_dir_alone(tmp_path):
+    """Bringt die Fixture selbst `.claude/skills/<name>/` mit, bleibt der Ordner — der
+    Runner fängt das über das skills-Feld des Agenten, nicht der Workspace."""
+    fixture = make_fixture(tmp_path)
+    (fixture / ".claude" / "skills" / "handoff").mkdir(parents=True)
+    (fixture / ".claude" / "skills" / "handoff" / "SKILL.md").write_text("---\nname: handoff\n---\n", encoding="utf-8")
+    ws = prepare(tmp_path / "ws", None, fixture)
+    assert (ws.root / ".claude" / "skills" / "handoff" / "SKILL.md").is_file()
