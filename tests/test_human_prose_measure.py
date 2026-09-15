@@ -92,3 +92,144 @@ def test_list_items_count_as_one_sentence_each():
     sents = m.sentences(text)
     assert len(sents) == 4  # der Einleitungssatz plus drei Punkte
     assert len(m.paragraphs(text)) == 2
+
+
+# --- Task 2: die vierzehn Prüfpunkte ---------------------------------------------------
+
+def _check(text, rule, register="fach"):
+    found = [c for c in m.check_all(text, register) if c.id == rule]
+    assert len(found) == 1, rule
+    return found[0]
+
+
+def test_check_ids_in_spec_order():
+    ids = [c.id for c in m.check_all(B1_NACHHER, "fach")]
+    assert ids == ["R1.1", "R4.1/R4.2", "R4.3", "R2.1", "R2.2", "R3.5", "R5.1", "R5.2",
+                   "R3.3", "R4.4", "R1.4", "R4.5", "R4.6", "R2.4"]
+    assert [j["id"] for j in m.judgement()] == ["R3.1", "R5.3", "R5.4", "R2.3-2", "R5.2"]
+
+
+def test_r11_characters():
+    assert _check(B2_VORHER, "R1.1").status == "finding"      # ein Geviertstrich
+    assert _check(B2_VORHER, "R1.1").value == 1
+    for key in ("b1n", "b2n", "b3n"):
+        assert _check(EXAMPLES[key], "R1.1").status == "pass", key
+    assert _check("Ein Satz – mit Gedankenstrich; und Semikolon.", "R1.1").value == 2
+    assert _check("Ein KI-Text mit Bindestrich und `a — b` im Code.", "R1.1").status == "pass"
+
+
+def test_r41_r42_phrases_are_patterns_with_gaps():
+    c = _check(B1_VORHER, "R4.1/R4.2")
+    assert c.status == "finding" and c.value == 3, c.reason
+    assert _check(B2_VORHER, "R4.1/R4.2").value == 4
+    for key in ("b1n", "b2n", "b3n"):
+        assert _check(EXAMPLES[key], "R4.1/R4.2").value == 0, key
+    assert m.PHRASES_DE and m.PHRASES_EN
+
+
+def test_r43_participle_tail_allows_comma_or_dash():
+    assert _check(B1_VORHER, "R4.3").value == 1      # ", wodurch"
+    assert _check(B2_VORHER, "R4.3").value == 1      # "— ensuring"
+    assert _check(B1_VORHER, "R4.3").status == "pass"  # höchstens eines je 300 Wörter: eines ist erlaubt
+    two = "Der Cache hilft, wodurch alles schneller wird. Er spart Zeit, was es ermöglicht, mehr zu tun."
+    assert _check(two, "R4.3").status == "finding"
+
+
+def test_r21_spread_windows_and_short_texts():
+    assert _check(B1_VORHER, "R2.1").status == "finding"      # kein Satz mit höchstens sechs Wörtern
+    assert "sechs" in _check(B1_VORHER, "R2.1").reason
+    assert _check(B3_VORHER, "R2.1").status == "pass"
+    assert _check(B2_VORHER, "R2.1").status == "unchecked"    # ein Satz
+    assert _check(B2_NACHHER, "R2.1").status == "unchecked"   # drei Sätze
+    assert _check(B1_NACHHER, "R2.1").status == "pass"
+    # Beispiel 3 Nachher: kein Satz mit zwanzig Wörtern. Die Regel ist für Register
+    # `kurz` zu streng — der Wert bleibt so im Test und im Report, nicht aufgeweicht.
+    assert _check(B3_NACHHER, "R2.1", "kurz").status == "finding"
+    assert "zwanzig" in _check(B3_NACHHER, "R2.1", "kurz").reason
+
+
+def test_r22_connector_only_at_paragraph_start():
+    for key, text in EXAMPLES.items():
+        assert _check(text, "R2.2").status == "pass", key   # „Darüber hinaus" steht im Absatzinneren
+    assert _check("Erster Absatz.\n\nDarüber hinaus gibt es mehr.", "R2.2").status == "finding"
+    assert _check("Erster Absatz.\n\nMoreover, there is more.", "R2.2").status == "finding"
+
+
+def test_r35_frame_phrases():
+    assert _check(B1_VORHER, "R3.5").status == "finding"    # „Zusammenfassend lässt sich sagen"
+    assert _check(B3_VORHER, "R3.5").status == "pass"       # „Ich hoffe, das hilft" ist R6, kein R3.5-Muster
+    assert _check("In diesem Artikel zeigen wir X.\n\nX ist gut.", "R3.5").status == "finding"
+    assert _check("X ist gut.\n\nFazit: X bleibt.", "R3.5").status == "finding"
+
+
+def test_r51_concreteness_heuristic():
+    assert _check(B1_VORHER, "R5.1").status == "finding"
+    assert _check(B1_NACHHER, "R5.1").status == "pass"      # Ziffern, TTL
+    # Beispiel 3 Nachher: zwei Absätze mit je zwei Sätzen — kein Behauptungsabsatz ab
+    # drei Sätzen, also nichts zu prüfen. Ehrlicher als ein pass, das 21:40 gutschreibt.
+    assert _check(B3_NACHHER, "R5.1").status == "unchecked"
+    # Beispiel 2 Nachher: kein Ziffer, kein Pfad, kein Großwort — die Heuristik zählt den
+    # guten Text rot. Bleibt so, der Report nennt es.
+    assert _check(B2_NACHHER, "R5.1").status == "finding"
+    assert _check("Wir nutzen PostgreSQL. Es läuft. Es bleibt so.", "R5.1").status == "pass"
+    assert _check("Siehe `config.yml`. Dort steht es. Ganz unten.", "R5.1").status == "pass"
+
+
+def test_r52_is_always_unchecked():
+    for text in EXAMPLES.values():
+        assert _check(text, "R5.2").status == "unchecked"
+
+
+def test_r33_triads():
+    three_of_four = (
+        "Wir brauchen Zeit, Geld und Leute. Der Plan hat Anfang, Mitte und Ende. "
+        "Es gibt Rot, Grün und Blau. Und dazu Nord, Süd, Ost und West."
+    )
+    c = _check(three_of_four, "R3.3")
+    assert c.status == "finding" and c.value == 3
+    assert _check(B2_VORHER, "R3.3").status == "pass"       # eine Aufzählung ist kein Muster
+    assert _check("- a\n- b\n- c\n\nText.\n\n- d\n- e\n", "R3.3").value == 1
+
+
+def test_r44_nominal_style():
+    heavy = " ".join(["Die Durchführung der Prüfung und die Bewertung der Planung."] * 5 + ["Wort"] * 150)
+    assert _check(heavy, "R4.4").status == "finding"
+    assert _check(B1_VORHER, "R4.4").status == "pass"       # eines auf 63 Wörter: ein Treffer ist kein Muster
+    assert _check(B1_VORHER, "R4.4").value == 1
+
+
+def test_r14_parentheses_colons_exclamation():
+    assert _check("Der Job (nachts) läuft (meistens) gut (sagt man).", "R1.4").status == "finding"
+    assert _check(B2_NACHHER, "R1.4").status == "pass"      # ein Doppelpunkt auf 44 Wörter
+    assert _check("Das ist toll! Wirklich!", "R1.4", "fach").status == "finding"
+    assert _check("Das ist toll!", "R1.4", "kurz").status == "pass"
+    listed = "Drei Dinge:\n\n- a\n- b\n- c\n"
+    assert _check(listed, "R1.4").value["colons"] == 0     # Doppelpunkt vor Liste zählt nicht
+
+
+def test_r45_passive_share():
+    passive = "Der Text wurde geschrieben. Die Zahl wird geprüft. Alles wird gemacht. Es ist gut."
+    assert _check(passive, "R4.5").status == "finding"
+    assert _check(B1_NACHHER, "R4.5").status == "pass"
+    assert _check("The report was written by the team. It is short.", "R4.5").status == "finding"
+
+
+def test_r46_hedges():
+    hedged = "Das könnte gehen. Möglicherweise nicht. Unter Umständen doch. Tendenziell ja. In der Regel nein."
+    assert _check(hedged, "R4.6").status == "finding"
+    assert _check(B1_NACHHER, "R4.6").status == "pass"
+
+
+def test_r24_fragments():
+    assert _check(B1_NACHHER, "R2.4").value == 1            # „Für Preise nicht."
+    assert _check(B1_NACHHER, "R2.4").status == "pass"      # eines ist erlaubt
+    many = "Nicht ideal. Kurz gesagt. Also nein. Und dann weiter im Text mit ganzen Sätzen, die reichen."
+    assert _check(many, "R2.4", "fach").status == "finding"
+    assert _check(many, "R2.4", "kurz").status == "pass"    # frei in der Kurzform
+
+
+def test_every_check_names_an_estimated_limit():
+    for c in m.check_all(B1_VORHER, "fach"):
+        if c.status != "unchecked":
+            assert c.limit is not None, c.id
+            assert c.estimated is False or "geschätzt" in c.reason, c.id

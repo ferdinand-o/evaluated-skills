@@ -113,7 +113,8 @@ aus Abschnitt 6 des Entwurfs als Konstanten mit Vermerk `geschätzt`.
       R3.5 Beispiel 1 Vorher `finding` (Schluss), Beispiel 3 Vorher `pass` (die
       Schlussformel „Ich hoffe, das hilft" ist R6, kein R3.5-Muster); R5.1 Beispiel 1
       Vorher `finding`, Beispiel 1 Nachher `pass` (Ziffern, `TTL`), Beispiel 3 Nachher
-      `pass` (`21:40`), Beispiel 2 Nachher `finding` mit Kommentar (Heuristik: Ziffer,
+      `unchecked` (zwei Absätze mit je zwei Sätzen: kein Behauptungsabsatz ab drei
+      Sätzen), Beispiel 2 Nachher `finding` mit Kommentar (Heuristik: Ziffer,
       Pfad, Backtick, Datum, Token in Großbuchstaben oder gemischter Schreibung wie
       `PostgreSQL` — deutsche Substantive zählen nicht); R5.2 immer `unchecked`; R3.3
       ein Text mit drei Dreier-Aufzählungen von vier `finding`; R4.4 ein Text mit 20
