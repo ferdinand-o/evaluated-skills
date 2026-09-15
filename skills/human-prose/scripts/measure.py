@@ -413,3 +413,123 @@ def check_all(text: str, register: str = "fach") -> list[Check]:
     paras = paragraphs(text)
     n_words = len(words(text))
     return [fn(text, sents, paras, n_words, register) for fn in CHECKS]
+
+
+# --- Artefakt und CLI -----------------------------------------------------------------
+
+import argparse
+import json
+import shlex
+import sys
+from pathlib import Path
+
+DEFAULT_OUT = Path(".skills") / "cache" / "human-prose" / "measure.json"
+
+
+def measure_meta(argv: list[str]) -> dict:
+    cmd = "python skills/human-prose/scripts/measure.py " + " ".join(shlex.quote(a) for a in argv)
+    return {"skill": "human-prose", "schema": SCHEMA_VERSION, "generated": cmd}
+
+
+def measure_text(text: str, register: str) -> dict:
+    """Ein Textblock des Artefakts: die vierzehn Zeilen, die fünf Urteile, die Summe."""
+    checks = check_all(text, register)
+    rows = [c.as_dict() for c in checks]
+    summary = {status: sum(1 for c in checks if c.status == status) for status in ("pass", "finding", "unchecked")}
+    _, method = strip_markup(text)
+    return {
+        "words": len(words(text)),
+        "sentences": len(sentences(text)),
+        "paragraphs": len(paragraphs(text)),
+        "skipped": method,
+        "checks": rows,
+        "judgement": judgement(),
+        "summary": summary,
+    }
+
+
+def render_measure_json(results: dict, meta: dict, register: str) -> str:
+    """`_meta` zuerst (docs/artifact-header.md, JSON-Konvention), dann Methode, Register,
+    dann `text` oder `before`/`after`."""
+    payload = {
+        "_meta": meta,
+        "method": {
+            "words": "str.split",
+            "sentence_splitter": "Punkt, Ausrufe- oder Fragezeichen plus Leerraum; Abkürzungen und Zahlen ausgenommen; Listenpunkt = Satz",
+            "excluded": "Codezäune, Inline-Code, Zitatzeilen, Überschriften, Tabellenzeilen",
+            "limits": "aus dem Entwurf v0.1, geschätzt, kein Korpus",
+        },
+        "register": register,
+    }
+    payload.update(results)
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"Datei nicht gefunden: {path}", file=sys.stderr)
+    except UnicodeDecodeError:
+        print(f"Datei nicht als UTF-8 lesbar: {path}", file=sys.stderr)
+    except OSError as exc:
+        print(f"Datei nicht lesbar: {path}: {exc}", file=sys.stderr)
+    return None
+
+
+def _summary_line(label: str, block: dict) -> str:
+    s = block["summary"]
+    return f"{label}: {s['pass']} pass, {s['finding']} Befunde, {s['unchecked']} ungeprüft ({block['words']} Wörter, {block['sentences']} Sätze)"
+
+
+def _print_table(results: dict) -> None:
+    if "text" in results:
+        for row in results["text"]["checks"]:
+            print(f"  [{row['status']:9}] {row['id']:10} {row['reason']}")
+        print(_summary_line("Nachgemessen", results["text"]))
+        return
+    before, after = results["before"], results["after"]
+    print(f"  {'Regel':10} {'vorher':10} {'nachher':10}")
+    for b, a in zip(before["checks"], after["checks"]):
+        print(f"  {b['id']:10} {b['status']:10} {a['status']:10} {a['reason'][:70]}")
+    print(_summary_line("Vorher", before))
+    print(_summary_line("Nachher", after))
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = argparse.ArgumentParser(description="human-prose: Prosa gegen die vierzehn Prüfpunkte messen (Tier 1)")
+    parser.add_argument("text", help="Datei mit dem Text (Modus A: der Entwurf; Modus B: das Original)")
+    parser.add_argument("--after", help="Modus B: die überarbeitete Fassung — Artefakt trägt before und after")
+    parser.add_argument("--register", choices=sorted(LIMITS), default="fach", help="fach (Doku, Artikel) oder kurz (Mail, Chat); Default fach")
+    parser.add_argument("--out", help=f"Artefakt-Pfad, Default {DEFAULT_OUT}")
+    args = parser.parse_args(argv)
+
+    text = _read(Path(args.text))
+    if text is None:
+        return 2
+    results: dict
+    if args.after:
+        after = _read(Path(args.after))
+        if after is None:
+            return 2
+        results = {"before": measure_text(text, args.register), "after": measure_text(after, args.register)}
+        decisive = results["after"]
+    else:
+        results = {"text": measure_text(text, args.register)}
+        decisive = results["text"]
+
+    out = Path(args.out) if args.out else DEFAULT_OUT
+    if not out.parent.exists():
+        # Bootstrap-Regel (docs/artifact-header.md): die Anlage wird angekündigt.
+        print(f"human-prose legt an: {out.parent}/ (Artefakt {out.name})")
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_measure_json(results, measure_meta(argv), args.register), encoding="utf-8")
+
+    _print_table(results)
+    print(f"Artefakt: {out}")
+    return 1 if decisive["summary"]["finding"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

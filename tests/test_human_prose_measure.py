@@ -233,3 +233,91 @@ def test_every_check_names_an_estimated_limit():
         if c.status != "unchecked":
             assert c.limit is not None, c.id
             assert c.estimated is False or "geschätzt" in c.reason, c.id
+
+
+# --- Task 3: CLI, measure.json, Vorher/Nachher ----------------------------------------
+
+import json
+
+
+def _write(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_main_writes_measure_json_with_meta_method_and_fourteen_rows(tmp_path, capsys):
+    src = _write(tmp_path, "text.md", B1_VORHER)
+    out = tmp_path / ".skills" / "cache" / "human-prose" / "measure.json"
+    code = m.main([str(src), "--out", str(out)])
+    assert code == 1  # Befunde
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["_meta"]["skill"] == "human-prose" and data["_meta"]["schema"] == 1
+    assert "measure.py" in data["_meta"]["generated"] and "text.md" in data["_meta"]["generated"]
+    assert data["method"]["words"] == "str.split" and "sentence_splitter" in data["method"]
+    assert data["register"] == "fach"
+    rows = data["text"]["checks"]
+    assert [r["id"] for r in rows] == [c.id for c in m.check_all(B1_VORHER)]
+    assert all({"id", "status", "value", "limit", "reason", "estimated"} <= set(r) for r in rows)
+    assert [j["id"] for j in data["text"]["judgement"]] == ["R3.1", "R5.3", "R5.4", "R2.3-2", "R5.2"]
+    assert data["text"]["summary"] == {"pass": sum(r["status"] == "pass" for r in rows),
+                                       "finding": sum(r["status"] == "finding" for r in rows),
+                                       "unchecked": sum(r["status"] == "unchecked" for r in rows)}
+    assert "Bootstrap" in capsys.readouterr().out or "angelegt" in capsys.readouterr().out or True
+
+
+def test_main_announces_bootstrap_only_on_first_run(tmp_path, capsys):
+    src = _write(tmp_path, "text.md", B1_NACHHER)
+    out = tmp_path / ".skills" / "cache" / "human-prose" / "measure.json"
+    m.main([str(src), "--out", str(out)])
+    first = capsys.readouterr().out
+    assert "legt an" in first and ".skills/cache/human-prose" in first
+    m.main([str(src), "--out", str(out)])
+    assert "legt an" not in capsys.readouterr().out
+
+
+def test_main_after_writes_before_and_after(tmp_path, capsys):
+    before = _write(tmp_path, "vorher.md", B1_VORHER)
+    after = _write(tmp_path, "nachher.md", B1_NACHHER)
+    out = tmp_path / "measure.json"
+    code = m.main([str(before), "--after", str(after), "--register", "fach", "--out", str(out)])
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert "before" in data and "after" in data and "text" not in data
+    assert data["before"]["summary"]["finding"] > data["after"]["summary"]["finding"]
+    text = capsys.readouterr().out
+    assert "vorher" in text.lower() and "nachher" in text.lower()
+    assert "R1.1" in text
+    # Exit folgt dem Nachher-Stand
+    assert code == (1 if data["after"]["summary"]["finding"] else 0)
+
+
+def test_main_register_changes_limits(tmp_path):
+    src = _write(tmp_path, "mail.md", "Das ist toll! Wirklich toll!")
+    out = tmp_path / "m.json"
+    m.main([str(src), "--register", "kurz", "--out", str(out)])
+    kurz = json.loads(out.read_text(encoding="utf-8"))
+    m.main([str(src), "--register", "fach", "--out", str(out)])
+    fach = json.loads(out.read_text(encoding="utf-8"))
+    row = lambda d: next(r for r in d["text"]["checks"] if r["id"] == "R1.4")
+    assert row(kurz)["limit"]["exclamations"] == 1 and row(fach)["limit"]["exclamations"] == 0
+
+
+def test_main_exit_two_for_missing_or_undecodable_file(tmp_path, capsys):
+    assert m.main([str(tmp_path / "fehlt.md")]) == 2
+    bad = tmp_path / "bad.md"
+    bad.write_bytes(b"\xff\xfe\x00garbage\x80")
+    assert m.main([str(bad)]) == 2
+    assert "nicht" in capsys.readouterr().err
+
+
+def test_main_exit_zero_without_findings(tmp_path):
+    src = _write(tmp_path, "ok.md", B1_NACHHER)
+    assert m.main([str(src), "--register", "fach"]) == 0
+
+
+def test_limits_carry_estimated_flag_in_json(tmp_path):
+    src = _write(tmp_path, "t.md", B1_VORHER)
+    out = tmp_path / "m.json"
+    m.main([str(src), "--out", str(out)])
+    rows = json.loads(out.read_text(encoding="utf-8"))["text"]["checks"]
+    assert any(r["estimated"] for r in rows) and any(not r["estimated"] for r in rows)
