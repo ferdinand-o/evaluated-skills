@@ -70,18 +70,18 @@ Zahlen mit Punkt (`3.5`, `21:40` bleibt ein Token).
 - Consumes: `file:docs/superpowers/specs/2026-09-15-menschlich-schreiben-v0.1.md`
 - Produces: `fn:strip_markup(text)`, `fn:paragraphs(text)`, `fn:sentences(text)`, `fn:words(text)`
 
-- [ ] **Step 1: Tests schreiben** — die sechs Beispieltexte aus Abschnitt 9 des
+- [x] **Step 1: Tests schreiben** — die sechs Beispieltexte aus Abschnitt 9 des
       Entwurfs als Fixture-Strings im Test; Satzzahlen 4, 1, 5 (Vorher 1 bis 3) und
       5, 3, 4 (Nachher 1 bis 3); Absätze 1, 1, 1 und 2, 1, 2; Wörter per `str.split`
       63, 36, 52 und 50, 44, 35; „z. B." teilt keinen Satz; ein Codezaun und ein
       Zitatblock verschwinden; drei Listenpunkte sind drei Sätze.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k "sentences or paragraphs or words"`.
-- [ ] **Step 3: Implementieren** — Modul-Docstring „Tier 1: nur Stdlib";
+- [x] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k "sentences or paragraphs or words"`.
+- [x] **Step 3: Implementieren** — Modul-Docstring „Tier 1: nur Stdlib";
       `strip_markup` entfernt Zäune, Inline-Code, Zitatzeilen und Überschriftenmarken
       und merkt sich die Zahl der entfernten Zitatzeilen für `method`; `sentences`
       teilt an `. ! ?` plus Leerraum, außer nach Abkürzung oder Ziffer.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 2: Vierzehn Prüfpunkte
 
@@ -97,7 +97,7 @@ aus Abschnitt 6 des Entwurfs als Konstanten mit Vermerk `geschätzt`.
 - Consumes: `fn:paragraphs(text)`, `fn:sentences(text)`, `fn:words(text)`
 - Produces: `fn:check_all(text, register)`, `CHECKS`, `PHRASES_DE`, `PHRASES_EN`, `token:unchecked`, `token:judgement`
 
-- [ ] **Step 1: Tests schreiben** — je Prüfpunkt ein reißender und ein bestehender
+- [x] **Step 1: Tests schreiben** — je Prüfpunkt ein reißender und ein bestehender
       Text, dazu die Erwartungswerte an den Beispielen: R1.1 Beispiel 2 Vorher
       `finding` (ein Geviertstrich), alle Nachher `pass`; R4.1/R4.2 Beispiel 1 Vorher
       drei Treffer (Muster mit Lücke: „spielt (\w+ ){0,2}eine entscheidende Rolle",
@@ -120,14 +120,14 @@ aus Abschnitt 6 des Entwurfs als Konstanten mit Vermerk `geschätzt`.
       ein Text mit drei Dreier-Aufzählungen von vier `finding`; R4.4 ein Text mit 20
       -ung-Wörtern auf 1000 `finding`, Beispiel 1 Vorher `pass` (1 auf 63); R1.4, R4.5,
       R4.6, R2.4 je ein Paar; `judgement` enthält genau R3.1, R5.3, R5.4, R2.3-2, R5.2.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k check`.
-- [ ] **Step 3: Implementieren** — `Check` als Dataclass; Fenster für R2.1 nach Spec
+- [x] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k check`.
+- [x] **Step 3: Implementieren** — `Check` als Dataclass; Fenster für R2.1 nach Spec
       (ganzer Text unter zehn Sätzen); Passiv-Heuristik `werden`-Form plus Partizip II
       im selben Satz; Fragment-Heuristik Satz ohne finites Verb aus einer kleinen
       Liste; Hedges aus R4.6; Konkretion wie im Test beschrieben.
-- [ ] **Step 4: Grün sehen**, volle Suite; die Tabelle der sechs Beispieltexte
+- [x] **Step 4: Grün sehen**, volle Suite; die Tabelle der sechs Beispieltexte
       (Prüfpunkt × Text) einmal ausdrucken und gegen die Spec-Tabelle lesen.
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 3: CLI, measure.json, Vorher/Nachher
 
@@ -139,7 +139,7 @@ aus Abschnitt 6 des Entwurfs als Konstanten mit Vermerk `geschätzt`.
 - Consumes: `fn:check_all(text, register)`, `CHECKS`
 - Produces: `fn:main(argv)`, `fn:render_measure_json(results, meta)`, `measure_json`
 
-- [ ] **Step 1: Tests schreiben** — `main([datei, "--out", pfad])` schreibt JSON mit
+- [x] **Step 1: Tests schreiben** — `main([datei, "--out", pfad])` schreibt JSON mit
       `_meta` (`skill: human-prose`, `schema: 1`, `generated` als Aufrufzeile),
       `method` (Satzteiler, Wortzählung, ausgelassene Zitatzeilen), Schlüssel `text`
       mit vierzehn Zeilen in fester Reihenfolge und `judgement` mit fünf Einträgen;
@@ -148,15 +148,15 @@ aus Abschnitt 6 des Entwurfs als Konstanten mit Vermerk `geschätzt`.
       nicht dekodierbarer Datei; stdout zeigt bei `--after` Vorher und Nachher
       nebeneinander; erster Lauf in einem Verzeichnis ohne `.skills/cache/human-prose/`
       druckt die Bootstrap-Ankündigung mit Pfad.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k "main or json"`.
-- [ ] **Step 3: Implementieren** — `argparse` mit `datei`, `--after`, `--register`,
+- [x] **Step 2: Rot sehen** — `pytest tests/test_human_prose_measure.py -k "main or json"`.
+- [x] **Step 3: Implementieren** — `argparse` mit `datei`, `--after`, `--register`,
       `--out`; `_meta` nach `docs/artifact-header.md`; Grenzen im JSON mit
       `"estimated": true`.
-- [ ] **Step 4: Grün sehen**, volle Suite; einmal
+- [x] **Step 4: Grün sehen**, volle Suite; einmal
       `python skills/human-prose/scripts/measure.py --help` lesen und das Skript über
       `docs/superpowers/specs/2026-09-15-menschlich-schreiben-v0.1.md` fahren (Exit 1
       erwartet, die Zahlen aus Spec 19 „Problem" im Rahmen der dort genannten Spanne).
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 4: references/rules.md und revise.md
 
@@ -173,12 +173,12 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `PHRASES_DE`, `PHRASES_EN`, `file:docs/superpowers/specs/2026-09-15-menschlich-schreiben-v0.1.md`
 - Produces: `rules_md`, `revise_md`, `token:Rückfrage:`
 
-- [ ] **Step 1: rules.md** — Entwurf übernehmen, Kopfzeile mit Herkunft und Version;
+- [x] **Step 1: rules.md** — Entwurf übernehmen, Kopfzeile mit Herkunft und Version;
       je Phrasenliste ein Absatz „als Muster", Wortlaut identisch mit dem Skript.
-- [ ] **Step 2: revise.md** — sieben Schritte, Eingriffstiefe leicht/mittel/stark,
+- [x] **Step 2: revise.md** — sieben Schritte, Eingriffstiefe leicht/mittel/stark,
       Bericht drei bis fünf Zeilen, `Rückfrage:` als Liste der Stellen, `Offen` gibt
       es nicht mehr; Faktenabgleich als Tabelle Aussage → Stelle im Ergebnis.
-- [ ] **Step 3: Prüfen** — ein Test vergleicht die Muster in `rules.md` mit
+- [x] **Step 3: Prüfen** — ein Test vergleicht die Muster in `rules.md` mit
       `PHRASES_DE`/`PHRASES_EN` (Zeile für Zeile gleich); Commit.
 
 ### Task 5: SKILL.md
@@ -190,18 +190,18 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `token:Rückfrage:`, `measure_json`, `rules_md`, `revise_md`
 - Produces: `token:Register:`, `token:Nachgemessen:`
 
-- [ ] **Step 1: Frontmatter** — `name: human-prose`; Description mit Triggern
+- [x] **Step 1: Frontmatter** — `name: human-prose`; Description mit Triggern
       („schreib mir eine Mail", „das klingt nach KI", „überarbeite den Text",
       „menschlicher") und Abgrenzung gegen `setup-writing-style` und `visual-summary`,
       ohne Prozessverb.
-- [ ] **Step 2: Body** — Eiserne Regel; Ablauf mit Register-Zeile, Modus A (120
+- [x] **Step 2: Body** — Eiserne Regel; Ablauf mit Register-Zeile, Modus A (120
       Wörter, `draft.md`, `Nachgemessen: <p> pass, <f> Befunde, <u> ungeprüft`), Modus B
       (Verweis auf `revise.md`, beide Aufrufe mit Repo- und Installationspfad),
       Stilprofil; Contract aus der Spec; Anti-Rationalisierung („eine kleine Zahl macht
       es konkreter", „der Leser merkt den Gedankenstrich nicht", „ich frage kurz
       nach und warte"); Abgrenzung mit `setup-writing-style`, `visual-summary`,
       `explain`, `dev-report`, `handoff`.
-- [ ] **Step 3: Prüfen** — `wc -l` unter 150; Sprachprüfung nach Spec 00 §4;
+- [x] **Step 3: Prüfen** — `wc -l` unter 150; Sprachprüfung nach Spec 00 §4;
       `python skills/skill-forge/scripts/lint_skill.py skills/human-prose` (ohne
       `--base`, neue Skill) — `unchecked` nur, wo `evals/` noch fehlt; Commit.
 
@@ -221,17 +221,17 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `token:Register:`, `token:Nachgemessen:`, `token:Rückfrage:`, `measure_json`
 - Produces: `evals_json`
 
-- [ ] **Step 1: Fixtures** — alle drei mit `"git": true`; `hp-empty` mit einer
+- [x] **Step 1: Fixtures** — alle drei mit `"git": true`; `hp-empty` mit einer
       README-Zeile (eine Git-Fixture ohne Datei scheitert am leeren Commit);
       `hp-cache/text.md` der Vorher-Text aus Beispiel 1; `hp-vague/text.md` der Satz
       aus der Spec.
-- [ ] **Step 2: Evals** — die fünf IDs aus der Spec-Tabelle mit den dort genannten
+- [x] **Step 2: Evals** — die fünf IDs aus der Spec-Tabelle mit den dort genannten
       Assertions: `anti-ceremony-short-mail-no-measurement`,
       `revise-writes-before-and-after`, `vague-text-asks-instead-of-inventing`,
       `long-draft-ends-with-measurement-line`,
       `routing-sounds-like-ai-without-skill-name`; `notes` je Eval mit der
       Diskriminator-Antwort; Muster escaped wie in `evals/skill-forge/evals.json`.
-- [ ] **Step 3: Schema-Test** — `evalkit.schema.load_evals` lädt sie; die Regexe
+- [x] **Step 3: Schema-Test** — `evalkit.schema.load_evals` lädt sie; die Regexe
       treffen die Fixture-Texte so, wie die Spec sagt (Eval 2: drei Muster auf
       `text.md` vorher wahr; Eval 3: die vagen Formeln vorher wahr, kein Zahl-Muster);
       `lint_skill.py skills/human-prose` meldet `anti-ceremony-eval` `pass`; Commit.
@@ -248,10 +248,10 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `token:Register:`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Routing-Matrix** — Zeile „Text schreiben oder überarbeiten, der nicht
+- [x] **Step 1: Routing-Matrix** — Zeile „Text schreiben oder überarbeiten, der nicht
       nach Modell klingen soll | human-prose (19) | setup-writing-style (Profil),
       visual-summary (verdichtet), explain (erklärt)" in Spec 00 §5 und README.
-- [ ] **Step 2: Abgrenzungssätze** — je ein Satz in `explain` (Tokens bleiben, wenn
+- [x] **Step 2: Abgrenzungssätze** — je ein Satz in `explain` (Tokens bleiben, wenn
       human-prose den Text formt) und `visual-summary` (ändert Format, nicht Stil);
       vorher `lint_skill.py <nachbar> --base main` und die `evals_due`-Folge tragen.
       `setup-writing-style` liegt im Profil und bleibt unverändert. Commit.
@@ -265,7 +265,7 @@ R4.1 und R4.2 zusätzlich als Muster (dieselben, die `PHRASES_DE`/`PHRASES_EN` t
 - Consumes: `evals_json`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt `## human-prose`** — Heuristiken (Passiv, Fragment,
+- [x] **Step 1: Abschnitt `## human-prose`** — Heuristiken (Passiv, Fragment,
       Konkretion, Satzgrenze) und wo sie an den Beispielen falsch zählen; Schwellen
       geschätzt, kein Korpus; R2.1 in Register `kurz` zu streng (Beispiel 3 Nachher);
       Rückfrage im `-p`-Modus ohne Antwort; Profil ungetestet, weil nicht installiert;
