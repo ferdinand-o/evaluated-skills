@@ -12,6 +12,21 @@ Persönliche Claude-Skills und ihre Spezifikationen.
 | `evalkit/` | der geteilte Eval-Harness |
 | `docs/` | Konventionen und Pläne |
 
+## Als Plugin installieren
+
+Das Repo ist ein Claude-Code-Marketplace mit einem Plugin für die ganze Sammlung
+(`.claude-plugin/marketplace.json`). Die Skills heißen installiert `cc-skills:<name>`.
+
+```
+/plugin marketplace add ferdinand-o/cc-skills
+/plugin install cc-skills@cc-skills
+/plugin marketplace update cc-skills     # holt neue Commits, danach /reload-plugins
+```
+
+Nicht im Plugin: `cad-parts`, weil es einen stl-cad-server als MCP-Server braucht.
+`tests/test_marketplace.py` hält die Liste mit `skills/` synchron: Eine neue Skill
+steht im Manifest oder ausdrücklich in `EXCLUDED`, sonst ist der Test rot.
+
 ## Evals laufen lassen
 
 ```bash

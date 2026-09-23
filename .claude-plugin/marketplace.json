@@ -1,0 +1,46 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "cc-skills",
+  "owner": {
+    "name": "ferdinand-o"
+  },
+  "description": "Skill-Sammlung nach Spec 00: ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
+  "plugins": [
+    {
+      "name": "cc-skills",
+      "source": "./",
+      "description": "Alle Skills der Sammlung als ein Plugin (cc-skills:<name>). Nicht enthalten: cad-parts, es braucht einen stl-cad-server.",
+      "version": "0.1.0",
+      "repository": "https://github.com/ferdinand-o/cc-skills",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "skills": [
+        "./skills/architecture-map",
+        "./skills/debug-ledger",
+        "./skills/dev-report",
+        "./skills/enterprise-ui",
+        "./skills/exercise-forge",
+        "./skills/explain",
+        "./skills/feature-spec",
+        "./skills/handoff",
+        "./skills/human-prose",
+        "./skills/impl-plan",
+        "./skills/learning-coach",
+        "./skills/motion-landing",
+        "./skills/rest-api-architect",
+        "./skills/review-context",
+        "./skills/skill-forge",
+        "./skills/sql-schema-architect",
+        "./skills/subagent-dev",
+        "./skills/testing-strategy",
+        "./skills/ui-architect",
+        "./skills/verified-research",
+        "./skills/visual-summary"
+      ]
+    }
+  ]
+}
