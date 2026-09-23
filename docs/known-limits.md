@@ -1656,6 +1656,17 @@ behoben zu werden:
   `cc-skills:` verhindert die Kollision im Aufruf, nicht die doppelte Sichtbarkeit; die
   Routing-Evals messen nur die Projekt-Installation unter `.claude/skills/`, nie das
   Plugin.
+- **Der Web-Loader von claude.ai liest das Manifest anders als die CLI.** Zwei
+  Abweichungen, beide am 2026-09-23 auf der Plugin-Seite in den claude.ai-Einstellungen
+  gesehen: Er ignoriert die `skills`-Liste und lädt jeden Ordner unter `skills/`, also
+  auch `cad-parts` (ein gemeldetes Issue im Claude-Code-Repo beschreibt genau das, die
+  CLI filtert korrekt). Und er lässt eine Skill still weg, deren Description `<…>`
+  enthält; `learning-coach` und `verified-research` trugen als einzige `<Thema>` und
+  fehlten als einzige, die Platzhalter im Body stören nicht. Die Descriptions sind
+  umformuliert, `tests/test_marketplace.py` meldet den nächsten Fall. Gemessen danach: vier
+  Routing-Läufe mit je drei Konkurrenz-Skills im Workspace, alle vier wählten die richtige
+  Skill, zwei davon mit der geänderten Phrase als Begründung. Der Ausschluss von
+  `cad-parts` gilt bis zum Fix des Issues nur für die CLI.
 - **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
   Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
 
