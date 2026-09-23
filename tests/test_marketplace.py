@@ -64,3 +64,17 @@ def test_no_plugin_json_that_would_conflict_with_strict_false():
         data = json.loads(plugin_json.read_text(encoding="utf-8"))
         for key in ("skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "outputStyles"):
             assert key not in data, f"plugin.json deklariert {key} — Konflikt mit strict: false"
+
+
+def test_descriptions_carry_no_angle_bracket_tags():
+    """Der Plugin-Import von claude.ai (Web) lehnt `<…>` in der Description ab und lässt die
+    Skill still weg; gemessen am 2026-09-23 an learning-coach und verified-research, die als
+    einzige `<Thema>` in der Description trugen. Im Body stören die Platzhalter nicht."""
+    import re
+    offenders = []
+    for skill_md in sorted(SKILLS.glob("*/SKILL.md")):
+        head = skill_md.read_text(encoding="utf-8").split("\n---", 2)[0]
+        desc = head.split("description:", 1)[1] if "description:" in head else ""
+        if re.search(r"<[A-Za-z][^>]*>", desc):
+            offenders.append(skill_md.parent.name)
+    assert not offenders, f"<…> in der Description, claude.ai lädt die Skill nicht: {offenders}"
