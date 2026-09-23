@@ -1632,6 +1632,33 @@ behoben zu werden:
   in dessen Abgrenzung hätte `evals_due: true` ausgelöst, ohne dass sich sein Contract
   ändert; der Satz sagt „die drei wörtlichen Tokens" und meint dieselben.
 
+## Marketplace (2026-09-23)
+
+- **Skriptpfade kennen das Plugin nicht.** Die SKILL.md-Dateien nennen zwei Formen,
+  `python skills/<name>/scripts/…` im Repo und `python .claude/skills/<name>/scripts/…`
+  installiert (Spec 17, Entscheidung 4). Als Plugin liegt das Skript unter
+  `${CLAUDE_PLUGIN_ROOT}/skills/<name>/scripts/…`; laut Claude-Code-Doku
+  (plugins-reference, „Environment variables") wird der Platzhalter in Skill-Inhalten
+  ersetzt. Keine SKILL.md trägt diese dritte Form, und `lint_skill.py` prüft sie nicht.
+  Ein Agent, der die Skill aus dem Plugin lädt, findet das Skript nur, wenn er den
+  Plugin-Pfad selbst kennt. Nachziehen heißt 21 SKILL.md-Dateien ändern, mit
+  `evals_due` dort, wo ein Pattern die geänderte Zeile trifft.
+- **Das ganze Repo wird kopiert.** `source: "./"` macht das Repo-Root zum Plugin-Root;
+  Claude Code klont es in seinen Plugin-Cache, samt `evals/`, `tests/`, `docs/`,
+  `evalkit/`. Die Doku empfiehlt, Tests und Fixtures draußen zu lassen; hier sind sie
+  klein, und ein separater `plugins/`-Ordner müsste synchron gehalten werden.
+- **`cad-parts` ist ausgeschlossen, nicht versteckt.** Die explizite `skills`-Liste ist
+  bei Marketplace-Root-Quelle die vollständige Menge (Doku, „Advanced plugin
+  entries"); `tests/test_marketplace.py` hält Liste und `skills/` synchron und nennt
+  den Grund je Ausschluss. Gemessen: `claude plugin validate .` grün, lokale
+  Installation lädt 21 Skills.
+- **17 Skills liegen auch im Nutzerprofil unter gleichem Namen.** Der Namensraum
+  `cc-skills:` verhindert die Kollision im Aufruf, nicht die doppelte Sichtbarkeit; die
+  Routing-Evals messen nur die Projekt-Installation unter `.claude/skills/`, nie das
+  Plugin.
+- **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
+  Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
+
 ## impl-plan
 
 Gebaut nach Spec 16 (2026-09-02). Tier 1 ohne eigenes Skript: Der einzige Code,
