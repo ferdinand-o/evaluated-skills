@@ -1,0 +1,7 @@
+{
+  "git": true,
+  "description": "Eine Feature-Spec mit Given/When/Then liegt unter docs/specs/wip/. Ein Commit implementiert genau das beschriebene Kriterium.",
+  "commits": [
+    {"message": "feat: add rundet auf zwei Nachkommastellen", "touch": {"src/calc.py": "def add(a, b):\n    return round(a + b, 2)\n"}}
+  ]
+}

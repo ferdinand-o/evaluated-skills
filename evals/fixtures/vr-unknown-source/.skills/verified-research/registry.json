@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval unknown-source-gets-registry-entry — enthält absichtlich keinen Treffer für sources/unknown-outlet.md"
+  },
+  "domains": {
+    "wirtschaft-statistik": [
+      {
+        "pattern": "www.destatis.de",
+        "name": "Statistisches Bundesamt (Destatis)",
+        "tier": 1,
+        "notiz": "Amtliche Primärstatistik — themenfremd zu diesem Fixture-Fall."
+      }
+    ]
+  },
+  "allgemein": []
+}

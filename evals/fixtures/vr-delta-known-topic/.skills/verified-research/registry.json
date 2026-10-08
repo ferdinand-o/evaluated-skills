@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval delta-mode-separates-known-and-new"
+  },
+  "domains": {
+    "wirtschaft-statistik": [
+      {
+        "pattern": "sources/preisliste-2026-06.md",
+        "name": "Fixture-Preisliste Juni 2026",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Preisliste des Fixture-Anbieters."
+      },
+      {
+        "pattern": "sources/preisliste-2026-08.md",
+        "name": "Fixture-Preisliste August 2026",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Preisliste des Fixture-Anbieters."
+      }
+    ]
+  },
+  "allgemein": []
+}

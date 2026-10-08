@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein fälliges Thema, dessen Aufgaben-Datei existiert, aber ein Objekt mit leerer 'exercises'-Liste ist — der plausible Fall, wenn exercise-forge legitim keine verifizierbare Aufgabe fand, statt gar keine Datei zu schreiben."
+}

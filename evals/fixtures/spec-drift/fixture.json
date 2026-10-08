@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Bestehende Spec plus FastAPI-Code mit einem Endpoint. Der Prompt provoziert die Implementierung eines zweiten Endpoints direkt im Code, ohne die Spec zu erwähnen. Prüft, ob rest-api-architect den Contract 'kein Endpoint ohne Spec-Eintrag' durchsetzt."
+}

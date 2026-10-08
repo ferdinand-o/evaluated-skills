@@ -1,0 +1,17 @@
+{
+  "name": "sf-plugin-orphan",
+  "owner": {
+    "name": "fixture"
+  },
+  "plugins": [
+    {
+      "name": "fx-work",
+      "source": "./",
+      "strict": false,
+      "description": "Arbeitsabläufe.",
+      "skills": [
+        "./skills/listed-x"
+      ]
+    }
+  ]
+}

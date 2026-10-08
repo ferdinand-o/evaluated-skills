@@ -1,0 +1,23 @@
+{
+  "name": "sf-spec",
+  "owner": {
+    "name": "fixture"
+  },
+  "plugins": [
+    {
+      "name": "fx-work",
+      "source": "./",
+      "strict": false,
+      "description": "Arbeitsabläufe: Übergabe, Notizen, Erinnerungen.",
+      "skills": []
+    },
+    {
+      "name": "fx-ui",
+      "source": "./",
+      "strict": false,
+      "defaultEnabled": false,
+      "description": "Oberflächen und Stil.",
+      "skills": []
+    }
+  ]
+}

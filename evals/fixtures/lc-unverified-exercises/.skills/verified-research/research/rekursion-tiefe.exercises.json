@@ -1,0 +1,20 @@
+{
+  "topic": "rekursion-tiefe",
+  "generated": "2026-08-20",
+  "exercises": [
+    {
+      "id": "mc-01",
+      "type": "multiple_choice",
+      "prompt": "Wie tief ist die Rekursion bei fakultaet(5)?",
+      "options": ["4", "5", "6"],
+      "answer": "5",
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
+    },
+    {
+      "id": "open-01",
+      "type": "open",
+      "prompt": "Warum begrenzt Python die Rekursionstiefe?",
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
+    }
+  ]
+}

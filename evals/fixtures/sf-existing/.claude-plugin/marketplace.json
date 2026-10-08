@@ -1,0 +1,12 @@
+{
+  "name": "sf-existing",
+  "owner": {"name": "fixture"},
+  "plugins": [
+    {
+      "name": "fx-dev",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/handoff", "./skills/note-tag"]
+    }
+  ]
+}

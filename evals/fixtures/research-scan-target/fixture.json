@@ -1,0 +1,23 @@
+{
+  "git": true,
+  "description": "12 Dateien ueber vier Verzeichnisse, drei mit TODO(security)-Kommentaren, fuer den Recherche-Fan-out-Eval.",
+  "commits": [
+    {
+      "message": "feat: kleine Beispiel-Codebase mit verstreuten Security-TODOs",
+      "touch": {
+        "src/auth/login.py": "def login():\n    # TODO(security): validate password strength\n    pass\n",
+        "src/auth/session.py": "def create_session():\n    return {}\n",
+        "src/payments/charge.py": "def charge():\n    # TODO(security): verify amount signature\n    pass\n",
+        "src/payments/refund.py": "def refund():\n    return True\n",
+        "src/utils/strings.py": "def slugify(x):\n    return x.lower()\n",
+        "src/utils/dates.py": "def today():\n    return None\n",
+        "src/api/routes.py": "ROUTES = []\n",
+        "src/api/middleware.py": "def middleware():\n    # TODO(security): rate limit anonymous requests\n    pass\n",
+        "src/db/models.py": "class User:\n    pass\n",
+        "src/db/migrations.py": "MIGRATIONS = []\n",
+        "docs/notes.md": "Projektnotizen.\n",
+        "tests/test_login.py": "def test_login():\n    pass\n"
+      }
+    }
+  ]
+}

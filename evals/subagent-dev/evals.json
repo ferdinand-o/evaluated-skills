@@ -1,0 +1,66 @@
+{
+  "evals": [
+    {
+      "id": "hidden-overlap-blocks-parallel",
+      "class": "contract",
+      "fixture": "plan-hidden-overlap",
+      "prompt": "Ich habe einen Plan unter docs/superpowers/plans/hidden-overlap.md mit zwei Tasks (Feature A, Feature B). Nutze subagent-dev, um zu entscheiden, ob ich beide Tasks parallel an je einen Subagenten delegieren kann.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/tasks/gate.json"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"verdict\":\\s*\"sequential\""},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "config/shared\\.yaml"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"verdict\":\\s*\"parallel\""}
+      ],
+      "notes": "Spec 09, Eval 1. Beide Tasks modifizieren config/shared.yaml — eine Überlappung, die nur im Files:-Block sichtbar ist, nicht am Task-Titel. Die Assertion hängt am gate.json-Artefakt, das nur diese Skill erzeugt (Vorab-Entscheidung A6/B3), nicht an einer Aussage über 'gute Zerlegung'."
+    },
+    {
+      "id": "mini-plan-below-threshold-is-anti-ceremony",
+      "class": "contract",
+      "fixture": "plan-mini-two-tasks",
+      "prompt": "Ich habe einen Plan unter docs/superpowers/plans/mini-two-tasks.md mit zwei unabhängigen Tasks (Logging-Helfer, Config-Loader). Nutze subagent-dev, um zu entscheiden, ob ich beide Tasks parallel an Subagenten delegieren soll.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/tasks/gate.json"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"verdict\":\\s*\"no-delegate\""},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "(?i)lohnt sich"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"verdict\":\\s*\"parallel\""}
+      ],
+      "notes": "Spec 09, Eval 2 — zugleich der Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2: zwei überlappungsfreie Tasks liegen unter der Parallel-Schwelle von 3, der Dispatch-Overhead lohnt sich nicht, obwohl beide Tasks für sich genommen parallel-sicher wären. Unterscheidet sich von Eval 1 (dort erzwingt eine echte Datei-Kopplung 'sequential', hier fehlt jede Kopplung und das Urteil ist 'no-delegate')."
+    },
+    {
+      "id": "verify-catches-signature-drift-before-review",
+      "class": "contract",
+      "fixture": "plan-disjoint-batch",
+      "prompt": "Ich habe einen Plan unter docs/superpowers/plans/disjoint-batch.md mit vier unabhängigen Tasks. Task 1 (Batch-Parser) wurde bereits an einen Subagenten dispatcht; sein Ergebnis liegt unter dispatched-task-1/. Nutze subagent-dev: (1) fälle das Gate-Urteil für den Plan, (2) prüfe danach mit dem verify-Unterkommando mechanisch, ob Task 1 innerhalb seiner Datei-Allowlist geblieben ist und ob seine Produces-Signatur eingehalten wurde, bevor irgendein Review stattfindet. Schreib das Verify-Ergebnis nach .skills/cache/tasks/verify-task-1.json.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/tasks/gate.json"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"verdict\":\\s*\"parallel\""},
+        {"type": "file_exists", "path": ".skills/cache/tasks/verify-task-1.json"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/verify-task-1.json", "pattern": "\"ok\":\\s*false"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/verify-task-1.json", "pattern": "arity_mismatch"}
+      ],
+      "must_not": [],
+      "notes": "Spec 09, Eval 3. Der bereits dispatchte Task-1-Code (dispatched-task-1/src/batch.py) hat batch_parse mit einem Parameter statt der im Plan deklarierten zwei — die mechanische Abnahme muss das vor jedem code-review-Aufruf fangen. Der Harness kann keinen echten zweiten Agenten-Dispatch auslösen (docs/known-limits.md), deshalb legt die Fixture das abweichende Ergebnis vorgefertigt an; der Prompt bittet nur um den verify-Schritt, den diese Skill tatsächlich ausführt."
+    },
+    {
+      "id": "research-fanout-stays-distilled",
+      "class": "behavior",
+      "fixture": "research-scan-target",
+      "prompt": "Ich will wissen, an welchen Stellen im Code TODO(security)-Kommentare stehen und was sie bedeuten — such im ganzen Repo (mehr als 10 Dateien über vier Verzeichnisse). Nutze subagent-dev für den Recherche-Fan-out, halte den Hauptkontext schlank, und schreib die destillierten Findings nach .skills/cache/tasks/research-security-todos.md (Findings mit Beleg-Pfad und Konfidenz je Fund, kein Rohmaterial).",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/tasks/research-security-todos.md"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/research-security-todos.md", "pattern": "## Findings"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/research-security-todos.md", "pattern": "Beleg:"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/research-security-todos.md", "pattern": "Konfidenz:"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/research-security-todos.md", "pattern": "(?i)login\\.py"},
+        {"type": "file_max_lines", "path": ".skills/cache/tasks/research-security-todos.md", "max_lines": 60},
+        {"type": "judge", "claim": "Die finale Antwort des Agenten im Hauptkontext referenziert die destillierten Findings (per Verweis auf die Findings-Datei oder eine kurze, verdichtete Zusammenfassung je Fundstelle) und zitiert nirgends lange Rohauszüge aus login.py, charge.py oder middleware.py wörtlich."}
+      ],
+      "must_not": [],
+      "notes": "Spec 09, Eval 4. class 'behavior', weil das eigentliche Ziel ('bleibt der Hauptkontext schlank') nur teilweise mechanisch prüfbar ist — die Struktur- und Inhalts-Assertions (Findings/Beleg/Konfidenz, Zeilenobergrenze, der gefundene login.py-Treffer) hängen an dem Artefakt, das nur diese Skill in diesem Format erzeugt; der Judge-Claim deckt die Prosa-Flut-Frage ab, die kein Regex fangen kann (bekannte Grenze, docs/known-limits.md)."
+    }
+  ]
+}

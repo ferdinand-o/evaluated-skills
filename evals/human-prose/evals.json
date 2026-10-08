@@ -1,0 +1,155 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-short-mail-no-measurement",
+      "class": "contract",
+      "fixture": "hp-empty",
+      "prompt": "Schreib mit human-prose eine kurze Mail ans Team: Deployment gestern 21:40 bis 22:15 down, Ursache Migration lief auf Prod länger als im Test, Rollback-Plan heute Abend.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "^Register: kurz"
+        },
+        {
+          "type": "file_absent",
+          "path": ".skills/cache/human-prose/measure.json"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "output_matches",
+          "pattern": "Nachgemessen:"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "—"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "(?i)ich hoffe"
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Eine Mail unter 120 Wörtern in Modus A: Register-Zeile ja, Skript nein, Artefakt nein, keine Nachgemessen-Zeile. Die Fixture bringt eine README-Zeile mit, weil eine Git-Fixture ohne Datei in prepare() am leeren Commit scheitert. Diskriminator: die wörtliche Zeile Register: kurz ist Doktrin dieser Skill; ein Basismodell schreibt sie nicht. Die Abwesenheiten (Geviertstrich, ich hoffe) kommen dazu, tragen den Eval aber nicht allein — ohne Skill entscheidet die Register-Zeile, ob er etwas misst (Spec 18, --without-skill)."
+    },
+    {
+      "id": "revise-writes-before-and-after",
+      "class": "contract",
+      "fixture": "hp-cache",
+      "prompt": "Überarbeite text.md mit human-prose, Register fach, Eingriffstiefe mittel.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/human-prose/measure.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/human-prose/measure.json",
+          "pattern": "\"skill\": \"human-prose\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/human-prose/measure.json",
+          "pattern": "\"before\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/human-prose/measure.json",
+          "pattern": "\"after\""
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": "text.md",
+          "pattern": "(?i)zusammenfassend lässt sich sagen|es ist wichtig zu beachten|entscheidende Rolle"
+        },
+        {
+          "type": "file_matches",
+          "path": "text.md",
+          "pattern": ", wodurch"
+        }
+      ],
+      "notes": "Modus B über den Vorher-Text aus Beispiel 1 des Entwurfs. Die Skill misst vorher, schreibt um, misst nachher und ersetzt die Datei. Die drei must_not-Muster stehen wörtlich in der Fixture (R4.1 zweimal, R3.5 einmal) und müssen danach fehlen; ebenso das Partizip-Anhängsel. Diskriminator: measure.json mit \"skill\": \"human-prose\" und den Schlüsseln before und after schreibt nur diese Skill; ein Basismodell, das „überarbeite\" hört, schreibt keine Messung."
+    },
+    {
+      "id": "vague-text-asks-instead-of-inventing",
+      "class": "contract",
+      "fixture": "hp-vague",
+      "prompt": "Mach text.md mit human-prose konkreter.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "^Rückfrage:"
+        },
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/human-prose/measure.json"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": "text.md",
+          "pattern": "\\d+\\s*(ms|Millisekunden|Prozent|%)"
+        },
+        {
+          "type": "file_matches",
+          "path": "text.md",
+          "pattern": "(?i)verschiedene Faktoren|zahlreiche Unternehmen"
+        }
+      ],
+      "notes": "Die Fixture hat keine Zahl und keinen Namen. „Konkreter\" verführt ein Basismodell zu 400 Millisekunden und drei Firmennamen (R5.2); die Skill schreibt um, lässt die Stellen allgemein und fragt mit der wörtlichen Zeile Rückfrage:. Sie wartet nie — deshalb ist der Eval in einem einzigen -p-Zug grün (Spec 19, Review-Befund 2). Diskriminator: das Token Rückfrage: am Zeilenanfang und das Artefakt; das Zahl-Muster fängt die Erfindung."
+    },
+    {
+      "id": "long-draft-ends-with-measurement-line",
+      "class": "contract",
+      "fixture": "hp-empty",
+      "prompt": "Schreib mit human-prose einen Doku-Abschnitt von etwa 300 Wörtern darüber, warum ein Cache für Preise ein kürzeres TTL braucht als für Stammdaten; Zahlen nur, wenn ich sie dir gebe: Stammdaten TTL eine Stunde, Preise fünf Minuten.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "^Nachgemessen: \\d+ pass, \\d+ Befunde, \\d+ ungeprüft"
+        },
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/human-prose/measure.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/human-prose/measure.json",
+          "pattern": "\"text\""
+        }
+      ],
+      "must_not": [
+        {
+          "type": "output_matches",
+          "pattern": "—"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "(?im)^(darüber hinaus|zudem|außerdem)\\b"
+        }
+      ],
+      "notes": "Modus A über der 120-Wörter-Grenze: Entwurf nach draft.md, Skript, Befunde beheben, Nachgemessen-Zeile. Die Zahlen (eine Stunde, fünf Minuten) kommen aus dem Auftrag und sind nach der Eisernen Regel erlaubt. Diskriminator: die Zeile Nachgemessen: mit drei Zahlen und das Artefakt mit Schlüssel text sind skill-eigen; das Konnektor-Muster ist R2.2 wörtlich am Zeilenanfang, der Geviertstrich R1.1 — beides prüft output_matches über alle Züge der Antwort, die Skill darf also auch im Zwischentext keinen setzen."
+    },
+    {
+      "id": "routing-sounds-like-ai-without-skill-name",
+      "class": "contract",
+      "fixture": "hp-cache",
+      "prompt": "Das klingt nach KI. Überarbeite text.md.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/human-prose/measure.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/human-prose/measure.json",
+          "pattern": "\"skill\": \"human-prose\""
+        }
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Routing-Eval ohne Skill-Namen im Prompt: Landet „das klingt nach KI, überarbeite\" bei human-prose, bei visual-summary oder bei gar keiner Skill? Diskriminator: das Artefakt an diesem Ort mit dem Skill-Namen in _meta. Routing-Evals sind stochastisch (docs/known-limits.md, „Stichprobe\"): ein roter Lauf zeigt die Kollision, ein grüner beweist nichts."
+    }
+  ]
+}

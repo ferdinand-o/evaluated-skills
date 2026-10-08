@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Archiv mit einem geloesten Fall (Cache-Key-Kollision durch Kuerzung auf 8 Zeichen). Ein neuer Bug im Passwort-Reset hat exakt dasselbe Ursachenmuster."
+}

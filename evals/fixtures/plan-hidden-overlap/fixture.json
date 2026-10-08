@@ -1,0 +1,13 @@
+{
+  "git": true,
+  "description": "Plan mit zwei Tasks, die beide config/shared.yaml anfassen — verdeckte Ueberlappung.",
+  "commits": [
+    {
+      "message": "docs: Plan mit verdeckt ueberlappenden Tasks",
+      "touch": {
+        "docs/superpowers/plans/hidden-overlap.md": "# Hidden Overlap Plan\n\n**Goal:** Zwei Features, die beide dieselbe Config-Datei anfassen.\n\n## Global Constraints\n\n- Testfixture fuer subagent-dev.\n\n---\n\n### Task 1: Feature A\n\n**Files:**\n- Modify: `config/shared.yaml`\n- Create: `src/feature_a.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement Feature A**\n\n### Task 2: Feature B\n\n**Files:**\n- Modify: `config/shared.yaml`\n- Create: `src/feature_b.py`\n\n**Interfaces:**\n- Consumes: nichts Neues\n- Produces: nichts Neues\n\n- [ ] **Step 1: Implement Feature B**\n",
+        "config/shared.yaml": "shared: true\n"
+      }
+    }
+  ]
+}

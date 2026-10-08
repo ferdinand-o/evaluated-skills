@@ -1,0 +1,72 @@
+{
+  "evals": [
+    {
+      "id": "production-trap-not-null-needs-multistep",
+      "class": "behavior",
+      "fixture": "production-trap",
+      "prompt": "In der Tabelle `orders` (siehe models/orders.py) brauchen wir eine neue Pflichtspalte `shipping_country` (NOT NULL, ohne Default) für ein neues Feature. Schreib die Alembic-Migration dafür.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/migration-gate-report.json"},
+        {"type": "judge", "claim": "Für die neue NOT-NULL-Spalte shipping_country auf der Bestandstabelle orders wird nicht eine naive Einzelschritt-Migration (direkt op.add_column mit nullable=False ohne Default) als fertige Lösung vorgeschlagen, sondern entweder das sichere Mehrschritt-Muster aus migration-safety.md (nullable ergänzen, Backfill, dann NOT NULL über validiertes Constraint) oder eine bewusst rot klassifizierte Migration mit explizitem Mehrschritt-Plan-Marker."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die Antwort behauptet oder zeigt, dass die Migration tatsächlich gegen eine Datenbank ausgeführt oder angewendet wurde, z. B. durch einen echten alembic upgrade-Aufruf oder eine hergestellte Datenbankverbindung."}
+      ],
+      "notes": "Die Produktions-Trap aus Spec 08, der wichtigste Eval — trägt den Zweck der Skill. R2/R5: die Gefahrenklasse hängt an der Operation (NOT NULL ohne Default auf Bestandstabelle), nicht an einer geratenen Zeilenzahl."
+    },
+    {
+      "id": "array-vs-relation-hidden-many-to-many",
+      "class": "behavior",
+      "fixture": "array-vs-relation",
+      "prompt": "Wir wollen Artikeln (siehe models/articles.py) beliebig viele Tags zuordnen können. Leg dafür auf `articles` eine Spalte `tag_ids integer[]` an, die die IDs der Tags enthält.",
+      "must": [
+        {"type": "judge", "claim": "Die Antwort rät von einer Array-Spalte mit Tag-IDs ab und schlägt stattdessen eine eigene Tags-Tabelle mit einer Junction-/Zwischentabelle (z. B. article_tags) über Fremdschlüssel vor, statt der wörtlichen Anfrage einfach zu folgen."},
+        {"type": "judge", "claim": "Die Antwort begründet die Ablehnung der Array-Spalte mit einem konkreten technischen Nachteil (z. B. fehlende referenzielle Integrität, kein effizienter Join/Index für die Beziehung, oder keine Möglichkeit für Metadaten auf der Beziehung), nicht nur mit einer pauschalen Stilregel."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die Antwort legt tatsächlich eine tag_ids integer[]-Spalte oder eine äquivalente ID-Array-Spalte als finale, unwidersprochene Lösung an."}
+      ],
+      "notes": "Spec 08s zweiter Eval. Prüft, ob references/modeling.md greift, wenn der Nutzer das Antipattern explizit anfordert statt es nur anzudeuten."
+    },
+    {
+      "id": "missing-downgrade-is-flagged",
+      "class": "contract",
+      "fixture": "missing-downgrade",
+      "prompt": "Prüf bitte die Migration `alembic/versions/0001_add_nickname.py` mit dem Migrations-Gate und sag mir, ob sie so durchgehen kann.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/migration-gate-report.json"},
+        {"type": "file_matches", "path": ".skills/cache/migration-gate-report.json", "pattern": "\"status\":\\s*\"violation\""},
+        {"type": "file_matches", "path": ".skills/cache/migration-gate-report.json", "pattern": "(?i)downgrade\\(\\).{0,60}(fehlt|leer)"}
+      ],
+      "must_not": [],
+      "notes": "Isoliert vom Rest: die einzige Operation in der Fixture ist add_column(nullable=True), also grün — der einzige Verstoß, den das Gate finden kann, ist der leere downgrade() ohne Begründung."
+    },
+    {
+      "id": "convention-violations-all-found",
+      "class": "contract",
+      "fixture": "convention-violations",
+      "prompt": "Prüf bitte das Schema in `models/users.py` gegen unsere Konventionen.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/lint-schema-report.json"},
+        {"type": "file_matches", "path": ".skills/cache/lint-schema-report.json", "pattern": "userEmail"},
+        {"type": "file_matches", "path": ".skills/cache/lint-schema-report.json", "pattern": "String\\(50\\)"}
+      ],
+      "must_not": [],
+      "notes": "Spec 08s vierter Eval: camelCase-Spalte und varchar(50) statt text müssen beide auftauchen, ohne dass das Modell selbst danach suchen musste — lint_schema.py findet beides mechanisch aus derselben Spalte."
+    },
+    {
+      "id": "green-additive-stays-short",
+      "class": "behavior",
+      "fixture": "green-additive",
+      "prompt": "Leg eine neue Tabelle `newsletter_subscriptions` an mit `id` (Primärschlüssel) und `email` (Text, nullable). Schreib Model und Migration dafür.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/migration-gate-report.json"},
+        {"type": "judge", "claim": "Die Antwort bleibt kurz und verhältnismäßig für eine additive, locksichere Spaltenänderung auf einer neu angelegten Tabelle — sie beschränkt sich im Wesentlichen auf Model, Migration und die Bestätigung, dass die Klassifikation grün ist."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die Antwort erklärt ausführlich die rot-Klassifikation, das Mehrschritt-Plan-Muster, Lock-Timeout-Auflagen oder andere für diesen trivialen Fall irrelevante Gefahrenszenarien, obwohl hier nur eine additive grüne Operation auf einer neuen Tabelle vorliegt."}
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, als behavior wie handoffs anti-ceremony-invents-nothing (siehe docs/known-limits.md) — es gibt keinen mechanisch bounded Report wie bei dev-report, deshalb Judge statt file_max_lines."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Eine lokale Quelle, die nicht im Register steht, mit rubrik-relevanten Fakten im Fixture-Text selbst. Prüft, ob ein begründeter Registereintrag nach rating-rubric.md entsteht."
+}

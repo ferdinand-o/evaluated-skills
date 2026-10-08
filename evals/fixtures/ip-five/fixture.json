@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Spec einer neuen Tier-1-Skill mit Eval-Tabelle (Spalte id, fünf IDs) und einer gekürzten Spec 00, damit ein Spec:-Verweis des Plans auf eine existierende Datei zeigt. Nichts unter docs/superpowers/plans/."
+}

@@ -1,0 +1,1 @@
+{"git": true, "description": "Leeres Repo mit einer README-Zeile: eine Git-Fixture ohne Datei scheitert in prepare() am leeren Commit (Spec 19)."}

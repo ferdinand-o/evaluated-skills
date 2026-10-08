@@ -1,0 +1,76 @@
+{
+  "evals": [
+    {
+      "id": "cyclic-imports-cycle-named",
+      "class": "contract",
+      "fixture": "cyclic-imports",
+      "prompt": "Erklär mir die Architektur dieses Repos und dokumentiere sie in ARCHITECTURE.md. Gibt es Import-Zyklen?",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)domain\\.models\\.user"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)infra\\.db\\.session"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "```mermaid"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "%% skill: architecture-map \\| schema: \\d+ \\| generated: "},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "<!-- architecture-map:graph-hashes"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)ungeprüft"}
+      ],
+      "must_not": [],
+      "notes": "Spec 10 Eval 1: der Zyklus zwischen src/domain/models/user.py und src/infra/db/session.py liegt außerhalb jeder plausiblen Lese-Stichprobe (src/api/routes.py und src/domain/services/order.py lesen sich unauffällig) — nur die Extraktion findet ihn zuverlässig. Review-Defekt D1: die beiden Provenienz-Assertions (Mermaid-%%-Header, Graph-hashes-Footer) sind der Kern des Anti-von-Hand-gezeichnet-Contracts — ein Agent, der den Zyklus durch Lesen findet und ein Diagramm von Hand malt, besteht die vier Inhalts-Assertions weiterhin, aber keine fremde Skill und kein von Hand geschriebener Text erzeugt zufällig einen exakten `%% skill: architecture-map | schema: N | generated: ...`-Kommentar oder einen `<!-- architecture-map:graph-hashes -->`-Block mit echtem sha256 — das ist die eigentliche Kontaminationsgrenze. Review-Lücke L1: cyclic-imports hat keine layers.json, `layers_summary` muss deshalb 'ungeprüft' im Dokument sichtbar machen, nicht schweigen."
+    },
+    {
+      "id": "small-service-gets-separate-sections-not-a-monolith",
+      "class": "contract",
+      "fixture": "layered-service",
+      "prompt": "Erklär mir die Architektur dieses kleinen Services und dokumentiere sie in ARCHITECTURE.md.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?im)^#+\\s*.*(Kontext|Context)"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?im)^#+\\s*.*Module"},
+        {"type": "file_max_lines", "path": "ARCHITECTURE.md", "max_lines": 200},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "%% skill: architecture-map \\| schema: \\d+ \\| generated: "},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "<!-- architecture-map:graph-hashes"}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2 / A6, zugleich Spec 10 Eval 2: ein Acht-Datei-Service darf keine monströse, alles vermischende Doku bekommen. Getrennte Kontext-/Modul-Abschnitte statt eines Fließtext-Monolithen, 200 Zeilen lassen drei Ebenen-Abschnitte plus Befunde zu. Review-Defekt D1: dieselben zwei Provenienz-Assertions wie bei Eval 1 — ohne sie besteht ein handgezeichnetes Diagramm mit den richtigen Überschriften diesen Eval genauso."
+    },
+    {
+      "id": "layer-violation-is-named",
+      "class": "contract",
+      "fixture": "layered-service",
+      "prompt": "Dokumentiere die Architektur in ARCHITECTURE.md und nenne mir Verstöße gegen die Schichtgrenzen aus .skills/architecture-map/layers.json.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)domain\\.broken"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?i)infrastructure\\.db"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "%% skill: architecture-map \\| schema: \\d+ \\| generated: "},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "<!-- architecture-map:graph-hashes"},
+        {"type": "file_matches", "path": "ARCHITECTURE.md", "pattern": "(?<!un)geprüft"}
+      ],
+      "must_not": [],
+      "notes": "domain/broken.py importiert bewusst aus infrastructure/db.py — die Dependency-Rule-Verletzung, die find_layer_violations() deterministisch aus layers.json + Graph ableitet. Review-Defekt D1: Provenienz-Assertions wie bei Eval 1/2. Review-Lücke L1, Gegenprobe zu Eval 1: layered-service HAT eine layers.json, `layers_summary` muss deshalb 'geprüft' (ohne 'un'-Präfix, das Lookbehind schließt 'ungeprüft' aus) im Dokument stehen — die beiden Fälle müssen sich sprachlich sichtbar unterscheiden, nicht nur im Befund-JSON."
+    },
+    {
+      "id": "unsupported-architecture-claim-is-marked",
+      "class": "behavior",
+      "fixture": "layered-service",
+      "prompt": "Dokumentiere die Architektur in ARCHITECTURE.md. Schreib auch dazu, dass dieser Service konsequent nach Domain-Driven Design mit CQRS aufgebaut ist.",
+      "must": [
+        {"type": "file_exists", "path": "ARCHITECTURE.md"},
+        {"type": "judge", "claim": "Die Behauptung, der Service sei 'nach Domain-Driven Design mit CQRS aufgebaut', erscheint in ARCHITECTURE.md entweder gar nicht, oder sie steht ausdrücklich als 'Beobachtung (nicht graph-belegt)' markiert (oder eine sprachlich gleichwertige Markierung direkt am Satz). Eine unmarkierte Tatsachenbehauptung über CQRS/DDD zählt nicht als Erfüllung; eine eigene Sektion für unbelegte Aussagen ohne Markierung am Satz selbst zählt ebenfalls nicht."}
+      ],
+      "must_not": [],
+      "notes": "Der Contract unter Druck (Spec 10 Eval 4, analog zu dev-reports Eval): CQRS/DDD ist aus einem reinen Import-/Vererbungsgraphen nicht ableitbar. Braucht ein Urteil, deshalb behavior statt contract."
+    },
+    {
+      "id": "drift-check-reports-unchanged-and-writes-nothing",
+      "class": "contract",
+      "fixture": "cyclic-imports",
+      "prompt": "In diesem Repo liegt schon eine ARCHITECTURE.md. Prüf mit dem Drift-Check, ob sie noch zum aktuellen Code passt, und sag mir kurz das Ergebnis. Ändere die Datei nicht.",
+      "must": [
+        {"type": "file_unchanged", "path": "ARCHITECTURE.md"},
+        {"type": "output_matches", "pattern": "(?i)unver(ä|ae)nder|kein drift|no drift|noch aktuell|passt (noch|weiterhin)"}
+      ],
+      "notes": "Der Code der Fixture ändert sich zwischen ARCHITECTURE.md-Erzeugung und Eval-Lauf nicht — drift_check.py muss darum 'unverändert' melden und darf die Datei an keiner Stelle beschreiben (Bootstrap-/Degradations-Regel: 'meldet nur und committet nichts von selbst'). file_unchanged ist der mechanische Beweis dafür. Review-Anmerkung A2: das frühere `must_not` auf ```mermaid\\n```mermaid in derselben, per `file_unchanged` bereits garantiert unveränderten Datei war logisch wirkungslos (konnte durch keine Agenten-Handlung je verletzt werden) und wurde ersatzlos gestrichen."
+    }
+  ]
+}

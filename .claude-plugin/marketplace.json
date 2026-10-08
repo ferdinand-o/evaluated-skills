@@ -1,0 +1,75 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "cc-skills",
+  "owner": {
+    "name": "ferdinand-o"
+  },
+  "description": "Skill-Sammlung nach Spec 00 in drei Plugins (Spec 20): Entwicklung, UI, Wissen. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
+  "renames": {
+    "cc-skills": null
+  },
+  "plugins": [
+    {
+      "name": "cc-dev",
+      "source": "./",
+      "description": "Entwicklungs-Skills: Spec, Debugging, Tests, Review-Kontext, Architektur, Reports, Übergabe, Subagent-Dispatch, API- und Schema-Entwurf. Immer an.",
+      "repository": "https://github.com/ferdinand-o/cc-skills",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "skills": [
+        "./skills/architecture-map",
+        "./skills/debug-ledger",
+        "./skills/dev-report",
+        "./skills/feature-spec",
+        "./skills/handoff",
+        "./skills/rest-api-architect",
+        "./skills/review-context",
+        "./skills/sql-schema-architect",
+        "./skills/subagent-dev",
+        "./skills/testing-strategy"
+      ]
+    },
+    {
+      "name": "cc-ui",
+      "source": "./",
+      "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung. Standardmäßig aus, je Frontend-Repo einschalten.",
+      "repository": "https://github.com/ferdinand-o/cc-skills",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "defaultEnabled": false,
+      "skills": [
+        "./skills/enterprise-ui",
+        "./skills/motion-landing",
+        "./skills/ui-architect"
+      ]
+    },
+    {
+      "name": "cc-knowledge",
+      "source": "./",
+      "description": "Wissens-Skills: erklären, lernen, üben, recherchieren, zusammenfassen, menschlich schreiben. Immer an.",
+      "repository": "https://github.com/ferdinand-o/cc-skills",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "skills": [
+        "./skills/exercise-forge",
+        "./skills/explain",
+        "./skills/human-prose",
+        "./skills/learning-coach",
+        "./skills/verified-research",
+        "./skills/visual-summary"
+      ]
+    }
+  ]
+}

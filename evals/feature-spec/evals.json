@@ -1,0 +1,64 @@
+{
+  "evals": [
+    {
+      "id": "prose-criteria-refuses-export",
+      "class": "contract",
+      "fixture": "prose-criteria",
+      "prompt": "Exportiere die Test-Stubs für den Spec-Entwurf docs/specs/wip/notifications.md.",
+      "must": [
+        {"type": "file_matches", "path": "docs/specs/wip/notifications.md", "pattern": "(?s)### Erinnerung bei Verschiebung.*?\\n-\\s*Given"},
+        {"type": "output_matches", "pattern": "(?i)zeile\\s+\\d+"},
+        {"type": "output_matches", "pattern": "(?i)given"},
+        {"type": "output_matches", "pattern": "(?i)when"},
+        {"type": "output_matches", "pattern": "(?i)then"},
+        {"type": "git_head_unchanged"}
+      ],
+      "must_not": [],
+      "notes": "Trägt den Contract aus Spec 03 (der wichtigste Eval, zuerst gebaut). Das zweite Kriterium in der Fixture ist Fließtext statt Given/When/Then. Spec 03 verlangt, dass der Export verweigert und Given/When/Then einfordert — nicht, dass der Lauf bei der Verweigerung stehenbleibt. Die vier output_matches plus git_head_unchanged belegen, dass die Verweigerung tatsächlich ausgelöst und begründet wurde (ohne sie käme ein Lauf durch, der Prosa stillschweigend akzeptiert); die file_matches-Assertion belegt, dass das Prosa-Kriterium VOR dem (dann erfolgreichen) Export in Given/When/Then überführt wurde — die Fixture-Spec trägt selbst den feature-spec-Artefakt-Header, ist also ein Wegwerf-Entwurf der Skill, den umzuschreiben genau die Arbeit dieser Skill ist, kein handgeschriebener Nutzer-Contract. Ursprünglich mit zwei file_absent-Assertionen, die einen Abbruch bei der Verweigerung erzwangen; korrigiert nach Review-Fix-Runde 2, nachdem ein echter Lauf zeigte, dass die Skill korrekt verweigert, umschreibt und danach erfolgreich exportiert."
+    },
+    {
+      "id": "decisions-conflict-is-surfaced",
+      "class": "behavior",
+      "fixture": "decisions-conflict",
+      "prompt": "Ich brauche eine Spec für einen neuen Endpunkt, der Fehler als reines JSON {\"status\": \"error\", \"message\": \"...\"} zurückgibt — ganz ohne error.code, das reicht dem Frontend.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)decisions\\.md"},
+        {"type": "judge", "claim": "Der Spec-Entwurf benennt explizit die bestehende Entscheidung aus docs/decisions.md (API-Fehler tragen ein Pflicht-error.code-Feld), stellt fest, dass die Anfrage — Fehler ohne error.code — dieser Entscheidung widerspricht, und trifft dazu eine bewusste Wahl: entweder folgt der Entwurf der bestehenden Entscheidung (error.code bleibt Pflicht), oder er schlägt eine Revision vor und begründet sie. Ein bloßes beiläufiges Erwähnen der Begriffe 'decisions.md' oder 'error.code', ohne den Widerspruch selbst zu benennen und eine Wahl zu treffen, erfüllt das nicht."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Der Entwurf übernimmt die angefragte Fehlerform ohne error.code, ohne die bestehende Entscheidung aus docs/decisions.md zu erwähnen oder den Widerspruch zu ihr zu benennen — stillschweigende Übernahme der neuen Anfrage."}
+      ],
+      "notes": "War ursprünglich als 'contract' klassifiziert mit drei unabhängigen Regex-Treffern (decisions.md, error.code, Widerspruch-Wortstamm) — die bestehen aber auch dann, wenn der Entwurf die Begriffe nur beiläufig erwähnt und die Entscheidung trotzdem stillschweigend übergeht, weil die drei Muster unabhängig voneinander an beliebigen Stellen im Output treffen dürfen. Ob ein Konflikt substantiell aufgegriffen wurde (benannt, UND als Widerspruch erkannt, UND eine Wahl dazu getroffen), ist ein Urteil, kein mechanisch prüfbarer Fakt — Spec 00 §2 verlangt dafür 'behavior' mit Judge. Der Judge-Claim verlangt explizit alle drei Teile zusammen, das must_not fängt den Fall der stillschweigenden Übernahme. Reklassifiziert nach Review-Fix-Runde (Defekt 2)."
+    },
+    {
+      "id": "vague-request-drafts-with-marked-assumptions",
+      "class": "behavior",
+      "fixture": "vague-feature",
+      "prompt": "Bau mir Notifications.",
+      "must": [
+        {"type": "file_matches", "path": "docs/specs/wip/notifications.md", "pattern": "(?i)annahme:"},
+        {"type": "judge", "claim": "Es entsteht sofort ein vollständiger Spec-Entwurf (mit Problem, Non-Goals, Annahmen, Ansatz, Akzeptanzkriterien als Given/When/Then und offenen Fragen), ohne dass zuerst eine Serie von Rückfragen an den Nutzer gestellt wird."},
+        {"type": "judge", "claim": "Jede ungesicherte Annahme im Entwurf steht als eigene, einzeln herausgehobene 'Annahme:'-Zeile — keine Annahme ist unmarkiert in Fließtext versteckt."},
+        {"type": "judge", "claim": "Der Entwurf behauptet nicht ungeerdet, vollständig oder fertig zu sein; wo er auf Annahmen beruht, wird das benannt statt als sicheres Wissen dargestellt."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Die Antwort besteht überwiegend aus einer Liste von Rückfragen an den Nutzer, bevor irgendein Entwurfsinhalt vorgelegt wird."}
+      ],
+      "notes": "Spec 03s erster Eval: draft-first statt interview-first. Die Fixture liefert genug Codebase-Kontext (EmailService, EventBus, kein Push/SMS-Kanal), damit plausible, konkrete Annahmen möglich sind statt generischer Platzhalter. Der Ablageort docs/specs/wip/notifications.md ist seit der Fix-Runde 2 kein Raten mehr: SKILL.md Schritt 3 legt fest, dass der Dateiname der slugifizierte Feature-Titel ist, und der Prompt nennt 'Notifications' als Feature-Titel wörtlich. Ursprünglich prüfte hier output_matches auf (?i)annahme: gegen die Agent-Ausgabe (stdout) statt gegen die Datei — ein echter Lauf zeigte, dass der Entwurf korrekt mit markierten Annahmen entsteht, nur eben nicht auf stdout gespiegelt wird, was Spec 03 auch nirgends verlangt. Korrigiert nach Review-Fix-Runde 2 auf file_matches gegen den Entwurf selbst."
+    },
+    {
+      "id": "hidden-scope-risk-lands-in-non-goals",
+      "class": "behavior",
+      "fixture": "scope-risk-tenant",
+      "prompt": "Bau mir einen CSV-Export für alle Bestellungen.",
+      "must": [
+        {"type": "output_matches", "pattern": "(?i)mandant|tenant"},
+        {"type": "judge", "claim": "Der Spec-Entwurf listet unter Non-Goals explizit, dass der Export nicht mandantenübergreifend arbeitet bzw. sich auf den aktuellen Mandanten beschränkt — als eigene Non-Goals-Zeile, nicht nur beiläufig im Ansatz erwähnt."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Non-Goals bleibt bei allgemeinen Floskeln wie 'wir bauen nicht alles auf einmal', ohne den konkreten Mandanten-Bezug dieser Codebase zu benennen."}
+      ],
+      "notes": "Spec 03s dritter Eval. Die Fixture-Codebase scoped jede Query strikt auf tenant_id — die Anfrage 'alle Bestellungen' trägt das Risiko einer mandantenübergreifenden Auswertung, ohne dass der Nutzer das ausgesprochen hat. Das Risiko muss in den Non-Goals landen, nicht nur beiläufig erwähnt werden."
+    }
+  ]
+}

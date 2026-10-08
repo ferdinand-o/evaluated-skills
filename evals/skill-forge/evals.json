@@ -1,0 +1,155 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-one-sentence-change-lints-only",
+      "class": "contract",
+      "fixture": "sf-existing",
+      "prompt": "Nutze skill-forge: ändere in skills/note-tag/SKILL.md den Satz „Fertig. Keine Zusammenfassung, keine Rückfrage.\" zu „Fertig — keine Zusammenfassung, keine Rückfrage.\"",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/skill-forge/lint.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\"evals_due\": false"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\"findings_mode\": \"new-vs-base\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": "evals/note-tag/evals.json"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "docs/superpowers/reports/note-tag-report.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"pass\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/marketplace.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein geänderter Satz im Body: Der Lint läuft im Diff-Modus (findings_mode new-vs-base), meldet evals_due: false, und die Skill tut sonst nichts — evals.json und Report bleiben unverändert. Die Fixture ist an der Basis lint-sauber, damit der Eval misst, ob die Änderung zur Zeremonie eskaliert, nicht ob Altlasten aufgeräumt werden. Diskriminator: lint.json unter .skills/cache/skill-forge/ schreibt nur diese Skill, und evals_due: false ist ihr mechanisches Urteil; ein Basismodell hat weder die Datei noch die Regel, und superpowers:writing-skills verlangte für jede Änderung einen Test. Seit Spec 20: Die Fixture trägt ein Manifest, plugin-membership ist pass, und ein geänderter Satz ändert das Manifest nicht."
+    },
+    {
+      "id": "token-change-makes-evals-due",
+      "class": "contract",
+      "fixture": "sf-existing",
+      "prompt": "Nutze skill-forge: ändere in skills/note-tag/SKILL.md in Ablauf-Schritt 3 den Token Untagged: zu Untagged →",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\"evals_due\": true"
+        }
+      ],
+      "must_not": [],
+      "notes": "Gegenstück zu anti-ceremony-one-sentence-change-lints-only, eigener Prompt (ein Prompt je Eval). Die Zeile liegt im Ablauf, nicht im Contract und nicht im Frontmatter — evals_due: true entsteht allein aus dem Pattern-Zweig: das must_not-Pattern Untagged: der evals.json trifft die geänderte Zeile per re.search. Der Schema-Test bindet den Grund (evals_due_reason nennt das Pattern), nicht nur den Wert. Diskriminator: Ein Basismodell sieht keinen Zusammenhang zwischen einem Wort in der SKILL.md und einer Assertion in einer anderen Datei — der Zusammenhang existiert nur im Diff-Modus des Lints."
+    },
+    {
+      "id": "gate-word-without-hook-is-reported",
+      "class": "contract",
+      "fixture": "sf-gate",
+      "prompt": "Prüfe die Skill gate-demo mit skill-forge.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"gate-language\", \"status\": \"finding\""
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"gate-language\", \"status\": \"pass\""
+        }
+      ],
+      "notes": "Der Contract sagt „blockiert den Commit\" ohne assets/hooks/ — Spec 00 §4 kennt nur diese Sammlung. Die Assertion bindet an die Regelzeile in lint.json in ihrer festen Schlüsselreihenfolge (id, status, reason). Die Fixture bringt kein evals/ und kein docs/ mit; Regeln 6–13 sind dort unchecked, gate-language ist immer prüfbar. Diskriminator: lint.json und die Regel-ID gate-language sind Vokabular dieser Skill."
+    },
+    {
+      "id": "missing-anti-ceremony-eval-is-reported",
+      "class": "contract",
+      "fixture": "sf-noanti",
+      "prompt": "Prüfe die Skill quiet-log mit skill-forge.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"anti-ceremony-eval\", \"status\": \"finding\""
+        }
+      ],
+      "must_not": [],
+      "notes": "evals/quiet-log/evals.json existiert, aber keine ID beginnt mit anti-ceremony-. Die Fixture bringt evals/ mit, damit die Regel geprüft ist statt unchecked — nur dann ist finding möglich. Diskriminator: die ID-Präfix-Konvention aus Spec 00 §2 (neu mit Spec 17) und die Regel-ID in lint.json."
+    },
+    {
+      "id": "routing-new-skill-gets-house-evals",
+      "class": "contract",
+      "fixture": "sf-spec",
+      "prompt": "Bau mir eine Skill nach specs/Spec 30 – reminder.md.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "evals/*/evals.json",
+          "pattern": "\"id\": \"anti-ceremony-"
+        },
+        {
+          "type": "file_matches",
+          "path": "evals/*/evals.json",
+          "pattern": "(?i)diskriminator"
+        },
+        {
+          "type": "file_matches",
+          "path": ".claude-plugin/marketplace.json",
+          "pattern": "\"\\./skills/reminder\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"pass\""
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": "evals/*/evals.json",
+          "pattern": "expected_output"
+        }
+      ],
+      "notes": "Pflicht-Routing-Eval ohne Skill-Namen im Prompt: Landet „bau mir eine Skill\" bei skill-forge oder bei skill-creator? Die gekürzte Spec 00 der Fixture enthält weder §2 noch das Eval-Vokabular, nichts liegt unter evals/ — der Glob trifft nur, was die Skill schreibt. Diskriminator: das ID-Präfix anti-ceremony- und die Diskriminator-Notiz in notes sind Hausvokabular aus references/evals.md; expected_output ist das Vokabular von skill-creator. Routing-Evals sind stochastisch (docs/known-limits.md, „Stichprobe\"): ein roter Lauf zeigt die Kollision, ein grüner beweist nichts. Seit Spec 20 trägt die Fixture ein Manifest mit zwei Plugins und leeren Listen. Diskriminator für die zwei neuen Assertions: Nur skill-forge Schritt 7 trägt die neue Skill in die skills-Liste genau eines Plugins ein, und nur sein letzter Lint-Lauf schreibt plugin-membership pass in lint.json."
+    },
+    {
+      "id": "skill-outside-any-plugin-is-reported",
+      "class": "contract",
+      "fixture": "sf-plugin-orphan",
+      "prompt": "Prüfe die Skill orphan-x mit skill-forge.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"finding\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/marketplace.json"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/excluded.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Spec 20: orphan-x steht in keiner skills-Liste und nicht in excluded.json. „Prüfe“ heißt melden, nicht beheben — die SKILL.md sagt „Prüfen ändert nichts“. Diskriminator: Die Regel-ID plugin-membership und lint.json gibt es nur in lint_skill.py; ein hilfsbereiter Agent ohne die Skill trüge orphan-x in die Liste ein und ließe die zwei file_unchanged-Assertions fallen."
+    }
+  ]
+}

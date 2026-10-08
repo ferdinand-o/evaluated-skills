@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Eine lokale Quelle mit einem Fakt, den kein Modell aus dem Training kennen kann (internes Protokoll, erfundene Konstanten). Zwingt die Skill, für die Zahl tatsächlich in die Datei zu sehen — nur dann ist ein Source:-Marker verdient. Ersetzt die Websuche, die im Harness bewusst nirgends stattfindet."
+}

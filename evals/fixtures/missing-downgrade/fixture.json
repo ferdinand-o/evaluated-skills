@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Eine vorhandene Migration mit gruener Operation (add_column nullable), aber leerem downgrade() ohne Begruendung — reiner Contract-Verstoss, isoliert von der Gefahrenklassifikation."
+}
