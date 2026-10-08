@@ -1,0 +1,4 @@
+body { font: 16px system-ui; }
+.flyout { display: none; }
+.menu:hover .flyout { display: block; }
+.badge:hover { background: #eee; border-color: #ccc; }
