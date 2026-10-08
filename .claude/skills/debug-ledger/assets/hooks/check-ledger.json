@@ -1,0 +1,16 @@
+{
+  "_comment": "G3-Vorlage fuer debug-ledger (Spec 00 Paragraph 4). Wird von der Skill NIE automatisch installiert -- siehe SKILL.md Abschnitt 'Optionaler Hook'. Fragment manuell in settings.json unter 'hooks' einfuegen, ggf. mit vorhandenen PreToolUse-Eintraegen zusammenfuehren. Claude Code reicht den Tool-Aufruf als JSON auf stdin; Exit-Code 2 blockiert den Tool-Call und zeigt stderr dem Modell.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import json, sys, subprocess\ndata = json.load(sys.stdin)\ncmd = data.get(\"tool_input\", {}).get(\"command\", \"\")\nif \"git commit\" not in cmd:\n    sys.exit(0)\nresult = subprocess.run([\"python3\", \"skills/debug-ledger/scripts/check_ledger.py\", \"--staged\"], capture_output=True, text=True)\nif result.returncode != 0:\n    sys.stderr.write(result.stdout + result.stderr)\n    sys.exit(2)\nsys.exit(0)\n'"
+          }
+        ]
+      }
+    ]
+  }
+}
