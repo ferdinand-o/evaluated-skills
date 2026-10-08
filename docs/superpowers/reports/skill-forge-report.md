@@ -364,13 +364,77 @@ Container, sagt erst der erste echte Lauf; meldet er „Baseline unmöglich", is
 beantworten soll — wie viele der 97 Evals ohne Skill grün sind — ist offen, bis er
 fährt.
 
+## Folgerunde: Plugin-Aufteilung (Spec 20, 2026-10-08)
+
+Nach `specs/Spec 20 – plugin-split.md` und `docs/superpowers/plans/2026-10-08-plugin-split.md`,
+zwölf Tasks. Das Gate sagte zuerst `sequential`; für die Teilmenge ab Task 4 gab es die
+Tasks 5, 6 und 10 frei, die drei Subagenten parallel in eigenen Worktrees bauten,
+der Rest lief im Hauptkontext. Jede Task ging durch `verify` mit `--base`.
+
+Task 1 war eine Messung mit Stoppbedingung: Ein Wegwerf-Marketplace sollte zeigen, ob
+der Sync-Weg von claude.ai Plugins mit eigenem Quellordner richtig lädt. Sie endete mit
+Stopp. Der Nutzer bindet nur per CLI an, `plugins/synced/` enthält keine Plugins,
+Cloud-Sessions laden keine Plugins, und claude.ai lässt beim Einbinden keinen Branch
+wählen (`docs/superpowers/validation/2026-10-08-plugin-split-sync.md`). Spec 20 wurde
+darauf vereinfacht: drei Einträge mit `source: "./"` und `skills`-Liste statt
+generierter Plugin-Kopien; `scripts/sync_skills.py` spiegelt nur noch die zehn
+Projekt-Kopien unter `.claude/skills/`.
+
+In der Skill: Schritt 4 fährt nach dem Lint `sync_skills.py --check`, die
+Anti-Zeremonie-Regel heißt „Lint, Sync-Check, Commit", „Prüfen ändert nichts" steht in
+Schritt 4, Schritt 7 ordnet jede neue Skill genau einem Plugin zu und lässt den Lint
+danach erneut laufen. `lint_skill.py` hat die vierzehnte Regel `plugin-membership`, die
+Checkliste den Punkt 20, die Evals 1 und 5 je zwei Assertionen mehr und Eval 6 ist neu.
+
+**Was gemessen wurde.** 1 266 Tests grün nach dem letzten Merge, ein vorbestehender
+Fehlschlag außerhalb (`rest-api-architect`, Spectral). `claude plugin validate .` grün;
+mit einem Wegwerf-Config-Verzeichnis lädt die CLI 10, 3 und 6 Skills, `cc-ui` ist nach
+der Installation aus, und im Repo selbst ist `cc-dev` durch die committete
+`.claude/settings.json` aus. Geschätzte Kosten je Session laut `claude plugin details`:
+`cc-dev` rund 2 360 Tokens, `cc-knowledge` rund 1 513, `cc-ui` rund 647. Vorher zeigte
+`/context` mit dem Ein-Plugin neun Skills mit weniger als 20 Tokens.
+`sync_skills.py --report` zählt 6 `superpowers:`-Verweise in Descriptions aktiver
+Plugins, vorher 8. Eine Zeichenzählung je Plugin liegt in Spec 20.
+
+| Eval | Ergebnis | Beobachtung |
+| --- | --- | --- |
+| 1 Anti-Zeremonie | bestanden | eine Zeile, Lint mit `--base HEAD`, 14 Regeln grün, `evals_due: false`, Commit; Sync-Check als „nicht gelaufen, Skript fehlt im Workspace" benannt |
+| 5 Routing ohne Skill-Namen | bestanden | `reminder` in `fx-work` eingetragen, letzter Lint mit `plugin-membership` `pass`; drei Evals im Hausformat, Nachtrag zur Spec ausdrücklich ohne Review-Vermerk |
+| 6 Skill außerhalb jedes Plugins | bestanden | Lint ohne `--base`, Befund gemeldet, Manifest und `excluded.json` unberührt |
+
+Aufbau wie bei den früheren Läufen: Workspace über `evalkit.workspace.prepare()`, ein
+Opus-Subagent mit nichts als dem Prompt und dem Hinweis auf `.claude/skills/`,
+Bewertung mit `evalkit.runner.grade()` gegen die Baseline. Ein Lauf je Eval, eine
+Stichprobe.
+
+Zwei Funde aus dem Bau, beide behoben oder vermerkt:
+
+- **Zuschnitt:** Die neue Regel machte `test_sf_existing_is_clean_at_base` rot, weil das
+  Manifest der Fixture erst in Task 9 stand. Es kam nach Task 4; die Lesson steht im
+  Plan.
+- **`verify` und Nicht-ASCII-Pfade:** `check_allowlist` liest `git diff --name-only` mit
+  Quoting und meldete Spec 00 (Gedankenstrich im Namen) als Verstoß. Task 10 wurde mit
+  `core.quotepath=false` abgenommen; der Fix gehört nach subagent-dev (known-limits).
+
+**Was nicht gemessen wurde.** Die Evals 2 bis 4 liefen nicht erneut; ihre Muster prüft
+der Schema-Test an echter Lint-Ausgabe. Die Evals von feature-spec und debug-ledger sind
+trotz `evals_due: true` ungefahren: `run_evals.py` bricht unter root ab
+(`--dangerously-skip-permissions cannot be used with root/sudo privileges`). Kein Lauf
+mit `--without-skill`, aus demselben Grund. `/context` nach dem Merge misst der Nutzer;
+ob die neun Skills ohne Description dann wieder eine zeigen, ist offen. Die Trefferquote
+des Routings mit drei Plugins misst kein Eval, weil der Harness Skills unter
+`.claude/skills/` installiert, nie als Plugin. Ob `Skill(...)`-Deny-Regeln Plugin-Skills
+ausblenden, ist ungeprüft. Der Umstieg vom alten Plugin über `renames` ist an keiner
+echten Altinstallation ausprobiert.
+
 ## Offen für die nächste Runde
 
 - Spec 19 (`human-prose`) bauen: Plan mit `impl-plan`, `measure.py` mit Tests an den
   sechs Beispieltexten zuerst. Faktenklasse bisher: Spec 18 sechs von sieben, Spec 19
   acht von dreizehn.
-- Die fünf Evals außerhalb eines Root-Containers fahren, zuerst
-  `anti-ceremony-one-sentence-change-lints-only` und `routing-new-skill-gets-house-evals`.
+- Die sechs Evals außerhalb eines Root-Containers im Harness fahren, dazu die Evals von
+  feature-spec und debug-ledger, die mit Spec 20 fällig wurden.
+- `/context` nach dem Merge von Spec 20 messen und in diesen Report eintragen.
 - Das Register schrumpfen lassen, eine Skill pro Anlass: Beim nächsten Fix an einer
   registrierten Skill die `report-section` nachziehen und den Eintrag streichen.
 - `run_evals.py --without-skill` einmal beim Nutzer fahren, zuerst über `skill-forge`,
