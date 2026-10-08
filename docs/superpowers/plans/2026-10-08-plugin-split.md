@@ -360,7 +360,7 @@ und Task 9 rot.
 - Consumes: `token:skill-outside-any-plugin-is-reported`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — Abschnitt zu dieser Runde mit den Zeichen vorher und nachher,
+- [x] **Step 1: Report** — Abschnitt zu dieser Runde mit den Zeichen vorher und nachher,
       `/context` vorher aus dem Protokoll, dem Ergebnis der Sync-Messung, den Eval-Läufen
       der Evals 1, 5 und 6 und der Evals von feature-spec und debug-ledger, und der
       Sektion „Was nicht gemessen wurde": `/context` nach dem Merge (misst der Nutzer),
