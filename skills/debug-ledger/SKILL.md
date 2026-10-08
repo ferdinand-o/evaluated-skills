@@ -71,8 +71,10 @@ ist das kein Fehler — es gibt schlicht keinen Treffer, weiter zu Schritt 1.
   `--resolve` sichtbar; die Datei wird nie automatisch umgegliedert oder
   geprunt — das Archiv ist der Zinseszins dieser Skill, ein geprunter Fall ist
   genau der, den Phase 0 als Nächstes gebraucht hätte.
-- Jedes Ledger trägt die Kopfzeile aus `docs/artifact-header.md`
-  (`skill: debug-ledger | schema: 1 | generated: …`); `INDEX.md` ebenso.
+- Jedes Ledger trägt als erste Zeile die Kopfzeile
+  `<!-- skill: debug-ledger | schema: 1 | generated: <Kommando> -->`;
+  `INDEX.md` ebenso. Vollregel (Ausnahmen, Konsumenten-Regel): `docs/artifact-header.md`
+  — Repo-Kontext, nicht Teil dieser Skill.
 
 ## Anti-Rationalisierung
 

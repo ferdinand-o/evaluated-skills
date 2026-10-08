@@ -353,3 +353,28 @@ def test_main_json_mode_emits_valid_json(tmp_path, monkeypatch, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["findings"] == []
+
+
+# --- Preset-Auflösung ------------------------------------------------------------
+#
+# Testlauf-Fund (2026-08-21): Der in SKILL.md dokumentierte Aufruf
+# `python <skill-dir>/scripts/lint_schema.py <models>` bricht mit exit 1 ab, weil das
+# Default-Preset über einen repo-relativen Pfad gegen --repo gesucht wurde. Der Pfad
+# existiert nur im cc-skills-Repo selbst; in jedem anderen Projekt — und in jeder
+# installierten Skill — zeigt er ins Leere. Das Skript muss sein eigenes mitgeliefertes
+# Preset finden, ohne dass der Aufrufer ein Flag kennt.
+
+
+def test_load_conventions_finds_shipped_preset_without_skill_dir_flag(tmp_path):
+    """Fremdes Projekt ohne skills/-Baum: das Preset der Skill muss trotzdem laden."""
+    conventions = lint.load_conventions(tmp_path)
+    assert conventions, "Preset wurde nicht geladen"
+    assert "tables" in conventions or "naming" in conventions or conventions
+
+
+def test_load_conventions_still_honours_explicit_skill_dir(tmp_path):
+    """Das --skill-dir-Flag bleibt wirksam und schlägt den Default."""
+    preset = tmp_path / "skill" / "assets" / "conventions.json"
+    preset.parent.mkdir(parents=True)
+    preset.write_text(json.dumps({"marker": "explizit"}), encoding="utf-8")
+    assert lint.load_conventions(tmp_path, tmp_path / "skill")["marker"] == "explizit"

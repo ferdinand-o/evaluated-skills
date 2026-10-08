@@ -3,6 +3,7 @@ import json
 from conftest import load_script
 
 gate = load_script("skills/rest-api-architect/scripts/gate.py")
+extract_openapi = load_script("skills/rest-api-architect/scripts/extract_openapi.py")
 
 
 FULL_CONVENTIONS = {
@@ -16,6 +17,13 @@ FULL_CONVENTIONS = {
 
 COMPLIANT_TEXT = """
 "/v1/orders":
+  "get":
+    "responses":
+      "200":
+        "content":
+          "application/json":
+            "schema":
+              "type": "array"
   "post":
     "parameters":
       - "name": "Idempotency-Key"
@@ -128,6 +136,73 @@ def test_checklist_never_silently_skips_a_dimension():
         "versioning.prefix_pattern", "idempotency.header", "naming.field_case",
         "naming.no_verbs_in_paths", "timestamps.format",
     }
+
+
+# --- Fehlalarme: Versionierung, Idempotency und Pagination ohne Voraussetzung ----
+#
+# gate.py hat keinen YAML-Parser (siehe Modulkopf) — die folgenden Fixtures sind bewusst
+# so roh wie ein echtes, unquotiertes YAML-Dokument, nicht wie das quotierte JSON-artige
+# COMPLIANT_TEXT oben, das aus einer früheren, zu engen Implementierung stammt.
+
+VERSIONING_ONLY_CONVENTIONS = {"versioning": {"prefix_pattern": "^/v[0-9]+/"}}
+
+UNQUOTED_YAML_TEXT = """
+paths:
+  /v1/users/{id}:
+    get:
+      operationId: get_user
+      responses:
+        "200":
+          description: ok
+"""
+
+
+def test_checklist_versioning_accepts_unquoted_yaml_path():
+    # Fehlalarm: gate.py:104 verlangte bislang ein Anführungszeichen direkt vor dem Pfad
+    # (hartkodiert, unabhängig vom conventions.json-Wert). Echtes YAML quotet Pfad-Schlüssel
+    # aber nicht zwingend (siehe assets/openapi-skeleton.yaml: "/v1/<ressourcen>:" unquotiert).
+    checks = {c["name"]: c for c in gate.run_checklist(UNQUOTED_YAML_TEXT, VERSIONING_ONLY_CONVENTIONS)}
+    assert checks["versioning.prefix_pattern"]["passed"] is True
+
+
+GET_ONLY_SINGLE_RESOURCE_TEXT = """
+paths:
+  /v1/users/{id}:
+    get:
+      operationId: get_user
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+"""
+
+
+def test_checklist_skips_idempotency_when_no_relevant_method_present():
+    # Fehlalarm: ein GET-only-Dokument ohne jede der in required_for_methods genannten
+    # Methoden hat keinen Ort, an dem ein Idempotency-Key stehen könnte — der Check darf
+    # nicht als "failed" gelten, sondern muss die fehlende Voraussetzung als "skipped" melden.
+    conventions = {"idempotency": {"header": "Idempotency-Key", "required_for_methods": ["POST"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(GET_ONLY_SINGLE_RESOURCE_TEXT, conventions)}
+    check = checks["idempotency.header"]
+    assert check.get("skipped") is True
+    assert check["passed"] is not False
+
+
+def test_checklist_skips_pagination_when_no_list_endpoint():
+    # Fehlalarm: ein einzelnes Ressourcen-GET (kein Array-Antwortschema) ist kein
+    # Listen-Endpoint — Cursor-Paginierung ist hier nicht anwendbar, ihr Fehlen also kein
+    # Verstoß. Beide Pagination-Checks müssen als "skipped" markiert sein.
+    conventions = {"pagination": {"request_params": ["cursor", "limit"], "response_fields": ["next_cursor"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(GET_ONLY_SINGLE_RESOURCE_TEXT, conventions)}
+    for name in ("pagination.request_params", "pagination.response_fields"):
+        assert checks[name].get("skipped") is True
+        assert checks[name]["passed"] is not False
 
 
 # --- Erfolgspfad: nur mit gemocktem subprocess getestet, nie mit echtem Werkzeug --
@@ -247,6 +322,26 @@ def test_format_report_contains_degradation_line_verbatim(tmp_path):
         assert check["name"] in text
 
 
+def test_format_report_marks_skipped_checks_as_skip_not_ok_or_fail(tmp_path):
+    # Report-Schema (Step 5): ein "skipped" Check darf im Report weder als bestanden noch
+    # als durchgefallen erscheinen, sonst verschwindet die Auslassung still.
+    conventions = {"idempotency": {"header": "Idempotency-Key", "required_for_methods": ["POST"]}}
+    openapi = tmp_path / "openapi.yaml"
+    openapi.write_text(GET_ONLY_SINGLE_RESOURCE_TEXT, encoding="utf-8")
+    report = gate.build_gate_report(
+        openapi, tmp_path / "ruleset.json", conventions, previous_path=None,
+        which=_which_factory(set()), run=_run_returning("[]"),
+    )
+    check = {c["name"]: c for c in report["checklist"]}["idempotency.header"]
+    assert check["skipped"] is True
+    text = gate.format_report(report)
+    assert "[SKIP] idempotency.header" in text
+    assert "[FAIL] idempotency.header" not in text
+    assert "[OK] idempotency.header" not in text
+    # Ein übersprungener Check darf das Gesamtergebnis nicht kippen.
+    assert report["checklist_ok"] is True
+
+
 # --- main() -------------------------------------------------------------------
 
 
@@ -279,3 +374,108 @@ def test_main_rejects_missing_openapi_file(tmp_path):
     conventions.write_text(json.dumps(FULL_CONVENTIONS), encoding="utf-8")
     rc = gate.main(["--openapi", str(tmp_path / "nope.yaml"), "--conventions", str(conventions), "--ruleset", str(tmp_path / "r.json")])
     assert rc == 2
+
+
+# --- Review-Befund 1: _document_has_method verlangte bislang, dass der Methoden-Key ------
+# allein bis Zeilenende steht. JSON-formatiertes OpenAPI ("post": { — z. B. von
+# extract_openapi.py erzeugt) und YAML mit Zeilenkommentar (post:   # ...) wurden dadurch
+# nicht als Methoden-Key erkannt, der Idempotency-Check faelschlich uebersprungen.
+
+
+def test_document_has_method_detects_json_style_key_with_brace():
+    text = '  "post": {\n    "operationId": "create_order"\n'
+    assert gate._document_has_method(text, "post") is True
+
+
+def test_document_has_method_detects_yaml_key_with_trailing_comment():
+    text = "  post:   # legt eine neue Order an\n    operationId: create_order\n"
+    assert gate._document_has_method(text, "post") is True
+
+
+def test_idempotency_check_fails_not_skips_for_json_style_post_without_header():
+    # Ohne Fix wird der "post"-Key in JSON-Form nicht erkannt -> Check wird faelschlich
+    # als "skipped" (Voraussetzung fehlt) statt als echter Verstoss gemeldet.
+    text = (
+        '"/v1/orders":\n'
+        '  "post":\n'
+        '    "operationId": "create_order"\n'
+    )
+    conventions = {"idempotency": {"header": "Idempotency-Key", "required_for_methods": ["POST"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(text, conventions)}
+    check = checks["idempotency.header"]
+    assert check["skipped"] is False
+    assert check["passed"] is False
+
+
+# --- Review-Befund 2: _document_has_list_endpoint kannte nur "type: array" als Signal ----
+# extract_openapi.py (Brownfield) erzeugt dieses Signal nie -- Responses tragen nur einen
+# "TODO: aus Code ergänzen"-Platzhalter. Pagination-Checks wurden im Brownfield-Ablauf
+# dauerhaft uebersprungen, auch bei echten Collection-Endpoints.
+
+
+def _brownfield_list_endpoint_text() -> str:
+    paths = {
+        "/v1/orders": {
+            "get": {
+                "operationId": "list_orders",
+                "x-verified": True,
+                "parameters": [],
+                "responses": {"200": {"description": "TODO: aus Code ergänzen"}},
+                "x-source": "app.py:10",
+            }
+        }
+    }
+    document = extract_openapi.build_openapi_document(paths, [], title="Test API")
+    return extract_openapi.dump_yaml(document)
+
+
+def test_document_has_list_endpoint_detects_brownfield_collection_path_without_array_type():
+    text = _brownfield_list_endpoint_text()
+    assert "array" not in text  # sanity: das alte Signal fehlt in echtem Brownfield-Output
+    assert gate._document_has_list_endpoint(text) is True
+
+
+def test_pagination_check_runs_not_skips_for_brownfield_collection_endpoint():
+    text = _brownfield_list_endpoint_text()
+    conventions = {"pagination": {"request_params": ["cursor", "limit"], "response_fields": ["next_cursor"]}}
+    checks = {c["name"]: c for c in gate.run_checklist(text, conventions)}
+    assert checks["pagination.request_params"]["skipped"] is False
+    assert checks["pagination.request_params"]["passed"] is False  # Params tatsaechlich fehlend
+
+
+def test_document_has_list_endpoint_still_false_for_single_resource_path():
+    # Kein Regressions-Fehlalarm: ein reines Einzel-Ressourcen-GET bleibt kein Listen-Endpoint.
+    assert gate._document_has_list_endpoint(GET_ONLY_SINGLE_RESOURCE_TEXT) is False
+
+
+# --- Review-Befund 3: _versioning_prefix_regex interpoliert ungeschuetzt -----------------
+# Bei einer Alternation bekommt nur der erste Zweig den Praefix, der zweite verlangt Spalte 0
+# und matcht in eingeruecktem YAML nie. Ein Muster mit Inline-Flag laesst re.compile mit
+# re.error abbrechen -- unabgefangen in main().
+
+
+def test_versioning_prefix_regex_alternation_second_branch_matches_indented_yaml():
+    conventions = {"versioning": {"prefix_pattern": "^/v[0-9]+/|^/api/v[0-9]+/"}}
+    text = "paths:\n  /api/v2/users:\n    get:\n      operationId: get_user\n"
+    checks = {c["name"]: c for c in gate.run_checklist(text, conventions)}
+    assert checks["versioning.prefix_pattern"]["passed"] is True
+
+
+def test_versioning_invalid_regex_reported_as_failed_check_not_uncaught_exception():
+    conventions = {"versioning": {"prefix_pattern": "(?i)^/V[0-9]+/"}}
+    text = "paths:\n  /v1/users:\n"
+    checks = {c["name"]: c for c in gate.run_checklist(text, conventions)}
+    check = checks["versioning.prefix_pattern"]
+    assert check["passed"] is False
+    assert check["skipped"] is False
+
+
+def test_main_survives_invalid_versioning_regex_and_reports_violation(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate.shutil, "which", _which_factory(set()))
+    openapi = tmp_path / "openapi.yaml"
+    openapi.write_text(COMPLIANT_TEXT, encoding="utf-8")
+    conventions = tmp_path / "conventions.json"
+    conventions.write_text(json.dumps({"versioning": {"prefix_pattern": "(?i)^/V[0-9]+/"}}), encoding="utf-8")
+
+    rc = gate.main(["--openapi", str(openapi), "--conventions", str(conventions), "--ruleset", str(tmp_path / "r.json")])
+    assert rc == 1
