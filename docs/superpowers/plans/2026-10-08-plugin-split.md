@@ -344,7 +344,7 @@ und Task 9 rot.
 - Consumes: `token:skill-outside-any-plugin-is-reported`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt** — Marketplace: drei Einträge mit Root-Quelle und
+- [x] **Step 1: Abschnitt** — Marketplace: drei Einträge mit Root-Quelle und
       `skills`-Liste, nur der CLI-Weg ist abgedeckt, Plugins laden in Cloud-Sessions
       nicht, Namensraum `cc-dev:`; in fremden Repos laufen die Skripte von 9 der 10
       Skills in `cc-dev` und 4 der 6 in `cc-knowledge` nicht, weil die Pfade relativ zum
