@@ -140,8 +140,9 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       überschrittene Schwelle; Ausgabeform mit `hookEventName` `UserPromptSubmit` und
       `additionalContext`; Wortlaut als Feststellung mit `[setup-user]` am Anfang;
       Aufräumen nach 24 Stunden Änderungszeit.
-- [ ] **Step 4: Prüfen** — jede Datei mit Kopfzeile; `lint_skill.py skills/setup-user`
-      meldet für `asset-headers` keinen Befund aus `references/`. Commit.
+- [ ] **Step 4: Prüfen** — References tragen wie im ganzen Repo keine Kopfzeile, sie
+      sind Doktrin, kein erzeugtes Artefakt; jede Datei unter 200 Zeilen, die drei
+      Tokens wörtlich vorhanden. Commit.
 
 ### Task 4: context_hint.py
 
