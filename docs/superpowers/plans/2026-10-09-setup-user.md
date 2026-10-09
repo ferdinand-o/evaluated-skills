@@ -117,14 +117,14 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: (nichts Neues)
 - Produces: `token:setup-user-plan`, `token:hookEventName`, `token:limit-hints.json`
 
-- [ ] **Step 1: plan-format.md** — Aufbau von `plan.md` (Kopfzeile, Ansicht, Codeblock mit
+- [x] **Step 1: plan-format.md** — Aufbau von `plan.md` (Kopfzeile, Ansicht, Codeblock mit
       Info-String `json setup-user-plan`); Felder des Blocks: `schema`, `python`,
       `answers`, `operations` (je `path` relativ zu `<config-dir>`, `action` aus
       `create`, `merge`, `copy`, `content` oder `patch`), `base` (je Pfad SHA-256 des
       LF-normalisierten Bestands mit `<config-dir>` statt absolutem Pfad, `null` wenn
       fehlend), `hash`; Hash = SHA-256 über `json.dumps(block ohne hash, sort_keys=True,
       ensure_ascii=False, separators=(",", ":"))`.
-- [ ] **Step 2: settings-merge.md** — welche Schlüssel `apply` mischt (`statusLine.command`,
+- [x] **Step 2: settings-merge.md** — welche Schlüssel `apply` mischt (`statusLine.command`,
       `hooks.UserPromptSubmit`, auf Bestätigung `permissions.deny`), welche es nie
       anfasst (alle anderen, in Abschnitt A auch `enabledPlugins`); Identität eigener
       Einträge über die Suffixe `setup-user/runtime/context_hint.py` und
@@ -132,7 +132,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       ASCII-Escapes, Schlüsselreihenfolge des Bestands, LF, Zeilenumbruch am Ende);
       Backup-Namen `JJJJMMTT-hhmmss` mit `-2` bei Kollision; Reihenfolge `runtime/`,
       `thresholds.json`, CLAUDE.md und Regeln, zuletzt `settings.json`.
-- [ ] **Step 3: thresholds.md** — Schwellen 60 und 80 % Kontext, 80 % fünf Stunden, 85 %
+- [x] **Step 3: thresholds.md** — Schwellen 60 und 80 % Kontext, 80 % fünf Stunden, 85 %
       sieben Tage; Gültigkeit (Kontext je `session_id`, Limit solange `resets_at_epoch`
       in der Zukunft); Merker in `state/hints-<session_id>.json` und
       `state/limit-hints.json` mit Schlüssel aus Fenster, Schwelle und
@@ -140,7 +140,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       überschrittene Schwelle; Ausgabeform mit `hookEventName` `UserPromptSubmit` und
       `additionalContext`; Wortlaut als Feststellung mit `[setup-user]` am Anfang;
       Aufräumen nach 24 Stunden Änderungszeit.
-- [ ] **Step 4: Prüfen** — References tragen wie im ganzen Repo keine Kopfzeile, sie
+- [x] **Step 4: Prüfen** — References tragen wie im ganzen Repo keine Kopfzeile, sie
       sind Doktrin, kein erzeugtes Artefakt; jede Datei unter 200 Zeilen, die drei
       Tokens wörtlich vorhanden. Commit.
 
