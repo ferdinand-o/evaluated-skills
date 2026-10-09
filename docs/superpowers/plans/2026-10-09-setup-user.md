@@ -295,13 +295,13 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:setup-user-plan`
 - Produces: `token:UserPromptSubmit`
 
-- [ ] **Step 1: Schreiben** — CLAUDE.md-Gerüst ≤ 40 Zeilen, je Regel ≤ 20 Zeilen,
+- [x] **Step 1: Schreiben** — CLAUDE.md-Gerüst ≤ 40 Zeilen, je Regel ≤ 20 Zeilen,
       zusammen ≤ 120, jede mit Kopfzeile in Zeile 1; `verification.md` mit „keine
       Erfolgsmeldung ohne Beleg" und „Review-Befunde vor dem Umsetzen nachmessen";
       `context.md` sagt, was `[setup-user]`-Hinweise bedeuten; das Fragment trägt den
       Hook mit `<python> "<config-dir>/setup-user/runtime/context_hint.py" || true`;
       `known-statusline-hashes.json` mit `_meta` und leerer Liste, Task 5 füllt sie.
-- [ ] **Step 2: Prüfen** — `wc -l` je Datei; ein Test in `tests/test_setup_user_fixtures.py`
+- [x] **Step 2: Prüfen** — `wc -l` je Datei; ein Test in `tests/test_setup_user_fixtures.py`
       ist erst Task 11; hier `lint_skill.py skills/setup-user` ohne Befund für
       `asset-headers`. Commit.
 
