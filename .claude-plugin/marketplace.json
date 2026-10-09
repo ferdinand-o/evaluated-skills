@@ -28,6 +28,7 @@
         "./skills/handoff",
         "./skills/rest-api-architect",
         "./skills/review-context",
+        "./skills/setup-user",
         "./skills/sql-schema-architect",
         "./skills/subagent-dev",
         "./skills/testing-strategy"
