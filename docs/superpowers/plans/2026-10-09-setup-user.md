@@ -293,7 +293,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 
 **Interfaces:**
 - Consumes: `token:setup-user-plan`
-- Produces: `token:context_hint.py || true`
+- Produces: `token:UserPromptSubmit`
 
 - [ ] **Step 1: Schreiben** — CLAUDE.md-Gerüst ≤ 40 Zeilen, je Regel ≤ 20 Zeilen,
       zusammen ≤ 120, jede mit Kopfzeile in Zeile 1; `verification.md` mit „keine
