@@ -156,3 +156,110 @@ def test_plan_refuses_missing_dir_and_broken_settings(tmp_path, assets, capsys):
     (cfg / "settings.json").write_text("{kaputt", encoding="utf-8")
     assert inspect.main(["--config-dir", str(cfg)]) == 2
     assert not (cfg / "setup-user" / "plan.md").exists()
+
+
+# --- apply_config.py ----------------------------------------------------------------
+
+apply = load_script("skills/setup-user/scripts/apply_config.py")
+
+
+def plan_for(cfg: Path, answers: dict | None = None, python: str | None = None) -> Path:
+    block = inspect.build_plan(cfg, answers or {}, python)
+    out = cfg / "setup-user" / "plan.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(inspect.render_plan(block, cfg), encoding="utf-8")
+    return out
+
+
+def without_bookkeeping(snap: dict) -> dict:
+    return {k: v for k, v in snap.items() if not k.startswith("setup-user/backups/") and k != "setup-user/plan.md"}
+
+
+def test_hash_functions_agree(tmp_path, assets):
+    for name, settings in (("a", {}), ("b", {"spinnerTipsEnabled": False}), ("c", {"statusLine": {"command": "x.sh"}})):
+        block = inspect.build_plan(cfg_with(tmp_path, name, settings), {"tone": "ä ö ü"}, None)
+        assert apply.canonical_hash(block) == inspect.plan_hash(block) == block["hash"]
+
+
+def test_apply_merges_and_substitutes_config_dir(tmp_path, assets):
+    cfg = cfg_with(tmp_path, "cfg", {"spinnerTipsEnabled": False})
+    result = apply.apply_plan(plan_for(cfg), cfg)
+    settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    posix = cfg.resolve().as_posix()
+    assert settings["spinnerTipsEnabled"] is False
+    assert settings["statusLine"] == {"type": "command", "command": f'python3 "{posix}/setup-user/runtime/statusline.py"'}
+    hook = settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+    assert hook == f'python3 "{posix}/setup-user/runtime/context_hint.py" || true'
+    assert (cfg / "setup-user" / "runtime" / "context_hint.py").read_text(encoding="utf-8") == STUB_HINT
+    assert (cfg / "CLAUDE.md").read_text(encoding="utf-8").startswith("<!-- skill: setup-user")
+    assert json.loads((cfg / "setup-user" / "thresholds.json").read_text(encoding="utf-8"))["_meta"]["skill"] == "setup-user"
+    assert result["backup"] is not None
+    assert (Path(result["backup"]) / "settings.json").read_text(encoding="utf-8").count("spinnerTipsEnabled") == 1
+
+
+def test_apply_is_idempotent(tmp_path, assets):
+    cfg = cfg_with(tmp_path, "cfg", {"spinnerTipsEnabled": False})
+    apply.apply_plan(plan_for(cfg), cfg)
+    first = without_bookkeeping(snapshot(cfg))
+    apply.apply_plan(plan_for(cfg), cfg)
+    assert without_bookkeeping(snapshot(cfg)) == first
+    settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    assert len(settings["hooks"]["UserPromptSubmit"]) == 1, "kein zweiter Hook-Eintrag"
+
+
+@pytest.mark.parametrize("change", ["plan", "state"])
+def test_apply_refuses_changed_plan_or_state(tmp_path, assets, change):
+    cfg = cfg_with(tmp_path, "cfg", {"spinnerTipsEnabled": False})
+    plan = plan_for(cfg)
+    if change == "plan":
+        plan.write_text(plan.read_text(encoding="utf-8").replace('"knapp und sachlich"', '"anders"'), encoding="utf-8")
+    else:
+        (cfg / "settings.json").write_text(json.dumps({"spinnerTipsEnabled": True}), encoding="utf-8")
+    before = snapshot(cfg)
+    with pytest.raises(apply.ApplyError):
+        apply.apply_plan(plan, cfg)
+    assert snapshot(cfg) == before
+
+
+def test_apply_requires_explicit_existing_config_dir(tmp_path, assets, monkeypatch, capsys):
+    cfg = cfg_with(tmp_path, "cfg", {})
+    plan = plan_for(cfg)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    assert apply.main(["--plan", str(plan)]) == 2, "$CLAUDE_CONFIG_DIR zählt nicht als ausdrücklich"
+    assert apply.main(["--plan", str(plan), "--config-dir", str(tmp_path / "fehlt")]) == 2
+    assert not (tmp_path / "fehlt").exists()
+    assert not (cfg / "CLAUDE.md").exists()
+    assert apply.main(["--plan", str(plan), "--config-dir", str(cfg)]) == 0
+
+
+def test_apply_writes_settings_last(tmp_path, assets):
+    cfg = cfg_with(tmp_path, "cfg", {"spinnerTipsEnabled": False})
+    plan = plan_for(cfg)
+    (cfg / "setup-user" / "runtime").write_text("ich bin eine Datei, kein Ordner", encoding="utf-8")
+    before = (cfg / "settings.json").read_bytes()
+    with pytest.raises(apply.ApplyError):
+        apply.apply_plan(plan, cfg)
+    assert (cfg / "settings.json").read_bytes() == before
+
+
+def test_apply_keeps_foreign_keys_and_statusline_options(tmp_path, assets):
+    foreign_hook = {"hooks": [{"type": "command", "command": "echo fremd"}]}
+    settings = {
+        "model": "opus",
+        "statusLine": {"type": "command", "command": "python3 old.py", "padding": 2, "refreshInterval": 5},
+        "hooks": {"UserPromptSubmit": [foreign_hook], "Stop": [{"hooks": [{"type": "command", "command": "x"}]}]},
+    }
+    cfg = cfg_with(tmp_path, "cfg", settings, {"old.py": STUB_STATUSLINE})
+    settings["statusLine"]["command"] = f"python3 {cfg}/old.py"
+    (cfg / "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    result = apply.apply_plan(plan_for(cfg), cfg)
+    apply.apply_plan(plan_for(cfg), cfg)
+    after = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    assert after["model"] == "opus" and after["hooks"]["Stop"] == settings["hooks"]["Stop"]
+    assert after["statusLine"]["padding"] == 2 and after["statusLine"]["refreshInterval"] == 5
+    assert after["statusLine"]["command"].endswith('setup-user/runtime/statusline.py"')
+    groups = after["hooks"]["UserPromptSubmit"]
+    assert groups[0] == foreign_hook and len(groups) == 2
+    assert json.loads((Path(result["backup"]) / "settings.json").read_text(encoding="utf-8")) == settings
+    text = (cfg / "settings.json").read_text(encoding="utf-8")
+    assert text.endswith("\n") and "\r" not in text and text.startswith('{\n  "model"')
