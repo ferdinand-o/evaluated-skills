@@ -314,13 +314,13 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `fn:build_plan(config_dir, answers, python)`, `fn:apply_plan(plan_path, config_dir)`, `fn:verify(config_dir)`, `token:CLAUDE_CODE_ONLY`
 - Produces: `token:angewendet und geprüft`
 
-- [ ] **Step 1: Frontmatter** — `name`, Description mit Triggern und Abgrenzung gegen
+- [x] **Step 1: Frontmatter** — `name`, Description mit Triggern und Abgrenzung gegen
       `/statusline` und setup-repo, ohne `<…>`, `disable-model-invocation: true`.
-- [ ] **Step 2: Rumpf** — Eiserne Regel, Modi plan, apply, check, Interview mit höchstens
+- [x] **Step 2: Rumpf** — Eiserne Regel, Modi plan, apply, check, Interview mit höchstens
       drei Fragen, Übergabesätze „angewendet und geprüft, wirkt ab der nächsten Session"
       und „angewendet, ungeprüft — Grund", Contract, Abgrenzung mit **handoff** fett und
       skill-forge unfett, Skripte über `${CLAUDE_SKILL_DIR}`.
-- [ ] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-user` ohne
+- [x] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-user` ohne
       Befund außer `report-section`, `routing`, `neighbors` und `plugin-membership`, die
       Task 12 bis 14 schließen. Commit.
 
