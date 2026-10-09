@@ -40,6 +40,9 @@ STATUSES = ("pass", "finding", "hint", "unchecked")
 
 FRONTMATTER_ALLOWED = frozenset({"name", "description", "license", "version", "metadata", "allowed-tools"})
 FRONTMATTER_REQUIRED = ("name", "description")
+# Claude-Code-spezifische Skills, die nur per Slash-Befehl laufen (Spec 21, 22): Nur sie
+# dürfen `disable-model-invocation` tragen, weil die Description dann nicht im Kontext steht.
+CLAUDE_CODE_ONLY = frozenset({"setup-user", "setup-repo"})
 PROCESS_VERBS = ("runs", "builds", "generates", "produces", "collects", "renders",
                  "scans", "creates", "writes", "tracks", "enforces", "classifies")
 PROCESS_VERB_RE = re.compile(r"\b(" + "|".join(PROCESS_VERBS) + r")\b", re.IGNORECASE)
@@ -231,7 +234,8 @@ def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     if fields is None:
         return RuleResult("frontmatter", "finding", "kein Frontmatter (--- … ---) am Dateianfang")
     missing = [k for k in FRONTMATTER_REQUIRED if not fields.get(k)]
-    extra = sorted(set(fields) - FRONTMATTER_ALLOWED)
+    allowed = FRONTMATTER_ALLOWED | ({"disable-model-invocation"} if skill_dir.name in CLAUDE_CODE_ONLY else set())
+    extra = sorted(set(fields) - allowed)
     invalid = []
     for line in _read(md).split("\n")[1:]:
         if line.strip() == "---":

@@ -594,3 +594,15 @@ def test_lint_output_names_sync_check_when_script_exists(tmp_path, capsys):
     (root / "scripts" / "sync_skills.py").write_text("# stub\n", encoding="utf-8")
     ls.main([str(skill), "--repo-root", str(root)])
     assert "sync_skills.py --check" in capsys.readouterr().out
+
+
+# --- CLAUDE_CODE_ONLY (Spec 21) ----------------------------------------------------
+
+def test_disable_model_invocation_only_for_claude_code_only(tmp_path):
+    md = GOOD_SKILL_MD.replace("name: note-tag\n", "name: setup-user\ndisable-model-invocation: true\n")
+    root, skill = make_repo(tmp_path / "a", md, name="setup-user")
+    assert status_of(ls.lint_skill(skill, root), "frontmatter")[0] == "pass"
+    md = GOOD_SKILL_MD.replace("name: note-tag\n", "name: note-tag\ndisable-model-invocation: true\n")
+    root, skill = make_repo(tmp_path / "b", md)
+    status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
+    assert status == "finding" and "disable-model-invocation" in reason
