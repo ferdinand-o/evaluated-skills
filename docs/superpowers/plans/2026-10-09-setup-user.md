@@ -267,18 +267,18 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `fn:hint_for(payload, config_dir, now)`, `token:setup-user: statusline`
 - Produces: `fn:verify(config_dir)`
 
-- [ ] **Step 1: Tests schreiben** — `test_verify_runs_in_sandbox_only` (keine neue oder
+- [x] **Step 1: Tests schreiben** — `test_verify_runs_in_sandbox_only` (keine neue oder
       geänderte Datei außerhalb des Temp-Verzeichnisses, auch nicht unter `HOME`),
       `test_verify_skips_foreign_commands` („ungeprüft (fremd, nicht ausgeführt)"),
       `test_verify_flags_silent_hook_nonzero_exit_and_empty_statusline`,
       `test_verify_without_bash_is_unchecked`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_user_verify.py`.
-- [ ] **Step 3: Implementieren** — Befehle aus `settings.json` lesen, Skriptpfad
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_user_verify.py`.
+- [x] **Step 3: Implementieren** — Befehle aus `settings.json` lesen, Skriptpfad
       auflösen, nur Dateien mit Asset-Hash ausführen, über `bash -c` mit
       `CLAUDE_CONFIG_DIR`, `HOME`, `USERPROFILE` auf ein Temp-Verzeichnis und 10 Sekunden
       Timeout; Beispielzustand oberhalb einer Schwelle einspielen; Befunde als Liste.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 9: Assets
 
