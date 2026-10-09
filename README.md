@@ -27,7 +27,8 @@ und Plugin zusammen:
   rest-api-architect, review-context, sql-schema-architect, subagent-dev,
   testing-strategy.
 - `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
-  aus** (`defaultEnabled: false`): enterprise-ui, motion-landing, ui-architect. Je
+  aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
+  ui-architect. Je
   Frontend-Repo in dessen `.claude/settings.json` einschalten, mit
   `"enabledPlugins": {"cc-ui@cc-skills": true}`; die Projekt-Einstellung gewinnt
   gegen das `false`, das die Installation in die User-Settings schreibt.

@@ -104,9 +104,15 @@ Anführungszeichen, gemessen wie im Problem).
 | Plugin | Skills | Zeichen | `defaultEnabled` |
 | --- | --- | --- | --- |
 | `cc-dev` | architecture-map, debug-ledger, dev-report, feature-spec, handoff, rest-api-architect, review-context, sql-schema-architect, subagent-dev, testing-strategy | 6 318 | true |
-| `cc-ui` | enterprise-ui, motion-landing, ui-architect | 1 685 | false — an je Frontend-Repo |
+| `cc-ui` | enterprise-ui, mobile-audit, motion-landing, ui-architect | 2 461 | false — an je Frontend-Repo |
 | `cc-knowledge` | explain, exercise-forge, human-prose, learning-coach, verified-research, visual-summary | 4 285 | true |
 | kein Plugin | impl-plan, skill-forge (1 179 Zeichen) — nur für Specs dieser Sammlung, Projekt-Kopie; cad-parts — braucht einen stl-cad-server | — | — |
+
+mobile-audit kam mit PR #17 nach dieser Spec auf main und beim Merge am 2026-10-09 nach
+`cc-ui`: Sie prüft Webseiten mobil, teilt `references/mobile.md` mit den drei UI-Skills
+und wird mit ihnen je Frontend-Repo an- und abgeschaltet. Die Zeichen im Problem sind der
+Stand vor dem Merge; danach hat `cc-dev` 6 305 Zeichen, weil zwei Descriptions kürzer
+wurden.
 
 Jeder Eintrag hat `source: "./"`, `strict: false`, eine sortierte `skills`-Liste mit
 `./skills/<name>`, kein `version` und keine `dependencies`. Laut Doku überschreibt eine

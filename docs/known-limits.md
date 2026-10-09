@@ -1684,7 +1684,7 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   Projekt-Kopien unter `.claude/skills/`.
 - **Skriptpfade in fremden Repos.** Die SKILL.md-Dateien rufen ihre Skripte über
   `skills/<name>/scripts/…` relativ zum Arbeitsverzeichnis auf. In einem fremden Repo
-  laufen deshalb die Skripte von 9 der 10 Skills in `cc-dev`, 1 der 3 in `cc-ui` und 4
+  laufen deshalb die Skripte von 9 der 10 Skills in `cc-dev`, 1 der 4 in `cc-ui` und 4
   der 6 in `cc-knowledge` nicht; das Plugin liefert dort Doktrin ohne lauffähiges
   Skript. Die Umstellung auf `${CLAUDE_SKILL_DIR}` ist eine eigene Folgespec.
 - **Projekt-Kopien driften nur bis zum Sync-Check.** `scripts/sync_skills.py --check`

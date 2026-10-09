@@ -36,7 +36,7 @@
     {
       "name": "cc-ui",
       "source": "./",
-      "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung. Standardmäßig aus, je Frontend-Repo einschalten.",
+      "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung, Mobil-Prüfung. Standardmäßig aus, je Frontend-Repo einschalten.",
       "repository": "https://github.com/ferdinand-o/cc-skills",
       "keywords": [
         "skills",
@@ -47,6 +47,7 @@
       "defaultEnabled": false,
       "skills": [
         "./skills/enterprise-ui",
+        "./skills/mobile-audit",
         "./skills/motion-landing",
         "./skills/ui-architect"
       ]

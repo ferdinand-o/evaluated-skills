@@ -160,11 +160,15 @@ def action_resolve(repo: Path, ledger_rel: str, cause: str) -> None:
     idx = index_path(repo)
     content = idx.read_text(encoding="utf-8")
 
-    if ledger_rel in content:
+    # Link-Ziel relativ zu INDEX.md, nicht zum Repo-Wurzelverzeichnis: INDEX.md liegt
+    # selbst in docs/debugging/, ein repo-relativer Pfad löste zu docs/debugging/docs/
+    # debugging/<datei>.md auf und zeigte ins Leere.
+    link_target = Path(ledger_rel).name
+    if f"]({link_target})" in content:
         print(f"INDEX.md verweist bereits auf {ledger_rel}, nichts geändert.")
         return
 
-    entry = f"- {symptom} → {cause} ([{Path(ledger_rel).name}]({ledger_rel}))\n"
+    entry = f"- {symptom} → {cause} ([{link_target}]({link_target}))\n"
     if not content.endswith("\n"):
         content += "\n"
     content += entry
