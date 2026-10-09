@@ -383,7 +383,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:anti-ceremony-check-on-aligned-config-changes-nothing`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt** — `## setup-user`: was auf Windows ungemessen ist (`|| true`,
+- [x] **Step 1: Abschnitt** — `## setup-user`: was auf Windows ungemessen ist (`|| true`,
       Interpreter, Vererbung von `CLAUDE_CONFIG_DIR`, `os.replace` bei offenem Leser),
       dass die Statusline bei `claude -p` nicht läuft, dass Hinweise nur entstehen und
       schweigen, ihre Wirkung aber ungemessen ist, dass Abschnitt B fehlt. Commit.
