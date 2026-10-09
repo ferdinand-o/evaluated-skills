@@ -1705,8 +1705,39 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   Bau beobachtet: `check_allowlist` liest `git diff --name-only` mit `core.quotepath`,
   `specs/Spec 00 – skill-foundation.md` kommt dann als `"specs/Spec 00 \342\200\223 …"`
   zurück und passt auf keinen Eintrag. Umgangen mit
-  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false`; der Fix
-  gehört nach subagent-dev.
+  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false`. Das
+  hilft nur für Committetes: Für uncommittete Dateien liest `check_allowlist`
+  `git status --porcelain`, das Pfade mit Leerzeichen in Anführungszeichen setzt, und
+  entfernt sie nicht (beim Bau von Spec 21 gesehen). Umweg dort: erst committen, dann
+  gegen die Basis prüfen. Der Fix (`-z` für beide Aufrufe) gehört nach subagent-dev.
+
+## setup-user
+
+Gebaut nach Spec 21, Abschnitt A (2026-10-09). Tier 1: `inspect_config.py`,
+`apply_config.py`, `verify_install.py`, dazu zwei Laufzeitskripte im Config-Verzeichnis.
+Was ungemessen bleibt und wo es beißt:
+
+- **Windows ist ungemessen.** Ob `|| true` im Hook-Kommando dort greift, ob `python` oder
+  `py -3` der richtige Interpreter ist, ob Claude Code `CLAUDE_CONFIG_DIR` an das
+  Statusline-Kommando vererbt und ob `os.replace` bei offenem Leser scheitert, misst erst
+  der erste echte Lauf auf dem Windows-PC. Die Skripte lesen stdin als UTF-8-Bytes und
+  schreiben stdout als UTF-8, unabhängig von der Codepage.
+- **Bei `claude -p` läuft die Statusline nicht** (mit CLI 2.1.292 gemessen). Kopflose
+  Läufe bekommen deshalb nie einen Kontext-Hinweis; Limit-Hinweise nur, solange ein
+  interaktiver Lauf den Cache frisch hält.
+- **Ob Hinweise das Verhalten ändern, misst nichts.** Tests messen, dass der Hook meldet
+  und schweigt; kein Eval kann einen Kontextstand von 60 % herbeiführen.
+- **Hook-Änderungen wirken ab der nächsten Session.** Ob eine mitten in der Session
+  geänderte `settings.json` sofort greift, ist nicht gemessen; die Übergabe sagt es so.
+- **Die Prüfung führt nur Asset-Befehle aus.** Eine fremde Statusline bleibt
+  „ungeprüft (fremd, nicht ausgeführt)", auch wenn sie richtig wäre. `verify_install.py`
+  braucht `bash`; ohne heißt das Ergebnis „ungeprüft — keine bash".
+- **Abschnitt B fehlt.** `route_check.py`, die Lückentabelle als Daten, das Plugin-Profil
+  in `enabledPlugins` und der Eval `superpowers-sessionstart-is-reported` kommen erst nach
+  Spec 23; bis dahin fasst setup-user `enabledPlugins` nicht an.
+- **Die Statusline-Vorlage stammt vom Nutzer.** Asset und Anzeige-Test bauen auf seiner
+  Fassung vom 2026-10-07 auf (`tests/fixtures/setup-user/`); ohne sie gibt es kein Asset
+  und keinen Anzeige-Vergleich.
 
 ## impl-plan
 
