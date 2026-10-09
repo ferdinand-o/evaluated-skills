@@ -154,7 +154,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:limit-hints.json`, `token:hookEventName`
 - Produces: `fn:hint_for(payload, config_dir, now)`, `fn:main()`
 
-- [ ] **Step 1: Tests schreiben** — Zustand und Cache werden im Test von Hand in ein
+- [x] **Step 1: Tests schreiben** — Zustand und Cache werden im Test von Hand in ein
       Temp-Config-Verzeichnis geschrieben: `test_hint_once_and_rearms` (zweiter Prompt
       über derselben Schwelle schweigt, nach Absinken und erneutem Überschreiten wieder
       ein Hinweis, neues Limitfenster wieder scharf), `test_hint_one_text_per_prompt_highest_threshold`
@@ -165,15 +165,15 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       `test_hint_output_shape` (stdout genau ein JSON-Objekt mit `hookEventName` und
       `additionalContext`, Text beginnt mit `[setup-user]`); Aufruf als Unterprozess mit
       `CLAUDE_CONFIG_DIR` auf `tmp_path`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_user_hint.py`.
-- [ ] **Step 3: Implementieren** — `hint_for` ist rein bis auf das Lesen und Schreiben
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_user_hint.py`.
+- [x] **Step 3: Implementieren** — `hint_for` ist rein bis auf das Lesen und Schreiben
       der Merker; `main` liest `sys.stdin.buffer`, dekodiert UTF-8 mit Ersetzung, ruft
       `hint_for` in `try/except BaseException`, gibt bei Text genau ein JSON-Objekt aus
       und endet immer mit 0; Config-Verzeichnis aus `CLAUDE_CONFIG_DIR`, sonst drei
       Ebenen über der Datei, sonst `~/.claude`; Merker atomar über Temp-Datei und
       `os.replace` mit drei Versuchen.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 5: Statusline-Asset
 
