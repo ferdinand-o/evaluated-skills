@@ -95,16 +95,16 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: (nichts Neues)
 - Produces: `token:CLAUDE_CODE_ONLY`
 
-- [ ] **Step 1: Test schreiben** — `test_disable_model_invocation_only_for_claude_code_only`:
+- [x] **Step 1: Test schreiben** — `test_disable_model_invocation_only_for_claude_code_only`:
       `make_repo` mit `name: setup-user` und `disable-model-invocation: true` →
       `frontmatter` `pass`; dieselbe Zeile in `note-tag` → `finding` mit dem Schlüssel im
       Grund.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_skill_forge_lint.py -k claude_code_only`.
-- [ ] **Step 3: Implementieren** — `CLAUDE_CODE_ONLY = frozenset({"setup-user", "setup-repo"})`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_skill_forge_lint.py -k claude_code_only`.
+- [x] **Step 3: Implementieren** — `CLAUDE_CODE_ONLY = frozenset({"setup-user", "setup-repo"})`;
       `rule_frontmatter` erlaubt `disable-model-invocation` nur, wenn der Ordnername in
       der Liste steht.
-- [ ] **Step 4: Grün sehen**, volle Suite; `python scripts/sync_skills.py` und `--check`.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite; `python scripts/sync_skills.py` und `--check`.
+- [x] **Step 5: Commit.**
 
 ### Task 3: References
 
