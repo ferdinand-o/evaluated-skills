@@ -216,7 +216,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:setup-user-plan`
 - Produces: `fn:build_plan(config_dir, answers, python)`, `fn:plan_hash(block)`, `fn:render_plan(block, config_dir)`
 
-- [ ] **Step 1: Tests schreiben** — `test_plan_is_path_and_eol_neutral` (dasselbe
+- [x] **Step 1: Tests schreiben** — `test_plan_is_path_and_eol_neutral` (dasselbe
       Verzeichnis an zwei Orten, einmal mit CRLF-Bestand → gleicher Hash; andere
       Kopfzeile → gleicher Hash), `test_plan_classifies_statusline` (Kennzeile oder
       bekannter Hash → umstellen, keine → Asset, fremde → bleibt mit Satz
@@ -224,13 +224,13 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       (Snapshot des Config-Verzeichnisses vorher und nachher; nur `setup-user/plan.md`
       ist neu), `test_plan_resolves_python` (aus vorhandenem `statusLine`-Kommando, sonst
       `--python`, sonst `python3`; steht im Block).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_user_apply.py -k plan`.
-- [ ] **Step 3: Implementieren** — Bestandsaufnahme, Interview-Antworten aus
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_user_apply.py -k plan`.
+- [x] **Step 3: Implementieren** — Bestandsaufnahme, Interview-Antworten aus
       `--answers <json>` in CLAUDE.md und Regeln einsetzen, Operationen nach
       `references/settings-merge.md`, Block und Hash nach `references/plan-format.md`,
       Ansicht mit Diff; erste Ausgabezeile nennt das aufgelöste Verzeichnis.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 7: apply_config.py
 
