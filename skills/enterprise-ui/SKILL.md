@@ -61,6 +61,7 @@ Read the reference before doing the work — do not reconstruct from memory.
 | Charts / data-viz | `references/charts.md` |
 | Motion / transitions | `references/motion.md` |
 | Accessibility floor | `references/a11y-floor.md` |
+| Anything that also ships to phones (i.e. everything on the web) | `references/mobile.md` — then verify with the `mobile-audit` skill |
 
 ## A note on fonts
 

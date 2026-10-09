@@ -39,6 +39,8 @@ und niemand merkt mehr, welche Version gilt.
 
 ## Szenen-Grammatik
 
+**Mobil ist der Regelfall, nicht die Variante.** Eine Landing Page wird ueberwiegend auf Telefonen gesehen: Vor der Choreografie gilt das Handwerk aus `references/mobile.md` (schmal zuerst, `dvh/svh` statt `100vh`, Safe-Areas, kein Hover-only-Pfad), und nach dem Bauen prueft die `mobile-audit`-Skill, ob es gehalten hat.
+
 | Typ | Technik zuerst | Demo | Rezept |
 | --- | --- | --- | --- |
 | hero-reveal | CSS Scroll-Driven / Load-Orchestrierung | ja | `references/scenes/hero-reveal.md` |

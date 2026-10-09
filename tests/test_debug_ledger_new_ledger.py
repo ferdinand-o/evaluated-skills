@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 import pytest
 
 from conftest import load_script
@@ -172,7 +175,10 @@ def test_action_resolve_appends_index_entry(tmp_path):
     index_text = (tmp_path / "docs" / "debugging" / "INDEX.md").read_text(encoding="utf-8")
     assert "Login hängt beim Start" in index_text
     assert "Cache-Key kollidierte zwischen zwei Layern" in index_text
-    assert rel in index_text
+    # Der Dateiname, nicht der repo-relative Pfad: INDEX.md liegt selbst in
+    # docs/debugging/, ein repo-relativer Link zeigte von dort aus ins Leere
+    # (Testlauf-Fund 2026-08-21). Diese Assertion hatte den Defekt festgeschrieben.
+    assert Path(rel).name in index_text
 
 
 def test_action_resolve_is_idempotent(tmp_path, capsys):
@@ -277,3 +283,36 @@ def test_main_escalate_end_to_end(tmp_path, capsys):
 def test_main_escalate_missing_ledger_returns_error_code(tmp_path):
     rc = new_ledger.main(["--escalate", "docs/debugging/nope.md", "--repo", str(tmp_path)])
     assert rc == 1
+
+
+# --- INDEX-Verlinkung ------------------------------------------------------------
+#
+# Testlauf-Fund (2026-08-21): --resolve schrieb den Link-Zielpfad repo-root-relativ
+# ('docs/debugging/<datei>.md'), obwohl INDEX.md selbst in docs/debugging/ liegt. Der
+# Link löste damit zu 'docs/debugging/docs/debugging/<datei>.md' auf und zeigte ins
+# Leere — das Archiv war nur noch über Textsuche benutzbar.
+
+
+def _resolved_index(tmp_path):
+    new_ledger.action_new(
+        tmp_path, symptom="Login hängt", repro="pytest -x", expected="ok", observed="haengt",
+        slug="login", date_str="2026-08-21",
+    )
+    ledger_rel = "docs/debugging/2026-08-21-login.md"
+    new_ledger.action_resolve(tmp_path, ledger_rel, cause="Session-Cookie fehlte")
+    return tmp_path / "docs" / "debugging" / "INDEX.md", ledger_rel
+
+
+def test_index_link_resolves_relative_to_the_index_file(tmp_path):
+    index, ledger_rel = _resolved_index(tmp_path)
+    link_target = re.search(r"\]\(([^)]+)\)", index.read_text(encoding="utf-8")).group(1)
+    assert (index.parent / link_target).is_file(), (
+        f"Link {link_target!r} zeigt von {index.parent} aus ins Leere"
+    )
+
+
+def test_resolve_twice_does_not_duplicate_the_index_entry(tmp_path):
+    index, ledger_rel = _resolved_index(tmp_path)
+    new_ledger.action_resolve(tmp_path, ledger_rel, cause="Session-Cookie fehlte")
+    text = index.read_text(encoding="utf-8")
+    assert text.count("2026-08-21-login.md]") == 1, "Eintrag wurde dupliziert"
