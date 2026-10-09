@@ -242,7 +242,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `fn:build_plan(config_dir, answers, python)`, `fn:plan_hash(block)`
 - Produces: `fn:apply_plan(plan_path, config_dir)`, `fn:canonical_hash(block)`
 
-- [ ] **Step 1: Tests schreiben** — `test_hash_functions_agree` (`canonical_hash` gleich
+- [x] **Step 1: Tests schreiben** — `test_hash_functions_agree` (`canonical_hash` gleich
       `plan_hash` für drei Blöcke), `test_apply_is_idempotent`,
       `test_apply_refuses_changed_plan_or_state`,
       `test_apply_requires_explicit_existing_config_dir`,
@@ -250,12 +250,12 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       `settings.json` unverändert), `test_apply_keeps_foreign_keys_and_statusline_options`
       (fremder Schlüssel, `padding`, `refreshInterval` bleiben; kein zweiter Hook-Eintrag;
       Backup enthält den alten Inhalt).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_user_apply.py -k apply`.
-- [ ] **Step 3: Implementieren** — Block aus `plan.md` lesen, Hash und Basis-Hashes prüfen,
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_user_apply.py -k apply`.
+- [x] **Step 3: Implementieren** — Block aus `plan.md` lesen, Hash und Basis-Hashes prüfen,
       `<config-dir>` mit Schrägstrichen einsetzen, Backups, Reihenfolge nach
       `references/settings-merge.md`, atomares Schreiben; Abbruch ohne berührte Datei.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 8: verify_install.py
 
