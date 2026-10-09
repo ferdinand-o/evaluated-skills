@@ -364,12 +364,12 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:angewendet und geprüft`
 - Produces: `token:[setup-user]`
 
-- [ ] **Step 1: handoff** — Abgrenzung: `[setup-user]`-Hinweise raten zu handoff, mit dem
+- [x] **Step 1: handoff** — Abgrenzung: `[setup-user]`-Hinweise raten zu handoff, mit dem
       Wort setup-user; `python scripts/sync_skills.py` und `--check`; `lint_skill.py
       --base HEAD skills/handoff` ohne neuen Befund.
-- [ ] **Step 2: Manifest** — `./skills/setup-user` in die `skills`-Liste von `cc-dev`;
+- [x] **Step 2: Manifest** — `./skills/setup-user` in die `skills`-Liste von `cc-dev`;
       `pytest tests/test_marketplace.py`.
-- [ ] **Step 3: Matrix** — Spec 00 §5: Satz zur Ausnahme für Claude-Code-spezifische
+- [x] **Step 3: Matrix** — Spec 00 §5: Satz zur Ausnahme für Claude-Code-spezifische
       Skills und Zeile setup-user; README dieselbe Zeile und setup-user in der Liste von
       `cc-dev`. `lint_skill.py skills/setup-user` meldet `routing` und `neighbors` grün.
       Commit.
