@@ -14,10 +14,18 @@ Statusline gibt eine Zeile aus und schreibt den Cache; der Hook gibt genau ein J
 mit additionalContext aus. Ein Hook, der schweigt, ein Exit ungleich 0 und eine leere
 Statusline sind Befunde. Fehlt bash, heißt das Ergebnis „ungeprüft — keine bash".
 
-    python verify_install.py [--config-dir PFAD]
+    python verify_install.py [--config-dir PFAD] [--write-check]
 
 Exit 0 ohne Befund (auch wenn etwas ungeprüft blieb — das steht in der Ausgabe),
 1 mit Befund.
+
+--write-check ist der Modus `check` der Skill: Zusätzlich zum Prüflauf vergleicht das
+Skript den Bestand mit den Assets (Laufzeitskripte per Hash, CLAUDE.md und Regeln nur
+Kopfzeile und Zeilenbudget, thresholds.json, Hook-Eintrag) und schreibt nur
+<config-dir>/setup-user/check.md mit Kopfzeile: Abweichungen oder „keine Abweichung".
+Ein fehlendes Skript steht als erste Abweichung da; ein relativer Skriptpfad ist ein
+Hinweis „nur im Arbeitsverzeichnis gültig", keine Abweichung. Befehle laufen vom
+aktuellen Arbeitsverzeichnis aus, damit relative Pfade sich wie in Claude Code auflösen.
 """
 
 import argparse
@@ -36,6 +44,9 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 SCRIPT_RE = re.compile(r'"([^"]+\.py)"|\'([^\']+\.py)\'|(\S+\.py)\b')
 SESSION = "setup-user-verify"
 TIMEOUT = 10
+HEADER_RE = re.compile(r"^<!--\s*skill:\s*[a-z0-9-]+\s*\|\s*schema:\s*\d+\s*\|\s*generated:.*-->\s*$")
+RULES = ("communication", "verification", "context", "git")
+BUDGET = {"CLAUDE.md": 40, "rule": 20, "total": 120}
 
 
 def _find_bash():
@@ -98,7 +109,7 @@ def _run(bash: str, command: str, payload: bytes, sandbox: Path):
     env = {**os.environ, "CLAUDE_CONFIG_DIR": str(sandbox), "HOME": str(sandbox / "home"),
            "USERPROFILE": str(sandbox / "home")}
     return subprocess.run([bash, "-c", command], input=payload, capture_output=True, env=env,
-                          cwd=sandbox, timeout=TIMEOUT)
+                          cwd=Path.cwd(), timeout=TIMEOUT)
 
 
 def _check_output(kind: str, proc, sandbox: Path) -> list[str]:
@@ -167,13 +178,90 @@ def verify(config_dir):
     return result
 
 
+def _raw_script(command: str) -> str | None:
+    m = SCRIPT_RE.search(command)
+    return next(g for g in m.groups() if g) if m else None
+
+
+def _profile_checks(config_dir: Path) -> list[str]:
+    deviations, total = [], 0
+    files = [("CLAUDE.md", config_dir / "CLAUDE.md", BUDGET["CLAUDE.md"])]
+    files += [(f"rules/{r}.md", config_dir / "rules" / f"{r}.md", BUDGET["rule"]) for r in RULES]
+    for label, path, budget in files:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            deviations.append(f"{label} fehlt")
+            continue
+        total += len(lines)
+        first = next((l.strip() for l in lines if l.strip()), "")
+        if not HEADER_RE.match(first):
+            deviations.append(f"{label} ohne Kopfzeile in Zeile 1")
+        if len(lines) > budget:
+            deviations.append(f"{label} hat {len(lines)} Zeilen, Budget {budget}")
+    if total > BUDGET["total"]:
+        deviations.append(f"CLAUDE.md und Regeln haben zusammen {total} Zeilen, Budget {BUDGET['total']}")
+    try:
+        thresholds = json.loads((config_dir / "setup-user" / "thresholds.json").read_text(encoding="utf-8"))
+        if not isinstance(thresholds, dict) or "_meta" not in thresholds:
+            deviations.append("setup-user/thresholds.json ohne _meta")
+    except (OSError, ValueError):
+        deviations.append("setup-user/thresholds.json fehlt oder ist unlesbar")
+    return deviations
+
+
+def check_report(config_dir, result):
+    """(Abweichungen, Hinweise) für check.md; ein fehlendes Skript steht vorn."""
+    config_dir = Path(config_dir)
+    deviations = sorted(result["findings"], key=lambda f: "Skript fehlt" not in f)
+    notes = list(result["unchecked"])
+    try:
+        settings = json.loads((config_dir / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settings = {}
+    commands = _commands(settings if isinstance(settings, dict) else {})
+    if not any(kind == "hook" and "setup-user/runtime/context_hint.py" in cmd.replace("\\", "/") for kind, cmd in commands):
+        deviations.append("Hook context_hint.py fehlt in settings.json")
+    for kind, cmd in commands:
+        raw = _raw_script(cmd)
+        if raw and not raw.startswith("~") and not Path(raw).is_absolute():
+            notes.append(f"{kind}: relativer Skriptpfad {raw} — nur im Arbeitsverzeichnis gültig")
+    runtime = config_dir / "setup-user" / "runtime"
+    for name in ("statusline.py", "context_hint.py"):
+        path = runtime / name
+        if path.is_file() and _sha_lf(path) != _sha_lf(ASSETS / "runtime" / name):
+            deviations.append(f"setup-user/runtime/{name} weicht vom Asset ab")
+    deviations += _profile_checks(config_dir)
+    return deviations, notes
+
+
+def render_check(config_dir, result, deviations, notes, argv_text) -> str:
+    lines = [f"<!-- skill: setup-user | schema: 1 | generated: python verify_install.py {argv_text} -->", "",
+             "# setup-user — Prüfbericht", "", f"Ziel: `{Path(config_dir).resolve()}`", "", "## Abweichungen", ""]
+    lines += [f"- ABWEICHUNG: {d}" for d in deviations] or ["keine Abweichung"]
+    lines += ["", "## Hinweise", ""]
+    lines += [f"- {n}" for n in notes] or ["- keine"]
+    lines += ["", "## Prüflauf", ""]
+    lines += [f"- gelaufen: {r['kind']} (Exit {r['exit']})" for r in result["ran"]] or ["- nichts gelaufen"]
+    return "\n".join(lines) + "\n"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="setup-user-Installation in einer Sandbox prüfen (Spec 21)")
     parser.add_argument("--config-dir")
+    parser.add_argument("--write-check", action="store_true", help="Modus check: setup-user/check.md schreiben")
     args = parser.parse_args(argv)
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     config_dir = Path(args.config_dir or env or Path.home() / ".claude").expanduser()
     result = verify(config_dir)
+    if args.write_check:
+        deviations, notes = check_report(config_dir, result)
+        out = config_dir / "setup-user" / "check.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        argv_text = " ".join(argv if argv is not None else sys.argv[1:])
+        out.write_text(render_check(config_dir, result, deviations, notes, argv_text), encoding="utf-8", newline="\n")
+        print(f"check.md: {out} — " + (f"{len(deviations)} Abweichung(en)" if deviations else "keine Abweichung"))
+        return 1 if deviations else 0
     for item in result["ran"]:
         print(f"gelaufen: {item['kind']} (Exit {item['exit']})")
     for item in result["findings"]:

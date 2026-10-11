@@ -126,3 +126,52 @@ def test_verify_main_exit_codes(tmp_path, monkeypatch, capsys):
     assert "geprüft" in capsys.readouterr().out
     (cfg / "setup-user" / "runtime" / "context_hint.py").unlink()
     assert verify_mod.main(["--config-dir", str(cfg)]) == 1
+
+
+# --- check.md (Fix-Runde 1) ----------------------------------------------------------
+
+def write_profile(cfg: Path, claude_lines: int = 10) -> None:
+    head = "<!-- skill: setup-user | schema: 1 | generated: test -->\n"
+    (cfg / "CLAUDE.md").write_text(head + "x\n" * (claude_lines - 1), encoding="utf-8")
+    (cfg / "rules").mkdir(exist_ok=True)
+    for name in ("communication", "verification", "context", "git"):
+        (cfg / "rules" / f"{name}.md").write_text(head + "# r\n", encoding="utf-8")
+    (cfg / "setup-user" / "thresholds.json").write_text(json.dumps({"_meta": {"skill": "setup-user"}}), encoding="utf-8")
+
+
+def test_write_check_reports_no_deviation_and_only_writes_check_md(tmp_path, monkeypatch):
+    cfg = make_install(tmp_path, monkeypatch)
+    write_profile(cfg)
+    before = snapshot(tmp_path)
+    assert verify_mod.main(["--config-dir", str(cfg), "--write-check"]) == 0
+    after = snapshot(tmp_path)
+    check = cfg / "setup-user" / "check.md"
+    assert set(after) - set(before) == {str(check)} and all(after[k] == v for k, v in before.items())
+    text = check.read_text(encoding="utf-8")
+    assert text.startswith("<!-- skill: setup-user | schema: 1 | generated: ")
+    assert "keine Abweichung" in text and len(text.splitlines()) <= 60
+
+
+def test_write_check_flags_missing_script_first_and_budget(tmp_path, monkeypatch):
+    cfg = make_install(tmp_path, monkeypatch)
+    write_profile(cfg, claude_lines=45)
+    (cfg / "setup-user" / "runtime" / "context_hint.py").unlink()
+    assert verify_mod.main(["--config-dir", str(cfg), "--write-check"]) == 1
+    text = (cfg / "setup-user" / "check.md").read_text(encoding="utf-8")
+    deviations = [l for l in text.splitlines() if l.startswith("- ABWEICHUNG")]
+    assert "Skript fehlt" in deviations[0]
+    assert any("CLAUDE.md" in d and "40" in d for d in deviations)
+    assert "keine Abweichung" not in text
+
+
+def test_relative_script_paths_run_from_cwd_and_are_noted(tmp_path, monkeypatch):
+    cfg = make_install(tmp_path, monkeypatch)
+    write_profile(cfg)
+    settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    settings["statusLine"]["command"] = 'python3 "cfg/setup-user/runtime/statusline.py"'
+    settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"] = 'python3 "cfg/setup-user/runtime/context_hint.py" || true'
+    (cfg / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert verify_mod.main(["--config-dir", "cfg", "--write-check"]) == 0
+    text = (cfg / "setup-user" / "check.md").read_text(encoding="utf-8")
+    assert "keine Abweichung" in text and "nur im Arbeitsverzeichnis gültig" in text
