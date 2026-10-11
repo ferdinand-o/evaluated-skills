@@ -397,7 +397,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:anti-ceremony-check-on-aligned-config-changes-nothing`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe außerhalb des Harness
+- [x] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe außerhalb des Harness
       oder „ungefahren" mit Grund, und die Sektion „Was nicht gemessen wurde": erster
       echter Lauf auf dem Windows-PC und der Devbox, Baseline ohne Skill, Abschnitt B.
       `lint_skill.py skills/setup-user` ganz sauber. Commit.
