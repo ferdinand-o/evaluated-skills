@@ -1,4 +1,10 @@
 {
-  "_meta": {"skill": "setup-user", "schema": 1, "generated": "von Hand; SHA-256 bekannter Fassungen der Nutzer-Statusline, LF-normalisiert"},
-  "sha256": []
+  "_meta": {
+    "skill": "setup-user",
+    "schema": 1,
+    "generated": "von Hand; SHA-256 bekannter Fassungen der Nutzer-Statusline, LF-normalisiert; tests/fixtures/setup-user/statusline-original.py"
+  },
+  "sha256": [
+    "6e411ffd30aff8d257801026da79a7de61c1bc9fd5dca8f7ce7214df60a20eaa"
+  ]
 }
