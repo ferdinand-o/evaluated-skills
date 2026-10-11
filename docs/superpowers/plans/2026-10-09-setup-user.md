@@ -74,13 +74,13 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: (nichts Neues)
 - Produces: `token:statusline-original.py`
 
-- [ ] **Step 1: Dateien vom Nutzer** — die Statusline, die heute in seiner
+- [x] **Step 1: Dateien vom Nutzer** — die Statusline, die heute in seiner
       `settings.json` steht, und, falls vorhanden, die korrigierte Fassung aus dem
       Review; fehlt die korrigierte, entsteht sie in Task 5 aus dem Original.
-- [ ] **Step 2: Ablegen** — unverändert unter `tests/fixtures/setup-user/`; `README.md`
+- [x] **Step 2: Ablegen** — unverändert unter `tests/fixtures/setup-user/`; `README.md`
       mit Kopfzeile nennt Herkunft, Datum und den SHA-256 beider Dateien mit
       LF-normalisierten Zeilenenden.
-- [ ] **Step 3: Prüfen** — beide Dateien laufen mit einer vollen Beispiel-Eingabe aus der
+- [x] **Step 3: Prüfen** — beide Dateien laufen mit einer vollen Beispiel-Eingabe aus der
       statusline-Doku und geben eine Zeile aus; ein Lauf schreibt nur in ein
       Temp-`HOME`. Commit.
 
