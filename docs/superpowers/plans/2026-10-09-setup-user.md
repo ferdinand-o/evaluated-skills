@@ -338,16 +338,16 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:angewendet und geprüft`, `token:setup-user: statusline`
 - Produces: `token:anti-ceremony-check-on-aligned-config-changes-nothing`
 
-- [ ] **Step 1: Fixtures** — je `fixture.json` und `cfg/`; `su-aligned` mit Laufzeitdateien
+- [x] **Step 1: Fixtures** — je `fixture.json` und `cfg/`; `su-aligned` mit Laufzeitdateien
       gleich den Assets und relativen Skriptpfaden; `su-planned` und `su-own-statusline`
       mit einem `plan.md`, den `inspect_config.py --python python3` erzeugt hat;
       `su-fresh` und `su-planned` mit `"spinnerTipsEnabled": false`.
-- [ ] **Step 2: Evals** — `anti-ceremony-check-on-aligned-config-changes-nothing`,
+- [x] **Step 2: Evals** — `anti-ceremony-check-on-aligned-config-changes-nothing`,
       `plan-is-default-and-writes-only-plan`, `apply-merges-existing-plan-and-backs-up`,
       `foreign-statusline-is-kept-while-hook-is-merged` mit den Assertions der Spec und je
       der Diskriminator-Frage in `notes`; `superpowers-sessionstart-is-reported` kommt mit
       Abschnitt B und steht hier nicht.
-- [ ] **Step 3: Schema-Test** — `load_evals` lädt vier Evals; `test_fixture_plans_are_current`
+- [x] **Step 3: Schema-Test** — `load_evals` lädt vier Evals; `test_fixture_plans_are_current`
       vergleicht die Blöcke der Fixture-Pläne mit neu erzeugten und die Laufzeitdateien
       in `su-aligned` mit den Assets. Commit.
 
