@@ -186,7 +186,7 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
 - Consumes: `token:statusline-original.py`, `token:limit-hints.json`
 - Produces: `token:setup-user: statusline`
 
-- [ ] **Step 1: Tests schreiben** — `test_statusline_keeps_cache_on_session_start`,
+- [x] **Step 1: Tests schreiben** — `test_statusline_keeps_cache_on_session_start`,
       `test_statusline_keeps_window_on_explicit_null`, `test_statusline_respects_config_dir`,
       `test_statusline_partial_window_keeps_other_window`,
       `test_statusline_survives_null_empty_and_non_ascii_input`,
@@ -194,8 +194,8 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       `tests/fixtures/setup-user/statusline-original.py` bei voller Eingabe),
       `test_statusline_state_prunes_and_sanitizes`; alle als Unterprozess mit
       `CLAUDE_CONFIG_DIR` und `HOME` auf `tmp_path`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_user_statusline.py`.
-- [ ] **Step 3: Implementieren** — Ausgangspunkt ist die korrigierte Fassung aus Task 1;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_user_statusline.py`.
+- [x] **Step 3: Implementieren** — Ausgangspunkt ist die korrigierte Fassung aus Task 1;
       dazu Kennzeile `# setup-user: statusline` in Zeile 2, Zeile zuerst ausgeben, dann
       schreiben; Limit-Cache je Fenster nur bei gültigem Wert überschreiben, bisherige
       Schlüssel des Caches behalten und `_meta` ergänzen; `state/context-<session_id>.json`
@@ -203,8 +203,8 @@ Diese Task braucht den Nutzer und läuft im Hauptkontext.
       Aufräumen nach 24 Stunden Änderungszeit und alter `*.tmp`; immer Exit 0.
       `known-statusline-hashes.json` bekommt die LF-normalisierten Hashes von Original
       und korrigierter Fassung.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 6: inspect_config.py
 
