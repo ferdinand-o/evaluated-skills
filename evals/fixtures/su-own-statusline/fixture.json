@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Config-Verzeichnis mit einer fremden Statusline cfg/my-status.py (weder Kennzeile noch bekannter Hash), eingetragen mit relativem Pfad, und einem Plan aus inspect_config.py --config-dir cfg --python python3; die fremde Statusline bleibt, der Hook kommt dazu."
+}

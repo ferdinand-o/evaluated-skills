@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Eingerichtetes Config-Verzeichnis: Laufzeitskripte gleich den Assets, CLAUDE.md und vier Regeln aus den Vorlagen mit den Default-Antworten, thresholds.json, statusLine und Hook mit relativen Skriptpfaden (eine Fixture kann keine absoluten tragen). Kein plan.md, keine Backups."
+}

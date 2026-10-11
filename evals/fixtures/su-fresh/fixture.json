@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Config-Verzeichnis cfg/ mit nur einer settings.json (spinnerTipsEnabled: false): keine Statusline, keine CLAUDE.md, keine Regeln, kein Plan. Für den Default-Modus plan."
+}

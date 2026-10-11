@@ -1,0 +1,198 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-check-on-aligned-config-changes-nothing",
+      "class": "contract",
+      "fixture": "su-aligned",
+      "prompt": "/setup-user check --config-dir ./cfg",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": "cfg/setup-user/check.md"
+        },
+        {
+          "type": "artifact_header",
+          "path": "cfg/setup-user/check.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/check.md",
+          "pattern": "keine Abweichung"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/check.md",
+          "pattern": "nur im Arbeitsverzeichnis gültig"
+        },
+        {
+          "type": "file_max_lines",
+          "path": "cfg/setup-user/check.md",
+          "max_lines": 60
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/settings.json"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/CLAUDE.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/rules/communication.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/rules/verification.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/rules/context.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/rules/git.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/setup-user/runtime/statusline.py"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/setup-user/runtime/context_hint.py"
+        },
+        {
+          "type": "file_absent",
+          "path": "cfg/setup-user/plan.md"
+        },
+        {
+          "type": "file_absent",
+          "path": "cfg/setup-user/backups/*/settings.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval (Spec 00 §2, Spec 21): check auf ein Verzeichnis, das dem Plan schon entspricht, ändert nichts außer check.md und meldet „keine Abweichung“. Die Fixture nutzt relative Skriptpfade, deshalb der Hinweis „nur im Arbeitsverzeichnis gültig“. Diskriminator: check.md mit Kopfzeile schreibt nur verify_install.py --write-check; ohne Skill antwortet der Agent auf /setup-user, der Befehl sei nicht installiert. Plan und Backup dürfen nicht entstehen — ein „reparierender“ Agent fällt."
+    },
+    {
+      "id": "plan-is-default-and-writes-only-plan",
+      "class": "contract",
+      "fixture": "su-fresh",
+      "prompt": "/setup-user --config-dir ./cfg",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": "cfg/setup-user/plan.md"
+        },
+        {
+          "type": "artifact_header",
+          "path": "cfg/setup-user/plan.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/plan.md",
+          "pattern": "setup-user-plan"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "cfg/settings.json"
+        },
+        {
+          "type": "file_absent",
+          "path": "cfg/CLAUDE.md"
+        }
+      ],
+      "must_not": [],
+      "notes": "plan ist der Default-Modus und schreibt nur plan.md. Diskriminator: den Block `json setup-user-plan` schreibt nur inspect_config.py; dass nur geplant wird, zeigen settings.json unverändert und keine CLAUDE.md."
+    },
+    {
+      "id": "apply-merges-existing-plan-and-backs-up",
+      "class": "contract",
+      "fixture": "su-planned",
+      "prompt": "/setup-user apply --config-dir ./cfg — den Plan in cfg/setup-user/plan.md habe ich gelesen und bestätige ihn",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/backups/*/settings.json",
+          "pattern": "\"spinnerTipsEnabled\": false"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/settings.json",
+          "pattern": "\"statusLine\""
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/settings.json",
+          "pattern": "context_hint"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/settings.json",
+          "pattern": "\"spinnerTipsEnabled\": false"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/runtime/context_hint.py",
+          "pattern": "^# setup-user: context_hint$"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/thresholds.json",
+          "pattern": "\"_meta\""
+        },
+        {
+          "type": "artifact_header",
+          "path": "cfg/CLAUDE.md"
+        },
+        {
+          "type": "file_max_lines",
+          "path": "cfg/CLAUDE.md",
+          "max_lines": 40
+        },
+        {
+          "type": "output_matches",
+          "pattern": "angewendet"
+        }
+      ],
+      "must_not": [],
+      "notes": "apply setzt einen bestätigten, versionierten Plan um. Diskriminator: Kennzeile von context_hint.py, thresholds.json mit _meta und ein Backup mit dem Alt-Inhalt entstehen nur durch apply_config.py; der fremde Schlüssel spinnerTipsEnabled prüft das Mischen. Ein Agent ohne Skill könnte die Plan-Ansicht von Hand umsetzen, kennt aber weder Kennzeile noch Backup-Ort."
+    },
+    {
+      "id": "foreign-statusline-is-kept-while-hook-is-merged",
+      "class": "contract",
+      "fixture": "su-own-statusline",
+      "prompt": "/setup-user apply --config-dir ./cfg — den Plan in cfg/setup-user/plan.md habe ich gelesen und bestätige ihn",
+      "must": [
+        {
+          "type": "file_unchanged",
+          "path": "cfg/my-status.py"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/settings.json",
+          "pattern": "my-status"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/settings.json",
+          "pattern": "context_hint"
+        },
+        {
+          "type": "file_exists",
+          "path": "cfg/setup-user/backups/*/settings.json"
+        },
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/thresholds.json",
+          "pattern": "\"_meta\""
+        },
+        {
+          "type": "output_matches",
+          "pattern": "ungeprüft"
+        }
+      ],
+      "must_not": [],
+      "notes": "Eine fremde Statusline bleibt eingetragen, der Hook kommt dazu. Diskriminator: thresholds.json und Backup nur durch apply_config.py; die fremde Statusline führt verify_install.py nie aus, die Übergabe sagt deshalb „ungeprüft“. Ohne Skill bliebe die Fixture unverändert und das Hook-Fragment fehlte."
+    }
+  ]
+}

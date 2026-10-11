@@ -1,0 +1,27 @@
+<!-- skill: setup-user | schema: 1 | generated: python inspect_config.py, Vorlage assets/CLAUDE.md.tmpl -->
+# Persönliche Vorgaben für alle Projekte
+
+Gilt in jedem Repo, solange dessen eigene CLAUDE.md nichts anderes sagt. Die Details
+stehen in `rules/`; diese Datei bleibt kurz, weil sie in jeder Session geladen wird.
+
+## Arbeitsweise
+
+- Sprache in Antworten und Commit-Texten: Deutsch. Ton: knapp und sachlich.
+- Shell auf diesem Rechner: bash. Befehle so schreiben, dass sie dort laufen.
+- Git: kein Commit und kein Push ohne Auftrag.
+- Erst die Lage prüfen (Dateien, Tests, Stand), dann handeln; nichts behaupten, was
+  nicht gelesen oder gemessen ist.
+- Fertig heißt geprüft. Was nicht geprüft werden konnte, heißt so und nennt den Grund.
+
+## Regeln
+
+- `rules/communication.md` — Sprache, Ton, Antwortlänge
+- `rules/verification.md` — Belege vor Erfolgsmeldungen, Review-Befunde nachmessen
+- `rules/context.md` — was `[setup-user]`-Hinweise bedeuten
+- `rules/git.md` — Commits und Pushes
+
+## Repo-Regeln gehen vor
+
+Was ein Repo in seiner CLAUDE.md, in `.claude/rules/` oder in `.claude/settings.json`
+festlegt, gilt dort vor diesen Vorgaben. Was in Cloud-Sessions und CI gelten muss, gehört
+ins Repo, nicht hierher — Cloud-Sessions lesen diese Datei nicht.

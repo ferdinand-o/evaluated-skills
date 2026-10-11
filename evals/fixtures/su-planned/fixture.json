@@ -1,0 +1,4 @@
+{
+  "git": false,
+  "description": "Wie su-fresh, dazu cfg/setup-user/plan.md, erzeugt mit inspect_config.py --config-dir cfg --python python3 aus dem Fixture-Ordner; test_fixture_plans_are_current hält den Block aktuell."
+}
