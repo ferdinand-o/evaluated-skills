@@ -40,7 +40,11 @@ Schwelle. Der Hook hält nie einen Prompt an.
    ```
    Bricht `apply` mit „Hash passt nicht" oder „Bestand geändert" ab, wird neu geplant,
    nie der Block von Hand angepasst.
-5. **check:** `verify_install.py` und der Vergleich mit den Assets; schreibt nur
+5. **check:**
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/verify_install.py" --config-dir <pfad> --write-check
+   ```
+   Prüflauf und Vergleich mit den Assets; schreibt nur
    `<config-dir>/setup-user/check.md` mit Kopfzeile, mit Abweichungen oder „keine
    Abweichung". Ein fehlendes Hook- oder Statusline-Skript ist die erste Abweichung.
    Ein relativer Skriptpfad steht als Hinweis „nur im Arbeitsverzeichnis gültig" da, nicht
