@@ -1670,6 +1670,75 @@ behoben zu werden:
 - **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
   Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
 
+## Marketplace — drei Plugins (Spec 20, 2026-10-08)
+
+Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensraum
+`cc-skills:` und den Punkt zu `version`. Was ungemessen bleibt und wo es beißt:
+
+- **Nur der CLI-Weg ist abgedeckt.** `cc-dev`, `cc-ui` und `cc-knowledge` haben je
+  `source: "./"` und eine `skills`-Liste; die CLI lädt nur die gelisteten Ordner
+  (gemessen: 10, 3, 6 Skills, `claude plugin validate .` grün). Der Web-Loader von
+  claude.ai ignoriert die Liste (Abschnitt davor) und lüde je Plugin alle Ordner. Der
+  Nutzer bindet Plugins nur per CLI an, `plugins/synced/` enthält keine Plugins, und
+  Cloud-Sessions laden Plugins gar nicht (gemeldeter Bug); dort helfen nur die
+  Projekt-Kopien unter `.claude/skills/`.
+- **Skriptpfade in fremden Repos.** Die SKILL.md-Dateien rufen ihre Skripte über
+  `skills/<name>/scripts/…` relativ zum Arbeitsverzeichnis auf. In einem fremden Repo
+  laufen deshalb die Skripte von 9 der 10 Skills in `cc-dev`, 1 der 4 in `cc-ui` und 4
+  der 6 in `cc-knowledge` nicht; das Plugin liefert dort Doktrin ohne lauffähiges
+  Skript. Die Umstellung auf `${CLAUDE_SKILL_DIR}` ist eine eigene Folgespec.
+- **Projekt-Kopien driften nur bis zum Sync-Check.** `scripts/sync_skills.py --check`
+  steht in skill-forge Schritt 4 (G1) und in `tests/test_marketplace.py` (G2). Wer ein
+  Original außerhalb von skill-forge ändert und nicht `pytest` fährt, committet eine
+  veraltete Kopie; einen Hook gibt es bewusst nicht.
+- **`cc-dev` ist in diesem Repo aus.** Die committete `.claude/settings.json` setzt
+  `cc-dev@cc-skills` auf `false`, damit die acht Projekt-Kopien nicht doppelt
+  erscheinen. rest-api-architect und sql-schema-architect fehlen damit hier; eine
+  synchronisierte ID `cc-dev@synced` ist nicht abgedeckt.
+- **Kein `version`-Feld.** Updates kommen mit jedem Commit nach
+  `/plugin marketplace update cc-skills`; eine Release-Nummer gibt es nicht.
+- **Das Listing-Budget ist nur vorher gemessen.** `/context` zeigte am 2026-10-08 mit dem
+  alten Ein-Plugin neun Skills mit weniger als 20 Tokens, also ohne Description
+  (`docs/superpowers/validation/2026-10-08-plugin-split-sync.md`). Ob die Aufteilung
+  das behebt, misst der Nutzer nach dem Merge.
+- **`verify` von subagent-dev meldet Nicht-ASCII-Pfade als Allowlist-Verstoß.** Beim
+  Bau beobachtet: `check_allowlist` liest `git diff --name-only` mit `core.quotepath`,
+  `specs/Spec 00 – skill-foundation.md` kommt dann als `"specs/Spec 00 \342\200\223 …"`
+  zurück und passt auf keinen Eintrag. Umgangen mit
+  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false`. Das
+  hilft nur für Committetes: Für uncommittete Dateien liest `check_allowlist`
+  `git status --porcelain`, das Pfade mit Leerzeichen in Anführungszeichen setzt, und
+  entfernt sie nicht (beim Bau von Spec 21 gesehen). Umweg dort: erst committen, dann
+  gegen die Basis prüfen. Der Fix (`-z` für beide Aufrufe) gehört nach subagent-dev.
+
+## setup-user
+
+Gebaut nach Spec 21, Abschnitt A (2026-10-09). Tier 1: `inspect_config.py`,
+`apply_config.py`, `verify_install.py`, dazu zwei Laufzeitskripte im Config-Verzeichnis.
+Was ungemessen bleibt und wo es beißt:
+
+- **Windows ist ungemessen.** Ob `|| true` im Hook-Kommando dort greift, ob `python` oder
+  `py -3` der richtige Interpreter ist, ob Claude Code `CLAUDE_CONFIG_DIR` an das
+  Statusline-Kommando vererbt und ob `os.replace` bei offenem Leser scheitert, misst erst
+  der erste echte Lauf auf dem Windows-PC. Die Skripte lesen stdin als UTF-8-Bytes und
+  schreiben stdout als UTF-8, unabhängig von der Codepage.
+- **Bei `claude -p` läuft die Statusline nicht** (mit CLI 2.1.292 gemessen). Kopflose
+  Läufe bekommen deshalb nie einen Kontext-Hinweis; Limit-Hinweise nur, solange ein
+  interaktiver Lauf den Cache frisch hält.
+- **Ob Hinweise das Verhalten ändern, misst nichts.** Tests messen, dass der Hook meldet
+  und schweigt; kein Eval kann einen Kontextstand von 60 % herbeiführen.
+- **Hook-Änderungen wirken ab der nächsten Session.** Ob eine mitten in der Session
+  geänderte `settings.json` sofort greift, ist nicht gemessen; die Übergabe sagt es so.
+- **Die Prüfung führt nur Asset-Befehle aus.** Eine fremde Statusline bleibt
+  „ungeprüft (fremd, nicht ausgeführt)", auch wenn sie richtig wäre. `verify_install.py`
+  braucht `bash`; ohne heißt das Ergebnis „ungeprüft — keine bash".
+- **Abschnitt B fehlt.** `route_check.py`, die Lückentabelle als Daten, das Plugin-Profil
+  in `enabledPlugins` und der Eval `superpowers-sessionstart-is-reported` kommen erst nach
+  Spec 23; bis dahin fasst setup-user `enabledPlugins` nicht an.
+- **Die Statusline-Vorlage stammt vom Nutzer.** Asset und Anzeige-Test bauen auf seiner
+  Fassung vom 2026-10-07 auf (`tests/fixtures/setup-user/`); ohne sie gibt es kein Asset
+  und keinen Anzeige-Vergleich.
+
 ## impl-plan
 
 Gebaut nach Spec 16 (2026-09-02). Tier 1 ohne eigenes Skript: Der einzige Code,
@@ -1725,7 +1794,7 @@ peinlichste Fehler dieser Skill gewesen; der Repo-Test lintet es deshalb mit.
 
 ## skill-forge
 
-Gebaut nach Spec 17 (2026-09-10). Tier 1: `scripts/lint_skill.py`, dreizehn Regeln,
+Gebaut nach Spec 17 (2026-09-10). Tier 1: `scripts/lint_skill.py`, seit Spec 20 vierzehn Regeln,
 Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
 
 - **Das Register ist ein Schuldenregister.** `tests/test_skills_lint.py` friert je
@@ -1779,9 +1848,15 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   kann beides nicht unterscheiden und behauptet deshalb nichts. Beides fängt der
   Reviewer, nicht der Lint.
 - **Im Eval-Workspace ist die Hälfte `unchecked`.** `asset-headers`, `routing`,
-  `report-section` brauchen `docs/` und `README.md`, `neighbors` fremde Skills. Die
-  fünf Evals binden nur an Regeln, die in ihrer Fixture geprüft sind; ein Eval, der
-  `routing` prüfen wollte, müsste die Matrix mitbringen.
+  `report-section` brauchen `docs/` und `README.md`, `neighbors` fremde Skills,
+  `plugin-membership` ein Manifest. Die sechs Evals binden nur an Regeln, die in ihrer
+  Fixture geprüft sind; ein Eval, der `routing` prüfen wollte, müsste die Matrix
+  mitbringen.
+- **`plugin-membership` liest nur die Listen.** Die Regel zählt, in wie vielen
+  `skills`-Listen die Skill steht; ob die Projekt-Kopie dem Original gleicht, prüft
+  `sync_skills.py --check`, nicht der Lint. Eval 5 bindet an das `pass` aus dem letzten
+  Lint-Lauf nach Schritt 7; fährt ein Agent den Lint nur in Schritt 4, steht dort
+  `finding`, und der Eval fällt — das ist gewollt, ungefahren ist es aber auch.
 - **Die Baseline ohne Skill ist gebaut, aber hier nie gefahren** (Spec 18, 2026-09-15):
   `run_evals.py --without-skill` fährt dieselben Evals ohne Installation und prüft am
   `skills`-Feld des `system.init`-Ereignisses, ob der Agent die Skill sah — in beide

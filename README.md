@@ -11,21 +11,66 @@ Persönliche Claude-Skills und ihre Spezifikationen.
 | `evals/` | Eval-Definitionen und Fixtures |
 | `evalkit/` | der geteilte Eval-Harness |
 | `docs/` | Konventionen und Pläne |
+| `.claude/skills/` | generierte Projekt-Kopien für die Arbeit an diesem Repo, nie von Hand ändern |
+| `scripts/` | Repo-Werkzeuge, darunter `sync_skills.py` für die Projekt-Kopien |
 
-## Als Plugin installieren
+## Als Plugins installieren
 
-Das Repo ist ein Claude-Code-Marketplace mit einem Plugin für die ganze Sammlung
-(`.claude-plugin/marketplace.json`). Die Skills heißen installiert `cc-skills:<name>`.
+Das Repo ist ein Claude-Code-Marketplace (`.claude-plugin/marketplace.json`) mit drei
+Plugins. Alle nehmen die Repo-Wurzel als Quelle und laden nur die Skills ihrer
+`skills`-Liste; installiert heißen sie mit dem Plugin als Namensraum, etwa
+`cc-dev:handoff`. Ab Claude Code 2.1.275 installiert je Plugin eine Zeile Marketplace
+und Plugin zusammen:
+
+- `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
+  architecture-map, debug-ledger, dev-report, feature-spec, handoff,
+  rest-api-architect, review-context, setup-user, sql-schema-architect, subagent-dev,
+  testing-strategy. setup-user läuft nur als `/cc-dev:setup-user`.
+- `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
+  aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
+  ui-architect. Je
+  Frontend-Repo in dessen `.claude/settings.json` einschalten, mit
+  `"enabledPlugins": {"cc-ui@cc-skills": true}`; die Projekt-Einstellung gewinnt
+  gegen das `false`, das die Installation in die User-Settings schreibt.
+- `/plugin install cc-knowledge --marketplace ferdinand-o/cc-skills` — Wissen, immer
+  an: exercise-forge, explain, human-prose, learning-coach, verified-research,
+  visual-summary.
+
+Mit älteren Versionen erst `/plugin marketplace add ferdinand-o/cc-skills`, dann
+`/plugin install cc-dev@cc-skills` und so weiter. Neue Commits holt
+`/plugin marketplace update cc-skills`, danach `/reload-plugins`.
+
+**Umstieg vom alten Plugin `cc-skills`.** Bis Spec 20 war die ganze Sammlung ein Plugin
+`cc-skills@cc-skills`. Das Manifest führt es unter `renames` als entfernt
+(`"cc-skills": null`); `/plugin marketplace update cc-skills` nimmt es deshalb heraus.
+Danach die neuen Plugins installieren:
 
 ```
-/plugin marketplace add ferdinand-o/cc-skills
-/plugin install cc-skills@cc-skills
-/plugin marketplace update cc-skills     # holt neue Commits, danach /reload-plugins
+/plugin marketplace update cc-skills
+/plugin install cc-dev@cc-skills
+/plugin install cc-ui@cc-skills
+/plugin install cc-knowledge@cc-skills
 ```
 
-Nicht im Plugin: `cad-parts`, weil es einen stl-cad-server als MCP-Server braucht.
-`tests/test_marketplace.py` hält die Liste mit `skills/` synchron: Eine neue Skill
-steht im Manifest oder ausdrücklich in `EXCLUDED`, sonst ist der Test rot.
+**In keinem Plugin** stehen drei Skills, je mit Grund in `.claude-plugin/excluded.json`:
+
+- impl-plan und skill-forge gelten nur für Specs und Skills dieser Sammlung. Sie liegen
+  nur als Projekt-Kopie unter `.claude/skills/` und laden, wenn Claude Code in diesem
+  Repo läuft.
+- cad-parts ist ausgeschlossen, weil es einen stl-cad-server als MCP-Server braucht.
+
+**Projekt-Kopien.** `.claude/skills/` hält zehn Skills für die Arbeit an diesem Repo:
+impl-plan, skill-forge und acht aus `cc-dev` ohne rest-api-architect und
+sql-schema-architect. Original ist immer `skills/<name>/`; `scripts/sync_skills.py`
+spiegelt die Skills seiner Tabelle `PROJECT_SKILLS` dorthin, und
+`python3 scripts/sync_skills.py --check` meldet jede abweichende Kopie. Die committete
+`.claude/settings.json` schaltet `cc-dev@cc-skills` in diesem Repo aus, damit die acht
+nicht doppelt erscheinen.
+
+`tests/test_marketplace.py` hält Manifest, `excluded.json` und Kopien mit `skills/`
+synchron: Eine neue Skill steht in genau einer `skills`-Liste oder mit Grund in
+`.claude-plugin/excluded.json`, sonst ist der Test rot; dieselbe Zuordnung prüft die
+Lint-Regel `plugin-membership` von skill-forge.
 
 ## Evals laufen lassen
 
@@ -52,7 +97,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
 | neues Feature, Codebase existiert | feature-spec | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
-| Bug, Testfehler | debug-ledger *(geplant)* | feature-spec |
+| Bug, Testfehler | debug-ledger | feature-spec |
 | Testplan, Repo-Typ-Frage | testing-strategy | test-driven-development (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
 | Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
@@ -66,6 +111,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | Skill bauen oder ändern | skill-forge | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 | Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (verdichtet, ändert keinen Stil), explain (erklärt mit eigenem Antwortvertrag) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
+| eigenen Claude-Code-User-Scope einrichten oder prüfen | setup-user | `/statusline` (Statusline nach Wunsch), setup-repo (Repo, Cloud, CI), handoff (sichert den Stand) |
 
 ## Konventionen
 

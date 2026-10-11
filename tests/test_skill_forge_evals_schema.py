@@ -36,9 +36,9 @@ def _lint_json(skill_dir: Path, out: Path, *extra: str) -> str:
     return out.read_text(encoding="utf-8")
 
 
-def test_five_contract_evals_load():
+def test_six_contract_evals_load():
     evals = load_evals(EVALS_PATH)
-    assert len(evals) == 5 and all(ev.eval_class == "contract" for ev in evals)
+    assert len(evals) == 6 and all(ev.eval_class == "contract" for ev in evals)
 
 
 def test_anti_ceremony_eval_binds_to_lint_json_and_untouched_files():
@@ -79,6 +79,9 @@ def test_gate_and_noanti_patterns_grip_real_script_output(tmp_path):
     for pattern, expected in _lint_patterns(evals["missing-anti-ceremony-eval-is-reported"]):
         assert bool(re.search(pattern, noanti, re.MULTILINE)) is expected, pattern
         assert not re.search(pattern, clean, re.MULTILINE)
+    # Ohne Manifest bleibt plugin-membership dort unchecked und stört die beiden Evals nicht.
+    for text in (gate, noanti):
+        assert '{"id": "plugin-membership", "status": "unchecked"' in text
 
 
 def _existing_repo(tmp_path: Path) -> Path:
@@ -126,3 +129,50 @@ def test_routing_eval_binds_to_house_vocabulary_the_fixture_does_not_name():
         assert word.lower() not in spec00.lower(), f"Fixture sagt {word!r} vor"
     assert any("anti-ceremony-" in a.pattern for a in routing.must)
     assert any("expected_output" in a.pattern for a in routing.must_not)
+
+
+MANIFEST_PATH = ".claude-plugin/marketplace.json"
+
+
+def _repo_from(tmp_path: Path, fixture: str) -> Path:
+    root = tmp_path / fixture
+    shutil.copytree(FIXTURES / fixture, root, ignore=shutil.ignore_patterns("fixture.json"))
+    return root
+
+
+def test_orphan_pattern_grips_real_script_output_and_not_the_clean_skill(tmp_path):
+    orphan_eval = _evals()["skill-outside-any-plugin-is-reported"]
+    assert orphan_eval.fixture == "sf-plugin-orphan"
+    orphan = _lint_json(FIXTURES / "sf-plugin-orphan" / "skills" / "orphan-x", tmp_path / "orphan.json")
+    listed = _lint_json(FIXTURES / "sf-plugin-orphan" / "skills" / "listed-x", tmp_path / "listed.json")
+    patterns = _lint_patterns(orphan_eval)
+    assert patterns
+    for pattern, expected in patterns:
+        assert bool(re.search(pattern, orphan, re.MULTILINE)) is expected, pattern
+        assert not re.search(pattern, listed, re.MULTILINE), f"{pattern} greift auch an listed-x"
+    unchanged = {a.path for a in orphan_eval.must if a.type == "file_unchanged"}
+    assert unchanged == {MANIFEST_PATH, ".claude-plugin/excluded.json"}
+    for rel in unchanged:
+        assert (FIXTURES / "sf-plugin-orphan" / rel).is_file(), rel
+
+
+def test_routing_eval_plugin_assertions_grip_a_built_skill(tmp_path):
+    """Eval 5 nachgespielt: reminder gebaut und in eine Liste eingetragen — dann greifen
+    beide neuen Muster; an der Fixture selbst greift das Manifest-Muster nicht."""
+    routing = _evals()["routing-new-skill-gets-house-evals"]
+    manifest_patterns = [a.pattern for a in routing.must if a.type == "file_matches" and a.path == MANIFEST_PATH]
+    assert len(manifest_patterns) == 1
+    fixture_manifest = (FIXTURES / "sf-spec" / MANIFEST_PATH).read_text(encoding="utf-8")
+    assert not re.search(manifest_patterns[0], fixture_manifest)
+
+    root = _repo_from(tmp_path, "sf-spec")
+    skill = root / "skills" / "reminder"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: reminder\ndescription: Use when x.\n---\n\n# reminder\n", encoding="utf-8")
+    manifest = json.loads((root / MANIFEST_PATH).read_text(encoding="utf-8"))
+    manifest["plugins"][0]["skills"].append("./skills/reminder")
+    (root / MANIFEST_PATH).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    assert re.search(manifest_patterns[0], (root / MANIFEST_PATH).read_text(encoding="utf-8"))
+    text = _lint_json(skill, root / LINT_PATH, "--repo-root", str(root))
+    for pattern, expected in _lint_patterns(routing):
+        assert bool(re.search(pattern, text, re.MULTILINE)) is expected, pattern

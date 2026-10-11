@@ -16,6 +16,8 @@ des Nutzers weiterarbeiten kann.
   Skill anfassen.
 - `handoff.md` = rollierender Sitzungszustand. Nur diese Datei schreiben.
 - Kein `git commit` — der Nutzer committet selbst.
+- **setup-user** installiert einen Hook, der bei hohem Kontext mit `[setup-user]` zum
+  Sichern rät; den Stand sichert handoff, nicht der Hook.
 - **human-prose** überarbeitet auf Zuruf den Fließtext einer `handoff.md`; die
   Kopfzeile `# Handoff — <Projektname>` und die sechs Sektionen bleiben.
 

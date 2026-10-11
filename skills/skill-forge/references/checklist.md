@@ -1,4 +1,4 @@
-# Prüfliste je Bauphase — die 19 Punkte, und wer sie prüft
+# Prüfliste je Bauphase — die 20 Punkte, und wer sie prüft
 
 Destilliert aus `docs/skill-building-pitfalls.md`, `docs/known-limits.md` und den
 Reports von fünfzehn Skill-Bauten (Prüfung `docs/assessment-writing-skills-writing-plans.md`
@@ -55,6 +55,7 @@ Der Plan ist Sache von `impl-plan` (16). Hier nur, was der Skill-Bau zusätzlich
 | 11 | Jede in „Abgrenzung" genannte Skill dieser Sammlung nennt diese Skill zurück | mechanisch: `neighbors` | Spec 00 §5 |
 | 12 | Der Report hat die Sektion `## Was nicht gemessen wurde` — unter genau diesem Namen | mechanisch: `report-section` | Spec 17 (vorher unter sechs Namen) |
 | 13 | `docs/known-limits.md` hat einen Abschnitt `## <skill>` | mechanisch: `report-section` | Spec 00; known-limits |
+| 20 | Die Skill steht in der `skills`-Liste genau eines Plugins oder mit Grund in `.claude-plugin/excluded.json`; gehört sie zur Repo-Arbeit, auch in `PROJECT_SKILLS` von `scripts/sync_skills.py` | mechanisch: `plugin-membership`; die Projekt-Kopie `sync_skills.py --check` | Spec 20 |
 
 ## Was die Liste nicht ersetzt
 

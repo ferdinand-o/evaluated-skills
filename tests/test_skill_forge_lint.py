@@ -42,7 +42,8 @@ GOOD_EVALS = {"evals": [
 
 
 def make_repo(tmp_path: Path, skill_md: str = GOOD_SKILL_MD, evals: dict | None = GOOD_EVALS,
-              name: str = "note-tag", with_docs: bool = True) -> tuple[Path, Path]:
+              name: str = "note-tag", with_docs: bool = True,
+              manifest: dict | None | bool = True, excluded: dict | str | None = None) -> tuple[Path, Path]:
     root = tmp_path / "repo"
     skill = root / "skills" / name
     skill.mkdir(parents=True)
@@ -67,6 +68,16 @@ def make_repo(tmp_path: Path, skill_md: str = GOOD_SKILL_MD, evals: dict | None 
         (root / "docs" / "known-limits.md").write_text(f"# Grenzen\n\n## {name}\n\nnichts.\n", encoding="utf-8")
         (root / "docs" / "superpowers" / "reports" / f"{name}-report.md").write_text(
             "# Report\n\n## Was NICHT gemessen wurde\n\n- Evals.\n", encoding="utf-8")
+    if manifest is True:
+        manifest = {"name": "t", "owner": {"name": "t"}, "plugins": [
+            {"name": "p-one", "source": "./", "skills": [f"./skills/{name}", "./skills/handoff"]}]}
+    if manifest:
+        (root / ".claude-plugin").mkdir()
+        (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(manifest), encoding="utf-8")
+    if excluded is not None:
+        (root / ".claude-plugin").mkdir(exist_ok=True)
+        text = excluded if isinstance(excluded, str) else json.dumps(excluded)
+        (root / ".claude-plugin" / "excluded.json").write_text(text, encoding="utf-8")
     # der Nachbar handoff nennt note-tag zurück
     other = root / "skills" / "handoff"
     other.mkdir()
@@ -88,7 +99,7 @@ def test_good_skill_passes_every_rule(tmp_path):
 
 
 def test_rule_ids_are_stable_and_unique():
-    assert len(set(ls.RULE_IDS)) == 13
+    assert len(set(ls.RULE_IDS)) == 14
 
 
 def test_repo_root_is_found_upwards_and_missing_root_means_unchecked(tmp_path):
@@ -98,14 +109,15 @@ def test_repo_root_is_found_upwards_and_missing_root_means_unchecked(tmp_path):
     lonely.mkdir(parents=True)
     (lonely / "SKILL.md").write_text(GOOD_SKILL_MD, encoding="utf-8")
     report = ls.lint_skill(lonely)
-    for rule_id in ("evals-exist", "anti-ceremony-eval", "judge-claims", "fixture-git", "routing", "report-section"):
+    for rule_id in ("evals-exist", "anti-ceremony-eval", "judge-claims", "fixture-git", "routing", "report-section",
+                    "plugin-membership"):
         status, _ = status_of(report, rule_id)
         assert status == "unchecked", rule_id
     # neighbors: Abschnitt vorhanden, aber keine Nachbarn im Workspace
     assert status_of(report, "neighbors")[0] == "unchecked"
     # asset-headers: ohne Assets gibt es nichts zu prüfen — das ist ein echtes pass
     assert status_of(report, "asset-headers")[0] == "pass"
-    assert report.summary()["pass"] == 6 and report.summary()["unchecked"] == 7
+    assert report.summary()["pass"] == 6 and report.summary()["unchecked"] == 8
 
 
 # --- Regeln 1–5 (immer prüfbar) ---------------------------------------------------
@@ -542,3 +554,55 @@ def test_frontmatter_rejects_unquoted_yaml_mapping_colon_and_accepts_quoted(tmp_
 ])
 def test_yaml_plain_scalar_problem(value, ok):
     assert (ls.yaml_plain_scalar_problem(value) is None) is ok
+
+
+# --- plugin-membership (Spec 20) --------------------------------------------------
+
+def _plugins(*lists: list[str]) -> dict:
+    return {"name": "t", "owner": {"name": "t"}, "plugins": [
+        {"name": f"p{i}", "source": "./", "skills": [f"./skills/{s}" for s in skills]}
+        for i, skills in enumerate(lists)]}
+
+
+@pytest.mark.parametrize("manifest, excluded, expected", [
+    (_plugins(["note-tag", "handoff"]), None, "pass"),
+    (_plugins(["handoff"]), {"note-tag": "nur im Repo"}, "pass"),
+    (_plugins(["handoff"]), {"_kommentar": "x", "note-tag": "nur im Repo"}, "pass"),
+    (_plugins(["handoff"]), None, "finding"),
+    (_plugins(["note-tag", "handoff"], ["note-tag"]), None, "finding"),
+    (_plugins(["note-tag", "handoff"]), {"note-tag": "nur im Repo"}, "finding"),
+    (False, None, "unchecked"),
+    ({"name": "t", "owner": {"name": "t"}, "plugins": [{"name": "p0", "source": "./"}]}, None, "unchecked"),
+    (_plugins(["note-tag", "handoff"]), "[1, 2]", "unchecked"),
+])
+def test_plugin_membership_rule(tmp_path, manifest, excluded, expected):
+    root, skill = make_repo(tmp_path, manifest=manifest, excluded=excluded)
+    status, reason = status_of(ls.lint_skill(skill, root), "plugin-membership")
+    assert status == expected, reason
+
+
+def test_plugin_membership_unchecked_on_broken_manifest(tmp_path):
+    root, skill = make_repo(tmp_path, manifest=False)
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "marketplace.json").write_text("{kaputt", encoding="utf-8")
+    assert status_of(ls.lint_skill(skill, root), "plugin-membership")[0] == "unchecked"
+
+
+def test_lint_output_names_sync_check_when_script_exists(tmp_path, capsys):
+    root, skill = make_repo(tmp_path)
+    (root / "scripts").mkdir()
+    (root / "scripts" / "sync_skills.py").write_text("# stub\n", encoding="utf-8")
+    ls.main([str(skill), "--repo-root", str(root)])
+    assert "sync_skills.py --check" in capsys.readouterr().out
+
+
+# --- CLAUDE_CODE_ONLY (Spec 21) ----------------------------------------------------
+
+def test_disable_model_invocation_only_for_claude_code_only(tmp_path):
+    md = GOOD_SKILL_MD.replace("name: note-tag\n", "name: setup-user\ndisable-model-invocation: true\n")
+    root, skill = make_repo(tmp_path / "a", md, name="setup-user")
+    assert status_of(ls.lint_skill(skill, root), "frontmatter")[0] == "pass"
+    md = GOOD_SKILL_MD.replace("name: note-tag\n", "name: note-tag\ndisable-model-invocation: true\n")
+    root, skill = make_repo(tmp_path / "b", md)
+    status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
+    assert status == "finding" and "disable-model-invocation" in reason

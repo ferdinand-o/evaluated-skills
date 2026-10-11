@@ -80,7 +80,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
 | neues Feature, Codebase existiert | feature-spec (03) | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
-| Bug, Testfehler | systematic-debugging (01) | feature-spec |
+| Bug, Testfehler | debug-ledger (01) | feature-spec |
 | Testplan, Repo-Typ-Frage | testing-strategy (05) | test-driven-development (Zyklus *während* der Implementierung) |
 | Diff prüfen | `/code-review` (mitgeliefert) | Spec 04 — nur noch als Kontextpaket-Lieferant, siehe unten |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
@@ -89,7 +89,10 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Skill bauen oder ändern | skill-forge (17) | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
+| eigenen Claude-Code-User-Scope einrichten oder prüfen (Statusline, Kontext-Hinweise, Regeln) | setup-user (21) | `/statusline` (Statusline nach Freitext-Wunsch), setup-repo (22, was in Cloud und CI gelten muss), handoff (sichert den Stand, setup-user rät nur dazu) |
 | Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose (19) | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (11, verdichtet, ändert keinen Stil), explain (15, erklärt mit eigenem Antwortvertrag) |
+
+**Ausnahme für Claude-Code-spezifische Skills** (Spec 21, 22): `setup-user` und `setup-repo` richten Claude Code selbst ein und laufen nur als Slash-Befehl. Sie tragen `disable-model-invocation: true`, das der Lint nur für die Liste `CLAUDE_CODE_ONLY` erlaubt, und schreiben nach gezeigtem Plan in Settings-Dateien; ihre Portabilität über Agenten hinweg ist bewusst aufgegeben.
 
 *Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `superpowers:writing-plans`. *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
 
@@ -99,7 +102,7 @@ Spec 00 als eigene Skill („scaffold-skill", die Gerüst und Konventionen erzeu
 
 ## Out of scope
 
-Die vierzehn Einzel-Skills selbst, Plugin-/Marketplace-Packaging und Verteilung, CI-Integration des Eval-Runners, Versionierungs- und Release-Prozess der Skill-Sammlung, Migration bestehender Repos auf die Artefakt-Pfade.
+Die vierzehn Einzel-Skills selbst, CI-Integration des Eval-Runners, Versionierungs- und Release-Prozess der Skill-Sammlung, Migration bestehender Repos auf die Artefakt-Pfade.
 
 ## Open questions
 

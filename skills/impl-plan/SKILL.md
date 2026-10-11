@@ -36,6 +36,11 @@ macht die Testsuite rot. Das ist G2 — ein Skript meldet, sobald jemand `pytest
    Nachbar-Task annehmen könnte"), bei Tier 0 der Eval-Task **vor** der SKILL.md. Die
    vier Pflicht-Tasks behalten ihre kanonischen Titel: `Evals`, `Nachbarn`,
    `known-limits`, `Report` — oder im Anti-Zeremonie-Fall ein Sammel-Task `Pflicht`.
+   Der Task `Nachbarn` nennt neben Routing-Matrix und Abgrenzungen die
+   **Plugin-Zuordnung**: die `skills`-Liste genau eines Plugins in
+   `.claude-plugin/marketplace.json` oder ein Eintrag mit Grund in
+   `.claude-plugin/excluded.json`, bei einer Projekt-Skill dazu die Tabelle in
+   `scripts/sync_skills.py`. Ändert die Spec keine Zuordnung, steht dort „unverändert".
 4. **Interfaces** mit dem Vokabular aus `task-patterns.md`: `fn:`, `token:`, `file:`,
    oder nackte Bezeichner. Kein `…` in einem Symbol, keine Prosa zwischen `Interfaces:`
    und Step 1.

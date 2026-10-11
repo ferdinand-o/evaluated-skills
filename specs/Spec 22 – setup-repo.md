@@ -1,6 +1,6 @@
 # Spec 22: setup-repo — ein Repo, in dem Claude weiß, wann es fertig ist und wann eine Arbeit ein neues Ziel ist
 
-Skill-Spezifikation · Zyklus 22 · Entscheidung: alles, was in Cloud, CI und jedem Clone gelten muss, liegt im Repo; Ziele leben in einem Ledger plus immer geladener Regel plus Bereichs-Hook, nicht in einer Skill, weil eine Regel immer gilt und eine Skill erst ausgelöst werden muss · Abgeglichen mit Spec 00 · Überarbeitet nach unabhängigem Review
+Skill-Spezifikation · Zyklus 22 · Entscheidung: alles, was in Cloud, CI und jedem Clone gelten muss, liegt im Repo; Ziele leben in einem Ledger plus immer geladener Regel plus Bereichs-Hook, nicht in einer Skill, weil eine Regel immer gilt und eine Skill erst ausgelöst werden muss; gebaut in vier Abschnitten, Harness-Änderung zuerst · Abgeglichen mit Spec 00 · Überarbeitet nach unabhängigem Review (zweite Runde 2026-10-08: Basis je Turn, kein Folgeturn, Zielregel mit festen Fällen, Interpreter entschieden)
 
 ## Problem
 
@@ -34,6 +34,13 @@ Fünf Messungen aus der Claude-Code-Doku bestimmen den Zuschnitt:
   trusted" (headless); `permissions.allow` aus dem Repo ist dort „Not used" (permissions,
   „What runs before you trust a folder").
 
+Dazu zwei Messungen aus der hooks-Doku, die den Bereichs-Hook bestimmen (im zweiten
+Review per WebFetch geprüft): `additionalContext` am `Stop`-Ereignis „keeps the
+conversation going through the same loop protections as `decision: "block"`" — es hält
+das Turn-Ende also an und kostet einen vollen Modellturn. Und bei Exit 0 am
+`Stop`-Ereignis landen stdout und stderr nur im Debug-Log; Claude und der Nutzer sehen
+sie nicht. Sichtbar für den Nutzer ist nur das gemeinsame Feld `systemMessage`.
+
 Die Doku stellt eine ausführbare Prüfung als den Hebel für unbeaufsichtigte Arbeit dar:
 „Give Claude a check it can run … It's the difference between a session you watch and
 one you walk away from" (best-practices). Der Eval-Harness dieser Sammlung schließt
@@ -54,23 +61,39 @@ Claude-Code-spezifisch. Fünf Abweichungen von Spec 00, alle hier begründet:
    Verifikations-Hook ist abgewählt.
 4. `.claude/settings.json` und die kopierten Hook-Skripte tragen keine Kopfzeile; JSON
    hat keinen Platz dafür, und die Skripte erkennt `check` per Inhalts-Hash gegen die
-   Assets.
+   Assets. Alle Markdown-Ephemera (`plan.md`, `apply.md`, `check.md`) tragen die
+   Kopfzeile in Zeile 1, alle JSON-Ephemera (`detect.json`, `candidates.json`,
+   `goal-scope.json`) tragen `_meta`.
 5. `docs/goals.md` ist nutzergepflegt und maschinenlesbar, also nach Spec 00 §1 eher
    Konfiguration; es liegt trotzdem unter `docs/`, weil Menschen es lesen und pflegen
    sollen.
 
 Alle Skripte Tier 1 und plattformübergreifend; Laufzeitskripte werden ins Repo kopiert
-(`.claude/hooks/`) und über `"$CLAUDE_PROJECT_DIR"/.claude/hooks/…` aufgerufen (so zeigt
-es hooks-guide), damit sie in Cloud-Sessions ohne Plugin laufen. Gate-Grade:
-Bestätigung vor `apply` G1; Hash über Plan und Bestand G2 wie Spec 21; der
-Bereichs-Hook meldet per `additionalContext`, hält kein Turn-Ende an, löst aber einen
-Folgeturn aus; der optionale Verifikations-Hook ist G3. Die Skill committet nie.
+(`.claude/hooks/`) und über `$CLAUDE_PROJECT_DIR/.claude/hooks/…` aufgerufen (so zeigt
+es hooks-guide), damit sie in Cloud-Sessions ohne Plugin laufen. Das committete
+Kommando startet Python über einen Starter, der unter Linux, in der Cloud und in Git
+Bash unter Windows gleich lautet:
+`command -v python3 >/dev/null 2>&1 && exec python3 "<skript>" "$@" || exec python "<skript>" "$@"`.
+Ob der Windows-Store-Platzhalter für `python3` ihn dort aushebelt, misst der Bau auf dem
+Windows-PC als Abnahme. Gate-Grade: Bestätigung vor `apply` G1; Hash über Plan und
+Bestand G2 wie Spec 21; der Bereichs-Hook meldet und hält nichts an; der optionale
+Verifikations-Hook ist G3. Die Skill committet nie.
+
 Dateien mit Frontmatter in Zeile 1 (Rules mit `paths`, `.claude/agents/reviewer.md`)
 tragen die Kopfzeile als erste Zeile nach dem Frontmatter; dafür kommt eine „Begründete
-Ausnahme" mit den wörtlichen Asset-Pfaden in `docs/artifact-header.md`. Plugin: `cc-dev`
-(Spec 20). Die Erkennung ist eigen (`detect_repo.py`), weil `detect_stack.py` aus
-testing-strategy zwar Test-Runner und Frontend-SPAs kennt, aber weder Delphi noch
-Makefile oder Agent-Dateien.
+Ausnahme" mit den wörtlichen Asset-Pfaden in `docs/artifact-header.md`, und der Satz
+über die Zahl der Ausnahmen dort wird nachgezogen. Plugin: `cc-dev` (Spec 20). Die
+Erkennung ist eigen (`detect_repo.py`), weil `detect_stack.py` aus testing-strategy zwar
+Test-Runner und Frontend-SPAs kennt, aber weder Delphi noch Makefile oder Agent-Dateien.
+
+Gebaut wird in vier Abschnitten, je mit eigenem Plan:
+
+- **A — Harness:** `EXCLUDED_PREFIXES` auf `(".git/", ".claude/skills/", ".claude/worktrees/")`,
+  danach die Contract-Evals aller Skills einmal fahren. Eigener PR vor allem anderen.
+- **B — Kern:** Erkennung, Ernte, Verifikationsbefehl, CLAUDE.md, Rules,
+  `plan`/`apply`/`check`, Plugins je Repo, optionaler Verifikations-Hook; Evals 1 bis 5.
+- **C — Ziele:** Ledger, Zielregel, Bereichs-Hook, Vorlagen-Messung.
+- **D — Ziel-Reviewer:** erst, wenn die Delphi-Prüfpunkte vom Nutzer vorliegen.
 
 ## Approach
 
@@ -84,50 +107,54 @@ erfunden.* Die Zielregel selbst ist Inhalt der Skill, keine geerntete Regel.
 skills/setup-repo/
 ├── SKILL.md                         Modi plan/apply/check, Eiserne Regel, Contract, Abgrenzung
 ├── references/rules-harvest.md      Kandidat → ableitbar / Werkzeug / Regel; paths wo möglich; Quelle je Regel
-├── references/goals.md              Ledger-Schema, Glob-Dialekt der Bereiche, Klassifikation entdeckter Arbeit
-├── references/review/python.md      Konformitäts-Prüfpunkte je Stack; fließen beim apply in reviewer.md ein
-├── references/review/typescript.md
-├── references/review/delphi.md
-├── references/review/generic.md
-├── assets/CLAUDE.md                 Gerüst: Kopfzeile, Zeile „Verifikation: …", @AGENTS.md falls vorhanden
-├── assets/goals.md                  Ledger-Gerüst für docs/goals.md, Kopfzeile schema 1
-├── assets/rules/goals.md            immer geladene Zielregel ≤ 25 Zeilen, Kopfzeile in Zeile 1
-├── assets/agents/reviewer.md        Ziel-Reviewer: Diff gegen Fertig-wenn, Bereich und Stack-Prüfpunkte; Kopfzeile nach dem Frontmatter
-├── assets/runtime/goal_scope.py     Tier 1 — Stop-Hook: Änderungen außerhalb der Bereiche → additionalContext, einmal je Dateimenge
-├── assets/runtime/verify_stop.py    Tier 1 — optionaler Stop-Hook: Verifikationsbefehl; höchstens drei Blocks in Folge
-├── assets/hooks/goal-scope.json     Fragment für .claude/settings.json; meldet
+├── references/plan-format.md        kanonischer JSON-Block wie Spec 21, Info-String setup-repo-plan
+├── references/goals.md              (C) Ledger-Schema, Glob-Dialekt der Bereiche, ID-Vergabe, Klassifikation entdeckter Arbeit
+├── references/review/python.md      (D) Konformitäts-Prüfpunkte je Stack, jeder mit Quelle; fließen beim apply in reviewer.md ein
+├── references/review/typescript.md  (D)
+├── references/review/delphi.md      (D) Prüfpunkte vom Nutzer
+├── references/review/generic.md     (D)
+├── assets/CLAUDE.md.tmpl            Gerüst: Kopfzeile, Zeile „Verifikation: …", @AGENTS.md falls vorhanden; Endung .tmpl, damit Claude Code die Datei beim Arbeiten im Ordner nicht als Anweisung lädt
+├── assets/goals.md                  (C) Ledger-Gerüst für docs/goals.md, Kopfzeile schema 1
+├── assets/rules/goals.md            (C) immer geladene Zielregel ≤ 25 Zeilen, Kopfzeile in Zeile 1
+├── assets/agents/reviewer.md        (D) Ziel-Reviewer: Diff gegen Fertig-wenn, Bereich und Stack-Prüfpunkte; Kopfzeile nach dem Frontmatter
+├── assets/runtime/goal_scope.py     (C) Tier 1 — UserPromptSubmit: Basis des Turns, offene Meldung als additionalContext; Stop: Änderungen außerhalb der Bereiche → systemMessage und offene Meldung
+├── assets/runtime/verify_stop.py    Tier 1 — optionaler Stop-Hook: Verifikationsbefehl; höchstens drei Blocks in Folge; --selftest prüft nur das Programm
+├── assets/hooks/goal-scope.json     (C) Fragment für .claude/settings.json, beide Ereignisse; meldet
 ├── assets/hooks/verify-stop.json    Fragment, opt-in; G3
-├── scripts/detect_repo.py           Tier 1 — Sprachen, Frontend, Runner, Linter-/Formatter-Konfiguration, Tests, CI, CLAUDE-Dateien, AGENTS.md
+├── scripts/detect_repo.py           Tier 1 — Sprachen, Frontend, Runner, Linter-/Formatter-Konfiguration, Tests, CI, CLAUDE-Dateien, AGENTS.md, Projekt-Skills unter .claude/skills/
 ├── scripts/harvest_rules.py         Tier 1 — Regelkandidaten mit Quelle aus Konfigurationen, CONTRIBUTING, Commit-Betreffs → candidates.json
-├── scripts/plan_repo.py             Tier 1 — liest candidates.json mit Klasse je Kandidat; Plan mit Hash; Budget samt Importen
-└── scripts/apply_repo.py            Tier 1 — wendet nur einen Plan mit passendem Hash an; prüft Hooks mit Beispiel-Payload
+├── scripts/plan_repo.py             Tier 1 — liest candidates.json mit Klasse je Kandidat; plan.md mit Ansicht und Block samt Hash; Budget samt Importen
+└── scripts/apply_repo.py            Tier 1 — wendet nur einen Plan mit passendem Hash an; schreibt apply.md; prüft Hooks mit Beispiel-Payload
 
-evalkit/assertions.py, evalkit/workspace.py   EXCLUDED_PREFIXES (".git/", ".claude/skills/"); Docstrings und Fehlertext nachgezogen
-tests/test_assertions.py, tests/test_workspace.py   .claude/settings.json beobachtet, .claude/skills/ nicht
-docs/artifact-header.md              Begründete Ausnahme: Kopfzeile nach dem Frontmatter, wörtlich mit skills/setup-repo/assets/agents/reviewer.md
-skills/handoff/SKILL.md, skills/testing-strategy/SKILL.md, skills/review-context/SKILL.md, skills/feature-spec/SKILL.md   Rückverweis, der setup-repo wörtlich nennt
-scripts/sync_plugins.py, plugins/cc-dev/skills/setup-repo/   Zuordnung zu cc-dev (Spec 20)
-.gitignore                           !evals/fixtures/*/.skills/cache/setup-repo/ — Fixture-Pläne sind versioniert
+evalkit/assertions.py, evalkit/workspace.py   (A) EXCLUDED_PREFIXES (".git/", ".claude/skills/", ".claude/worktrees/"); Docstrings und Fehlertext nachgezogen
+tests/test_assertions.py, tests/test_workspace.py   (A) .claude/settings.json beobachtet, .claude/skills/ und .claude/worktrees/ nicht
+docs/artifact-header.md              Begründete Ausnahme: Kopfzeile nach dem Frontmatter, wörtlich mit skills/setup-repo/assets/agents/reviewer.md; Satz „Die drei dokumentierten Ausnahmen" nachgezogen
+skills/handoff/SKILL.md, skills/testing-strategy/SKILL.md, skills/review-context/SKILL.md, skills/feature-spec/SKILL.md   Rückverweis, der setup-repo wörtlich nennt; Projekt-Kopien über sync_skills.py
+.claude-plugin/marketplace.json      setup-repo in der skills-Liste von cc-dev (Spec 20)
 specs/Spec 00 – skill-foundation.md, README.md   Matrixzeile setup-repo; README „Aufbau" nennt evals-templates/
 docs/known-limits.md                 Abschnitt setup-repo
 docs/superpowers/reports/setup-repo-report.md   Report mit „Was nicht gemessen wurde"
-evals/setup-repo/evals.json          sechs Evals, siehe unten
-evals/fixtures/sr-aligned/, sr-fresh/, sr-notests/, sr-planned/   je fixture.json mit "git": true
-evals-templates/setup-repo/evals.json, evals-templates/fixtures/sr-goals-seeded/   Vorlagen-Messung der Zielregel
+evals/setup-repo/evals.json          fünf Evals, siehe unten
+evals/fixtures/sr-aligned/, sr-fresh/, sr-notests/, sr-planned/, sr-tampered/   je fixture.json mit "git": true
+evals-templates/setup-repo/evals.json, evals-templates/fixtures/sr-goals-seeded/   (C) Vorlagen-Messung der Zielregel
 tests/test_setup_repo_*.py           siehe Tests (Repo)
 ```
+
+`.skills/cache/` ist in der `.gitignore` dieses Repos an der Wurzel verankert (das Muster
+enthält einen Schrägstrich); versionierte Fixture-Pläne unter
+`evals/fixtures/*/.skills/cache/setup-repo/` brauchen deshalb keine Ausnahme.
 
 Im Zielrepo entsteht nach `apply`:
 
 ```
 CLAUDE.md                            neu mit Kopfzeile, oder bestehende nur um bestätigte Abschnitte ergänzt
-.claude/settings.json                gemischt: permissions (allow: Verifikation, Tests, Lint; deny: Secrets), hooks
+.claude/settings.json                gemischt: permissions.allow für Verifikation, Tests, Lint; hooks
 .claude/settings.local.json          enabledPlugins für dieses Repo (persönlich, nicht committet)
 .claude/rules/goals.md, weitere aus Belegen
-.claude/agents/reviewer.md           mit den Prüfpunkten des erkannten Stacks
+.claude/agents/reviewer.md           (D) mit den Prüfpunkten des erkannten Stacks
 .claude/hooks/goal_scope.py, optional verify_stop.py
-docs/goals.md
-.gitignore                           Zeile .skills/cache/
+docs/goals.md                        (C)
+.gitignore                           Zeilen .skills/cache/ und .claude/settings.local.json
 ```
 
 ### Ablauf
@@ -137,88 +164,132 @@ docs/goals.md
    Kandidat die Klasse ein: ableitbar aus dem Code (fällt weg), schon durch ein
    konfiguriertes Werkzeug geprüft (keine Regel, im Bericht als „Werkzeug"), sonst Regel —
    mit `paths`, wo sie nur einen Teil betrifft. `plan_repo.py` schreibt
-   `.skills/cache/setup-repo/plan.md`: Diff, Quelle und Klasse je Kandidat, Budget,
-   abwählbare Hooks, Hash. Der Hash läuft über Plantext und Inhalte der Zieldateien, mit
-   Pfaden relativ zur Repo-Wurzel, ohne HEAD-SHA, ohne `.claude/skills/`.
+   `.skills/cache/setup-repo/plan.md`: oben die Ansicht mit Diff, je Kandidat eine Zeile
+   „Kandidat · Quelle · Klasse", Budget und abwählbaren Hooks; darunter der Block
+   `json setup-repo-plan` nach `references/plan-format.md`. Der Hash läuft nur über den
+   Block in kanonischer Form, mit LF-normalisierten Inhalten, Pfaden relativ zur
+   Repo-Wurzel, ohne HEAD-SHA, ohne `.claude/skills/`. Bis `apply` die `.gitignore`
+   ergänzt, ist `.skills/cache/` im Zielrepo unversioniert sichtbar; der Plan sagt das.
 3. **Verifikation festlegen.** Aus vorhandenen Einträgen (`Makefile`, `package.json`-
    Scripts, `pyproject.toml`, `justfile`): der Befehl, der Lint, Typprüfung und schnelle
    Tests verbindet, notfalls zusammengesetzt aus vorhandenen Zielen (`make lint && make
    test`). Bei Delphi wird der Build aus der `.dproj` abgeleitet und im Bericht als
-   „abgeleitet" markiert. Gibt es nichts, steht in der CLAUDE.md „Verifikation: keine —
-   ungeprüft", und der Bericht nennt `testing-strategy`. Neue Runner-Ziele legt die Skill
-   nicht an.
+   „abgeleitet" markiert; ein abgeleiteter Befehl kommt nicht in `permissions.allow`.
+   Gibt es nichts, steht in der CLAUDE.md „Verifikation: keine — ungeprüft", und der
+   Bericht nennt `testing-strategy`. Neue Runner-Ziele legt die Skill nicht an.
 4. **apply** in einem späteren Aufruf nach Bestätigung: `apply_repo.py --plan
-   .skills/cache/setup-repo/plan.md`. Verweigert wird nur, wenn eine Zieldatei
-   uncommittete Änderungen hat. Danach jeden Hook mit Beispiel-Payload ausführen.
+   .skills/cache/setup-repo/plan.md`. Verweigert wird, wenn der Hash nicht passt oder
+   eine versionierte Zieldatei uncommittete Änderungen hat. Unversionierte Zieldateien
+   wie `.claude/settings.local.json` bekommen vorher ein Backup unter
+   `.skills/cache/setup-repo/backups/<JJJJMMTT-hhmmss>/`. Danach jeden Hook mit
+   Beispiel-Payload ausführen; `verify_stop.py` läuft dabei nur mit `--selftest`, das
+   prüft, ob das Programm des Verifikationsbefehls existiert, ohne ihn zu starten.
    Existiert `AGENTS.md` ohne eine der drei CLAUDE-Dateien, enthält die neue CLAUDE.md
-   direkt unter der Kopfzeile `@AGENTS.md`; das Budget zählt die importierten Zeilen mit.
+   direkt unter der Kopfzeile `@AGENTS.md`; das Budget zählt die importierten Zeilen
+   mit. `apply` schreibt in jedem Fall `.skills/cache/setup-repo/apply.md` mit Ergebnis
+   oder Abbruchgrund.
 5. **check.** Bestand gegen Plan; Budget; Hooks laufen; Ledger-Kopfzeile lesbar. Liest
-   die Klassen aus dem letzten Plan, klassifiziert nicht neu; schreibt `check.md`.
+   die Klassen aus dem letzten Plan, klassifiziert nicht neu; fehlt der Plan (frischer
+   Clone, Cloud), stehen klassenabhängige Punkte als „ungeprüft — kein Plan". Schreibt
+   `check.md`.
 
 Ohne Antwort auf Rückfragen (`claude -p`) nimmt der Plan Annahmen und führt sie im
-Bericht; `apply` wendet nur einen vorhandenen Plan an.
+Bericht; `apply` wendet nur einen vorhandenen Plan an. `permissions.deny` für Secrets
+bietet der Plan an wie Spec 21, mit demselben Hinweis, dass ein Read-Deny beliebige
+Unterprozesse nicht erfasst; gesetzt wird es nur nach Bestätigung.
 
-**Ziele.** `docs/goals.md` hat drei Tabellen: *Aktiv* (`id`, Ziel, Fertig wenn, Bereich,
-seit), *Kandidaten* (`id`, Kandidat, entdeckt bei, Grund, am), *Erledigt* (`id`, Ziel,
-Beleg, am; die letzten zehn, Älteres liegt in Git). *Aktiv* plus *Kandidaten* sind der
-Backlog. Der Bereich sind Pfad-Globs mit `**`, getrennt durch Kommas, in einer Zelle.
-Beim Einrichten entsteht der Ledger leer; die Skill erfindet keine Ziele. „Fertig wenn"
-folgt der `/goal`-Doku: ein messbarer Endzustand, die Prüfung, die ihn zeigt, und was
-sich nicht ändern darf.
-
-Die Regel `.claude/rules/goals.md` ordnet jede während der Arbeit entdeckte Aufgabe in
-genau eine von drei Klassen:
-
-1. **Teil des Ziels** — nötig, damit „Fertig wenn" eintritt: erledigen.
-2. **Trivial** — in einer Datei, die die aktuelle Aufgabe ohnehin ändert, höchstens fünf
-   Zeilen, kein geändertes Verhalten: erledigen und im Turn-Ende nennen.
-3. **Neues Ziel** — alles andere: nicht umsetzen, als Kandidat eintragen, im Turn-Ende
-   nennen. Der Nutzer befördert Kandidaten nach *Aktiv*.
-
-Ein Prompt wird nur dann ein Eintrag unter *Aktiv*, wenn er mehr verlangt als die
-Trivial-Schwelle oder der Nutzer ihn ausdrücklich ein Ziel nennt; dann schlägt Claude
-die passende `/goal`-Zeile aus „Fertig wenn" vor. Ist ein Ziel erreicht, wandert es mit
-Beleg (Befehl und Ergebnis) nach *Erledigt*.
-
-Der Hook `goal_scope.py` macht die dritte Klasse prüfbar, soweit Dateien sie zeigen. Er
-merkt sich beim ersten Lauf einer Session den HEAD als Basis — Commits schon im ersten
-Turn sieht er deshalb nicht (Zustand
-`.skills/cache/setup-repo/goal-scope.json`, Schlüssel `session_id`) und vergleicht am
-`Stop`-Ereignis `git diff <basis> --name-only -z` plus unversionierte Dateien
-(`git ls-files --others --exclude-standard -z`) mit den Bereichen aller aktiven Ziele;
-so sieht er auch Commits der Session. Ausgenommen sind `docs/goals.md`, `handoff.md`,
-`docs/debugging/`, `docs/decisions.md`, `docs/specs/wip/`, `.claude/skills/` und
-`.skills/` — Artefakte der Sammlung, die keine Zielarbeit sind. Liegen Änderungen
-außerhalb und wurden sie für diese Dateimenge noch nicht gemeldet, gibt er
-`hookSpecificOutput.additionalContext` aus („[setup-repo] Geändert außerhalb des
-Bereichs von G3: src/dates.py. Laut Zielregel ist das Teil des Ziels, trivial,
-vom Nutzer verlangt oder ein Kandidat."). Laut Doku setzt das das Gespräch fort (hooks,
-„Stop"). Ohne Repo-Commit, ohne `docs/goals.md`, ohne aktives Ziel schweigt er; fehlt
-die Kopfzeile des Ledgers oder ist sie unbekannt, schreibt er das auf stderr und
-schweigt sonst (Konsumenten-Regel).
+**Plugins je Repo.** `enabledPlugins` nach Spec 20 kommt in `.claude/settings.local.json`,
+nicht in die committete Datei — die Plugins stammen aus der persönlichen Sammlung des
+Nutzers und laden in der Cloud ohnehin nicht. `cc-ui` an, wenn `detect_repo.py` ein
+Frontend erkennt. Ein Plugin, dessen Skills im Repo als Projekt-Kopie unter
+`.claude/skills/` liegen, geht aus, damit nichts doppelt erscheint. Die Plugin-ID
+(`<name>@<marketplace>` oder `<name>@synced`) liest `detect_repo.py` aus
+`installed_plugins.json` und `plugins/synced/` des Config-Verzeichnisses, ohne Code aus
+setup-user zu importieren. Findet es keine ID, schreibt `apply` nichts und der Bericht
+sagt „ungeprüft — Plugin-ID nicht gefunden". Im Repo `cc-skills` regelt Spec 20 den
+Schalter für `cc-dev` bereits in der committeten Datei; `check` meldet das nicht als
+Abweichung.
 
 **Verifikations-Hook (opt-in).** `verify_stop.py` hält das Turn-Ende an, solange der
 Verifikationsbefehl rot ist, höchstens dreimal in Folge je Session (eigener Zähler im
-Zustand, unabhängig von `stop_hook_active`); danach lässt er das Ende zu und meldet
-„rot nach drei Versuchen". Ist der Befehl nicht ausführbar (Programm fehlt), endet er
-mit 0 und „ungeprüft — <Werkzeug> fehlt", etwa beim Delphi-Build auf der Linux-Devbox.
-Die Claude-Code-Obergrenze von acht Blocks ohne Tool-Aufruf (hooks-guide) bleibt als
-zweites Netz.
+Zustand, unabhängig von `stop_hook_active`). Danach lässt er das Ende zu und gibt
+`systemMessage` „rot nach drei Versuchen" aus. Ist der Befehl nicht ausführbar
+(Programm fehlt), endet er mit 0 und `systemMessage` „ungeprüft — <Werkzeug> fehlt",
+etwa beim Delphi-Build auf der Linux-Devbox. Die Claude-Code-Obergrenze von acht Blocks
+ohne Tool-Aufruf (hooks-guide) bleibt als zweites Netz.
 
-**Review.** Der Ziel-Reviewer prüft einen Diff gegen „Fertig wenn" und „Bereich" des
-Ziels und gegen die Konformitäts-Prüfpunkte des erkannten Stacks, die `apply` aus
-`references/review/` in `reviewer.md` schreibt (etwa: neue öffentliche Funktion hat
-einen Test, neue Abhängigkeit steht im Manifest). Jeder Befund trägt ein
+**Ziele (Abschnitt C).** `docs/goals.md` hat drei Tabellen: *Aktiv* (`id`, Ziel, Fertig
+wenn, Bereich, seit), *Kandidaten* (`id`, Kandidat, entdeckt bei, Grund, am), *Erledigt*
+(`id`, Ziel, Beleg, am; die letzten zehn, Älteres liegt in Git). *Aktiv* plus
+*Kandidaten* sind der Backlog. IDs heißen `G<n>`, mit `n` eins größer als das höchste
+`n` in allen drei Tabellen; vor jedem Schreiben liest Claude die Datei neu und hängt nur
+an. Beim Einrichten entsteht der Ledger leer; die Skill erfindet keine Ziele. „Fertig
+wenn" folgt der `/goal`-Doku: ein messbarer Endzustand, die Prüfung, die ihn zeigt, und
+was sich nicht ändern darf.
+
+Der Bereich sind Pfad-Globs relativ zur Repo-Wurzel, getrennt durch Kommas, in einer
+Zelle. Dialekt: `**` passt auf beliebig viele Ordner, `*` und `?` innerhalb eines
+Pfadteils, Trenner ist immer `/`, Groß- und Kleinschreibung zählen, geschweifte Klammern
+gibt es nicht. Ein Ziel mit leerem Bereich hat keinen Bereich; der Hook übergeht es.
+
+Die Regel `.claude/rules/goals.md` gilt nur, solange *Aktiv* mindestens ein Ziel hat.
+Dann ordnet sie jede während der Arbeit entdeckte Aufgabe in genau eine von vier Klassen:
+
+1. **Vom Nutzer verlangt** — steht im aktuellen Prompt: erledigen.
+2. **Teil des Ziels** — nötig, damit „Fertig wenn" eintritt: erledigen.
+3. **Trivial** — in einer Datei, die die aktuelle Aufgabe ohnehin ändert, höchstens fünf
+   Zeilen, keine neue öffentliche Schnittstelle, kein neuer oder geänderter Test nötig:
+   erledigen und im Turn-Ende nennen. Ein kleiner Bugfix fällt darunter.
+4. **Neues Ziel** — alles andere: nicht umsetzen, als Kandidat eintragen, im Turn-Ende
+   nennen. Der Nutzer befördert Kandidaten nach *Aktiv*.
+
+Ein Eintrag unter *Aktiv* entsteht nur, wenn der Nutzer etwas ausdrücklich ein Ziel
+nennt; dann schlägt Claude die passende `/goal`-Zeile aus „Fertig wenn" vor. Bevor ein
+Ziel nach *Erledigt* wandert, läuft der Ziel-Reviewer (Abschnitt D, sofern
+eingerichtet); dann wandert es mit Beleg (Befehl und Ergebnis). Gleichzeitige Sessions
+können beim Mergen von `docs/goals.md` kollidieren; Claude löst einen solchen Konflikt
+nicht selbst, sondern fragt.
+
+**Bereichs-Hook.** `goal_scope.py` macht die vierte Klasse prüfbar, soweit Dateien sie
+zeigen, und läuft an zwei Ereignissen:
+
+- **`UserPromptSubmit`:** Er hält die Basis dieses Turns fest — HEAD und für jede
+  geänderte oder unversionierte Datei einen Inhalts-Hash (`git status --porcelain -z`).
+  Liegt aus dem letzten Turn eine offene Meldung vor, gibt er sie als
+  `hookSpecificOutput.additionalContext` aus und löscht sie.
+- **`Stop`:** Er bestimmt die Dateien, die sich in diesem Turn geändert haben: alles aus
+  `git diff <basis-HEAD> --name-only -z` und `git ls-files --others --exclude-standard
+  -z`, dessen Inhalt nicht mehr dem Basis-Hash gleicht, plus gelöschte Dateien. So
+  zählen Commits des Turns mit, und was schon vor dem Turn uncommittet war, zählt nur,
+  wenn es sich weiter ändert. Pfade sind relativ zur Repo-Wurzel
+  (`git rev-parse --show-toplevel`), auch wenn die Session in einem Unterordner läuft.
+  Liegt eine Datei außerhalb der Bereiche aller aktiven Ziele und wurde sie in dieser
+  Session noch nicht gemeldet, schreibt er eine offene Meldung in den Zustand und gibt
+  `systemMessage` aus, etwa „[setup-repo] Geändert außerhalb des Bereichs von G3:
+  src/dates.py. Laut Zielregel: vom Nutzer verlangt, Teil des Ziels, trivial oder ein
+  Kandidat." Er hält das Turn-Ende nicht an und löst keinen Folgeturn aus.
+
+Claude sieht die Meldung damit beim nächsten Prompt, der Nutzer sofort. Ausgenommen sind
+`docs/goals.md`, `handoff.md`, `docs/debugging/`, `docs/decisions.md`,
+`docs/specs/wip/`, `.claude/`, `.skills/`, `CLAUDE.md` und `.gitignore` — Artefakte der
+Sammlung und der Einrichtung, die keine Zielarbeit sind. Ohne Repo-Commit, ohne
+`docs/goals.md`, ohne aktives Ziel schweigt er. Fehlt die Kopfzeile des Ledgers oder ist
+sie unbekannt, oder scheitert ein git-Aufruf, gibt er einmal je Session `systemMessage`
+mit dem Grund aus und schweigt sonst (Konsumenten-Regel, Sichtbarkeits-Regel). Den
+Zustand `.skills/cache/setup-repo/goal-scope.json` (Schlüssel `session_id`, mit `_meta`)
+schreibt er atomar; ist er unlesbar, beginnt er neu. Einträge älter als sieben Tage räumt
+er beim Schreiben ab. Er endet immer mit 0.
+
+**Review (Abschnitt D).** Der Ziel-Reviewer prüft einen Diff gegen „Fertig wenn" und
+„Bereich" des Ziels und gegen die Konformitäts-Prüfpunkte des erkannten Stacks, die
+`apply` aus `references/review/` in `reviewer.md` schreibt (etwa: neue öffentliche
+Funktion hat einen Test, neue Abhängigkeit steht im Manifest). Jeder Prüfpunkt trägt
+seine Quelle; einer ohne Quelle steht als „ungeprüft" da. Jeder Befund trägt ein
 Failure-Szenario. Fehler im Code selbst sucht er nicht — das ist `/code-review`,
 „reviews the current diff for bugs" (best-practices). Den offenen Zuschnitt von Spec 04
 berührt das nicht. Das Kontextpaket von `review-context` liest er nur, wenn der
 Hauptagent es im selben Lauf erzeugt und den Pfad übergeben hat: Die Datei trägt `_meta`,
 aber nur einen symbolischen Bereich wie `HEAD~1..HEAD`, keinen SHA.
-
-**Plugins je Repo.** `enabledPlugins` nach Spec 20 kommt in `.claude/settings.local.json`,
-nicht in die committete Datei — die Plugins stammen aus der persönlichen Sammlung des
-Nutzers und laden in der Cloud ohnehin nicht. `cc-ui` an, wenn `detect_repo.py` ein
-Frontend erkennt; `cc-meta` an im Repo `cc-skills`.
 
 ### Contract
 
@@ -231,14 +302,17 @@ Frontend erkennt; `cc-meta` an im Repo `cc-skills`.
   ≤ 150; `plan_repo.py` meldet Überschreitung als Befund (G2).
 - **AGENTS.md bleibt lesbar.** Eine neue CLAUDE.md neben `AGENTS.md` importiert es.
 - **Mischen, nie überschreiben; kein Commit.** Bestehende `.claude/settings.json` wird
-  gemischt wie in Spec 21; `apply` verweigert Zieldateien mit uncommitteten Änderungen und
-  committet nie.
-- **Neue Ziele werden Kandidaten.** Die Regel verlangt die Dreiteilung (G1); der Hook
-  meldet Dateien außerhalb der Bereiche und löst damit einen Folgeturn aus, blockiert aber
-  nichts.
+  gemischt wie in Spec 21; `apply` verweigert versionierte Zieldateien mit uncommitteten
+  Änderungen, sichert unversionierte vorher und committet nie.
+- **Sichtbar oder gar nicht.** Jede Meldung eines Stop-Hooks geht über `systemMessage`;
+  nichts landet nur im Debug-Log.
+- **Neue Ziele werden Kandidaten.** Die Regel verlangt die vier Klassen (G1); der Hook
+  meldet Dateien außerhalb der Bereiche, hält aber nichts an und löst keinen Folgeturn
+  aus.
 - **Anti-Zeremonie-Fall:** `check` auf ein eingerichtetes Repo ändert nur `check.md` und
   meldet „keine Abweichung"; ein Repo ohne Tests bekommt keinen erfundenen Testbefehl; ein
-  Tippfehler-Prompt erzeugt keine Ledger-Zeile (Vorlagen-Messung).
+  Tippfehler-Prompt erzeugt keine Ledger-Zeile (Vorlagen-Messung); ohne aktives Ziel
+  schweigen Regel und Hook.
 
 ### Abgrenzung
 
@@ -254,51 +328,61 @@ Frontend erkennt; `cc-meta` an im Repo `cc-skills`.
 Rückverweise beim Bau, je mit dem Wort setup-repo: `handoff` nennt `docs/goals.md` unter
 „Einstiegspunkte", wenn es existiert (Konsumenten-Regel, Kopfzeile lesen);
 `testing-strategy`, `review-context` und `feature-spec` bekommen je einen Halbsatz in
-ihrer Abgrenzung. Kein Eval-Pattern dieser vier trifft einen solchen Halbsatz (im Review
-geprüft), `evals_due` entsteht also nicht.
+ihrer Abgrenzung. Kein Eval-Pattern dieser vier trifft einen solchen Halbsatz (im ersten
+Review geprüft), `evals_due` entsteht also nicht.
 
 ### Tests (Repo)
 
 | Test | Datei | prüft |
 | --- | --- | --- |
-| `test_claude_dir_observed_except_skills` | `tests/test_assertions.py`, `tests/test_workspace.py` | `.claude/settings.json` im Snapshot und prüfbar; `.claude/skills/` weiter ausgenommen; Fehlertext nennt `.claude/skills/` |
-| `test_detect_python_ts_delphi_frontend_none` | `tests/test_setup_repo_detect.py` | Sprache, Frontend, Runner und Tests in Mini-Fixtures; Delphi über `.dproj`; alle drei CLAUDE-Dateien |
+| `test_claude_dir_observed_except_skills_and_worktrees` | `tests/test_assertions.py`, `tests/test_workspace.py` | (A) `.claude/settings.json` im Snapshot und prüfbar; `.claude/skills/` und `.claude/worktrees/` weiter ausgenommen; Fehlertext nennt beide |
+| `test_detect_python_ts_delphi_frontend_none` | `tests/test_setup_repo_detect.py` | Sprache, Frontend, Runner und Tests in Mini-Fixtures; Delphi über `.dproj`; alle drei CLAUDE-Dateien; Projekt-Skills unter `.claude/skills/` |
+| `test_detect_plugin_ids` | dito | ID aus `installed_plugins.json` und aus `plugins/synced/`; keine ID → leer |
 | `test_harvest_marks_tool_rules` | `tests/test_setup_repo_harvest.py` | `line-length` aus ruff-Konfiguration wird Kandidat mit Quelle; `plan_repo.py` macht bei Klasse Werkzeug keine Regelzeile daraus |
 | `test_budget_counts_unscoped_rules_and_imports` | `tests/test_setup_repo_plan.py` | Rules mit `paths` zählen nicht, importiertes `AGENTS.md` zählt |
-| `test_plan_hash_is_path_and_head_neutral` | dito | dasselbe Repo an zwei Orten, mit verschiedenem HEAD und installierter Skill → gleicher Hash |
+| `test_plan_hash_is_path_head_and_eol_neutral` | dito | dasselbe Repo an zwei Orten, mit verschiedenem HEAD, mit CRLF-Bestand und installierter Skill → gleicher Hash |
 | `test_agents_md_is_imported` | dito | `AGENTS.md` ohne CLAUDE-Datei → Plan enthält `@AGENTS.md` unter der Kopfzeile |
-| `test_apply_refuses_dirty_target_and_changed_plan` | `tests/test_setup_repo_apply.py` | uncommittete Zieldatei oder geänderter Plan → Abbruch; unversionierter `.claude/skills/` stört nicht |
+| `test_apply_refuses_dirty_target_and_changed_plan` | `tests/test_setup_repo_apply.py` | uncommittete versionierte Zieldatei oder geänderter Block → Abbruch mit Grund in `apply.md`; unversionierter `.claude/skills/` stört nicht |
+| `test_apply_backs_up_local_settings_and_ignores_them` | dito | vorhandene `.claude/settings.local.json` wird gesichert und gemischt; `.gitignore` bekommt die Zeile |
 | `test_apply_merges_existing_settings` | dito | vorhandene `hooks.Stop` und `permissions` bleiben, Listen vereinigt |
-| `test_fixture_plans_are_current` | `tests/test_setup_repo_fixtures.py` | versionierte Pläne in `sr-planned` und `sr-aligned` gleichen neu erzeugten Plänen; die Bestandsdateien in `sr-aligned` gleichen den Assets |
-| `test_goal_scope_reports_once_incl_staged_and_committed` | `tests/test_setup_repo_goal_scope.py` | gestagete, ungestagete, committete Datei außerhalb → eine Meldung; gleiche Dateimenge erneut → keine; Nicht-ASCII-Name |
-| `test_goal_scope_ignores_house_artifacts` | dito | nur `docs/goals.md`, `handoff.md`, `.claude/skills/`, `.skills/` geändert → keine Meldung |
-| `test_goal_scope_silent_without_goals_or_commit` | dito | kein `docs/goals.md`, kein aktives Ziel, Repo ohne Commit, fremde Kopfzeile → keine Meldung, stderr bei fremder Kopfzeile |
-| `test_goal_scope_output_shape` | dito | `hookSpecificOutput.additionalContext`, Text beginnt mit `[setup-repo]` |
-| `test_verify_stop_counts_and_missing_tool` | `tests/test_setup_repo_verify_stop.py` | grün → 0; rot → 2 bis zum dritten Mal, dann 0 mit „rot nach drei Versuchen"; fehlendes Programm → 0 mit „ungeprüft" |
+| `test_fixture_plans_are_current` | `tests/test_setup_repo_fixtures.py` | Blöcke in `sr-planned`, `sr-aligned` und `sr-tampered` gleichen neu erzeugten, `sr-tampered` bis auf die eine absichtliche Änderung; die Bestandsdateien in `sr-aligned` gleichen den Assets |
+| `test_goal_scope_turn_baseline` | `tests/test_setup_repo_goal_scope.py` | (C) vorher uncommittete, unveränderte Datei → keine Meldung; im Turn committete, gestagete, ungestagete und gelöschte Datei außerhalb → eine Meldung; Nicht-ASCII-Name; Session im Unterordner |
+| `test_goal_scope_reports_each_file_once_and_defers_context` | dito | (C) dieselbe Datei im nächsten Turn → keine neue Meldung; offene Meldung erscheint beim nächsten `UserPromptSubmit` als `additionalContext` und danach nicht mehr |
+| `test_goal_scope_globs` | dito | (C) `src/**`, `*` in einem Pfadteil, Groß- und Kleinschreibung, leere Bereichszelle, Komma-Liste |
+| `test_goal_scope_ignores_house_artifacts` | dito | (C) nur `docs/goals.md`, `handoff.md`, `.claude/`, `.skills/`, `CLAUDE.md`, `.gitignore` geändert → keine Meldung |
+| `test_goal_scope_silent_or_visible` | dito | (C) kein `docs/goals.md`, kein aktives Ziel, Repo ohne Commit → nichts; fremde Kopfzeile oder git-Fehler → einmal `systemMessage`; kaputter Zustand → Neustart |
+| `test_goal_scope_output_shape` | dito | (C) Stop: nur `systemMessage`, nie `decision` oder `additionalContext`; UserPromptSubmit: `hookEventName` und `additionalContext`, Text beginnt mit `[setup-repo]`; Exit immer 0 |
+| `test_verify_stop_counts_and_missing_tool` | `tests/test_setup_repo_verify_stop.py` | grün → 0; rot → 2 bis zum dritten Mal, dann 0 mit `systemMessage` „rot nach drei Versuchen"; fehlendes Programm → 0 mit `systemMessage` „ungeprüft"; `--selftest` startet den Befehl nicht |
+| `test_launcher_command_runs` | dito | der Starter aus den Fragmenten läuft unter bash mit `python3` und, wenn `python3` fehlt, mit `python` |
 
 ### Evals
 
-Voraussetzung: die Harness-Änderung oben. Die Plan-Evals laufen auf Fixtures ohne Plan
-und prüfen den Bericht; nur Eval 6 wendet einen versionierten Plan an. Ohne installierte
-Skill ändert ein Agent auf `/setup-repo` nichts (für `/setup-user` im Review gemessen,
-hier übertragen), deshalb bindet jeder Eval an ein Artefakt, das nur die Skill erzeugt.
-In der Tabelle steht `\|` für ein Regex-`|`; in `evals.json` wird es ein einfaches `|`.
+Voraussetzung: Abschnitt A. Ohne installierte Skill ändert ein Agent auf `/setup-repo`
+nichts (für `/setup-user` im ersten Review gemessen, hier übertragen). Weil die
+Plan-Ansicht aber alles beschreibt und ein hilfsbereiter Agent sie von Hand umsetzen
+könnte, bindet jeder Eval an ein Artefakt, das nur die Skripte erzeugen. Vor der Abnahme
+läuft jeder Eval einmal mit `--without-skill` (Spec 18). In der Tabelle steht `\|` für
+ein Regex-`|`; in `evals.json` wird es ein einfaches `|`.
 
 | # | id | Klasse | Fixture | Assertions | Diskriminator |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `anti-ceremony-check-on-aligned-repo-changes-nothing` | contract | `sr-aligned` | `file_exists` und `artifact_header` auf `.skills/cache/setup-repo/check.md`; `file_matches` dort `keine Abweichung`; `file_unchanged` einzeln auf `CLAUDE.md`, `.claude/settings.json`, `.claude/rules/goals.md`, `.claude/agents/reviewer.md`, `.claude/hooks/goal_scope.py`, `docs/goals.md`; `git_head_unchanged` | `check.md` mit Kopfzeile entsteht nur durch die Skill; die Fixture hat keine offenen Kandidaten, damit die Klassen des letzten Plans genügen |
-| 2 | `plan-is-default-and-writes-only-report` | contract | `sr-fresh` | `file_exists` `.skills/cache/setup-repo/plan.md` und `detect.json`; `file_absent` `CLAUDE.md` und `.claude/settings.json` | ohne Skill entsteht weder Plan noch `detect.json` |
-| 3 | `plan-takes-verify-command-from-the-repo` | contract | `sr-fresh` | `file_matches` Plan auf `Verifikation:.*make check` | schwach: ein Agent, der das Makefile liest, nennt auch `make check`; es unterscheidet, dass der Satz im Plan der Skill steht |
-| 4 | `plan-without-tests-says-unverified` | contract | `sr-notests` | `file_matches` Plan auf `Verifikation: keine` | ohne Skill kein Plan; mit Skill der Wortlaut der Doktrin statt eines erfundenen Befehls |
-| 5 | `plan-classifies-configured-tool-rule` | contract | `sr-fresh` | `file_matches` Plan auf `(?i)line.?length.{0,120}Werkzeug` — der Plan führt je Kandidat eine Zeile „Kandidat · Quelle · Klasse" in dieser Reihenfolge | die Fixture trägt `line-length = 100` in `pyproject.toml`; nur die Klassifikation der Skill schreibt „Werkzeug" daneben |
-| 6 | `apply-executes-plan-faithfully` | contract | `sr-planned` | `file_matches` `CLAUDE.md` auf `Verifikation:.*make check`; `must_not` `file_matches` `CLAUDE.md` auf `(?i)line.?length\|100 Zeichen`; `file_max_lines` `CLAUDE.md` 125; `file_matches` `.claude/settings.json` auf `make check` und auf `goal_scope`; `file_exists` und `artifact_header` auf `docs/goals.md`; `file_matches` `docs/goals.md` auf `## Kandidaten`; `file_matches` `.claude/rules/goals.md` auf `Kandidat`; `git_head_unchanged` | ohne Skill bleibt die Fixture unverändert; gemessen wird, dass `apply_repo.py` den versionierten Plan treu umsetzt, nicht die Klassifikation (die messen 3 bis 5) |
+| 1 | `anti-ceremony-check-on-aligned-repo-changes-nothing` | contract | `sr-aligned` | `file_exists` und `artifact_header` auf `.skills/cache/setup-repo/check.md`; `file_matches` dort `keine Abweichung`; `file_unchanged` einzeln auf `CLAUDE.md`, `.claude/settings.json`, `.claude/rules/goals.md`, `.claude/hooks/goal_scope.py`, `docs/goals.md`; `file_absent` `.skills/cache/setup-repo/apply.md`; `git_head_unchanged` | `check.md` mit Kopfzeile entsteht nur durch die Skill; die Fixture hat keine offenen Kandidaten, damit die Klassen des letzten Plans genügen |
+| 2 | `plan-from-repo-writes-only-report` | contract | `sr-fresh` | `file_exists` `.skills/cache/setup-repo/plan.md` und `detect.json`; `file_matches` Plan auf `setup-repo-plan`, auf `Verifikation:.*make check` und auf `(?i)line.?length.{0,120}Werkzeug`; `file_absent` `CLAUDE.md` und `.claude/settings.json` | den Block und `detect.json` schreiben nur die Skripte; die Fixture trägt `line-length = 100` in `pyproject.toml`, und nur die Klassifikation der Skill schreibt „Werkzeug" in die Kandidatenzeile |
+| 3 | `plan-without-tests-says-unverified` | contract | `sr-notests` | `file_matches` Plan auf `Verifikation: keine`; `file_matches` Plan auf `setup-repo-plan` | ohne Skill kein Plan; mit Skill der Wortlaut der Doktrin statt eines erfundenen Befehls |
+| 4 | `apply-executes-plan-faithfully` | contract | `sr-planned` | `file_matches` `CLAUDE.md` auf `Verifikation:.*make check`; `must_not` `file_matches` `CLAUDE.md` auf `(?i)line.?length\|100 Zeichen`; `file_max_lines` `CLAUDE.md` 125; `file_matches` `.claude/settings.json` auf `make check` und auf `goal_scope`; `file_matches` `.skills/cache/setup-repo/apply.md` auf `angewendet`; `file_matches` `.gitignore` auf `settings\.local\.json`; `git_head_unchanged` | `apply.md` schreibt nur `apply_repo.py`; gemessen wird, dass der versionierte Plan treu umgesetzt wird, nicht die Klassifikation (die messen 2 und 3) |
+| 5 | `apply-refuses-tampered-plan` | contract | `sr-tampered` | `file_matches` `.skills/cache/setup-repo/apply.md` auf `(?i)hash`; `file_absent` `CLAUDE.md` und `.claude/settings.json` | der Block wurde nach dem Hashen geändert; nur `apply_repo.py` prüft den Hash und schreibt den Abbruchgrund, ein Agent ohne Skill setzt den Plan um oder schweigt |
 
-Prompts: 1 „/setup-repo check", 2 bis 5 „/setup-repo", 6 „/setup-repo apply — den Plan
-in .skills/cache/setup-repo/plan.md habe ich gelesen und bestätige ihn". Das Budget in
-Eval 6 ist 150 minus die 25 Zeilen der Zielregel. `sr-planned` bringt den Plan unter
-`.skills/cache/setup-repo/plan.md` mit; die `.gitignore`-Ausnahme oben versioniert ihn.
+Prompts: 1 „/setup-repo check", 2 und 3 „/setup-repo", 4 und 5 „/setup-repo apply — den
+Plan in .skills/cache/setup-repo/plan.md habe ich gelesen und bestätige ihn". Das Budget
+in Eval 4 ist 150 minus die 25 Zeilen der Zielregel; die Fixture hat keine weitere Regel
+ohne `paths` und kein `AGENTS.md`. `sr-planned` und `sr-tampered` bringen den Plan unter
+`.skills/cache/setup-repo/plan.md` mit. Zielregel, Ledger und Bereichs-Hook kommen erst
+mit Abschnitt C: In Abschnitt B fehlen in Eval 1 die `file_unchanged`-Assertions auf
+`.claude/rules/goals.md`, `.claude/hooks/goal_scope.py` und `docs/goals.md` und in Eval 4
+die Assertion auf `goal_scope`, und die Fixtures tragen diese Dateien nicht. Abschnitt C
+ergänzt Fixtures, Pläne und Assertions.
 
-### Vorlagen-Messung der Zielregel (außerhalb des Eval-Vertrags)
+### Vorlagen-Messung der Zielregel (Abschnitt C, außerhalb des Eval-Vertrags)
 
 Ob Claude entdeckte Arbeit tatsächlich als Kandidat einträgt, misst kein Eval dieser
 Skill: Rules laden beim Sessionstart, die Regel muss also schon in der Fixture liegen.
@@ -313,12 +397,10 @@ offensichtlicher, nicht verwandter Fehler in `src/dates.py`. Zwei Fälle:
 - Prompt „Behebe den Tippfehler in greet.py (Ziel G1)." — erwartet: Zeile unter
   *Kandidaten* mit `dates`, `src/dates.py` unverändert.
 - Prompt „Ändere in README.md ‚Helo' zu ‚Hello'." — erwartet: keine neue Zeile unter
-  *Aktiv*. Der Hook meldet hier README.md als außerhalb des Bereichs; die Regel nennt
-  „vom Nutzer verlangt" als zulässige Antwort.
+  *Aktiv* und *Kandidaten*; die Änderung ist vom Nutzer verlangt.
 
-Weil `-p` Projekt-Hooks ausführt, läuft `goal_scope.py` mit. Eine Fixture-Variante
-`sr-goals-seeded-nohook` ohne Hook-Eintrag trennt Regel und Hook; der Runner kennt keine
-Option, Hooks abzuschalten.
+Weil der Bereichs-Hook keinen Folgeturn mehr auslöst und `-p` nur einen Turn hat,
+beeinflusst er diese Läufe nicht; eine Fixture-Variante ohne Hook ist nicht nötig.
 
 ## Alternatives considered
 
@@ -333,6 +415,16 @@ Verworfen, weil eine Skill erst über ihre Description ausgelöst werden muss �
 beiläufig entdeckten Nebenbefund passiert das nicht —, während eine Regel ohne `paths`
 immer geladen ist. Gewinnt, wenn die Regel über 25 Zeilen wächst.
 
+**Bereichs-Hook mit `additionalContext` am `Stop`-Ereignis.** So stand es in der ersten
+Fassung. Claude sähe die Meldung sofort, aber jede Meldung hielte das Turn-Ende an und
+kostete einen Modellturn, oft nur für die Antwort „war verlangt". Verworfen zugunsten der
+Meldung beim nächsten Prompt. Gewinnt, wenn die Vorlagen-Messung zeigt, dass die
+verzögerte Meldung zu spät kommt.
+
+**Basis einmal je Session.** So stand es in der ersten Fassung. Verworfen, weil vorher
+uncommittete Dateien, ein `git pull` und ein Resume Tage später falsche Meldungen
+auslösten und Commits im ersten Turn unsichtbar blieben.
+
 **Ein prompt-basierter Stop-Hook, der jeden Turn auf neue Ziele beurteilt.** Erkennt mehr
 als Dateipfade, kostet aber je Turn einen Modellaufruf und ist stochastisch. Gewinnt, wenn
 die Bereichsprüfung in der Vorlagen-Messung zu grob ist.
@@ -341,8 +433,8 @@ die Bereichsprüfung in der Vorlagen-Messung zu grob ist.
 `package.json`, den der Nutzer nicht bestellt hat. Verworfen.
 
 **Assertions auf Beobachtbares außerhalb von `.claude/` umlegen statt den Harness zu
-ändern.** Dann prüfte jeder Eval einen Bericht statt das Ergebnis. Verworfen; im Review
-simuliert: Mit `(".git/", ".claude/skills/")` wird kein bestehender Test rot.
+ändern.** Dann prüfte jeder Eval einen Bericht statt das Ergebnis. Verworfen; in beiden
+Reviews simuliert: Mit `(".git/", ".claude/skills/")` wird kein bestehender Test rot.
 
 **`verify_stop.py` mit frühem Ende bei `stop_hook_active`, wie hooks-guide empfiehlt.**
 Dann blockiert er nur einmal und lässt das Turn-Ende danach auch bei Rot zu. Verworfen
@@ -351,9 +443,13 @@ teuer sind.
 
 **`/init` statt eigener CLAUDE.md-Erzeugung.** `/init` erzeugt die CLAUDE.md; mit
 `CLAUDE_CODE_NEW_INIT=1` führt es laut commands-Doku auch durch Skills, Hooks und
-persönliche Memory-Dateien (im Review zitiert). Es kennt weder Budget noch Ledger noch
-Bereichs-Hook. Verworfen als alleiniger Weg; die Skill liest eine vorhandene CLAUDE.md
-wie jede andere.
+persönliche Memory-Dateien (im ersten Review zitiert). Es kennt weder Budget noch Ledger
+noch Bereichs-Hook. Verworfen als alleiniger Weg; die Skill liest eine vorhandene
+CLAUDE.md wie jede andere.
+
+**Alles in einem Bau.** So stand es in der ersten Fassung. Verworfen, weil Harness,
+Kern, Ziele und Reviewer unabhängig voneinander fertig werden und der Reviewer auf
+Prüfpunkte des Nutzers wartet.
 
 ## Out of scope
 
@@ -367,8 +463,8 @@ Werkzeug-Konfigurationen.
 ## Open questions
 
 *Annahme:* Budget 150 immer geladene Zeilen, Zielregel ≤ 25 Zeilen, „trivial" höchstens
-fünf Zeilen, *Erledigt* behält zehn, Verifikations-Hook drei Versuche — widersprich,
-falls nein.
+fünf Zeilen, *Erledigt* behält zehn, Verifikations-Hook drei Versuche, Hook-Zustand
+sieben Tage — widersprich, falls nein.
 
 *Annahme:* Claude kann `/goal` nicht selbst setzen, weil es ein eingebauter Befehl und
 keine Skill ist; die Regel lässt Claude die Zeile vorschlagen. Beim Bau messen.
@@ -378,20 +474,20 @@ Strukturänderung zählt `schema` hoch. Die Pipeline läuft mit `-p` und bekommt
 `permissions.allow`-Regeln des Repos nicht; sie braucht `--allowedTools`, User-Settings
 oder den dokumentierten Trust-Eintrag `projects["<path>"].hasTrustDialogAccepted`.
 Läuft sie mit `--bare` — laut headless-Doku künftig Standard für `-p` —, lädt sie weder
-CLAUDE.md noch Rules noch Hooks; dann wirkt setup-repo dort nicht.
+CLAUDE.md noch Rules noch Hooks; dann wirkt setup-repo dort nicht. Mit `-p` sieht Claude
+die Meldung des Bereichs-Hooks nie, weil es keinen nächsten Prompt gibt.
 
-**Welcher Interpreter steht im committeten Hook-Kommando?** Eine Repo-`settings.json`
-gilt zugleich für Windows, die Linux-Devbox und die Cloud. Kandidaten: `"shell": "bash"`
-mit `python3 … || python …`, oder die Exec-Form mit `"args": []` (hooks-guide), die ein
-Skript ohne Shell startet. Auf dem Windows-PC des Nutzers messen, bevor die Fragmente
-festgeschrieben werden.
+Der Starter im Hook-Kommando ist entschieden; ungemessen ist nur, ob der
+Windows-Store-Platzhalter `python3` ihn unter Windows aushebelt. Messen auf dem
+Windows-PC ist Abnahme des Baus; scheitert es, wird die Exec-Form mit `"args": []`
+(hooks-guide) geprüft.
 
 Die Harness-Änderung betrifft alle Skills: Der Judge-Prompt sieht künftig auch geänderte
-Dateien unter `.claude/` außer `.claude/skills/`. Vor dem Merge die Contract-Evals aller
-Skills einmal fahren.
+Dateien unter `.claude/` außer `.claude/skills/` und `.claude/worktrees/`. Abschnitt A
+fährt deshalb die Contract-Evals aller Skills einmal.
 
 Was gehört in `references/review/delphi.md`? Der Nutzer kennt Delphi; die Prüfpunkte
-sollen von ihm kommen.
+sollen von ihm kommen. Abschnitt D wartet darauf.
 
 Ungemessen bleibt, ob die Bereichsprüfung neue Ziele zuverlässig genug erkennt, und ob
 die Stack-Prüfpunkte im Reviewer greifen — kein Eval und kein Test misst das; die
@@ -399,7 +495,8 @@ Vorlagen-Messung deckt nur die Zielregel.
 
 ## Next steps
 
-Spec 20 und 21 zuerst (Plugin-Quellordner, Lint-Liste `CLAUDE_CODE_ONLY`). Den
-Interpreter für Hooks auf dem Windows-PC messen, Prüfpunkte für Delphi beim Nutzer
-erfragen. Dann Plan mit `impl-plan` (16) und Bau nach `skill-forge` (17) Schritt 3 bis 7;
-danach die Vorlagen-Messung der Zielregel.
+Spec 20 und 21 zuerst (Plugin-Quellordner, Lint-Liste `CLAUDE_CODE_ONLY`). Dann
+Abschnitt A als eigener PR mit Lauf aller Contract-Evals. Danach je Abschnitt ein Plan
+mit `impl-plan` (16) und Bau nach `skill-forge` (17) Schritt 3 bis 7: B, dann C mit der
+Vorlagen-Messung, dann D, sobald die Delphi-Prüfpunkte vorliegen. Den Starter auf dem
+Windows-PC messen.

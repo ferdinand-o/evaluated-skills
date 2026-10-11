@@ -2,9 +2,23 @@
 
 Ein Chart in dieser Skill ist ein Beleg, kein Schmuck. Er erscheint nur, wenn er
 eine Frage beantwortet, die die Kernthese aufwirft — sonst entfällt der
-Chart-Slot ausdrücklich (`references/formats.md`). Die Farb-, Restraint- und
-A11y-Prinzipien folgen `skills/enterprise-ui/references/charts.md`; hier steht
-nur, was für diese Skill zusätzlich gilt.
+Chart-Slot ausdrücklich (`references/formats.md`).
+
+## Farbe, Zurückhaltung, Zugänglichkeit
+
+- **Farbe trägt nie allein Bedeutung.** Rauf/runter oder „anders als" braucht
+  zusätzlich ein Vorzeichen (`+2,4 %`), einen Pfeil (▲/▼), die Lage zur
+  Nulllinie oder eine Linienart (gestrichelt/durchgezogen) — sonst liest
+  ein Teil der Leser (etwa jeder zwölfte Mann) es nicht.
+- **Wenige Farben.** Für eine Größe von niedrig nach hoch ein Farbton in
+  Abstufungen, nie ein Regenbogen; für Kategorien nur so viele Farben, wie man
+  im Kopf behält, danach direkt beschriften.
+- **Nichts, was keinen Wert lesbar macht:** kein 3D, keine Schatten, Verläufe
+  oder Deko-Icons; Gitterlinien nur leise und nur auf der Werteachse; Achsen in
+  gedämpfter Textfarbe.
+- **Direkt beschriften statt Legende**, wo Platz ist (Linie am Endpunkt, Balken
+  an der Spitze).
+- **Einheit einmal im Achsentitel**, nicht an jedem Tick.
 
 ## Welcher Typ
 

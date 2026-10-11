@@ -40,8 +40,12 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    `--base HEAD` vergleicht mit dem letzten Commit; nur neue Befunde zählen. Ohne
    `--base` zählt alles: bei einer neuen Skill und beim reinen Prüfen ohne Änderung
    („prüfe die Skill X") — dort wäre jeder Befund ein Altbefund und der Lint grün.
+   Prüfen ändert nichts: Befunde werden gemeldet, nicht behoben.
    `evals_due` ist ohne `--base` ungeprüft, nie „nein". Fehlt das Skript, lautet die
-   Übergabe „ungeprüft — Lint nicht verfügbar", nie „fertig".
+   Übergabe „ungeprüft — Lint nicht verfügbar", nie „fertig". Danach
+   `python scripts/sync_skills.py --check`; meldet es eine Abweichung,
+   `python scripts/sync_skills.py` und erneut `--check` — die Projekt-Kopie unter
+   `.claude/skills/` gleicht dem Original vor dem Commit, nicht erst beim nächsten `pytest`.
 5. **Evals**, wenn `evals_due: true` oder neue Skill — nach `references/evals.md`:
    `evalkit`-Schema, ein Prompt je Eval, Diskriminator-Frage in `notes`, ein Eval mit
    ID-Präfix `anti-ceremony-`. Vor jeder Fix-Runde ein zweiter Lauf.
@@ -54,21 +58,26 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    Fix-Runde endet mit dem Lint.
 7. **Report, known-limits, Nachbarn** — Report mit „Was nicht gemessen wurde", Abschnitt
    `## <name>` in `docs/known-limits.md`, Routing-Matrix in Spec 00 §5 und `README.md`,
-   Rückverweise der Nachbarn. Der Lint prüft alle drei; danach ist er ganz sauber.
+   Rückverweise der Nachbarn. Dazu die Plugin-Zuordnung (Spec 20): die Skill in die
+   `skills`-Liste genau eines Plugins in `.claude-plugin/marketplace.json` — Frage: „mit
+   welchen Skills wird sie an- und abgeschaltet?", nicht „wovon handelt sie?" —, sonst
+   mit Grund in `.claude-plugin/excluded.json`; gehört sie zur Arbeit an diesem Repo,
+   zusätzlich in `PROJECT_SKILLS` in `scripts/sync_skills.py`. Der Lint prüft alle vier;
+   zuletzt läuft er erneut mit `--out`, und danach ist er ganz sauber.
 
-**Anti-Zeremonie-Regel:** Ein geänderter Satz in einer bestehenden SKILL.md löst Lint
-und Commit aus, sonst nichts — kein Eval, kein Report, kein Review — es sei denn, der
-Lint meldet `evals_due: true` oder einen neuen Befund. Altbefunde der Skill stehen im
-Register des Repo-Tests und sind nicht Sache dieser Änderung.
+**Anti-Zeremonie-Regel:** Ein geänderter Satz in einer bestehenden SKILL.md heißt
+Lint, Sync-Check, Commit — sonst nichts: kein Eval, kein Report, kein Review — es sei
+denn, der Lint meldet `evals_due: true` oder einen neuen Befund. Altbefunde der Skill
+stehen im Register des Repo-Tests und sind nicht Sache dieser Änderung.
 
 ## Contract
 
-- **Dreizehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
+- **Vierzehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
   `unchecked` mit Grund. **`unchecked` und `hint` zählen nie als `pass`**: Was der
   Lint nicht sehen konnte (kein `docs/`, keine Nachbarn, keine `evals.json`), hat er
   nicht bestanden — er sagt es. Im Eval-Workspace sind die Regeln zu `docs/`,
-  Routing und Nachbarn deshalb `unchecked`; die Evals dieser Skill binden nur an
-  Regeln, die dort geprüft sind.
+  Routing und Nachbarn deshalb `unchecked`, ohne Manifest auch `plugin-membership`;
+  die Evals dieser Skill binden nur an Regeln, die dort geprüft sind.
 - **Diff-Modus meldet nur Neues.** Mit `--base` läuft der Lint zweimal (Arbeitsstand,
   Basis) und der Exit-Code folgt `new_findings`. Ohne Git oder unbekannte Revision:
   Exit 2 mit Grund — nie stillschweigend „alles neu".
@@ -93,7 +102,7 @@ Register des Repo-Tests und sind nicht Sache dieser Änderung.
 | „Der Altbefund ist nicht meiner" | Stimmt — deshalb zählt er im Diff-Modus nicht. Was neu ist, ist deiner. |
 | „Der Lint ist rot, ich räume schnell alles auf" | Das ist die Zeremonie, gegen die die Skill gebaut ist. `--base HEAD`, nur Neues beheben; das Register bleibt, bis jemand es bewusst schrumpft. |
 | „Ein Satz braucht keinen Lint" | Ein Satz im Contract macht Evals fällig, einer im Frontmatter ändert den Trigger. Ob es einer davon war, sagt `evals_due` in einer Sekunde. |
-| „`unchecked` ist praktisch grün" | Es ist praktisch nichts. Sieben Regeln `unchecked` heißt: sieben Regeln ungeprüft, und der Report sagt das. |
+| „`unchecked` ist praktisch grün" | Es ist praktisch nichts. Acht Regeln `unchecked` heißt: acht Regeln ungeprüft, und der Report sagt das. |
 | „Die Description soll erklären, was die Skill tut" | Dann folgt der Agent der Description statt dem Body. Trigger und Abgrenzung — das Tun steht im Ablauf. |
 | „Die Diskriminator-Frage beantworte ich pauschal" | Sechzehn fremde Skills sind im Harness sichtbar. Eine Assertion, die eine von ihnen genauso erfüllt, misst nichts. Je Eval, wörtlich in `notes`. |
 | „Evals fahren hier nicht, also schreibe ich sie später" | Sie sind die ausführbare Definition von „fertig", gefahren oder nicht. Ungefahren steht im Report — nicht geschrieben ist ein Befund. |

@@ -2,7 +2,7 @@
 
 Der Reviewer ist ein Subagent mit frischem Kontext; er bekommt Spec, Plan, den
 Skill-Ordner und die `lint.json` — nie die Konversation. Dispatch **nach** dem Lint,
-nicht statt dessen: Der Lint prüft dreizehn Regeln mechanisch, der Reviewer prüft die
+nicht statt dessen: Der Lint prüft vierzehn Regeln mechanisch, der Reviewer prüft die
 sechs Ermessenspunkte aus `checklist.md` und misst nach, was der Bauende behauptet.
 Kalibrierung und Format sind die aus `impl-plan/references/reviewer-prompt.md`; die
 Kategorien sind die des Skill-Baus.

@@ -1,0 +1,5 @@
+{
+  "cad-parts": "braucht einen stl-cad-server als MCP-Server; ohne ihn ist die Skill nutzlos",
+  "impl-plan": "gilt nur für Specs dieser Sammlung; liegt als Projekt-Kopie unter .claude/skills/ (Spec 20)",
+  "skill-forge": "gilt nur für Skills dieser Sammlung; liegt als Projekt-Kopie unter .claude/skills/ (Spec 20)"
+}

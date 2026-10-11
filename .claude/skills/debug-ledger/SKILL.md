@@ -1,6 +1,6 @@
 ---
 name: debug-ledger
-description: "Use when encountering any bug, test failure, or \"das funktioniert nicht\" — including a one-line typo fix, not only hard cases. Every case gets a ledger file under docs/debugging/ with mandatory fields (Symptom, Repro-Kommando, Erwartung vs. Beobachtung); the archive is checked for a matching solved case first; and a full-mode fix proposal is mechanically refused without at least one tested row in the Hypothesen-Tabelle. Triggers include \"Bug\", \"Testfehler\", \"das geht nicht\", \"warum stürzt das ab\", \"es ist immer noch kaputt\". Not for new feature work (use feature-spec). What sets this apart from any other debugging doctrine, including the installed `systematic-debugging`, is the artifact: a persisted, archived, mechanically-checked ledger file under docs/debugging/ that a prose-only doctrine never produces — not stricter rhetoric, the same trigger scope plus a file."
+description: "Use when encountering any bug, test failure, or \"das funktioniert nicht\" — including a one-line typo fix, not only hard cases. Every case gets a ledger file under docs/debugging/ with mandatory fields (Symptom, Repro-Kommando, Erwartung vs. Beobachtung); the archive is checked for a matching solved case first; and a full-mode fix proposal is mechanically refused without at least one tested row in the Hypothesen-Tabelle. Triggers include \"Bug\", \"Testfehler\", \"das geht nicht\", \"warum stürzt das ab\", \"es ist immer noch kaputt\". Not for new feature work (use feature-spec). What sets this apart from any other debugging doctrine, including one installed by another plugin, is the artifact: a persisted, archived, mechanically-checked ledger file under docs/debugging/ that a prose-only doctrine never produces — not stricter rhetoric, the same trigger scope plus a file."
 ---
 
 # debug-ledger — das Artefakt ist der Prozess
@@ -71,8 +71,10 @@ ist das kein Fehler — es gibt schlicht keinen Treffer, weiter zu Schritt 1.
   `--resolve` sichtbar; die Datei wird nie automatisch umgegliedert oder
   geprunt — das Archiv ist der Zinseszins dieser Skill, ein geprunter Fall ist
   genau der, den Phase 0 als Nächstes gebraucht hätte.
-- Jedes Ledger trägt die Kopfzeile aus `docs/artifact-header.md`
-  (`skill: debug-ledger | schema: 1 | generated: …`); `INDEX.md` ebenso.
+- Jedes Ledger trägt als erste Zeile die Kopfzeile
+  `<!-- skill: debug-ledger | schema: 1 | generated: <Kommando> -->`;
+  `INDEX.md` ebenso. Vollregel (Ausnahmen, Konsumenten-Regel): `docs/artifact-header.md`
+  — Repo-Kontext, nicht Teil dieser Skill.
 
 ## Anti-Rationalisierung
 

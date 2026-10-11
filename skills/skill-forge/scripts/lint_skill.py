@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Skill-Ordner gegen die Hausmethode prüfen. Tier 1: nur Stdlib.
 
-Dreizehn Regeln aus Spec 00, `docs/artifact-header.md` und `docs/known-limits.md`
-(Spec 17). Jede Regel liefert `pass`, `finding`, `hint` oder `unchecked` mit Grund;
+Vierzehn Regeln aus Spec 00, `docs/artifact-header.md`, `docs/known-limits.md` und dem
+Plugin-Manifest (Spec 17, Spec 20). Jede Regel liefert `pass`, `finding`, `hint` oder `unchecked` mit Grund;
 `unchecked` und `hint` zählen nie als `pass` — ein übersprungener Check meldet nie
 Erfolg. Das Skript importiert weder `evalkit` noch ein anderes Skill-Skript: Im
 Eval-Workspace gibt es nur diesen Ordner, und Regeln, die `docs/`, `README.md` oder
@@ -40,6 +40,9 @@ STATUSES = ("pass", "finding", "hint", "unchecked")
 
 FRONTMATTER_ALLOWED = frozenset({"name", "description", "license", "version", "metadata", "allowed-tools"})
 FRONTMATTER_REQUIRED = ("name", "description")
+# Claude-Code-spezifische Skills, die nur per Slash-Befehl laufen (Spec 21, 22): Nur sie
+# dürfen `disable-model-invocation` tragen, weil die Description dann nicht im Kontext steht.
+CLAUDE_CODE_ONLY = frozenset({"setup-user", "setup-repo"})
 PROCESS_VERBS = ("runs", "builds", "generates", "produces", "collects", "renders",
                  "scans", "creates", "writes", "tracks", "enforces", "classifies")
 PROCESS_VERB_RE = re.compile(r"\b(" + "|".join(PROCESS_VERBS) + r")\b", re.IGNORECASE)
@@ -231,7 +234,8 @@ def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     if fields is None:
         return RuleResult("frontmatter", "finding", "kein Frontmatter (--- … ---) am Dateianfang")
     missing = [k for k in FRONTMATTER_REQUIRED if not fields.get(k)]
-    extra = sorted(set(fields) - FRONTMATTER_ALLOWED)
+    allowed = FRONTMATTER_ALLOWED | ({"disable-model-invocation"} if skill_dir.name in CLAUDE_CODE_ONLY else set())
+    extra = sorted(set(fields) - allowed)
     invalid = []
     for line in _read(md).split("\n")[1:]:
         if line.strip() == "---":
@@ -549,6 +553,54 @@ def rule_report_section(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     return RuleResult("report-section", "pass", "Report-Pflichtsektion und known-limits-Abschnitt vorhanden")
 
 
+MANIFEST_REL = Path(".claude-plugin") / "marketplace.json"
+EXCLUDED_REL = Path(".claude-plugin") / "excluded.json"
+
+
+def rule_plugin_membership(skill_dir: Path, repo_root: Path | None) -> RuleResult:
+    """Spec 20: Die Skill steht in der `skills`-Liste genau eines Plugins oder mit Grund in
+    `excluded.json`. Ob die Projekt-Kopie unter `.claude/skills/` dem Original gleicht,
+    prüft `scripts/sync_skills.py --check`, nicht diese Regel."""
+    if repo_root is None:
+        return RuleResult("plugin-membership", "unchecked", "Repo-Wurzel nicht im Workspace")
+    manifest_path = repo_root / MANIFEST_REL
+    if not manifest_path.is_file():
+        return RuleResult("plugin-membership", "unchecked", f"kein {MANIFEST_REL.as_posix()} im Workspace")
+    try:
+        manifest = json.loads(_read(manifest_path))
+    except (OSError, ValueError) as exc:
+        return RuleResult("plugin-membership", "unchecked", f"Manifest unlesbar ({type(exc).__name__})")
+    plugins = manifest.get("plugins") if isinstance(manifest, dict) else None
+    if not isinstance(plugins, list) or not all(isinstance(e, dict) for e in plugins):
+        return RuleResult("plugin-membership", "unchecked", "Manifest ohne lesbare Liste `plugins`")
+    without_list = [str(e.get("name", "?")) for e in plugins if not isinstance(e.get("skills"), list)]
+    if without_list:
+        return RuleResult("plugin-membership", "unchecked",
+                          "Eintrag ohne `skills`-Liste, Zugehörigkeit nicht bestimmbar: " + ", ".join(without_list))
+    excluded: dict = {}
+    excluded_path = repo_root / EXCLUDED_REL
+    if excluded_path.is_file():
+        try:
+            excluded = json.loads(_read(excluded_path))
+        except (OSError, ValueError) as exc:
+            return RuleResult("plugin-membership", "unchecked", f"excluded.json unlesbar ({type(exc).__name__})")
+        if not isinstance(excluded, dict):
+            return RuleResult("plugin-membership", "unchecked", "excluded.json ist kein JSON-Objekt")
+    name = skill_dir.name
+    hits = [str(e.get("name", "?")) for e in plugins if any(Path(str(s)).name == name for s in e["skills"])]
+    if name in excluded and not name.startswith("_"):
+        if hits:
+            return RuleResult("plugin-membership", "finding",
+                              f"in excluded.json und trotzdem in der Liste von {', '.join(hits)}")
+        return RuleResult("plugin-membership", "pass", f"ausgeschlossen: {str(excluded[name])[:80]}")
+    if len(hits) == 1:
+        return RuleResult("plugin-membership", "pass", f"in der `skills`-Liste von {hits[0]}")
+    if not hits:
+        return RuleResult("plugin-membership", "finding",
+                          "in keiner `skills`-Liste und nicht in excluded.json — Plugin zuordnen (skill-forge Schritt 7)")
+    return RuleResult("plugin-membership", "finding", f"in {len(hits)} Plugins: {', '.join(hits)}")
+
+
 RULES = [
     ("frontmatter", rule_frontmatter),
     ("skill-md-lines", rule_skill_md_lines),
@@ -563,12 +615,13 @@ RULES = [
     ("routing", rule_routing),
     ("neighbors", rule_neighbors),
     ("report-section", rule_report_section),
+    ("plugin-membership", rule_plugin_membership),
 ]
 RULE_IDS = tuple(rule_id for rule_id, _ in RULES)
 
 
 def lint_skill(skill_dir: Path | str, repo_root: Path | str | None = None) -> LintReport:
-    """Alle dreizehn Regeln über einen Skill-Ordner. `repo_root=None` heißt: selbst
+    """Alle vierzehn Regeln über einen Skill-Ordner. `repo_root=None` heißt: selbst
     suchen; wird keine gefunden, sind die Repo-Regeln `unchecked`."""
     skill_dir = Path(skill_dir)
     root = Path(repo_root) if repo_root is not None else find_repo_root(skill_dir)
@@ -853,6 +906,8 @@ def main(argv: list[str] | None = None) -> int:
     unchecked = [r.id for r in report.rules if r.status == "unchecked"]
     if unchecked:
         print("UNGEPRÜFT (nicht bestanden, nicht gescheitert): " + ", ".join(unchecked))
+    if report.repo_root is not None and (Path(report.repo_root) / "scripts" / "sync_skills.py").is_file():
+        print("Projekt-Kopien: python scripts/sync_skills.py --check (skill-forge Schritt 4)")
     print("Ergebnis: " + ("Befunde — " + ", ".join(new_ids) if new_ids else "kein neuer Befund"))
 
     if args.out:

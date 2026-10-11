@@ -27,10 +27,19 @@
         {
           "type": "file_unchanged",
           "path": "docs/superpowers/reports/note-tag-report.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"pass\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/marketplace.json"
         }
       ],
       "must_not": [],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein geänderter Satz im Body: Der Lint läuft im Diff-Modus (findings_mode new-vs-base), meldet evals_due: false, und die Skill tut sonst nichts — evals.json und Report bleiben unverändert. Die Fixture ist an der Basis lint-sauber, damit der Eval misst, ob die Änderung zur Zeremonie eskaliert, nicht ob Altlasten aufgeräumt werden. Diskriminator: lint.json unter .skills/cache/skill-forge/ schreibt nur diese Skill, und evals_due: false ist ihr mechanisches Urteil; ein Basismodell hat weder die Datei noch die Regel, und superpowers:writing-skills verlangte für jede Änderung einen Test."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein geänderter Satz im Body: Der Lint läuft im Diff-Modus (findings_mode new-vs-base), meldet evals_due: false, und die Skill tut sonst nichts — evals.json und Report bleiben unverändert. Die Fixture ist an der Basis lint-sauber, damit der Eval misst, ob die Änderung zur Zeremonie eskaliert, nicht ob Altlasten aufgeräumt werden. Diskriminator: lint.json unter .skills/cache/skill-forge/ schreibt nur diese Skill, und evals_due: false ist ihr mechanisches Urteil; ein Basismodell hat weder die Datei noch die Regel, und superpowers:writing-skills verlangte für jede Änderung einen Test. Seit Spec 20: Die Fixture trägt ein Manifest, plugin-membership ist pass, und ein geänderter Satz ändert das Manifest nicht."
     },
     {
       "id": "token-change-makes-evals-due",
@@ -98,6 +107,16 @@
           "type": "file_matches",
           "path": "evals/*/evals.json",
           "pattern": "(?i)diskriminator"
+        },
+        {
+          "type": "file_matches",
+          "path": ".claude-plugin/marketplace.json",
+          "pattern": "\"\\./skills/reminder\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"pass\""
         }
       ],
       "must_not": [
@@ -107,7 +126,30 @@
           "pattern": "expected_output"
         }
       ],
-      "notes": "Pflicht-Routing-Eval ohne Skill-Namen im Prompt: Landet „bau mir eine Skill\" bei skill-forge oder bei skill-creator? Die gekürzte Spec 00 der Fixture enthält weder §2 noch das Eval-Vokabular, nichts liegt unter evals/ — der Glob trifft nur, was die Skill schreibt. Diskriminator: das ID-Präfix anti-ceremony- und die Diskriminator-Notiz in notes sind Hausvokabular aus references/evals.md; expected_output ist das Vokabular von skill-creator. Routing-Evals sind stochastisch (docs/known-limits.md, „Stichprobe\"): ein roter Lauf zeigt die Kollision, ein grüner beweist nichts."
+      "notes": "Pflicht-Routing-Eval ohne Skill-Namen im Prompt: Landet „bau mir eine Skill\" bei skill-forge oder bei skill-creator? Die gekürzte Spec 00 der Fixture enthält weder §2 noch das Eval-Vokabular, nichts liegt unter evals/ — der Glob trifft nur, was die Skill schreibt. Diskriminator: das ID-Präfix anti-ceremony- und die Diskriminator-Notiz in notes sind Hausvokabular aus references/evals.md; expected_output ist das Vokabular von skill-creator. Routing-Evals sind stochastisch (docs/known-limits.md, „Stichprobe\"): ein roter Lauf zeigt die Kollision, ein grüner beweist nichts. Seit Spec 20 trägt die Fixture ein Manifest mit zwei Plugins und leeren Listen. Diskriminator für die zwei neuen Assertions: Nur skill-forge Schritt 7 trägt die neue Skill in die skills-Liste genau eines Plugins ein, und nur sein letzter Lint-Lauf schreibt plugin-membership pass in lint.json."
+    },
+    {
+      "id": "skill-outside-any-plugin-is-reported",
+      "class": "contract",
+      "fixture": "sf-plugin-orphan",
+      "prompt": "Prüfe die Skill orphan-x mit skill-forge.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"plugin-membership\", \"status\": \"finding\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/marketplace.json"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude-plugin/excluded.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Spec 20: orphan-x steht in keiner skills-Liste und nicht in excluded.json. „Prüfe“ heißt melden, nicht beheben — die SKILL.md sagt „Prüfen ändert nichts“. Diskriminator: Die Regel-ID plugin-membership und lint.json gibt es nur in lint_skill.py; ein hilfsbereiter Agent ohne die Skill trüge orphan-x in die Liste ein und ließe die zwei file_unchanged-Assertions fallen."
     }
   ]
 }
