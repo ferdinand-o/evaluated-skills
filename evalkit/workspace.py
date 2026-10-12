@@ -24,7 +24,8 @@ class Workspace:
 
 
 def snapshot(root: Path) -> dict[str, str]:
-    """relpath -> sha256 für alle Dateien außerhalb von .git/ und .claude/."""
+    """relpath -> sha256 für alle Dateien außerhalb von EXCLUDED_PREFIXES
+    (.git/, .claude/skills/, .claude/worktrees/); der Rest von .claude/ zählt mit."""
     result: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
         if path.is_symlink():

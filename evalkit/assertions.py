@@ -19,11 +19,13 @@ ARTIFACT_HEADER_RE = re.compile(
 
 GIT_HEAD_KEY = "__git_head__"
 
-# Pfade, die evalkit.workspace.snapshot() grundsätzlich nie beobachtet (.git/ die
-# eigene Fixture-Historie, .claude/ die installierte Skill). Hier definiert statt in
-# evalkit.workspace, damit check() unten dieselbe Grenze kennt, ohne einen Zyklus
-# workspace -> assertions -> workspace einzugehen (workspace importiert von hier).
-EXCLUDED_PREFIXES = (".git/", ".claude/")
+# Pfade, die evalkit.workspace.snapshot() grundsätzlich nie beobachtet: .git/ die
+# eigene Fixture-Historie, .claude/skills/ die installierte Skill, .claude/worktrees/
+# die Worktrees von Subagenten. Der Rest von .claude/ (settings.json, rules, hooks,
+# agents) ist Projektinhalt und wird beobachtet (Spec 22, Abschnitt A). Hier definiert
+# statt in evalkit.workspace, damit check() unten dieselbe Grenze kennt, ohne einen
+# Zyklus workspace -> assertions -> workspace einzugehen (workspace importiert von hier).
+EXCLUDED_PREFIXES = (".git/", ".claude/skills/", ".claude/worktrees/")
 
 
 class MechanicalCheckError(RuntimeError):
@@ -76,11 +78,16 @@ def resolve_target(root: Path, relpath: str) -> tuple[Path | None, str]:
 
     Bei mehreren Treffern gewinnt der alphabetisch erste, und das Label nennt die Zahl
     der übrigen — sonst hinge das Ergebnis unsichtbar an der Verzeichnisreihenfolge.
+    Treffer unter EXCLUDED_PREFIXES zählen nie: `.claude/**/*.md` beginnt mit keinem
+    ausgenommenen Präfix, träfe aber die installierte Skill.
     """
     if not has_glob(relpath):
         target = root / relpath
         return (target if target.is_file() else None), relpath
-    matches = sorted(p for p in root.glob(relpath) if p.is_file())
+    matches = sorted(
+        p for p in root.glob(relpath)
+        if p.is_file() and not p.relative_to(root).as_posix().startswith(EXCLUDED_PREFIXES)
+    )
     if not matches:
         return None, f"{relpath} (kein Treffer)"
     label = matches[0].relative_to(root).as_posix()
@@ -96,11 +103,12 @@ def check(assertion: Assertion, root: Path, baseline: dict[str, str], output: st
     plus der Sonderschlüssel `__git_head__`. `output` ist die Agent-Ausgabe — nötig,
     weil manche Contracts sich auf das Gesagte beziehen ("fragt nach, statt anzulegen").
 
-    Ein Pfad unter EXCLUDED_PREFIXES (.git/, .claude/) wirft MechanicalCheckError statt
-    ein Urteil zu fällen: der Workspace-Snapshot beobachtet diesen Bereich grundsätzlich
-    nicht, eine Assertion darauf wäre sonst still falsch (z. B. `file_unchanged` auf
-    einer unveränderten Datei unter .claude/, die fälschlich "nicht in der Baseline"
-    meldet, weil die Baseline diesen Bereich nie enthielt).
+    Ein Pfad unter EXCLUDED_PREFIXES (.git/, .claude/skills/, .claude/worktrees/) wirft
+    MechanicalCheckError statt ein Urteil zu fällen: der Workspace-Snapshot beobachtet
+    diesen Bereich grundsätzlich nicht, eine Assertion darauf wäre sonst still falsch
+    (z. B. `file_unchanged` auf einer unveränderten Datei der installierten Skill, die
+    fälschlich "nicht in der Baseline" meldet, weil die Baseline diesen Bereich nie
+    enthielt). Der Rest von .claude/ ist prüfbar.
     """
     if assertion.type == JUDGE_TYPE:
         raise MechanicalCheckError("judge-Assertions gehören zu evalkit.judge, nicht hierher")
@@ -122,8 +130,9 @@ def check(assertion: Assertion, root: Path, baseline: dict[str, str], output: st
         if assertion.path.startswith(prefix):
             raise MechanicalCheckError(
                 f"{assertion.path}: liegt unter {prefix!r} — dieser Bereich wird vom "
-                f"Workspace-Snapshot grundsätzlich nicht beobachtet (siehe "
-                f"evalkit.assertions.EXCLUDED_PREFIXES), eine Assertion darauf ist "
+                f"Workspace-Snapshot grundsätzlich nicht beobachtet "
+                f"(evalkit.assertions.EXCLUDED_PREFIXES: {', '.join(EXCLUDED_PREFIXES)}; "
+                f"der Rest von .claude/ ist prüfbar), eine Assertion darauf ist "
                 f"ungeeignet und nicht bloß unerfüllt"
             )
 

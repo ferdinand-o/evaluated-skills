@@ -144,7 +144,7 @@ def test_judge_assertion_is_rejected_here(tmp_path):
 
 
 def test_file_unchanged_on_excluded_claude_path_raises_instead_of_false_red(tmp_path):
-    """snapshot() schließt .claude/ bewusst aus der Baseline aus. Ohne diese Wache
+    """snapshot() schließt .claude/skills/ bewusst aus der Baseline aus. Ohne diese Wache
     würde file_unchanged für eine existierende, unveränderte Datei darunter fälschlich
     melden "nicht in der Baseline — vor dem Lauf existierte die Datei nicht" — falsches
     Rot mit falscher Diagnose statt eines klaren Hinweises auf eine ungeeignete
@@ -152,8 +152,37 @@ def test_file_unchanged_on_excluded_claude_path_raises_instead_of_false_red(tmp_
     target = tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md"
     target.parent.mkdir(parents=True)
     target.write_text("---\nname: handoff\n---\n", encoding="utf-8")
-    with pytest.raises(MechanicalCheckError, match=r"\.claude/"):
+    with pytest.raises(MechanicalCheckError, match=r"\.claude/skills/"):
         check(Assertion(type="file_unchanged", path=".claude/skills/handoff/SKILL.md"), tmp_path, BASELINE)
+
+
+def test_claude_dir_observed_except_skills_and_worktrees(tmp_path):
+    """Spec 22 Abschnitt A: setup-repo schreibt nach .claude/ (settings.json, rules,
+    hooks); Assertions dorthin sind prüfbar. Ausgenommen bleiben nur die installierte
+    Skill (.claude/skills/) und Agent-Worktrees (.claude/worktrees/)."""
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"hooks": {}}', encoding="utf-8")
+    assert check(Assertion(type="file_exists", path=".claude/settings.json"), tmp_path, BASELINE).ok
+    assert check(Assertion(type="file_matches", path=".claude/settings.json", pattern="hooks"), tmp_path, BASELINE).ok
+    for path in (".claude/skills/handoff/SKILL.md", ".claude/worktrees/agent-1/README.md"):
+        with pytest.raises(MechanicalCheckError) as exc:
+            check(Assertion(type="file_exists", path=path), tmp_path, BASELINE)
+        assert ".claude/skills/" in str(exc.value) and ".claude/worktrees/" in str(exc.value)
+
+
+def test_glob_never_resolves_into_excluded_area(tmp_path):
+    """Ein Glob wie .claude/**/*.md beginnt nicht mit einem ausgenommenen Präfix, träfe
+    aber die installierte Skill. Treffer unter EXCLUDED_PREFIXES zählen nie."""
+    skill = tmp_path / ".claude" / "skills" / "handoff" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("x", encoding="utf-8")
+    assert not check(Assertion(type="file_exists", path=".claude/**/*.md"), tmp_path, BASELINE).ok
+    rule = tmp_path / ".claude" / "rules" / "goals.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("x", encoding="utf-8")
+    result = check(Assertion(type="file_exists", path=".claude/**/*.md"), tmp_path, BASELINE)
+    assert result.ok and result.detail.startswith(".claude/rules/goals.md")
 
 
 def test_file_exists_on_excluded_git_path_raises(tmp_path):
