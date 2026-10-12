@@ -88,3 +88,19 @@ def test_harvest_main_without_detect_json_says_so(tmp_path):
                           timeout=30)
     assert proc.returncode == 2 and "detect_repo.py" in proc.stderr
     assert not (repo / ".skills").exists()
+
+
+def test_harvest_marks_tool_rules_plan_makes_no_rule_line(tmp_path):
+    """Zweiter Teil von test_harvest_marks_tool_rules: Klasse werkzeug wird keine
+    Regelzeile, steht aber in der Kandidatenzeile der Ansicht mit „Werkzeug"."""
+    import re
+
+    plan_mod = load_script("skills/setup-repo/scripts/plan_repo.py")
+    repo = make_repo(tmp_path)
+    detect = detect_mod.detect(repo, tmp_path / "cfg")
+    cands = harvest_mod.harvest(repo, detect)
+    line_id = next(c["id"] for c in cands if c["text"] == "`line-length = 100`")
+    block = plan_mod.build_plan(repo, detect, cands, {"classes": {line_id: "werkzeug"}})
+    claude = next(op for op in block["operations"] if op["path"] == "CLAUDE.md")["content"]
+    assert not re.search(r"(?i)line.?length|100 Zeichen", claude)
+    assert re.search(r"(?i)line.?length.{0,120}Werkzeug", plan_mod.render_plan(block))
