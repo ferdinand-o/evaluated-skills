@@ -13,7 +13,7 @@ Quelle: Makefile: check. Vor jeder Erfolgsmeldung laufen lassen.
 
 ## Budget
 
-Immer geladen nach apply: 42 von 150 Zeilen (CLAUDE.md samt Importen, Rules ohne `paths`).
+Immer geladen nach apply: 44 von 150 Zeilen (CLAUDE.md samt Importen, Rules ohne `paths`).
 
 ## Plugins je Repo
 
@@ -96,6 +96,8 @@ ungeprüft — Plugin-ID nicht gefunden; `apply` schreibt keine `enabledPlugins`
 +   keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.
 +4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen
 +   (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.
++   Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie außerhalb
++   eines Bereichs.
 +
 +Unter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit
 +prüfbarem „Fertig wenn", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*
@@ -177,7 +179,7 @@ Gemischt wird:
   },
   "budget": {
     "limit": 150,
-    "lines": 42
+    "lines": 44
   },
   "candidates": [
     {
@@ -189,7 +191,7 @@ Gemischt wird:
       "text": "`line-length = 100`"
     }
   ],
-  "hash": "e7f684e9a558f31ac48fee5732b95144506d762df3f845a6522e5018763edea5",
+  "hash": "2a082b697115989aa3625664cda07354ebca7d266c780cbbb09c1dc96dbd65c7",
   "operations": [
     {
       "action": "create",
@@ -203,7 +205,7 @@ Gemischt wird:
     },
     {
       "action": "create",
-      "content": "<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->\n# Ziele und entdeckte Arbeit\n\nGilt nur, solange `docs/goals.md` unter *Aktiv* mindestens ein Ziel hat; sonst nichts tun.\nKopfzeile von `docs/goals.md` zuerst prüfen; vor jedem Schreiben die Datei neu lesen.\n\nJede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:\n\n1. **Vom Nutzer verlangt** — steht im aktuellen Prompt: erledigen.\n2. **Teil des Ziels** — nötig, damit „Fertig wenn\" eintritt: erledigen.\n3. **Trivial** — in einer Datei, die die Aufgabe ohnehin ändert, höchstens fünf Zeilen,\n   keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.\n4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen\n   (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.\n\nUnter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit\nprüfbarem „Fertig wenn\", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*\nwandert ein Ziel nur mit Beleg (Befehl und Ergebnis).\n\nEine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen\naußerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.\nEinen Merge-Konflikt in `docs/goals.md` nicht selbst lösen — fragen.\n",
+      "content": "<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->\n# Ziele und entdeckte Arbeit\n\nGilt nur, solange `docs/goals.md` unter *Aktiv* mindestens ein Ziel hat; sonst nichts tun.\nKopfzeile von `docs/goals.md` zuerst prüfen; vor jedem Schreiben die Datei neu lesen.\n\nJede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:\n\n1. **Vom Nutzer verlangt** — steht im aktuellen Prompt: erledigen.\n2. **Teil des Ziels** — nötig, damit „Fertig wenn\" eintritt: erledigen.\n3. **Trivial** — in einer Datei, die die Aufgabe ohnehin ändert, höchstens fünf Zeilen,\n   keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.\n4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen\n   (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.\n   Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie außerhalb\n   eines Bereichs.\n\nUnter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit\nprüfbarem „Fertig wenn\", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*\nwandert ein Ziel nur mit Beleg (Befehl und Ergebnis).\n\nEine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen\naußerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.\nEinen Merge-Konflikt in `docs/goals.md` nicht selbst lösen — fragen.\n",
       "path": ".claude/rules/goals.md"
     },
     {

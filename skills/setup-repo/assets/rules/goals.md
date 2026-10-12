@@ -12,6 +12,8 @@ Jede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:
    keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.
 4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen
    (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.
+   Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie außerhalb
+   eines Bereichs.
 
 Unter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit
 prüfbarem „Fertig wenn", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*
