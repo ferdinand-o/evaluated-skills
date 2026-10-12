@@ -86,7 +86,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: (nichts Neues)
 - Produces: `token:setup-repo-plan`, `token:werkzeug`
 
-- [ ] **Step 1: plan-format.md** — Aufbau von `.skills/cache/setup-repo/plan.md`
+- [x] **Step 1: plan-format.md** — Aufbau von `.skills/cache/setup-repo/plan.md`
       (Kopfzeile, Ansicht, Codeblock mit Info-String `json setup-repo-plan`); Felder des
       Blocks: `schema`, `verification` (`command`, `source`, `derived`), `candidates`
       (je `id`, `text`, `source`, `class`, `paths`), `operations` (je `path` relativ zur
@@ -98,13 +98,13 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       Mischregeln für `.claude/settings.json` (Listen vereinigt, fremde Schlüssel
       bleiben, eigener Hook erkannt am Suffix `.claude/hooks/verify_stop.py`) und
       `.claude/settings.local.json` (nur `enabledPlugins`).
-- [ ] **Step 2: rules-harvest.md** — Quellen der Kandidaten (Linter-, Formatter- und
+- [x] **Step 2: rules-harvest.md** — Quellen der Kandidaten (Linter-, Formatter- und
       Typprüfer-Konfiguration, `.editorconfig`, `CONTRIBUTING*`, Commit-Betreffs der
       letzten 50 Commits); die drei Klassen `ableitbar` (fällt weg), `werkzeug` (keine
       Regelzeile, im Bericht als Werkzeug) und `regel` (mit `paths`, wo sie nur einen
       Teil betrifft); Aufruf `plan_repo.py --classes`; je Regel die Quelle; Budget 150
       immer geladene Zeilen samt Importen.
-- [ ] **Step 3: Prüfen** — beide Dateien unter 200 Zeilen, ohne Kopfzeile wie alle
+- [x] **Step 3: Prüfen** — beide Dateien unter 200 Zeilen, ohne Kopfzeile wie alle
       References im Repo, die Tokens `setup-repo-plan` und `werkzeug` wörtlich. Commit.
 
 ### Task 2: detect_repo.py
@@ -117,7 +117,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: (nichts Neues)
 - Produces: `fn:detect(repo_root, config_dir)`, `token:detect.json`
 
-- [ ] **Step 1: Tests schreiben** — `test_detect_python_ts_delphi_frontend_none`
+- [x] **Step 1: Tests schreiben** — `test_detect_python_ts_delphi_frontend_none`
       (Mini-Repos in `tmp_path`: Python mit `pyproject.toml` und ruff, TypeScript mit
       `package.json`-Scripts und React, Delphi über `.dproj`, leeres Repo; Runner-Ziele
       aus `Makefile`, `package.json`, `pyproject.toml`, `justfile`; Tests vorhanden ja
@@ -125,13 +125,13 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `.claude/skills/`) und `test_detect_plugin_ids` (Fake-Config-Verzeichnis mit
       `plugins/installed_plugins.json` und `installPath`, dessen Manifest die Skills je
       Plugin nennt; ein Plugin unter `plugins/synced/`; kein Eintrag → leere Liste).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_detect.py`.
-- [ ] **Step 3: Implementieren** — `detect` liest nur, ruft höchstens `git rev-parse` auf;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_detect.py`.
+- [x] **Step 3: Implementieren** — `detect` liest nur, ruft höchstens `git rev-parse` auf;
       `main` schreibt `.skills/cache/setup-repo/detect.json` mit `_meta`; Config-Verzeichnis
       aus `--config-dir`, sonst `CLAUDE_CONFIG_DIR`, sonst `~/.claude`; Plugin-IDs als
       `<name>@<marketplace>` oder `<name>@synced` mit ihren Skill-Namen.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 3: harvest_rules.py
 
