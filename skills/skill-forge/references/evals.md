@@ -68,6 +68,9 @@ aus einem Grund, der nichts mit der Skill zu tun hat (sechs Evals auf einmal, ei
   `docs/`, kein `README.md`, keine fremde Skill. Ein Skript der eigenen Skill ist da;
   ein Skript einer anderen Skill nicht. Was der Lint dort nicht sieht, meldet er als
   `unchecked` — ein Eval darf nur an Regeln binden, die in seiner Fixture geprüft sind.
+- **Was der Snapshot nicht sieht:** `.git/`, `.claude/skills/` (die installierte Skill)
+  und `.claude/worktrees/`. Eine Assertion dorthin ist ein Harness-Fehler. Der Rest von
+  `.claude/` (`settings.json`, Rules, Hooks, Agents) ist prüfbar.
 
 ## Der Pflicht-Anti-Zeremonie-Eval
 

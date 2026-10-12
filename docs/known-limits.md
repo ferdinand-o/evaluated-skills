@@ -146,6 +146,22 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   — der Eval bliebe bei `class: behavior` und einem `judge`-Claim für den
   Ledger-Inhalt. Es gibt kein Primitiv für „neuester Treffer" oder „Treffer
   außer Pfad X".
+- **Geändert (Spec 22, Abschnitt A, 2026-10-12): `.claude/` ist prüfbar, außer
+  `.claude/skills/` und `.claude/worktrees/`.** `EXCLUDED_PREFIXES` war
+  `(".git/", ".claude/")`; jede Assertion auf `.claude/settings.json`, Rules oder Hooks
+  endete als Harness-Fehler. Jetzt `(".git/", ".claude/skills/", ".claude/worktrees/")`.
+  Ein Glob wie `.claude/**/*.md` trifft die installierte Skill nie, auch wenn er mit
+  keinem ausgenommenen Präfix beginnt. Folge für den Judge: Der Dump geänderter Dateien
+  zeigt jetzt auch, was ein Agent unter `.claude/` außerhalb dieser beiden Ordner
+  schreibt, etwa `settings.local.json`.
+- **Gemessen statt gefahren: die Contract-Evals nach der Grenzänderung.** Spec 22
+  verlangt, nach Abschnitt A alle Contract-Evals einmal zu fahren. Der Runner läuft unter
+  root nicht. Gemessen wurde stattdessen deterministisch: für alle 113 Evals Workspace
+  mit alter und neuer Grenze vorbereiten, danach `settings.local.json` und einen
+  Worktree unter `.claude/` anlegen, jede mechanische Assertion prüfen. Ergebnis:
+  Baseline und Urteile gleich, 0 Abweichungen. Ein Agentenlauf kann nur über den
+  Judge-Dump anders ausgehen, und den gibt es nur bei Evals mit Judge-Claims. Ein
+  echter Lauf im Harness steht aus.
 
 ## Betrieb
 

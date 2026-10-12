@@ -59,7 +59,28 @@ def test_baseline_hashes_fixture_files_but_not_dot_git(tmp_path):
 
 def test_baseline_excludes_installed_skill(tmp_path):
     ws = prepare(tmp_path / "ws", make_skill(tmp_path), make_fixture(tmp_path))
-    assert not any(key.startswith(".claude/") for key in ws.baseline)
+    assert not any(key.startswith(".claude/skills/") for key in ws.baseline)
+
+
+def test_claude_dir_observed_except_skills_and_worktrees(tmp_path):
+    """Spec 22 Abschnitt A: Fixture-Dateien unter .claude/ stehen in der Baseline und
+    im Judge-Dump; die installierte Skill und Agent-Worktrees nicht."""
+    fixture = make_fixture(tmp_path)
+    (fixture / ".claude" / "rules").mkdir(parents=True)
+    (fixture / ".claude" / "settings.json").write_text('{"hooks": {}}', encoding="utf-8")
+    (fixture / ".claude" / "rules" / "goals.md").write_text("# Ziele\n", encoding="utf-8")
+    ws = prepare(tmp_path / "ws", make_skill(tmp_path), fixture)
+    assert ".claude/settings.json" in ws.baseline and ".claude/rules/goals.md" in ws.baseline
+    assert not any(key.startswith(".claude/skills/") for key in ws.baseline)
+    worktree = ws.root / ".claude" / "worktrees" / "agent-1" / "README.md"
+    worktree.parent.mkdir(parents=True)
+    worktree.write_text("Kopie\n", encoding="utf-8")
+    (ws.root / ".claude" / "settings.json").write_text('{"hooks": {"Stop": []}}', encoding="utf-8")
+    after = snapshot(ws.root)
+    assert not any(key.startswith(".claude/worktrees/") for key in after)
+    assert after[".claude/settings.json"] != ws.baseline[".claude/settings.json"]
+    dump = dump_changed_files(ws.root, ws.baseline)
+    assert ".claude/settings.json" in dump and "worktrees" not in dump
 
 
 def test_prepare_without_fixture_creates_empty_workspace(tmp_path):
