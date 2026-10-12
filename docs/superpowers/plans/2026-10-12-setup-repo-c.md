@@ -82,7 +82,7 @@ skills/handoff/SKILL.md, README.md
 - Consumes: (nichts Neues)
 - Produces: `token:Fertig wenn`, `token:goal_hook`
 
-- [ ] **Step 1: goals.md** — Ledger-Schema mit drei Tabellen (*Aktiv*: `id`, Ziel, Fertig
+- [x] **Step 1: goals.md** — Ledger-Schema mit drei Tabellen (*Aktiv*: `id`, Ziel, Fertig
       wenn, Bereich, seit; *Kandidaten*: `id`, Kandidat, entdeckt bei, Grund, am;
       *Erledigt*: `id`, Ziel, Beleg, am, die letzten zehn); ID-Vergabe `G<n>` über alle
       drei Tabellen, vor jedem Schreiben neu lesen und nur anhängen; „Fertig wenn" nach der
@@ -90,11 +90,11 @@ skills/handoff/SKILL.md, README.md
       `*`, `?`, `/`, Groß- und Kleinschreibung, keine Klammern, Komma-Liste, `src/` gleich
       `src/**`, leere Zelle ohne Bereich); die vier Klassen mit Beispielen; ausgenommene
       Pfade des Hooks; Merge-Konflikte fragen.
-- [ ] **Step 2: plan-format.md** — Option `goal_hook` (Standard `true`, abwählbar mit
+- [x] **Step 2: plan-format.md** — Option `goal_hook` (Standard `true`, abwählbar mit
       `--without-goal-hook`), Operationen für `docs/goals.md`, `.claude/rules/goals.md`,
       `.claude/hooks/goal_scope.py`; eigener Hook auch am Suffix
       `.claude/hooks/goal_scope.py` erkannt.
-- [ ] **Step 3: Prüfen** — beide Dateien unter 200 Zeilen, die Tokens wörtlich. Commit.
+- [x] **Step 3: Prüfen** — beide Dateien unter 200 Zeilen, die Tokens wörtlich. Commit.
 
 ### Task 2: Assets für Ziele
 
@@ -108,17 +108,17 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:Fertig wenn`
 - Produces: `token:Kandidaten`, `token:UserPromptSubmit`
 
-- [ ] **Step 1: Tests schreiben** — `test_goal_assets_shape`: Ledger mit Kopfzeile
+- [x] **Step 1: Tests schreiben** — `test_goal_assets_shape`: Ledger mit Kopfzeile
       `schema: 1` und den drei Tabellenköpfen ohne Zeilen; Regel ≤ 25 Zeilen, Kopfzeile in
       Zeile 1, kein `paths`-Frontmatter, nennt die vier Klassen; Fragment mit genau einem
       Eintrag je `UserPromptSubmit` und `Stop`, beide mit dem Starter und
       `$CLAUDE_PROJECT_DIR/.claude/hooks/goal_scope.py`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_goal_assets.py`.
-- [ ] **Step 3: Schreiben** — die drei Dateien; die Regel gilt nur, solange *Aktiv*
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_goal_assets.py`.
+- [x] **Step 3: Schreiben** — die drei Dateien; die Regel gilt nur, solange *Aktiv*
       mindestens ein Ziel hat, und sagt, was `[setup-repo]`-Meldungen bedeuten.
-- [ ] **Step 4: Grün sehen**, `lint_skill.py skills/setup-repo` ohne Befund für
+- [x] **Step 4: Grün sehen**, `lint_skill.py skills/setup-repo` ohne Befund für
       `asset-headers`.
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 3: goal_scope.py
 
@@ -130,7 +130,7 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:UserPromptSubmit`, `token:Kandidaten`
 - Produces: `fn:on_prompt(payload, root)`, `fn:on_stop(payload, root)`, `fn:glob_match(pattern, path)`
 
-- [ ] **Step 1: Tests schreiben** — `test_goal_scope_turn_baseline` (vorher uncommittete,
+- [x] **Step 1: Tests schreiben** — `test_goal_scope_turn_baseline` (vorher uncommittete,
       unveränderte Datei → keine Meldung; im Turn committete, gestagete, ungestagete und
       gelöschte Datei außerhalb → je eine Meldung; Nicht-ASCII-Name; Session im
       Unterordner), `test_goal_scope_reports_each_file_once_and_defers_context`,
@@ -141,15 +141,15 @@ skills/handoff/SKILL.md, README.md
       `decision` oder `additionalContext`; UserPromptSubmit mit `hookEventName` und
       `additionalContext`, Text beginnt mit `[setup-repo]`; Exit immer 0); alle als
       Unterprozess in Mini-Repos mit git.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_goal_scope.py`.
-- [ ] **Step 3: Implementieren** — Ereignis aus `hook_event_name`; Basis je Turn aus
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_goal_scope.py`.
+- [x] **Step 3: Implementieren** — Ereignis aus `hook_event_name`; Basis je Turn aus
       `git rev-parse HEAD` und Inhalts-Hashes der Einträge aus
       `git status --porcelain -z --untracked-files=all`; Stop über
       `git diff <basis> --name-only -z` plus `git ls-files --others --exclude-standard -z`
       plus gelöschte Basis-Dateien; Ausnahmen aus `references/goals.md`; Zustand nach E6
       mit `SETUP_REPO_GOAL_STATE`; „Tier 1" im Docstring.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 4: Ziele in plan_repo.py
 
