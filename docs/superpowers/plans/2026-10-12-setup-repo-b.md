@@ -143,17 +143,17 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:detect.json`
 - Produces: `fn:harvest(repo_root, detect)`
 
-- [ ] **Step 1: Test schreiben** — `test_harvest_marks_tool_rules`, erster Teil:
+- [x] **Step 1: Test schreiben** — `test_harvest_marks_tool_rules`, erster Teil:
       `line-length = 100` unter `[tool.ruff]` in `pyproject.toml` wird ein Kandidat mit
       Quelle `pyproject.toml` und dem Hinweis, dass ruff ihn prüft; dazu ein Kandidat aus
       `CONTRIBUTING.md` und einer aus wiederkehrenden Commit-Präfixen; IDs stabil
       (`c1`, `c2`, … in Quellreihenfolge).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_harvest.py`.
-- [ ] **Step 3: Implementieren** — Kandidaten aus den Quellen in `rules-harvest.md`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_harvest.py`.
+- [x] **Step 3: Implementieren** — Kandidaten aus den Quellen in `rules-harvest.md`;
       `main` liest `detect.json`, schreibt `candidates.json` mit `_meta`; keine Klasse —
       die trägt Claude ein.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 4: verify_stop.py
 
@@ -166,7 +166,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: (nichts Neues)
 - Produces: `fn:run_stop(payload, repo_root)`, `fn:selftest(repo_root)`
 
-- [ ] **Step 1: Tests schreiben** — `test_verify_stop_counts_and_missing_tool` (Mini-Repo
+- [x] **Step 1: Tests schreiben** — `test_verify_stop_counts_and_missing_tool` (Mini-Repo
       mit CLAUDE.md-Zeile `Verifikation: \`python -c "..."\``: grün → 0; rot → 2 mit
       Grund auf stderr bis zum dritten Mal je `session_id`, danach 0 mit `systemMessage`
       „rot nach drei Versuchen"; grün setzt den Zähler zurück; fehlendes Programm → 0
@@ -175,14 +175,14 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `test_launcher_command_runs` (das Kommando aus `verify-stop.json` läuft unter
       `bash -c` mit `CLAUDE_PROJECT_DIR` auf dem Mini-Repo, einmal mit `python3` im
       `PATH`, einmal mit nur `python`).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_verify_stop.py`.
-- [ ] **Step 3: Implementieren** — stdin als Bytes mit UTF-8-Ersetzung; Repo-Wurzel aus
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_verify_stop.py`.
+- [x] **Step 3: Implementieren** — stdin als Bytes mit UTF-8-Ersetzung; Repo-Wurzel aus
       `CLAUDE_PROJECT_DIR`; Zustand `.skills/cache/setup-repo/verify-stop.json` mit
       `_meta`, atomar geschrieben; Timeout 300 Sekunden; jede Ausnahme gefangen. Fragment
       mit `Stop`-Hook und dem Starter
       `command -v python3 >/dev/null 2>&1 && exec python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/verify_stop.py" || exec python "$CLAUDE_PROJECT_DIR/.claude/hooks/verify_stop.py"`.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 5: Assets
 
