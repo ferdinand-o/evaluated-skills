@@ -1717,15 +1717,14 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   alten Ein-Plugin neun Skills mit weniger als 20 Tokens, also ohne Description
   (`docs/superpowers/validation/2026-10-08-plugin-split-sync.md`). Ob die Aufteilung
   das behebt, misst der Nutzer nach dem Merge.
-- **`verify` von subagent-dev meldet Nicht-ASCII-Pfade als Allowlist-Verstoß.** Beim
-  Bau beobachtet: `check_allowlist` liest `git diff --name-only` mit `core.quotepath`,
-  `specs/Spec 00 – skill-foundation.md` kommt dann als `"specs/Spec 00 \342\200\223 …"`
-  zurück und passt auf keinen Eintrag. Umgangen mit
-  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false`. Das
-  hilft nur für Committetes: Für uncommittete Dateien liest `check_allowlist`
-  `git status --porcelain`, das Pfade mit Leerzeichen in Anführungszeichen setzt, und
-  entfernt sie nicht (beim Bau von Spec 21 gesehen). Umweg dort: erst committen, dann
-  gegen die Basis prüfen. Der Fix (`-z` für beide Aufrufe) gehört nach subagent-dev.
+- **Behoben (2026-10-12): `verify` von subagent-dev meldete Nicht-ASCII-Pfade als
+  Allowlist-Verstoß.** `check_allowlist` las `git diff --name-only` und
+  `git status --porcelain` ohne `-z`; git setzte `specs/Spec 00 – skill-foundation.md`
+  und Pfade mit Leerzeichen in Anführungszeichen und escapte sie, sodass sie auf keinen
+  Eintrag passten. Beim Bau von Spec 20 und 21 nur mit `core.quotepath=false` und
+  vorherigem Commit zu umgehen. Jetzt lesen beide Aufrufe mit `-z` und als UTF-8,
+  `git status` dazu mit `--untracked-files=all`, damit ein neuer Ordner seine Dateien
+  einzeln zeigt (`test_check_allowlist_reads_non_ascii_and_space_paths_without_quoting`).
 
 ## setup-user
 
