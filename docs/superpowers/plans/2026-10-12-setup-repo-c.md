@@ -161,17 +161,17 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `fn:on_prompt(payload, root)`, `token:goal_hook`
 - Produces: `fn:build_plan(repo_root, detect, candidates, options)`
 
-- [ ] **Step 1: Tests schreiben** — `test_plan_adds_goals_by_default` (Ledger und Regel als
+- [x] **Step 1: Tests schreiben** — `test_plan_adds_goals_by_default` (Ledger und Regel als
       `create`, `goal_scope.py` als `copy`, beide Ereignisse im Settings-Patch, Budget
       zählt die Regel), `test_plan_without_goal_hook` (Regel und Ledger bleiben, Hook und
       Kopie fehlen, Ansicht sagt „aus"), `test_plan_keeps_existing_ledger` (vorhandenes
       `docs/goals.md` wird nicht angefasst).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_plan.py -k goal`.
-- [ ] **Step 3: Implementieren** — Option `goal_hook` (Standard an), `--without-goal-hook`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_plan.py -k goal`.
+- [x] **Step 3: Implementieren** — Option `goal_hook` (Standard an), `--without-goal-hook`;
       Operationen nach `references/plan-format.md`; Ansicht unter „Hooks (abwählbar)".
-- [ ] **Step 4: Grün sehen**, volle Suite (Fixture-Test darf hier rot werden; Task 7
+- [x] **Step 4: Grün sehen**, volle Suite (Fixture-Test darf hier rot werden; Task 7
       erzeugt die Fixtures neu).
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 5: Ziele in apply_repo.py
 
@@ -183,17 +183,17 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `fn:on_stop(payload, root)`, `fn:build_plan(repo_root, detect, candidates, options)`
 - Produces: `fn:apply_plan(repo_root, plan_path)`, `fn:check_repo(repo_root)`
 
-- [ ] **Step 1: Tests schreiben** — `test_apply_probes_goal_hook_without_touching_state`
+- [x] **Step 1: Tests schreiben** — `test_apply_probes_goal_hook_without_touching_state`
       (Probe mit `UserPromptSubmit` und `Stop`, danach kein
       `.skills/cache/setup-repo/goal-scope.json`), `test_apply_merges_goal_hook_once`
       (zweimal anwenden, je Ereignis genau ein eigener Eintrag, fremde bleiben),
       `test_check_reads_ledger_header` (fremde Kopfzeile in `docs/goals.md` → Abweichung).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k goal`.
-- [ ] **Step 3: Implementieren** — eigener Hook an beiden Suffixen; Probe über
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k goal`.
+- [x] **Step 3: Implementieren** — eigener Hook an beiden Suffixen; Probe über
       `sys.executable` mit `SETUP_REPO_GOAL_STATE` in einem Temp-Verzeichnis, Exit 0 und
       gültiges JSON oder leere Ausgabe; `check` prüft die Ledger-Kopfzeile.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 6: SKILL.md
 
@@ -204,11 +204,11 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `fn:check_repo(repo_root)`, `token:Fertig wenn`
 - Produces: `token:Neue Ziele werden Kandidaten`
 
-- [ ] **Step 1: Abschnitt Ziele** — Ledger, Zielregel, Bereichs-Hook in wenigen Zeilen mit
+- [x] **Step 1: Abschnitt Ziele** — Ledger, Zielregel, Bereichs-Hook in wenigen Zeilen mit
       Verweis auf `references/goals.md`; `--without-goal-hook`; Contract-Zeilen „Neue Ziele
       werden Kandidaten" und „Sichtbar oder gar nicht"; Anti-Zeremonie: ohne aktives Ziel
       schweigen Regel und Hook; **handoff** in der Abgrenzung.
-- [ ] **Step 2: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-repo` ohne
+- [x] **Step 2: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-repo` ohne
       Befund außer `neighbors`, den Task 9 schließt. Commit.
 
 ### Task 7: Evals
