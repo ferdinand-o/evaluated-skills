@@ -173,7 +173,7 @@ def result_text(root: Path, op: dict) -> str:
         return (current or "") + (op["content"] if op["content"].strip() not in (current or "") else "")
     if action == "merge-json":
         return _json_text(merge_settings(_load_json(path), op["patch"]))
-    present = {line.strip() for line in (current or "").splitlines()}
+    present = {line.strip().lstrip("/") for line in (current or "").splitlines()}
     missing = [line for line in op["lines"] if line not in present]
     if not missing:
         return current or ""

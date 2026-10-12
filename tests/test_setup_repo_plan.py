@@ -238,3 +238,11 @@ def test_plan_writes_only_cache(tmp_path):
     fresh.mkdir()
     proc = run("plan_repo.py", fresh)
     assert proc.returncode == 2 and "detect_repo.py" in proc.stderr and not (fresh / ".skills").exists()
+
+
+def test_plan_gitignore_lists_only_missing_lines(tmp_path):
+    repo = tmp_path / "repo"
+    write(repo, ".gitignore", "node_modules/\n/.skills/cache/\n")
+    assert ops(plan_for(repo, tmp_path / "cfg"))[".gitignore"]["lines"] == [".claude/settings.local.json"]
+    write(repo, ".gitignore", ".skills/cache/\n.claude/settings.local.json\n")
+    assert ".gitignore" not in ops(plan_for(repo, tmp_path / "cfg"))

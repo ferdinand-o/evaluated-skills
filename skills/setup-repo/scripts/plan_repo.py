@@ -256,9 +256,10 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
         operations.append({"path": ".claude/settings.local.json", "action": "merge-json",
                            "patch": {"enabledPlugins": plugins}})
 
-    present = {line.strip() for line in (_read(root / ".gitignore") or "").splitlines()}
-    if any(line not in present for line in GITIGNORE_LINES):
-        operations.append({"path": ".gitignore", "action": "gitignore", "lines": list(GITIGNORE_LINES)})
+    present = {line.strip().lstrip("/") for line in (_read(root / ".gitignore") or "").splitlines()}
+    missing = [line for line in GITIGNORE_LINES if line not in present]
+    if missing:
+        operations.append({"path": ".gitignore", "action": "gitignore", "lines": missing})
 
     patch: dict = {}
     allow = [f"Bash({p})" for p in parts]

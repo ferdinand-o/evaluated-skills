@@ -39,8 +39,8 @@ Aktionen:
   ein Objekt nach den Mischregeln unten.
 - `copy` — Laufzeitskript aus `assets/runtime/` nach `.claude/hooks/`; `content` ist der
   Dateiinhalt, damit der Hash ihn deckt.
-- `gitignore` — `lines` sind Zeilen, die in `.gitignore` stehen müssen; fehlende werden
-  angehängt.
+- `gitignore` — `lines` sind die Zeilen, die in `.gitignore` noch fehlen; `/x` und `x`
+  gelten als dieselbe Zeile. `apply` hängt an, was dann noch fehlt.
 
 ## Mischregeln für die Settings
 
