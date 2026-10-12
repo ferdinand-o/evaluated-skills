@@ -24,8 +24,9 @@ und Plugin zusammen:
 
 - `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
   architecture-map, debug-ledger, dev-report, feature-spec, handoff,
-  rest-api-architect, review-context, setup-user, sql-schema-architect, subagent-dev,
-  testing-strategy. setup-user läuft nur als `/cc-dev:setup-user`.
+  rest-api-architect, review-context, setup-repo, setup-user, sql-schema-architect,
+  subagent-dev, testing-strategy. setup-user und setup-repo laufen nur als
+  `/cc-dev:setup-user` und `/cc-dev:setup-repo`.
 - `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
   aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
   ui-architect. Je
@@ -112,6 +113,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (verdichtet, ändert keinen Stil), explain (erklärt mit eigenem Antwortvertrag) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
 | eigenen Claude-Code-User-Scope einrichten oder prüfen | setup-user | `/statusline` (Statusline nach Wunsch), setup-repo (Repo, Cloud, CI), handoff (sichert den Stand) |
+| ein Repo für Claude Code einrichten oder prüfen | setup-repo | setup-user (persönlicher User-Scope), testing-strategy (welche Tests fehlen), `/init` (CLAUDE.md ohne Beleg) |
 
 ## Konventionen
 

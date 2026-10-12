@@ -125,9 +125,24 @@ Parst ein automatisiertes Werkzeug diese CSV künftig maschinell, braucht sie
 eine andere Lösung (z. B. eine begleitende `.meta.json`-Datei), keine
 `#`-Kopfzeile.
 
+## Begründete Ausnahme: Kopfzeile nach dem Frontmatter bei `setup-repo`
+
+Rules mit `paths`, die `skills/setup-repo/scripts/plan_repo.py` nach
+`.claude/rules/` schreibt, beginnen mit YAML-Frontmatter: Claude Code liest
+`paths` nur aus einem Frontmatter, das in Zeile 1 beginnt. Die Kopfzeile steht
+deshalb in der ersten Zeile nach dem schließenden `---`. Wer die Kopfzeile einer
+solchen Datei prüft, überspringt ein Frontmatter in Zeile 1 und liest die
+nächste Zeile.
+
+Diese Ausnahme gilt nur für Dateien, deren Frontmatter Claude Code selbst
+auswertet. Abschnitt D von Spec 22 ergänzt hier
+`skills/setup-repo/assets/agents/reviewer.md`, dessen Frontmatter einen Subagenten
+beschreibt.
+
 **Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben).
-Die drei dokumentierten Ausnahmen sind `handoff.md`, die Stub-Dateien von
-`feature-spec` und die Anki-CSV von `exercise-forge` — jede mit einem hier
+Die vier dokumentierten Ausnahmen sind `handoff.md`, die Stub-Dateien von
+`feature-spec`, die Anki-CSV von `exercise-forge` und die Kopfzeile nach dem
+Frontmatter bei den Rules von `setup-repo` — jede mit einem hier
 ausgeschriebenen Grund, keine davon, weil die Kopf-Regel optional wäre. Wer
 eine neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält,
 dokumentiert sie hier nach demselben Muster, statt sich stillschweigend auf
