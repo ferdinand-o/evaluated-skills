@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python3 >/dev/null 2>&1 && exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/goal_scope.py\" || exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/goal_scope.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python3 >/dev/null 2>&1 && exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/goal_scope.py\" || exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/goal_scope.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
