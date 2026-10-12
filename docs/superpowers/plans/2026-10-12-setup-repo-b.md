@@ -321,19 +321,19 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:Belegt oder ungeprüft`, `token:keine Abweichung`
 - Produces: `token:anti-ceremony-check-on-aligned-repo-changes-nothing`
 
-- [ ] **Step 1: Fixtures** — je `fixture.json` mit `"git": true`; `sr-fresh` mit
+- [x] **Step 1: Fixtures** — je `fixture.json` mit `"git": true`; `sr-fresh` mit
       `Makefile`-Ziel `check` und `line-length = 100` in `pyproject.toml`; `sr-notests`
       ohne Runner und Tests; `sr-planned` mit einem Plan, den `plan_repo.py` erzeugt hat;
       `sr-tampered` mit demselben Plan, im Block nach dem Hashen eine Zeile geändert;
       `sr-aligned` nach `apply` dieses Plans, mit dem Plan und ohne offene Kandidaten.
       Abschnitt B: keine Zielregel, kein Ledger, kein Bereichs-Hook in den Fixtures.
-- [ ] **Step 2: Evals** — `anti-ceremony-check-on-aligned-repo-changes-nothing`,
+- [x] **Step 2: Evals** — `anti-ceremony-check-on-aligned-repo-changes-nothing`,
       `plan-from-repo-writes-only-report`, `plan-without-tests-says-unverified`,
       `apply-executes-plan-faithfully`, `apply-refuses-tampered-plan` mit den Assertions
       der Spec, ohne die drei `file_unchanged` auf Zielregel, Bereichs-Hook und Ledger in
       Eval 1 und ohne `goal_scope` in Eval 4 (Spec 22, Evals: Abschnitt C ergänzt sie);
       je die Diskriminator-Frage in `notes`.
-- [ ] **Step 3: Schema-Test** — `load_evals` lädt fünf Evals;
+- [x] **Step 3: Schema-Test** — `load_evals` lädt fünf Evals;
       `test_fixture_plans_are_current` (Blöcke in `sr-planned`, `sr-aligned` und
       `sr-tampered` gleichen neu erzeugten, `sr-tampered` bis auf die eine Änderung;
       Bestand in `sr-aligned` gleich dem Ergebnis von `apply`) und
@@ -358,14 +358,14 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:Belegt oder ungeprüft`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abgrenzungen** — je ein Halbsatz mit dem Wort setup-repo in
+- [x] **Step 1: Abgrenzungen** — je ein Halbsatz mit dem Wort setup-repo in
       testing-strategy, review-context und feature-spec; handoff kommt mit Abschnitt C
       (`docs/goals.md`). `python scripts/sync_skills.py` und `--check`; `lint_skill.py
       --base HEAD` je Skill ohne neuen Befund.
-- [ ] **Step 2: Plugin-Zuordnung** — `./skills/setup-repo` in die `skills`-Liste von
+- [x] **Step 2: Plugin-Zuordnung** — `./skills/setup-repo` in die `skills`-Liste von
       `cc-dev`; die Tabelle in `scripts/sync_skills.py` bleibt unverändert;
       `pytest tests/test_marketplace.py`.
-- [ ] **Step 3: Matrix und Kopfzeile** — Spec 00 §5 und README je eine Zeile setup-repo,
+- [x] **Step 3: Matrix und Kopfzeile** — Spec 00 §5 und README je eine Zeile setup-repo,
       README setup-repo in der Liste von `cc-dev`; in `docs/artifact-header.md` die
       Begründete Ausnahme „Kopfzeile nach dem Frontmatter" für Rules mit `paths` aus
       `skills/setup-repo/scripts/plan_repo.py` und den Satz über die Zahl der Ausnahmen
@@ -381,7 +381,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:anti-ceremony-check-on-aligned-repo-changes-nothing`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt** — `## setup-repo`: Starter unter Windows ungemessen (Platzhalter
+- [x] **Step 1: Abschnitt** — `## setup-repo`: Starter unter Windows ungemessen (Platzhalter
       `python3` aus dem Store), `-p` nutzt keine Projekt-Freigaben, `--bare` lädt weder
       CLAUDE.md noch Hooks, Plugin-IDs unter `plugins/synced/` beim Nutzer nicht
       vorhanden, Klassifikation nur über Eval 2 gemessen, Abschnitt C und D fehlen.
@@ -396,7 +396,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:anti-ceremony-check-on-aligned-repo-changes-nothing`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe außerhalb des Harness
+- [x] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe außerhalb des Harness
       oder „ungefahren" mit Grund, Ende-zu-Ende-Lauf auf einer Kopie dieses Repos, und
       die Sektion „Was nicht gemessen wurde": Windows-Starter, Läufe mit
       `--without-skill`, Abschnitt C und D. `lint_skill.py skills/setup-repo` ganz
