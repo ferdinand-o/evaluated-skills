@@ -224,14 +224,14 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:Neue Ziele werden Kandidaten`
 - Produces: `token:anti-ceremony-check-on-aligned-repo-changes-nothing`
 
-- [ ] **Step 1: Fixtures** — `sr-planned` und `sr-tampered` mit neu erzeugtem Plan (Ziele
+- [x] **Step 1: Fixtures** — `sr-planned` und `sr-tampered` mit neu erzeugtem Plan (Ziele
       vorausgewählt), `sr-aligned` nach `apply` mit Ledger, Regel und Hook.
-- [ ] **Step 2: Evals** — `anti-ceremony-check-on-aligned-repo-changes-nothing` bekommt
+- [x] **Step 2: Evals** — `anti-ceremony-check-on-aligned-repo-changes-nothing` bekommt
       `file_unchanged` auf `.claude/rules/goals.md`, `.claude/hooks/goal_scope.py` und
       `docs/goals.md`; `apply-executes-plan-faithfully` bekommt `file_matches`
       `.claude/settings.json` auf `goal_scope`; `plan-from-repo-writes-only-report`,
       `plan-without-tests-says-unverified` und `apply-refuses-tampered-plan` bleiben.
-- [ ] **Step 3: Schema- und Nachspiel-Test** — `test_fixture_plans_are_current`,
+- [x] **Step 3: Schema- und Nachspiel-Test** — `test_fixture_plans_are_current`,
       `test_aligned_fixture_matches_apply`, `test_replayed_eval_passes_its_own_assertions`
       grün. Commit.
 
@@ -246,13 +246,13 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:Kandidaten`
 - Produces: `token:sr-goals-seeded`
 
-- [ ] **Step 1: Fixture** — eingerichtetes Repo mit Ledger (aktives Ziel G1 „Tippfehler in
+- [x] **Step 1: Fixture** — eingerichtetes Repo mit Ledger (aktives Ziel G1 „Tippfehler in
       greet.py beheben", Bereich `src/greet.py`), Regel, CLAUDE.md, Tippfehler in
       `src/greet.py`, offensichtlichem Fehler in `src/dates.py`, „Helo" im README.
-- [ ] **Step 2: Evals** — zwei Fälle aus der Spec: Prompt mit Ziel G1 → Zeile unter
+- [x] **Step 2: Evals** — zwei Fälle aus der Spec: Prompt mit Ziel G1 → Zeile unter
       *Kandidaten* mit `dates`, `src/dates.py` unverändert; README-Prompt → keine neue Zeile
       unter *Aktiv* und *Kandidaten*.
-- [ ] **Step 3: Test** — `load_evals` lädt beide; die Fixture trägt die Assets
+- [x] **Step 3: Test** — `load_evals` lädt beide; die Fixture trägt die Assets
       byte-gleich. Commit.
 
 ### Task 9: Nachbarn
@@ -266,11 +266,11 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:Kandidaten`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: handoff** — unter den Inhaltsregeln: existiert `docs/goals.md` mit
+- [x] **Step 1: handoff** — unter den Inhaltsregeln: existiert `docs/goals.md` mit
       lesbarer Kopfzeile von setup-repo, nennt die Übergabe es unter „Einstiegspunkte";
       `python scripts/sync_skills.py` und `--check`; `lint_skill.py --base HEAD
       skills/handoff` ohne neuen Befund.
-- [ ] **Step 2: README** — „Aufbau" nennt `evals-templates/` (Vorlagen-Messungen außerhalb
+- [x] **Step 2: README** — „Aufbau" nennt `evals-templates/` (Vorlagen-Messungen außerhalb
       des Eval-Vertrags). Plugin-Zuordnung unverändert. Commit.
 
 ### Task 10: known-limits
@@ -282,7 +282,7 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:sr-goals-seeded`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt setup-repo ergänzen** — der Hook sieht nur Dateien, nicht
+- [x] **Step 1: Abschnitt setup-repo ergänzen** — der Hook sieht nur Dateien, nicht
       Absichten; mit `-p` sieht Claude die Meldung nie; gleichzeitige Sessions und
       Merge-Konflikte im Ledger; Windows ungemessen; „Abschnitt C fehlt" streichen.
       Commit.
