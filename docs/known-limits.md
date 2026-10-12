@@ -1755,6 +1755,43 @@ Was ungemessen bleibt und wo es beißt:
   Fassung vom 2026-10-07 auf (`tests/fixtures/setup-user/`); ohne sie gibt es kein Asset
   und keinen Anzeige-Vergleich.
 
+## setup-repo
+
+Gebaut nach Spec 22, Abschnitt B (2026-10-12). Tier 1: `detect_repo.py`,
+`harvest_rules.py`, `plan_repo.py`, `apply_repo.py` (mit `--check`), dazu der opt-in-Hook
+`verify_stop.py` im Zielrepo. Was ungemessen bleibt und wo es beißt:
+
+- **Der Starter ist unter Windows ungemessen.** `command -v python3 … || exec python …`
+  läuft in den Tests unter bash mit `python3` und mit nur `python`. Ob der
+  Store-Platzhalter `python3` unter Windows `command -v` besteht und dann scheitert, misst
+  erst der erste Lauf auf dem Windows-PC; scheitert er, ist die Exec-Form mit `"args": []`
+  der nächste Versuch. Der Verifikationsbefehl läuft dort unter `cmd.exe`.
+- **`claude -p` nutzt die Freigaben des Repos nicht** (`permissions.allow` ist dort „Not
+  used"), und mit `--bare` lädt es weder CLAUDE.md noch Rules noch Hooks. Eine Pipeline
+  auf der Devbox braucht `--allowedTools` oder User-Settings; setup-repo wirkt dort sonst
+  nur über die CLAUDE.md.
+- **Plugin-IDs sind gegen keine echte Installation gemessen.** `detect_repo.py` liest
+  `installed_plugins.json` in beiden bekannten Formen (Objekt oder Liste je ID) und
+  `plugins/synced/`; beim Nutzer liegen unter `plugins/synced/` laut Spec 20 keine
+  Plugins. Wie `installPath` eines Marketplace mit `source: "./"` aussieht, ist geraten:
+  zuerst das Manifest dort, sonst `skills/*/SKILL.md`.
+- **Die Klassifikation misst nur Eval 2** — eine Fixture, ein Kandidat (`line-length`).
+  Ob Claude `ableitbar` und `regel` sinnvoll trennt, misst nichts.
+- **Die Ernte ist grob.** `CONTRIBUTING*` liefert jeden Aufzählungspunkt, auch
+  Installationsschritte, höchstens 20; das Commit-Format zählt erst ab 5 Commits und 60 %
+  Treffern. Monorepos mit Runnern in Unterordnern erkennt `detect_repo.py` nicht; es
+  liest nur die Wurzel.
+- **check sieht nur, was der letzte Plan berührt.** Eine Regel, die jemand nach apply
+  von Hand ergänzt, ist keine Abweichung, solange das Budget hält. Der Plan liegt unter
+  `.skills/cache/` und ist nicht committet; in einem frischen Clone heißt es „ungeprüft —
+  kein Plan".
+- **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab; die fünf
+  Evals liefen mit je einem Agenten und `evalkit.runner.grade()`, die Läufe ohne Skill
+  ebenso (Report).
+- **Abschnitt C und D fehlen.** Kein Ledger `docs/goals.md`, keine Zielregel, kein
+  Bereichs-Hook, keine Vorlagen-Messung, kein Ziel-Reviewer; handoff nennt `docs/goals.md`
+  erst mit Abschnitt C.
+
 ## impl-plan
 
 Gebaut nach Spec 16 (2026-09-02). Tier 1 ohne eigenes Skript: Der einzige Code,
