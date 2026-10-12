@@ -32,7 +32,7 @@ Quelle, Freigaben —, gehört deshalb committet ins Repo.
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/plan_repo.py" --classes '{"c1": "werkzeug", "c2": "regel"}'
    ```
-   Optionen: `--with-verify-hook`, `--deny-secrets`. Schreibt nur `plan.md`. Zeig dem
+   Optionen: `--with-verify-hook`, `--without-goal-hook`, `--deny-secrets`. Schreibt nur `plan.md`. Zeig dem
    Nutzer die Ansicht daraus: Verifikation mit Quelle, Kandidaten mit Klasse, Budget,
    Plugins, Hooks, Änderungen. Dann endet der Lauf; angewendet wird in einem späteren Aufruf.
 3. **apply**, erst nach ausdrücklicher Bestätigung des gezeigten Plans:
@@ -78,6 +78,18 @@ committete Datei. `cc-ui` an, wenn ein Frontend erkannt ist; ein Plugin, dessen 
 Projekt-Kopie unter `.claude/skills/` liegen, aus. Ohne gefundene ID: „ungeprüft —
 Plugin-ID nicht gefunden".
 
+## Ziele
+
+`apply` legt einen leeren Ledger `docs/goals.md` an (*Aktiv*, *Kandidaten*, *Erledigt*)
+und die immer geladene Regel `.claude/rules/goals.md`; vorhandene bleiben unberührt. Die
+Skill erfindet keine Ziele. Ein Ziel unter *Aktiv* trägt ein prüfbares „Fertig wenn" und
+einen Bereich aus Pfad-Globs. Solange eines aktiv ist, ordnet die Regel entdeckte Arbeit
+in vier Klassen: vom Nutzer verlangt, Teil des Ziels, trivial — erledigen; alles andere
+wird Kandidat. Der Bereichs-Hook `goal_scope.py` (vorausgewählt, abwählbar mit
+`--without-goal-hook`) meldet Dateien, die ein Turn außerhalb der Bereiche geändert hat:
+dem Nutzer sofort, Claude beim nächsten Prompt. Er hält nie etwas an. Schema, Glob-Dialekt
+und Klassen: `references/goals.md`.
+
 Format, Mischregeln und Hash: `references/plan-format.md`.
 
 ## Contract
@@ -89,10 +101,14 @@ Format, Mischregeln und Hash: `references/plan-format.md`.
 - **Budget.** Immer geladene Zeilen (CLAUDE.md samt Importen plus Rules ohne `paths`)
   ≤ 150; eine Überschreitung meldet `plan_repo.py` als Befund.
 - **AGENTS.md bleibt lesbar.** Eine neue CLAUDE.md neben `AGENTS.md` importiert es.
+- **Neue Ziele werden Kandidaten.** Die Regel verlangt die vier Klassen (G1); der
+  Bereichs-Hook meldet, hält nichts an und löst keinen Folgeturn aus.
+- **Sichtbar oder gar nicht.** Jede Meldung eines Stop-Hooks geht über `systemMessage`.
 - **Mischen, nie überschreiben; kein Commit.** Fremde Settings-Schlüssel und Hooks
   bleiben, Listen werden vereinigt; unversionierte Zieldateien bekommen ein Backup.
 - **Anti-Zeremonie:** `check` auf ein eingerichtetes Repo ändert nur `check.md` und meldet
-  „keine Abweichung"; ein Repo ohne Tests bekommt keinen erfundenen Testbefehl.
+  „keine Abweichung"; ein Repo ohne Tests bekommt keinen erfundenen Testbefehl; ohne
+  aktives Ziel schweigen Regel und Hook.
 
 ## Anti-Rationalisierung
 
@@ -110,6 +126,8 @@ Format, Mischregeln und Hash: `references/plan-format.md`.
   übernimmt nur vorhandene Befehle.
 - **review-context** — baut das Kontextpaket für einen Diff; setup-repo richtet kein
   Review ein.
+- **handoff** — sichert den Stand einer Sitzung in `handoff.md`; `docs/goals.md` ist der
+  Zielstand über Sitzungen hinweg.
 - `/code-review` — sucht Fehler im Code eines Diffs.
 - setup-user — der persönliche User-Scope; was nur für mich gilt, gehört nicht ins
   committete Repo.
