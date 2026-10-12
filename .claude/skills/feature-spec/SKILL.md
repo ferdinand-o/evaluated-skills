@@ -97,6 +97,8 @@ Fragen sind die Ausnahme (siehe Fallback in Schritt 2), nicht der Einstieg.
   greift diese Skill nicht.
 - **superpowers:writing-plans** — Zerlegung der fertigen Spec in
   Arbeitspakete. Diese Skill endet bei Spec plus Stubs, sie zerlegt nicht.
+- setup-repo — richtet das Repo für Claude Code ein; ein neues Feature spezifiziert es
+  nicht.
 - Ohne existierende Codebase (leeres Repo, neues Projekt) ist Draft-first
   ungeerdet — dort ist ein Interview-Muster überlegen, nicht diese Skill.
 - Diese Skill braucht keinen mechanischen Codebase-Scanner: „Scannen" heißt

@@ -82,4 +82,6 @@ muss, was eine Änderung erreichen sollte.
 - **`/security-review`, trailofbits/skills** — Sicherheitsfragen. Diese Skill hat keine
   Security-Linse (Spec 04, Constraints) und routet nicht selbst dorthin weiter, sondern nennt
   nur die Zuständigkeit.
+- setup-repo — richtet ein Repo für Claude Code ein (Verifikation, CLAUDE.md, Regeln mit
+  Quelle); ein Kontextpaket für einen Diff baut es nicht.
 - Diese Skill braucht ein Git-Repository für den Diff. Ohne Repo sagst du das und hörst auf.

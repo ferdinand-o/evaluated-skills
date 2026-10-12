@@ -132,6 +132,8 @@ schon Teil der Python-Stdlib ist.
   `testing-strategy` implementiert diese Stubs aus, erzeugt sie nie selbst.
   Kommt ein Stub-Export von `feature-spec`, ist `detect_stack.py` trotzdem
   zuerst dran — die Stubs sagen nichts über Repo-Typ oder Schichten.
+- setup-repo — übernimmt nur vorhandene Befehle als Verifikation; findet es keinen,
+  verweist es hierher, um zu klären, welche Tests fehlen.
 - Ohne jedes Manifest und ohne Git bleibt `detect_stack.py` trotzdem lauffähig
   (Tier 1) — es liefert dann nur `primary: null` und einen Legacy-Score ohne
   Historienkomponente, keinen Fehler.
