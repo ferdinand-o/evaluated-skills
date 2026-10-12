@@ -2,6 +2,7 @@
 """Wendet einen bestätigten setup-repo-Plan an (Spec 22).
 
     python apply_repo.py [--repo <pfad>] [--plan .skills/cache/setup-repo/plan.md]
+    python apply_repo.py --check [--repo <pfad>]
 
 Wendet nur einen Block mit passendem Hash an, dessen Bestand sich seit dem Plan nicht
 geändert hat und dessen versionierte Zieldateien keine uncommitteten Änderungen haben.
@@ -10,6 +11,12 @@ Unversionierte Zieldateien bekommen vorher ein Backup unter
 Letztes geschrieben, danach läuft je Hook die Probe (`verify_stop.py --selftest`).
 Schreibt in jedem Fall `.skills/cache/setup-repo/apply.md` mit Ergebnis oder
 Abbruchgrund. Committet nie. Format und Mischregeln: references/plan-format.md.
+
+`--check` ist ein trockener apply: jede Operation des letzten Plans gegen den heutigen
+Bestand, dazu Budget und Hook-Probe. Schreibt nur `.skills/cache/setup-repo/check.md` —
+„keine Abweichung" oder je Abweichung eine Zeile; ohne Plan stehen die
+klassenabhängigen Punkte als „ungeprüft — kein Plan". Die Budget-Zählung steht hier und
+in plan_repo.py je einmal, weil kein Skript ein anderes importiert.
 """
 from __future__ import annotations
 
@@ -27,6 +34,9 @@ from pathlib import Path
 CACHE = Path(".skills") / "cache" / "setup-repo"
 BLOCK_RE = re.compile(r"^```json setup-repo-plan\n(.*?)^```", re.MULTILINE | re.DOTALL)
 OWN_HOOK = ".claude/hooks/verify_stop.py"
+BUDGET_LIMIT = 150
+IMPORT_RE = re.compile(r"^@(\S+)\s*$")
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 SETTINGS = ".claude/settings.json"
 ACTIONS = ("create", "append", "merge-json", "copy", "gitignore")
 
@@ -273,12 +283,110 @@ def apply_plan(repo_root, plan_path) -> dict:
             "probes": [d for _, d in probes]}
 
 
+# --- check -------------------------------------------------------------------------
+
+def _has_paths(text: str) -> bool:
+    m = FRONTMATTER_RE.match(text)
+    return bool(m and re.search(r"^paths:", m.group(1), re.MULTILINE))
+
+
+def _always_loaded(root: Path) -> int:
+    total = 0
+    for rel in ("CLAUDE.md", ".claude/CLAUDE.md"):
+        text = _read(root / rel)
+        if text is None:
+            continue
+        total += len(text.splitlines())
+        for line in text.splitlines():
+            m = IMPORT_RE.match(line)
+            if m:
+                imported = _read(root / Path(rel).parent / m.group(1))
+                total += len(imported.splitlines()) if imported else 0
+    rules = root / ".claude" / "rules"
+    for path in sorted(rules.rglob("*.md")) if rules.is_dir() else []:
+        text = _read(path)
+        if text and not _has_paths(text):
+            total += len(text.splitlines())
+    return total
+
+
+def _own_hook_configured(root: Path) -> bool:
+    try:
+        data = json.loads(_read(root / SETTINGS) or "{}")
+    except ValueError:
+        return False
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    return any(_is_own(h) for entries in (hooks or {}).values() if isinstance(entries, list)
+               for entry in entries if isinstance(entry, dict) for h in entry.get("hooks") or [])
+
+
+def check_repo(repo_root) -> dict:
+    """Bestand gegen den letzten Plan; schreibt nur check.md."""
+    root = Path(repo_root).resolve()
+    deviations: list[str] = []
+    notes: list[str] = []
+    plan_path = root / CACHE / "plan.md"
+    if not plan_path.is_file():
+        notes.append("ungeprüft — kein Plan: CLAUDE.md, Regeln und Settings ohne Vergleich (frischer Clone oder "
+                     "Cloud-Session; `plan_repo.py` legt einen an)")
+    else:
+        try:
+            block = read_block(plan_path)
+        except ApplyError as exc:
+            deviations.append(f"Plan: {exc}")
+            block = None
+        for op in (block or {}).get("operations", []):
+            path = root / op["path"]
+            try:
+                expected = result_text(root, op)
+            except ApplyError as exc:
+                deviations.append(f"`{op['path']}`: {exc}")
+                continue
+            if not path.is_file():
+                deviations.append(f"`{op['path']}`: fehlt ({op['action']})")
+            elif _read(path) != expected:
+                deviations.append(f"`{op['path']}`: weicht vom Plan ab ({op['action']})")
+        open_ids = [c["id"] for c in (block or {}).get("candidates", []) if c.get("class") == "offen"]
+        if open_ids:
+            notes.append(f"offene Kandidaten im Plan: {', '.join(open_ids)} — nicht geprüft")
+    budget = _always_loaded(root)
+    if budget > BUDGET_LIMIT:
+        deviations.append(f"Budget: {budget} immer geladene Zeilen, Grenze {BUDGET_LIMIT}")
+    else:
+        notes.append(f"Budget: {budget} von {BUDGET_LIMIT} immer geladenen Zeilen")
+    if _own_hook_configured(root):
+        if not (root / OWN_HOOK).is_file():
+            if not any(d.startswith(f"`{OWN_HOOK}`") for d in deviations):
+                deviations.append(f"`{OWN_HOOK}`: in `.claude/settings.json` eingetragen, Skript fehlt")
+        else:
+            ok, detail = _probe(root)
+            notes.append(f"Verifikations-Hook: {'Probe ok' if ok else 'ungeprüft'} — {detail}")
+
+    status = "keine Abweichung" if not deviations else f"{len(deviations)} Abweichung(en)"
+    lines = [_header(" --check"), "# setup-repo — check", "", f"Ergebnis: {status}", ""]
+    if deviations:
+        lines += ["## Abweichungen", "", *[f"- {d}" for d in deviations], "",
+                  "Neu planen und anwenden, oder die Änderung bewusst behalten.", ""]
+    lines += ["## Hinweise", "", *[f"- {n}" for n in notes]]
+    _write(root / CACHE / "check.md", "\n".join(lines).rstrip("\n") + "\n")
+    return {"ok": not deviations, "status": status, "deviations": deviations, "notes": notes}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", default=".")
     parser.add_argument("--plan")
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.repo).resolve()
+    if args.check:
+        result = check_repo(root)
+        print(f"Repo: {root}")
+        print(result["status"])
+        for line in result["deviations"]:
+            print(f"  {line}")
+        print(f"Bericht: {root / CACHE / 'check.md'}")
+        return 0 if result["ok"] else 1
     plan = Path(args.plan) if args.plan else root / CACHE / "plan.md"
     result = apply_plan(root, plan)
     print(f"Repo: {root}")

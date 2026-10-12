@@ -176,3 +176,74 @@ def test_apply_never_commits(tmp_path):
     assert text.splitlines()[0].startswith("<!-- skill: setup-repo | schema: 1 | generated: python")
     assert "angewendet" in text and "CLAUDE.md" in text
     assert "Verifikation: `make check`" in (repo / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+# --- check (Task 8) ----------------------------------------------------------------
+
+def check_text(repo):
+    return (repo / CACHE / "check.md").read_text(encoding="utf-8")
+
+
+def applied_repo(tmp_path, files, name="repo", **options):
+    repo = committed_repo(tmp_path, files, name=name)
+    plan, _ = make_plan(repo, tmp_path / "cfg", **options)
+    assert apply_mod.apply_plan(repo, plan)["ok"] is True, report(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "eingerichtet")
+    return repo
+
+
+def test_check_aligned_reports_no_deviation(tmp_path):
+    repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n"}, verify_hook=True)
+    before = files_outside_cache(repo)
+    cache_before = {p.name for p in (repo / CACHE).iterdir()}
+    head = git(repo, "rev-parse", "HEAD")
+    proc = subprocess.run([sys.executable, str(SCRIPTS / "apply_repo.py"), "--repo", str(repo), "--check"],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    text = check_text(repo)
+    assert text.splitlines()[0].startswith("<!-- skill: setup-repo | schema: 1 | generated: python")
+    assert "keine Abweichung" in text
+    assert files_outside_cache(repo) == before and git(repo, "rev-parse", "HEAD") == head
+    assert {p.name for p in (repo / CACHE).iterdir()} - cache_before == {"check.md"}
+
+
+def test_check_reports_drift(tmp_path):
+    repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n"}, verify_hook=True)
+    write(repo, "CLAUDE.md", (repo / "CLAUDE.md").read_text(encoding="utf-8") + "Noch eine Zeile.\n")
+    (repo / ".claude/hooks/verify_stop.py").unlink()
+    write(repo, ".claude/rules/lang.md", "".join(f"Regel {i}\n" for i in range(200)))
+    result = apply_mod.check_repo(repo)
+    assert result["ok"] is False
+    text = check_text(repo)
+    assert "keine Abweichung" not in text
+    assert "`CLAUDE.md`" in text and "`.claude/hooks/verify_stop.py`" in text and "Budget" in text
+    assert len(result["deviations"]) == 3
+
+
+def test_check_without_plan_is_unverified(tmp_path):
+    repo = committed_repo(tmp_path, {"CLAUDE.md": "# x\n"})
+    result = apply_mod.check_repo(repo)
+    text = check_text(repo)
+    assert "ungeprüft — kein Plan" in text and result["deviations"] == []
+    assert "Budget" in text
+
+
+def test_check_keeps_cc_skills_switch(tmp_path):
+    settings = {"enabledPlugins": {"cc-dev@cc-skills": False}}
+    repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n",
+                                   ".claude/settings.json": json.dumps(settings, indent=2) + "\n"})
+    data = json.loads((repo / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert data["enabledPlugins"] == {"cc-dev@cc-skills": False}
+    assert apply_mod.check_repo(repo)["ok"] is True
+    assert "keine Abweichung" in check_text(repo)
+
+
+def test_check_flags_tampered_plan(tmp_path):
+    repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n"})
+    plan = repo / CACHE / "plan.md"
+    text = plan.read_text(encoding="utf-8")
+    start = text.index("```json setup-repo-plan")
+    plan.write_text(text[:start] + text[start:].replace("make check", "make chek", 1), encoding="utf-8")
+    assert apply_mod.check_repo(repo)["ok"] is False
+    assert "Hash passt nicht" in check_text(repo)
