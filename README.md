@@ -9,6 +9,7 @@ Persönliche Claude-Skills und ihre Spezifikationen.
 | `skills/` | die gebauten Skills (je ein Ordner mit `SKILL.md`) |
 | `specs/` | Spezifikationen, Spec 00 ist die gemeinsame Grundlage |
 | `evals/` | Eval-Definitionen und Fixtures |
+| `evals-templates/` | Vorlagen-Messungen außerhalb des Eval-Vertrags (laufen mit `--evals-dir evals-templates`) |
 | `evalkit/` | der geteilte Eval-Harness |
 | `docs/` | Konventionen und Pläne |
 | `.claude/skills/` | generierte Projekt-Kopien für die Arbeit an diesem Repo, nie von Hand ändern |
