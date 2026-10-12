@@ -46,7 +46,8 @@ def test_budget_counts_unscoped_rules_and_imports(tmp_path):
     write(repo, ".claude/rules/nur-src.md", '---\npaths:\n  - "src/**"\n---\nx\ny\nz\n')
     block = plan_for(repo, tmp_path / "cfg")
     claude = ops(block)["CLAUDE.md"]["content"]
-    assert block["budget"] == {"lines": len(claude.splitlines()) + 10 + 5, "limit": 150}
+    goal_rule = len(ops(block)[".claude/rules/goals.md"]["content"].splitlines())
+    assert block["budget"] == {"lines": len(claude.splitlines()) + 10 + 5 + goal_rule, "limit": 150}
     assert "überschritten" not in plan_mod.render_plan(block)
 
     write(repo, "AGENTS.md", "".join(f"Zeile {i}\n" for i in range(200)))
@@ -137,7 +138,7 @@ def test_choose_verification(tmp_path):
 def test_plan_allows_verification_and_runner_parts(tmp_path):
     repo = tmp_path / "repo"
     write(repo, "Makefile", "check:\n\ttrue\nlint:\n\ttrue\ntest:\n\ttrue\nbuild:\n\ttrue\n")
-    block = plan_for(repo, tmp_path / "cfg", deny_secrets=True)
+    block = plan_for(repo, tmp_path / "cfg", deny_secrets=True, goal_hook=False)
     patch = ops(block)[".claude/settings.json"]["patch"]
     assert patch["permissions"]["allow"] == ["Bash(make check)", "Bash(make lint)", "Bash(make test)"]
     assert "Read(./.env)" in patch["permissions"]["deny"]
@@ -149,7 +150,7 @@ def test_plan_allows_verification_and_runner_parts(tmp_path):
 def test_plan_verify_hook_option(tmp_path):
     repo = tmp_path / "repo"
     write(repo, "Makefile", "check:\n\ttrue\n")
-    block = plan_for(repo, tmp_path / "cfg", verify_hook=True)
+    block = plan_for(repo, tmp_path / "cfg", verify_hook=True, goal_hook=False)
     copy = ops(block)[".claude/hooks/verify_stop.py"]
     assert copy["action"] == "copy"
     assert copy["content"] == (ASSETS / "runtime" / "verify_stop.py").read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -195,7 +196,7 @@ def test_plan_classes_make_rules(tmp_path):
     claude = ops(block)["CLAUDE.md"]["content"]
     assert "- Neue Funktionen bekommen einen Test. (Quelle: CONTRIBUTING.md)" in claude
     assert "alembic" not in claude
-    (rule_path,) = [p for p in ops(block) if p.startswith(".claude/rules/")]
+    (rule_path,) = [p for p in ops(block) if p.startswith(".claude/rules/") and p != ".claude/rules/goals.md"]
     assert re.fullmatch(r"\.claude/rules/c2-[a-z0-9-]+\.md", rule_path)
     rule = ops(block)[rule_path]["content"].splitlines()
     assert rule[:4] == ["---", "paths:", '  - "db/**/*.py"', "---"]
@@ -246,3 +247,49 @@ def test_plan_gitignore_lists_only_missing_lines(tmp_path):
     assert ops(plan_for(repo, tmp_path / "cfg"))[".gitignore"]["lines"] == [".claude/settings.local.json"]
     write(repo, ".gitignore", ".skills/cache/\n.claude/settings.local.json\n")
     assert ".gitignore" not in ops(plan_for(repo, tmp_path / "cfg"))
+
+
+# --- Ziele (Abschnitt C) -----------------------------------------------------------
+
+def test_plan_adds_goals_by_default(tmp_path):
+    repo = tmp_path / "repo"
+    write(repo, "Makefile", "check:\n\ttrue\n")
+    block = plan_for(repo, tmp_path / "cfg")
+    o = ops(block)
+    assert o["docs/goals.md"]["action"] == "create"
+    assert o["docs/goals.md"]["content"] == (ASSETS / "goals.md").read_text(encoding="utf-8")
+    assert o[".claude/rules/goals.md"]["content"] == (ASSETS / "rules" / "goals.md").read_text(encoding="utf-8")
+    assert o[".claude/hooks/goal_scope.py"]["action"] == "copy"
+    hooks = o[".claude/settings.json"]["patch"]["hooks"]
+    fragment = json.loads((ASSETS / "hooks" / "goal-scope.json").read_text(encoding="utf-8"))["hooks"]
+    assert hooks == fragment and block["options"]["goal_hook"] is True
+    rule_lines = len(o[".claude/rules/goals.md"]["content"].splitlines())
+    assert block["budget"]["lines"] == len(o["CLAUDE.md"]["content"].splitlines()) + rule_lines
+    assert [op["path"] for op in block["operations"]][-1] == ".claude/settings.json"
+
+    both = plan_for(repo, tmp_path / "cfg", verify_hook=True)
+    stop = ops(both)[".claude/settings.json"]["patch"]["hooks"]["Stop"]
+    commands = [h["command"] for entry in stop for h in entry["hooks"]]
+    assert sum("goal_scope.py" in c for c in commands) == 1 and sum("verify_stop.py" in c for c in commands) == 1
+
+
+def test_plan_without_goal_hook(tmp_path):
+    repo = tmp_path / "repo"
+    write(repo, "Makefile", "check:\n\ttrue\n")
+    block = plan_for(repo, tmp_path / "cfg", goal_hook=False)
+    o = ops(block)
+    assert "docs/goals.md" in o and ".claude/rules/goals.md" in o
+    assert ".claude/hooks/goal_scope.py" not in o and "hooks" not in o[".claude/settings.json"]["patch"]
+    assert block["options"]["goal_hook"] is False
+    assert "Bereichs-Hook (`UserPromptSubmit`, `Stop`): aus" in plan_mod.render_plan(block)
+    assert "Bereichs-Hook (`UserPromptSubmit`, `Stop`): **an**" in plan_mod.render_plan(plan_for(repo, tmp_path / "cfg"))
+
+
+def test_plan_keeps_existing_ledger(tmp_path):
+    repo = tmp_path / "repo"
+    write(repo, "docs/goals.md", "<!-- skill: setup-repo | schema: 1 | generated: x -->\n# Ziele\n\nEigener Stand.\n")
+    write(repo, ".claude/rules/goals.md", (ASSETS / "rules" / "goals.md").read_text(encoding="utf-8"))
+    write(repo, ".claude/hooks/goal_scope.py", (ASSETS / "runtime" / "goal_scope.py").read_text(encoding="utf-8"))
+    o = ops(plan_for(repo, tmp_path / "cfg"))
+    assert "docs/goals.md" not in o and ".claude/rules/goals.md" not in o
+    assert ".claude/hooks/goal_scope.py" not in o, "gleiche Kopie liegt schon: keine Operation"

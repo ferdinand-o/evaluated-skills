@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Schreibt den Einrichtungsplan eines Repos (setup-repo, Spec 22). Tier 1.
 
-    python plan_repo.py [--repo <pfad>] [--classes '<json>'] [--with-verify-hook] [--deny-secrets]
+    python plan_repo.py [--repo <pfad>] [--classes '<json>'] [--with-verify-hook] [--without-goal-hook]
+                        [--deny-secrets]
 
 Liest `.skills/cache/setup-repo/detect.json` und `candidates.json`, schreibt nur
 `.skills/cache/setup-repo/plan.md`: oben die Ansicht für den Nutzer, darunter den Block
@@ -245,11 +246,18 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
         if existing != content:
             operations.append({"path": rel, "action": "create", "content": content})
 
+    # Ziele (Abschnitt C): Ledger und Regel nur anlegen, nie überschreiben.
+    for rel, asset in (("docs/goals.md", "goals.md"), (".claude/rules/goals.md", "rules/goals.md")):
+        if _read(root / rel) is None:
+            operations.append({"path": rel, "action": "create", "content": _norm((ASSETS / asset).read_text(encoding="utf-8"))})
+
     verify_hook = bool(options.get("verify_hook")) and verification["command"] is not None \
         and not verification["derived"]
-    if verify_hook:
-        operations.append({"path": ".claude/hooks/verify_stop.py", "action": "copy",
-                           "content": _norm((ASSETS / "runtime" / "verify_stop.py").read_text(encoding="utf-8"))})
+    goal_hook = bool(options.get("goal_hook", True))
+    for wanted, name in ((goal_hook, "goal_scope.py"), (verify_hook, "verify_stop.py")):
+        content = _norm((ASSETS / "runtime" / name).read_text(encoding="utf-8"))
+        if wanted and _read(root / ".claude" / "hooks" / name) != content:
+            operations.append({"path": f".claude/hooks/{name}", "action": "copy", "content": content})
 
     plugins = _plugins(detect)
     if plugins:
@@ -266,8 +274,13 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
     deny = DENY_SECRETS if options.get("deny_secrets") else []
     if allow or deny:
         patch["permissions"] = {k: v for k, v in (("allow", allow), ("deny", deny)) if v}
-    if verify_hook:
-        patch["hooks"] = json.loads((ASSETS / "hooks" / "verify-stop.json").read_text(encoding="utf-8"))["hooks"]
+    hooks: dict = {}
+    for wanted, fragment in ((goal_hook, "goal-scope.json"), (verify_hook, "verify-stop.json")):
+        if wanted:
+            for event, entries in json.loads((ASSETS / "hooks" / fragment).read_text(encoding="utf-8"))["hooks"].items():
+                hooks.setdefault(event, []).extend(entries)
+    if hooks:
+        patch["hooks"] = hooks
     if patch:
         operations.append({"path": ".claude/settings.json", "action": "merge-json", "patch": patch})
 
@@ -282,7 +295,8 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
         "schema": 1,
         "verification": verification,
         "candidates": cands,
-        "options": {"verify_hook": verify_hook, "deny_secrets": bool(options.get("deny_secrets"))},
+        "options": {"verify_hook": verify_hook, "goal_hook": goal_hook,
+                    "deny_secrets": bool(options.get("deny_secrets"))},
         "plugins": plugins,
         "budget": {"lines": _always_loaded(root, after), "limit": BUDGET_LIMIT},
         "operations": operations,
@@ -337,6 +351,12 @@ def render_plan(block) -> str:
     else:
         lines.append("ungeprüft — Plugin-ID nicht gefunden; `apply` schreibt keine `enabledPlugins`.")
     lines += ["", "## Hooks (abwählbar)", ""]
+    if block["options"].get("goal_hook"):
+        lines.append("- Bereichs-Hook (`UserPromptSubmit`, `Stop`): **an** — meldet Dateien außerhalb der Bereiche "
+                     "aktiver Ziele in `docs/goals.md`, hält nie etwas an. Abwählen: neu planen mit "
+                     "`--without-goal-hook`.")
+    else:
+        lines.append("- Bereichs-Hook (`UserPromptSubmit`, `Stop`): aus — Ledger und Zielregel kommen trotzdem.")
     if v["command"] is None or v["derived"]:
         lines.append("- Verifikations-Hook: nicht angeboten — kein belegter Verifikationsbefehl.")
     elif block["options"]["verify_hook"]:
@@ -384,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--classes", default="{}")
     parser.add_argument("--with-verify-hook", action="store_true")
+    parser.add_argument("--without-goal-hook", action="store_true")
     parser.add_argument("--deny-secrets", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.repo).resolve()
@@ -408,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     classes.update(given)
     try:
         block = build_plan(root, detect, candidates, {"classes": classes, "verify_hook": args.with_verify_hook,
+                                                      "goal_hook": not args.without_goal_hook,
                                                       "deny_secrets": args.deny_secrets})
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
