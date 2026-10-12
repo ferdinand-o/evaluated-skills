@@ -193,11 +193,11 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `token:setup-repo-plan`
 - Produces: `token:Verifikation:`
 
-- [ ] **Step 1: Schreiben** — Gerüst ≤ 40 Zeilen: Kopfzeile, Platz für `@AGENTS.md`,
+- [x] **Step 1: Schreiben** — Gerüst ≤ 40 Zeilen: Kopfzeile, Platz für `@AGENTS.md`,
       Zeile `Verifikation: …` mit den beiden Formen „`<befehl>`" und „keine — ungeprüft",
       Abschnitt für Regeln ohne `paths`, Verweis auf `.claude/rules/`; Platzhalter in
       doppelten geschweiften Klammern, wie in setup-user.
-- [ ] **Step 2: Prüfen** — `wc -l`; `lint_skill.py skills/setup-repo` ohne Befund für
+- [x] **Step 2: Prüfen** — `wc -l`; `lint_skill.py skills/setup-repo` ohne Befund für
       `asset-headers`. Commit.
 
 ### Task 6: plan_repo.py
@@ -211,7 +211,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `fn:detect(repo_root, config_dir)`, `fn:harvest(repo_root, detect)`, `token:Verifikation:`, `token:werkzeug`
 - Produces: `fn:build_plan(repo_root, detect, candidates, options)`, `fn:plan_hash(block)`, `fn:render_plan(block)`, `fn:choose_verification(detect)`
 
-- [ ] **Step 1: Tests schreiben** — `test_budget_counts_unscoped_rules_and_imports`,
+- [x] **Step 1: Tests schreiben** — `test_budget_counts_unscoped_rules_and_imports`,
       `test_plan_hash_is_path_head_and_eol_neutral` (dasselbe Repo an zwei Orten, mit
       verschiedenem HEAD, mit CRLF-Bestand und installierter Skill → gleicher Hash),
       `test_agents_md_is_imported`, `test_choose_verification` (`make check` vor
@@ -223,13 +223,13 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `tests/test_setup_repo_harvest.py` den zweiten Teil von
       `test_harvest_marks_tool_rules`: Klasse `werkzeug` ergibt keine Regelzeile, aber
       eine Kandidatenzeile mit „Werkzeug".
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_plan.py tests/test_setup_repo_harvest.py`.
-- [ ] **Step 3: Implementieren** — `--classes`, `--with-verify-hook`, `--deny-secrets`;
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_plan.py tests/test_setup_repo_harvest.py`.
+- [x] **Step 3: Implementieren** — `--classes`, `--with-verify-hook`, `--deny-secrets`;
       Operationen nach `references/plan-format.md`; Ansicht mit Diff, je Kandidat
       „Kandidat · Quelle · Klasse", Budget, abwählbare Hooks, Hinweis, dass
       `.skills/cache/` bis `apply` unversioniert sichtbar ist; Budget > 150 als Befund.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 7: apply_repo.py
 
