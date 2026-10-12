@@ -165,6 +165,13 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 ## Betrieb
 
+- **Gegenbefund 2026-10-12 zum folgenden Eintrag:** `claude -p` (CLI 2.1.296) läuft als
+  root, wenn man `--dangerously-skip-permissions` weglässt und die Werkzeuge mit
+  `--allowedTools "Read,Write,Edit,Glob,Grep,Bash,Skill"` und `--permission-mode
+  acceptEdits` freigibt; Skript-Aufrufe über Bash liefen damit ohne Verweigerung. So
+  liefen die setup-repo-Evals und die Vorlagen-Messung (Report setup-repo, Abschnitt C).
+  Der Harness selbst ist unverändert; ob `dispatch.py` auf diese Form umgestellt wird,
+  ist eine Entscheidung über die Isolationszusage unten.
 - **Der Harness läuft nicht als root — in keinem Container, keiner CI.**
   `evalkit/dispatch.py` setzt `permission_mode="bypassPermissions"` fest
   verdrahtet; die Claude-CLI verweigert diesen Modus unter uid 0 mit
@@ -1815,9 +1822,10 @@ ungemessen bleibt und wo es beißt:
   von Hand ergänzt, ist keine Abweichung, solange das Budget hält. Der Plan liegt unter
   `.skills/cache/` und ist nicht committet; in einem frischen Clone heißt es „ungeprüft —
   kein Plan".
-- **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab; die fünf
-  Evals liefen mit je einem Agenten und `evalkit.runner.grade()`, die Läufe ohne Skill
-  ebenso (Report).
+- **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab. In
+  Abschnitt B liefen die fünf Evals mit je einem Agenten, in Abschnitt C als echte
+  kopflose Sessions (`claude -p` mit `--allowedTools`, siehe Betrieb), jeweils mit und
+  ohne Skill, bewertet mit `evalkit.runner.grade()` (Report).
 - **Der Bereichs-Hook sieht Dateien, nicht Absichten.** Eine neue Aufgabe, die nur Dateien
   im Bereich des Ziels berührt, meldet er nicht; eine verlangte Änderung außerhalb meldet
   er doch. Die Einordnung in die vier Klassen leistet die Zielregel, nicht der Hook.

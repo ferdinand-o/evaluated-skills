@@ -296,6 +296,6 @@ skills/handoff/SKILL.md, README.md
 - Consumes: `token:sr-goals-seeded`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — Abschnitt C: was entstanden ist, Testzahl, Eval-Läufe mit und
+- [x] **Step 1: Report** — Abschnitt C: was entstanden ist, Testzahl, Eval-Läufe mit und
       ohne Skill, Vorlagen-Messung als Quote oder „ungefahren" mit Grund, und „Was nicht
       gemessen wurde". `lint_skill.py skills/setup-repo` ganz sauber. Commit.
