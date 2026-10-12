@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Python-Skript ohne Runner und ohne Tests; der Plan darf keinen Testbefehl erfinden."
+}

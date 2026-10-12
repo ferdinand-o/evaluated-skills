@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Wie sr-fresh, dazu .skills/cache/setup-repo/plan.md, erzeugt mit plan_repo.py --classes '{\"c1\": \"werkzeug\"}' in einer frischen Git-Kopie und leerem Config-Verzeichnis; test_fixture_plans_are_current hält den Block aktuell."
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Python-Projekt mit Makefile-Ziel check und line-length = 100 unter [tool.ruff]; noch nicht eingerichtet."
+}
