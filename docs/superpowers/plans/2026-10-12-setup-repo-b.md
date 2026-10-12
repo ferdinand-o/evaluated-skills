@@ -241,7 +241,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `fn:build_plan(repo_root, detect, candidates, options)`, `fn:plan_hash(block)`, `fn:selftest(repo_root)`
 - Produces: `fn:apply_plan(repo_root, plan_path)`, `fn:canonical_hash(block)`
 
-- [ ] **Step 1: Tests schreiben** — `test_hash_functions_agree`,
+- [x] **Step 1: Tests schreiben** — `test_hash_functions_agree`,
       `test_apply_refuses_dirty_target_and_changed_plan` (uncommittete versionierte
       Zieldatei oder geänderter Block → Abbruch mit Grund in `apply.md`, keine andere
       Datei berührt; unversionierter `.claude/skills/` stört nicht),
@@ -249,15 +249,15 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `test_apply_merges_existing_settings` (vorhandene `hooks.Stop` und `permissions`
       bleiben, Listen vereinigt, kein doppelter eigener Eintrag), `test_apply_is_idempotent`,
       `test_apply_never_commits` (HEAD unverändert).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k apply`.
-- [ ] **Step 3: Implementieren** — Block lesen, Hash und Basis prüfen, `git status
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k apply`.
+- [x] **Step 3: Implementieren** — Block lesen, Hash und Basis prüfen, `git status
       --porcelain -z` für versionierte Ziele, Backups unter
       `.skills/cache/setup-repo/backups/<JJJJMMTT-hhmmss>/`, Hook-Skripte nach
       `.claude/hooks/` kopieren, `.claude/settings.json` zuletzt; danach je Hook die
       Probe (`verify_stop.py --selftest`); `apply.md` mit Kopfzeile und „angewendet"
       oder dem Abbruchgrund, in jedem Fall.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 8: check in apply_repo.py
 
@@ -269,18 +269,18 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `fn:apply_plan(repo_root, plan_path)`
 - Produces: `fn:check_repo(repo_root)`, `token:keine Abweichung`
 
-- [ ] **Step 1: Tests schreiben** — `test_check_aligned_reports_no_deviation` (nach
+- [x] **Step 1: Tests schreiben** — `test_check_aligned_reports_no_deviation` (nach
       `apply` ändert `--check` nur `check.md`, Text „keine Abweichung"),
       `test_check_reports_drift` (geänderte CLAUDE.md, fehlendes Hook-Skript, Budget
       überschritten → je eine Abweichung), `test_check_without_plan_is_unverified`
       (klassenabhängige Punkte „ungeprüft — kein Plan"), `test_check_keeps_cc_skills_switch`
       (`cc-dev` in der committeten Datei ist keine Abweichung).
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k check`.
-- [ ] **Step 3: Implementieren** — `--check`: Hash des letzten Plans prüfen, jede
+- [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k check`.
+- [x] **Step 3: Implementieren** — `--check`: Hash des letzten Plans prüfen, jede
       Operation trocken gegen den Bestand anwenden, Budget, Hook-Probe; schreibt nur
       `check.md` mit Kopfzeile.
-- [ ] **Step 4: Grün sehen**, volle Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, volle Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 9: SKILL.md
 
