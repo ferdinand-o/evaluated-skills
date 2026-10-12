@@ -106,6 +106,6 @@ erzwingt.
   Eval 1 und 4 um die Assertions auf Zielregel, Hook und Ledger ergänzen.
 - Abschnitt D, sobald die Delphi-Prüfpunkte vorliegen.
 - Erster echter Lauf auf dem Windows-PC und auf einem Repo des Nutzers.
-- `detect_repo.py` zählt Sprachen auch aus Fixture-Ordnern; auf diesem Repo meldet es
-  TypeScript, weil Fixtures `.ts`-Dateien tragen. Für die Verifikation ohne Folgen, für
-  das Frontend womöglich nicht.
+- Behoben am 2026-10-12: `detect_repo.py` zählte Sprachen auch aus Fixture-Ordnern und
+  meldete auf diesem Repo TypeScript; Ordner `fixtures`, `__fixtures__` und `testdata`
+  werden jetzt übersprungen.
