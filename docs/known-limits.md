@@ -1786,9 +1786,10 @@ Was ungemessen bleibt und wo es beißt:
 
 ## setup-repo
 
-Gebaut nach Spec 22, Abschnitt B (2026-10-12). Tier 1: `detect_repo.py`,
-`harvest_rules.py`, `plan_repo.py`, `apply_repo.py` (mit `--check`), dazu der opt-in-Hook
-`verify_stop.py` im Zielrepo. Was ungemessen bleibt und wo es beißt:
+Gebaut nach Spec 22, Abschnitt B und C (2026-10-12). Tier 1: `detect_repo.py`,
+`harvest_rules.py`, `plan_repo.py`, `apply_repo.py` (mit `--check`), dazu im Zielrepo der
+opt-in-Hook `verify_stop.py` und der vorausgewählte Bereichs-Hook `goal_scope.py`. Was
+ungemessen bleibt und wo es beißt:
 
 - **Der Starter ist unter Windows ungemessen.** `command -v python3 … || exec python …`
   läuft in den Tests unter bash mit `python3` und mit nur `python`. Ob der
@@ -1817,9 +1818,22 @@ Gebaut nach Spec 22, Abschnitt B (2026-10-12). Tier 1: `detect_repo.py`,
 - **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab; die fünf
   Evals liefen mit je einem Agenten und `evalkit.runner.grade()`, die Läufe ohne Skill
   ebenso (Report).
-- **Abschnitt C und D fehlen.** Kein Ledger `docs/goals.md`, keine Zielregel, kein
-  Bereichs-Hook, keine Vorlagen-Messung, kein Ziel-Reviewer; handoff nennt `docs/goals.md`
-  erst mit Abschnitt C.
+- **Der Bereichs-Hook sieht Dateien, nicht Absichten.** Eine neue Aufgabe, die nur Dateien
+  im Bereich des Ziels berührt, meldet er nicht; eine verlangte Änderung außerhalb meldet
+  er doch. Die Einordnung in die vier Klassen leistet die Zielregel, nicht der Hook.
+- **Mit `claude -p` sieht Claude die Meldung nie.** Sie kommt per `systemMessage` beim
+  Turn-Ende und als `additionalContext` erst beim nächsten Prompt, den es kopflos nicht
+  gibt. Eine Pipeline auf der Devbox bekommt die Bereichsprüfung damit nur im Log.
+- **Die Basis gilt je Turn und Session.** Ein Rebase oder Amend, der den Basis-HEAD
+  entfernt, lässt `git diff` scheitern; der Hook meldet das einmal je Session und
+  schweigt dann. Zwei gleichzeitige Sessions haben je eigene Basis und eigene Meldungen;
+  ihre Ledger-Änderungen können beim Mergen kollidieren, und die Regel lässt Claude dann
+  fragen statt lösen.
+- **Die Ausnahmen sind fest.** `docs/goals.md`, `handoff.md`, `docs/debugging/`,
+  `docs/decisions.md`, `docs/specs/wip/`, `.claude/`, `.skills/`, `CLAUDE.md` und
+  `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
+- **Abschnitt D fehlt.** Kein Ziel-Reviewer; er wartet auf die Delphi-Prüfpunkte des
+  Nutzers.
 
 ## impl-plan
 
