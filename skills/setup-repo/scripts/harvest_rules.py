@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sammelt Regelkandidaten mit Quelle aus einem Repo (setup-repo, Spec 22).
+"""Sammelt Regelkandidaten mit Quelle aus einem Repo (setup-repo, Spec 22). Tier 1.
 
     python harvest_rules.py [--repo <pfad>] [--detect <detect.json>] [--out <pfad>]
 

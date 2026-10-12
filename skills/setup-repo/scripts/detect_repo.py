@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Erkennt Stack, Runner, Tests, CLAUDE-Dateien und Plugin-IDs eines Repos (setup-repo, Spec 22).
+"""Erkennt Stack, Runner, Tests, CLAUDE-Dateien und Plugin-IDs eines Repos (setup-repo, Spec 22). Tier 1.
 
     python detect_repo.py [--repo <pfad>] [--config-dir <pfad>] [--out <pfad>]
 

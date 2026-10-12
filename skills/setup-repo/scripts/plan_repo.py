@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Schreibt den Einrichtungsplan eines Repos (setup-repo, Spec 22).
+"""Schreibt den Einrichtungsplan eines Repos (setup-repo, Spec 22). Tier 1.
 
     python plan_repo.py [--repo <pfad>] [--classes '<json>'] [--with-verify-hook] [--deny-secrets]
 

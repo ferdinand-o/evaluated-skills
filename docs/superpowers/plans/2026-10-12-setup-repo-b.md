@@ -30,6 +30,10 @@ Vier Entscheidungen, die die Spec offen lässt:
 - **Die Kopfzeilen-Ausnahme kommt schon mit B,** für die Rules mit `paths`, die
   `plan_repo.py` erzeugt. Abschnitt D ergänzt sie um `assets/agents/reviewer.md`.
 
+**Lesson aus dem Bau:** Die Lint-Regel `script-tier` verlangt „Tier N" im Modul-Docstring
+jedes Skripts unter `scripts/`; kein Code-Task nannte das. Fix-Runde nach Task 9 in den
+vier Skripten; künftige Pläne nennen es im Implementieren-Step.
+
 **Tech Stack:** Python 3.13 Stdlib für Skripte und Tests; `git` als Unterprozess;
 Markdown für Skill, References, Evals; `bash -c` nur für den Starter-Test.
 
@@ -291,14 +295,14 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
 - Consumes: `fn:detect(repo_root, config_dir)`, `fn:build_plan(repo_root, detect, candidates, options)`, `fn:apply_plan(repo_root, plan_path)`, `fn:check_repo(repo_root)`
 - Produces: `token:Belegt oder ungeprüft`
 
-- [ ] **Step 1: Frontmatter** — `name`, Description mit Triggern und Abgrenzung gegen
+- [x] **Step 1: Frontmatter** — `name`, Description mit Triggern und Abgrenzung gegen
       setup-user und testing-strategy, ohne `<…>`, `disable-model-invocation: true`.
-- [ ] **Step 2: Rumpf** — Eiserne Regel, Modi plan (Default), apply, check mit den
+- [x] **Step 2: Rumpf** — Eiserne Regel, Modi plan (Default), apply, check mit den
       Aufrufen über `${CLAUDE_SKILL_DIR}`, Klassifikation per `--classes`, Plugins je
       Repo, Verifikations-Hook opt-in, Contract mit „Belegt oder ungeprüft",
       Anti-Rationalisierung, Abgrenzung mit **testing-strategy** und **review-context**
       fett, setup-user unfett.
-- [ ] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-repo` ohne
+- [x] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/setup-repo` ohne
       Befund außer `report-section`, `routing`, `neighbors` und `plugin-membership`, die
       Task 11 bis 13 schließen. Commit.
 

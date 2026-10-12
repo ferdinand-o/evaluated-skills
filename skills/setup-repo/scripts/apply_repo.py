@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wendet einen bestätigten setup-repo-Plan an (Spec 22).
+"""Wendet einen bestätigten setup-repo-Plan an (Spec 22). Tier 1.
 
     python apply_repo.py [--repo <pfad>] [--plan .skills/cache/setup-repo/plan.md]
     python apply_repo.py --check [--repo <pfad>]
