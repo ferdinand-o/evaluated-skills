@@ -1,10 +1,12 @@
 <!-- skill: skill-forge | schema: 1 | generated: von Hand nach skills/skill-forge/assets/skill-template/report.md -->
-# setup-repo — Abschlussbericht (Abschnitt B)
+# setup-repo — Abschlussbericht (Abschnitt B und C)
 
-Gebaut nach `specs/Spec 22 – setup-repo.md` und
-`docs/superpowers/plans/2026-10-12-setup-repo-b.md`, Tier 1, am 2026-10-12 sequenziell im
-Hauptkontext (Gate: alle 13 Tasks gekoppelt). Abschnitt A (Harness) war vorher ein
-eigener PR. Abschnitt C (Ziele) und D (Ziel-Reviewer) fehlen.
+Gebaut nach `specs/Spec 22 – setup-repo.md`, Tier 1, am 2026-10-12 sequenziell im
+Hauptkontext: Abschnitt B nach `docs/superpowers/plans/2026-10-12-setup-repo-b.md`
+(13 Tasks), Abschnitt C nach `docs/superpowers/plans/2026-10-12-setup-repo-c.md`
+(11 Tasks); das Gate koppelte jeweils alle Tasks. Abschnitt A (Harness) war vorher ein
+eigener PR. Abschnitt D (Ziel-Reviewer) fehlt. Die Abschnitte bis „Was nicht gemessen
+wurde" beschreiben B; Abschnitt C folgt danach.
 
 ## Was entstanden ist
 
@@ -97,14 +99,93 @@ erzwingt.
 - **Die Wirkung im Alltag.** Ob Claude mit der erzeugten CLAUDE.md wirklich vor jeder
   Erfolgsmeldung verifiziert und ob der Verifikations-Hook in einer echten Session
   hilft, misst nichts.
-- **Abschnitt C und D.** Kein Ledger, keine Zielregel, kein Bereichs-Hook, keine
-  Vorlagen-Messung, kein Ziel-Reviewer.
+- **Abschnitt D.** Kein Ziel-Reviewer.
+
+## Abschnitt C — Ziele
+
+### Was entstanden ist
+
+- `references/goals.md`: Ledger-Schema (*Aktiv*, *Kandidaten*, *Erledigt*), IDs `G<n>`,
+  „Fertig wenn" nach der `/goal`-Doku, Glob-Dialekt der Bereiche, die vier Klassen,
+  Ausnahmen des Hooks.
+- `assets/goals.md` (leerer Ledger), `assets/rules/goals.md` (immer geladene Zielregel,
+  24 Zeilen), `assets/hooks/goal-scope.json` (beide Ereignisse, derselbe Starter).
+- `assets/runtime/goal_scope.py`: `UserPromptSubmit` hält die Basis des Turns fest und
+  gibt eine offene Meldung als `additionalContext` aus; `Stop` meldet Dateien außerhalb
+  der Bereiche per `systemMessage`. Er hält nie etwas an.
+- `plan_repo.py` legt Ledger und Regel an, wenn sie fehlen, wählt den Bereichs-Hook vor
+  (`--without-goal-hook` wählt ihn ab) und kopiert Hook-Skripte nur, wenn sie fehlen oder
+  abweichen. `apply_repo.py` erkennt beide eigenen Hooks, probt `goal_scope.py` mit
+  Beispiel-Payload in einem Temp-Zustand und prüft in `check` die Ledger-Kopfzeile.
+- Fixtures neu erzeugt; Eval 1 prüft zusätzlich Zielregel, Bereichs-Hook und Ledger auf
+  `file_unchanged`, Eval 4 `goal_scope` in den Settings.
+- Vorlagen-Messung in `evals-templates/` mit Fixture `sr-goals-seeded` und zwei Fällen.
+- handoff nennt `docs/goals.md` unter „Einstiegspunkte"; README nennt `evals-templates/`.
+
+### Entscheidungen
+
+- **Proben schreiben keinen echten Zustand.** `goal_scope.py` liest den Zustandspfad aus
+  `SETUP_REPO_GOAL_STATE`; `apply` und `check` proben mit einer Temp-Datei.
+- **`src/` gilt als `src/**`.** Die Spec nannte den Fall nicht.
+- **Ledger und Regel kommen immer**, nur der Hook ist abwählbar; die Regel schweigt ohne
+  aktives Ziel.
+
+### Was gemessen wurde
+
+Suite: 1 488 grün, 3 übersprungen, 1 rot (`test_rest_api_architect_gate`, Spectral fehlt
+in der Umgebung). `lint_skill.py skills/setup-repo` ohne Befund.
+
+**Echte kopflose Sessions.** Neu in dieser Runde: `claude -p` läuft hier als root, wenn
+man `--dangerously-skip-permissions` weglässt und die Werkzeuge mit `--allowedTools`
+freigibt (`--permission-mode acceptEdits`). Damit lädt Claude Code im Workspace
+CLAUDE.md, Rules, Projekt-Skills und Hooks wie in echt — anders als die Agenten-Läufe
+aus Abschnitt B. Workspaces über `evalkit.workspace.prepare()`, Bewertung mit
+`evalkit.runner.grade()`, ein Lauf je Eval:
+
+| Eval | mit Skill | ohne Skill |
+| --- | --- | --- |
+| 1 Anti-Zeremonie, check | bestanden | nicht bestanden |
+| 2 plan als Default | bestanden | nicht bestanden |
+| 3 plan ohne Tests | bestanden | nicht bestanden |
+| 4 apply treu | bestanden | nicht bestanden |
+| 5 manipulierter Plan | bestanden | nicht bestanden |
+
+**Vorlagen-Messung der Zielregel**, je drei Läufe:
+
+| Fall | Runde 1 | Runde 2 |
+| --- | --- | --- |
+| README-Prompt erzeugt keine Ledger-Zeile | 3/3 | 3/3 |
+| Fehler in `dates.py` wird Kandidat, `dates.py` bleibt | 1/3 | 1/3 |
+
+Runde 1 deckte zwei Schwächen auf: Die installierte Skill unter `.claude/skills/` machte
+`ruff check .` und damit `make check` rot, und zwei Läufe hielten sich damit auf. Beide
+ordneten die Lint-Befunde richtig als neues Ziel ein, fragten aber, statt einzutragen;
+einer hielt den Bereich von G1 für ein Schreibverbot auf `docs/goals.md`. Fix-Runde: Die
+Regel sagt „Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie
+außerhalb eines Bereichs"; die Fixture nimmt `.claude` von ruff aus.
+
+In Runde 2 lasen die zwei gescheiterten Läufe `dates.py` nicht und meldeten „nichts
+Weiteres entdeckt". Bezogen auf die Läufe, die den Fehler entdeckten, trug die Regel ihn
+in beiden Runden jedes Mal als Kandidat ein und ließ `dates.py` unverändert (2 von 2).
+Der Fall misst also Entdecken und Eintragen zusammen; die Fixture wurde nicht verbogen,
+bis die Quote stimmt.
+
+### Was nicht gemessen wurde
+
+- **Ob der Bereichs-Hook neue Ziele zuverlässig genug erkennt.** Mit `-p` sieht Claude
+  seine Meldung nie; in den kopflosen Läufen lief er, wirkte aber nur im Log.
+- **Interaktive Sessions** mit Meldung beim nächsten Prompt — gemessen nur im Test.
+- **Windows** für den Starter beider Hooks.
+- **Ob die Fix-Runde der Regel das Nachfragen dauerhaft verhindert** — in Runde 2 kam
+  kein Lauf in die Lage.
 
 ## Offen für die nächste Runde
 
-- Abschnitt C nach eigenem Plan: Ledger, Zielregel, Bereichs-Hook, Vorlagen-Messung; dann
-  Eval 1 und 4 um die Assertions auf Zielregel, Hook und Ledger ergänzen.
 - Abschnitt D, sobald die Delphi-Prüfpunkte vorliegen.
+- Den Eval-Harness auf `--allowedTools` statt `--dangerously-skip-permissions` umstellen;
+  dann läuft er auch als root (known-limits, „Der Harness läuft nicht als root").
+- Vorlagen-Messung mit einer Fixture, in der der Nebenbefund beim Arbeiten zwangsläufig
+  sichtbar wird, etwa über einen Test, der `dates.py` berührt.
 - Erster echter Lauf auf dem Windows-PC und auf einem Repo des Nutzers.
 - Behoben am 2026-10-12: `detect_repo.py` zählte Sprachen auch aus Fixture-Ordnern und
   meldete auf diesem Repo TypeScript; Ordner `fixtures`, `__fixtures__` und `testdata`
