@@ -509,6 +509,36 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   Storyboard-*Text* in der Chat-Antwort selbst (das, was SKILL.md als
   Pflicht-Output vor jeder Implementierung verlangt) hat keine mechanische
   Prüfung, nur Eval 1s Judge-Claims.
+## mobile-audit
+
+Gebaut nach Spec 15 (2026-08-20/21): Stufe 1 `audit_static.py` (Tier 1, nur Stdlib),
+Stufe 2 `audit_devices.py` (Tier 3, Playwright mit Chromium). Spec 15 verlangte diesen
+Abschnitt; er fehlte und ist am 2026-10-12 aus Spec, Docstrings und Commit-Historie
+nachgetragen.
+
+- **Hover-Menüs per JavaScript bleiben unerkannt.** `mouseenter`-Listener sind aus dem
+  Quelltext nicht verlässlich zu erkennen und aus der laufenden Seite nicht aufzählbar
+  (`getEventListeners` gibt es nur in der DevTools-Konsole). Der Hover-Check sieht nur
+  CSS-Regeln unter `:hover`, die Sichtbarkeit oder Position ändern, und rät nicht.
+- **Die Tastatur ist modelliert, nicht gemessen.** Im Spike schrumpfte
+  `Emulation.setDeviceMetricsOverride` Layout- und visuellen Viewport gemeinsam, und
+  `Emulation.setVisibleSize` tat nichts. Der Check nimmt deshalb an, dass die Tastatur
+  die unteren K Pixel verdeckt (K je Profil in `assets/audit-config.json`), und meldet
+  „modelliert". Ob die Seite beim Fokus richtig scrollt, prüft er nicht.
+- **Bedienelemente aus `div` ohne `role` zählen nicht als interaktiv.** Stufe 2 erkennt
+  `a[href]`, `button`, Formularfelder, `[role=button]`, `[role=link]` und `[onclick]`;
+  ein `div` mit per JavaScript angehängtem Klick-Handler fällt durch Hit-Area- und
+  Tastatur-Check.
+- **Stufe 2 braucht Playwright mit Chromium.** Fehlt es, steht im Bericht
+  `stage_2: ungeprüft`, nie „grün"; die e2e-Tests überspringen sich dann. Gemessen wird
+  Overflow gegen `window.visualViewport`, weil Chromium im mobilen Modus
+  `window.innerWidth` auf die Inhaltsbreite dehnt (gemessen 700 statt 360).
+- **Die Evals messen nur Stufe 1.** Alle sechs sind `contract` und laufen ohne Browser;
+  Stufe 2 prüfen nur Unit-Tests mit synthetischen Messwerten und drei e2e-Tests.
+- **Drei Geräteprofile.** Das Phablet trägt keinen eigenen Check und ist gestrichen,
+  ebenso CPU- und Netzdrosselung (Performance gehört zu motion-landing). PWA und React
+  Native liegen außerhalb.
+
 ## visual-summary
 
 - **HTML-Budget ist nur sichtprüfbar, nicht mechanisch.** `references/formats.md`

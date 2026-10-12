@@ -121,7 +121,7 @@
       "notes": "Der wichtigste Eval dieser Skill: Er prueft die Abgrenzung, nicht das Finden. Das Flyout ist ein Verstoss (Sichtbarkeit haengt allein an :hover), der .badge-Hover ist ein reiner Stil und darf nicht im Bericht stehen. Ein Check, der jeden :hover meldet, waere die Fehlalarm-Maschine, die gate.py in Spec 07 gekostet hat — dieses must_not haelt genau das fest."
     },
     {
-      "id": "clean-view-stays-a-short-green-report",
+      "id": "anti-ceremony-clean-view-stays-a-short-green-report",
       "class": "contract",
       "fixture": "mobile-clean",
       "prompt": "Schau dir das mobil an.",

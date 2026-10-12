@@ -85,6 +85,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Diff prüfen | `/code-review` (mitgeliefert) | Spec 04 — nur noch als Kontextpaket-Lieferant, siehe unten |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
 | Landing-Page-Bewegung | motion-landing (06) | ui-architect (Stil/Tokens), enterprise-ui (Produktoberfläche) |
+| mobil kaputt, „geht das auf dem Handy?", bestehende Seite mobil prüfen | mobile-audit (15) | enterprise-ui, ui-architect, motion-landing (bauen mobil mit `references/mobile.md`; mobile-audit prüft nur) |
 | ad-hoc „fass zusammen" | visual-summary (11) | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
