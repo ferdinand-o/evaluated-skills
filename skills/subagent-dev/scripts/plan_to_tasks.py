@@ -1200,7 +1200,7 @@ def lint_report(
         else:
             coverage.update(ids_checked=len(criteria), status="checked", reason=None)
             # Kriterien-Titel stehen oft im Task-Titel; der zählt hier mit.
-            titled_region = "\n".join(f"{header}\n{block}" for _, header, block in blocks)
+            titled_region = "\n".join(f"{header.group(0)}{block}" for _, header, block in blocks)
             for title in criteria:
                 if title not in titled_region:
                     findings.append(LintFinding(None, f"Akzeptanzkriterium „{title}“ aus der Spec hat keinen Task"))

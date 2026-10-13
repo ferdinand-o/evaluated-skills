@@ -1265,18 +1265,20 @@ def test_work_plan_needs_one_source_and_final_verification(tmp_path):
 
 
 def test_work_plan_coverage_against_feature_spec_criteria(tmp_path):
+    """Kriterien-Titel zählen auch im Task-Titel — ganz, nicht nur so weit, wie die
+    repr eines Match-Objekts reicht (der zweite Titel ist länger als 50 Zeichen)."""
     spec = tmp_path / "docs" / "specs" / "wip" / "export.md"
     spec.parent.mkdir(parents=True)
     spec.write_text(
         "<!-- skill: feature-spec | schema: 1 | generated: feature-spec Draft für \"Export\" -->\n"
         "# Feature: Export\n\n## Akzeptanzkriterien\n\n### CSV hat Kopfzeile\n- Given a\n- When b\n- Then c\n\n"
-        "### Leere Liste ergibt leere Datei\n- Given a\n- When b\n- Then c\n\n## Offene Fragen\n\n- keine\n",
+        "### Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts\n- Given a\n- When b\n- Then c\n\n## Offene Fragen\n\n- keine\n",
         encoding="utf-8")
     plan_path = tmp_path / "docs" / "plans" / "p.md"
     plan_path.parent.mkdir(parents=True)
     tasks = [
         ("CSV hat Kopfzeile", "- Create: `src/export.py`", "- Consumes: (nichts Neues)\n- Produces: `fn:write_csv(rows, path)`"),
-        ("Leere Liste ergibt leere Datei", "- Modify: `src/export.py`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
+        ("Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts", "- Modify: `src/export.py`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
         ("Verifikation", "- Test: `Makefile`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
     ]
     text = _wp_plan(source="**Spec:** `../specs/wip/export.md`", tasks=tasks)
@@ -1286,7 +1288,7 @@ def test_work_plan_coverage_against_feature_spec_criteria(tmp_path):
 
     missing = _wp_plan(source="**Spec:** `../specs/wip/export.md`", tasks=[tasks[0], tasks[2]])
     findings = _wp_findings(missing, plan_path=plan_path)
-    assert any("Leere Liste ergibt leere Datei" in f for f in findings)
+    assert any("Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts" in f for f in findings)
 
     plain = tmp_path / "docs" / "specs" / "plain.md"
     plain.write_text("# Irgendeine Spec\n\n## Akzeptanzkriterien\n\n### X\n", encoding="utf-8")
