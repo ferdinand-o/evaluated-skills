@@ -1838,8 +1838,8 @@ ungemessen bleibt und wo es beißt:
   ihre Ledger-Änderungen können beim Mergen kollidieren, und die Regel lässt Claude dann
   fragen statt lösen.
 - **Die Ausnahmen sind fest.** `docs/goals.md`, `handoff.md`, `docs/debugging/`,
-  `docs/decisions.md`, `docs/specs/wip/`, `.claude/`, `.skills/`, `CLAUDE.md` und
-  `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
+  `docs/decisions.md`, `docs/specs/wip/`, `docs/plans/` (seit Spec 23), `.claude/`,
+  `.skills/`, `CLAUDE.md` und `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
 - **Abschnitt D fehlt.** Kein Ziel-Reviewer; er wartet auf die Delphi-Prüfpunkte des
   Nutzers.
 
@@ -1987,6 +1987,40 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   Trigger zu ändern. Die Description ist aber die Stelle, die der Harness beim Routing
   liest — wer die Routing-Kollision der zwei `brainstorming`-Skills misst, sollte sie
   dort ebenfalls benennen und die impl-plan-Evals mitfahren.
+
+## work-plan
+
+Gebaut nach Spec 23 (2026-10-13). Tier 1 ohne eigenes Skript; der Lint gehört
+subagent-dev und kennt seitdem die Kopfzeile `skill: work-plan`. Was ungemessen bleibt und
+wo es beißt:
+
+- **In einem fremden Repo reicht der Weg bis zum Lint, nicht bis zum Dispatch.** work-plan
+  ruft `plan_to_tasks.py lint` über `${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/` auf.
+  subagent-dev selbst ruft `generate` und `verify` repo-relativ auf
+  (`python skills/subagent-dev/scripts/…`); das läuft nur in diesem Repo, bis die
+  Folgespec für `${CLAUDE_SKILL_DIR}` es umstellt (Spec 20, Out of scope).
+- **`${CLAUDE_SKILL_DIR}` ist nur für die lokale Installation gemessen.** Nach
+  `claude plugin marketplace add` mit lokalem Pfad liegt die ganze Repo-Kopie im
+  Plugin-Cache, das Nachbarverzeichnis also daneben (CLI 2.1.296). Ob das bei einer
+  Installation aus dem GitHub-Marketplace genauso ist, misst nichts; fehlt das Skript,
+  sagt die Skill „ungeprüft — Lint nicht verfügbar".
+- **Im Eval-Workspace gibt es keinen Lint.** Dort liegt nur work-plan, nicht subagent-dev;
+  Eval 3 (`verification-task-uses-repo-command`) macht genau das zur Prüfung des
+  Vermerks „ungeprüft". Ob ein Plan aus einem echten Lauf lint-sauber ist, prüft der
+  Report von Hand nach.
+- **Die Schwelle ist eine Regel, kein Messwert.** Mehr als zwei Dateien, neue öffentliche
+  Schnittstelle oder Reihenfolge — die Grenze misst nur der Anti-Zeremonie-Eval
+  `anti-ceremony-one-file-change-gets-no-plan` an einem Tippfehler. Ob drei kleine
+  Dateien ohne Abhängigkeit einen Plan verdienen, entscheidet Claude.
+- **Coverage nur gegen feature-spec-Kriterien.** Zeigt `**Spec:**` auf eine Datei ohne
+  Kopfzeile `skill: feature-spec`, bleibt die Coverage `unchecked`; ein Auftrag hat
+  keine. Die `- Annahme:`-Zeilen prüft kein Lint.
+- **`cc-dev` listet eine Skill mehr.** work-plan lädt mit jeder `cc-dev`-Installation und
+  konkurriert im Routing mit impl-plan und dem eingebauten Plan-Modus; die Descriptions
+  grenzen ab, gemessen ist die Kollision nicht.
+- **Keine Projekt-Kopie in diesem Repo.** Hier gilt impl-plan; work-plan steht nicht in
+  `PROJECT_SKILLS` von `scripts/sync_skills.py` und lädt in diesem Repo nur, wenn
+  jemand `cc-dev` einschaltet.
 
 ## Verweise
 
