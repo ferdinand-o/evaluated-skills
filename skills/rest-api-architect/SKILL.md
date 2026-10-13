@@ -1,6 +1,6 @@
 ---
 name: rest-api-architect
-description: Use when designing a new REST API from scratch (Greenfield) or capturing an existing one before extending it (Brownfield) — produces a validated OpenAPI spec plus a project-wide conventions file (errors, pagination, versioning, idempotency, naming). Triggers include "REST-API entwerfen", "Endpoint hinzufügen", "API-Konventionen", "Breaking Change prüfen", "bestehende API erfassen". Routes to feature-spec (07 consumes its Soll as the target shape), testing-strategy (07's output feeds rest-api.md contract tests), and superpowers:writing-plans (breaks a Brownfield audit into work — this skill reports, it never plans). Not for server/client codegen, GraphQL/gRPC, auth implementation, or API-gateway/deployment config — those are explicitly out of scope.
+description: Use when designing a new REST API from scratch (Greenfield) or capturing an existing one before extending it (Brownfield) — produces a validated OpenAPI spec plus a project-wide conventions file (errors, pagination, versioning, idempotency, naming). Triggers include "REST-API entwerfen", "Endpoint hinzufügen", "API-Konventionen", "Breaking Change prüfen", "bestehende API erfassen". Routes to feature-spec (07 consumes its Soll as the target shape), testing-strategy (07's output feeds rest-api.md contract tests), and work-plan (breaks a Brownfield audit into work — this skill reports, it never plans). Not for server/client codegen, GraphQL/gRPC, auth implementation, or API-gateway/deployment config — those are explicitly out of scope.
 ---
 
 # rest-api-architect — Spec-first mit Konventions-Preset
@@ -36,7 +36,7 @@ Konventionsdatei. Implementierung läuft im normalen Entwicklungsfluss.
    Markierung bestehen, bis ein Mensch sie bestätigt.
 3. **Audit, kein Umbau (R5):** Ist vs. Preset als Bericht nach `docs/api-audit-<service>.md`
    — gewichtet nach Schwere, ohne ungefragte Sanierung. Für die Zerlegung in Arbeit: an
-   `superpowers:writing-plans` verweisen, nicht selbst planen.
+   `work-plan` verweisen, nicht selbst planen.
 4. Ab dem nächsten Endpoint gilt der Greenfield-Ablauf gegen die jetzt vorliegende Ist-Spec.
 
 ## Contract
@@ -86,7 +86,7 @@ wird nie übersprungen.
 
 - **feature-spec** liefert das Soll, gegen das diese Skill entwirft — nicht umgekehrt.
 - **testing-strategy** übernimmt Contract-Tests gegen `api/openapi.yaml` (`rest-api.md`).
-- **superpowers:writing-plans** zerlegt einen Brownfield-Befund in Arbeit — diese Skill
+- **work-plan** zerlegt einen Brownfield-Befund in Arbeit — diese Skill
   berichtet, sie plant nicht (R5).
 - Kein Server-/Client-Codegen, kein GraphQL/gRPC, keine Auth-Implementierung (nur die
   Preset-Schnittstelle: Bearer + Fehlerformate), kein API-Gateway/Deployment.

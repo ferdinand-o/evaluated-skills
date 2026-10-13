@@ -1,6 +1,6 @@
 ---
 name: subagent-dev
-description: Use when an impl-plan plan exists (or a superpowers:writing-plans plan, for repos without impl-plan) and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that superpowers:subagent-driven-development does not have. Not for writing the plan itself (use impl-plan) and not for auftragslose ad-hoc delegation without a plan (use superpowers:subagent-driven-development directly, or impl-plan first).
+description: Use when an impl-plan plan exists (or a work-plan plan for repos outside this collection) and you must decide which of its tasks can be delegated to parallel subagents. Runs plan_to_tasks.py to build a file/interface overlap matrix, gate the delegation decision mechanically (parallel only for ≥3 disjoint packages, default to sequential when in doubt), and generate a handoff Task-Datei per task instead of pasting history. Adds a mechanical `verify` step (allowlist + Produces-signature check via ast, never import) that a plain Agent dispatch does not have. Not for writing the plan itself (use impl-plan) and not for auftragslose ad-hoc delegation without a plan (use the built-in Agent tool directly, or work-plan first).
 ---
 
 # subagent-dev — Gate vor Dispatch, Task-Datei statt Historie
@@ -11,9 +11,9 @@ kein Fehlschlag.
 
 ## Ablauf
 
-1. **Plan vorhanden?** Kein Plan → `impl-plan` zuerst. Diese Skill parst nur
-   `### Task N:`-Blöcke im Format des impl-plan-Templates (aus `writing-plans`
-   übernommen).
+1. **Plan vorhanden?** Kein Plan → `impl-plan` (Spec dieser Sammlung) oder `work-plan`
+   (jedes andere Repo) zuerst. Diese Skill parst nur `### Task N:`-Blöcke mit der
+   Kopfzeile eines der beiden Templates (Format aus `writing-plans` übernommen).
 2. **Gate fällen und Task-Dateien erzeugen:**
    ```bash
    python skills/subagent-dev/scripts/plan_to_tasks.py generate docs/superpowers/plans/<plan>.md
@@ -114,14 +114,10 @@ kein Fehlschlag.
 ## Abgrenzung
 
 - **impl-plan** — erzeugt den Plan, den diese Skill konsumiert, lint-sauber.
-  Kein Plan vorhanden → dort zuerst. `superpowers:writing-plans` bleibt die
-  Ausnahme für Repos ohne diese Sammlung.
-- **superpowers:subagent-driven-development** — die 503-Zeilen-Referenz für
-  den *Ablauf* (Fix-Loop, Modellwahl, Ledger). Diese Skill ersetzt sie nicht,
-  sondern liefert ihr vorgeschaltet: ein mechanisches Gate statt einer
-  Textempfehlung, eine generierte Task-Datei statt einer von Hand komponierten
-  Dispatch-Prompt, und `verify` als mechanische Abnahme vor dem Review. Liegt
-  bereits ein Plan vor und die Frage ist „parallel oder sequenziell, und was
-  bekommt jeder Agent", gehört sie hierher; danach kann der eigentliche
-  Dispatch-Loop `subagent-driven-development` folgen.
+  Kein Plan vorhanden → dort zuerst.
+- **work-plan** — derselbe Plan für Repos außerhalb dieser Sammlung: Quelle Spec oder
+  Auftrag, Verifikation als letzter Task. `lint` kennt beide Kopfzeilen.
+- Das eingebaute **Agent**-Werkzeug — Delegation ohne Plan, ohne Gate und ohne
+  `verify`. Liegt ein Plan vor und die Frage ist „parallel oder sequenziell, und was
+  bekommt jeder Agent", gehört sie hierher.
 - **`/code-review`** — die zweite Abnahmestufe nach der mechanischen Prüfung.

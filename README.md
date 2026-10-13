@@ -26,7 +26,7 @@ und Plugin zusammen:
 - `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
   architecture-map, debug-ledger, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, setup-repo, setup-user, sql-schema-architect,
-  subagent-dev, testing-strategy. setup-user und setup-repo laufen nur als
+  subagent-dev, testing-strategy, work-plan. setup-user und setup-repo laufen nur als
   `/cc-dev:setup-user` und `/cc-dev:setup-repo`.
 - `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
   aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
@@ -98,7 +98,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
-| neues Feature, Codebase existiert | feature-spec | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
+| neues Feature, Codebase existiert | feature-spec | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), work-plan (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger | feature-spec |
 | Testplan, Repo-Typ-Frage | testing-strategy | test-driven-development (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
 | Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |
@@ -109,7 +109,8 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | mobil kaputt, „geht das auf dem Handy?" | mobile-audit | enterprise-ui/ui-architect/motion-landing — die *bauen* mobil mit `references/mobile.md`, mobile-audit prueft nur |
 | ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
-| Implementierungsplan zu einer Spec | impl-plan | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Implementierungsplan zu einer Spec | impl-plan | work-plan (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Plan für Arbeit in einem beliebigen Repo (Spec, Befund, Auftrag) | work-plan | impl-plan (Specs dieser Sammlung), eingebauter Plan-Modus (Plan nur im Gespräch), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Skill bauen oder ändern | skill-forge | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 | Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (verdichtet, ändert keinen Stil), explain (erklärt mit eigenem Antwortvertrag) |
 | Sitzungsende, Übergabe | handoff | visual-summary, dev-report |

@@ -1,6 +1,6 @@
 ---
 name: feature-spec
-description: Use when starting a new feature and a codebase already exists — scans the repo and existing decisions first, then drafts a complete spec with explicit `Annahme:` lines instead of interviewing. Triggers include "neues Feature", "bau mir X", "schreib eine Spec für …". Not for bugfixes or failing tests (use debug-ledger) and not for breaking the finished spec into work packages (use superpowers:writing-plans).
+description: Use when starting a new feature and a codebase already exists — scans the repo and existing decisions first, then drafts a complete spec with explicit `Annahme:` lines instead of interviewing. Triggers include "neues Feature", "bau mir X", "schreib eine Spec für …". Not for bugfixes or failing tests (use debug-ledger) and not for breaking the finished spec into work packages (use work-plan).
 ---
 
 # feature-spec — Draft-first Featurebeschreibung
@@ -95,7 +95,7 @@ Fragen sind die Ausnahme (siehe Fallback in Schritt 2), nicht der Einstieg.
 
 - **debug-ledger** *(Spec 01)* — Bug, Testfehler. Hier
   greift diese Skill nicht.
-- **superpowers:writing-plans** — Zerlegung der fertigen Spec in
+- **work-plan** — Zerlegung der fertigen Spec in
   Arbeitspakete. Diese Skill endet bei Spec plus Stubs, sie zerlegt nicht.
 - setup-repo — richtet das Repo für Claude Code ein; ein neues Feature spezifiziert es
   nicht.

@@ -1,6 +1,6 @@
 ---
 name: impl-plan
-description: "Use to write the implementation plan for a spec of this skill collection — turns a spec (Eval table, Skill-Struktur block, Abgrenzung) into a plan under docs/superpowers/plans/ that subagent-dev can read: `### Task N:` blocks with Files:, Interfaces: and checkbox steps, the four mandatory tasks with canonical titles (Evals, Nachbarn, known-limits, Report), a house header line, and a lint run before hand-off. Triggers include \"schreib den Plan\", \"Implementierungsplan zur Spec\", \"Plan für Spec NN\", \"plan the build\". Not for writing the spec itself (use brainstorming or feature-spec) and not for splitting, dispatching or verifying the plan (use subagent-dev, which consumes what this skill writes). For repositories without subagent-dev, use superpowers:writing-plans instead."
+description: "Use to write the implementation plan for a spec of this skill collection — turns a spec (Eval table, Skill-Struktur block, Abgrenzung) into a plan under docs/superpowers/plans/ that subagent-dev can read: `### Task N:` blocks with Files:, Interfaces: and checkbox steps, the four mandatory tasks with canonical titles (Evals, Nachbarn, known-limits, Report), a house header line, and a lint run before hand-off. Triggers include \"schreib den Plan\", \"Implementierungsplan zur Spec\", \"Plan für Spec NN\", \"plan the build\". Not for writing the spec itself (use brainstorming or feature-spec) and not for splitting, dispatching or verifying the plan (use subagent-dev, which consumes what this skill writes). For repositories outside this collection, use work-plan instead."
 ---
 
 # impl-plan — Pläne, die ihr Konsument lesen kann
@@ -102,7 +102,7 @@ Vor der Übergabe, ohne Subagent, mit frischem Blick auf die Spec:
   nach `docs/superpowers/specs/` ab und übergibt an `writing-plans`).
 - **subagent-dev** — zerlegt den Plan, fällt das Gate, dispatcht, nimmt ab. Besitzt den
   Parser und den Lint, die diese Skill aufruft.
-- **superpowers:writing-plans** — für Repos ohne `subagent-dev`. Sein Kopf
-  (`REQUIRED SUB-SKILL: subagent-driven-development`) ist hier falsch.
+- **work-plan** — dasselbe Planformat für Repos außerhalb dieser Sammlung: Quelle Spec
+  oder Auftrag, Verifikation als letzter Task, ohne die vier Pflicht-Tasks.
 - **skill-forge** (Spec 17) — baut eine Skill Ende-zu-Ende und konsumiert
   diese Skill für den Plan-Schritt.
