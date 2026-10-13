@@ -189,7 +189,7 @@ fünf zurück (Regel `neighbors`).
 Prompts: 1 „Schreib einen Plan: in src/greet.py den Tippfehler ‚Helo' korrigieren.",
 2 „Schreib den Plan zur Spec docs/specs/wip/export.md.", 3 „Schreib einen Plan für einen
 CSV-Export der Berichte mit CLI-Option `--csv` und einem Abschnitt in der README.",
-4 „Schreib einen Plan für den Zyklus, den ARCHITECTURE.md meldet." Die Fixture `wp-spec`
+4 „Schreib einen Plan für den Zyklus, den ARCHITECTURE.md meldet: Danach soll die Domäne gar nicht mehr von der Persistenz abhängen — User bekommt seine Session von außen, statt get_session() selbst aufzurufen." (geschärft nach dem ersten Lauf: der Zyklus allein liegt unter der Schwelle) Die Fixture `wp-spec`
 trägt einen feature-spec-Entwurf mit drei Akzeptanzkriterien; `wp-finding` ein
 `ARCHITECTURE.md` mit einem Zyklusbefund von architecture-map. Im Eval-Workspace liegt nur
 work-plan, nicht subagent-dev; der Lint ist dort nicht verfügbar. Vor der Abnahme läuft

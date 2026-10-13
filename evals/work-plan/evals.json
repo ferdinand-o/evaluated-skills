@@ -97,7 +97,7 @@
       "id": "plan-from-finding-records-assignment",
       "class": "contract",
       "fixture": "wp-finding",
-      "prompt": "Schreib einen Plan für den Zyklus, den ARCHITECTURE.md meldet.",
+      "prompt": "Schreib einen Plan für den Zyklus, den ARCHITECTURE.md meldet: Danach soll die Domäne gar nicht mehr von der Persistenz abhängen — User bekommt seine Session von außen, statt get_session() selbst aufzurufen.",
       "must": [
         {
           "type": "file_matches",
@@ -116,7 +116,7 @@
         }
       ],
       "must_not": [],
-      "notes": "Quelle ist ein Befund von architecture-map, keine Spec. Diskriminator: Hält ein Agent ohne die Skill die Quelle als **Auftrag:** mit dem Pfad des Befunds fest und seine Annahmen als `- Annahme:`-Zeilen? Nein — ohne Spec hält nur die Skill Quelle und Annahmen in Hausform fest."
+      "notes": "Quelle ist ein Befund von architecture-map, keine Spec. Diskriminator: Hält ein Agent ohne die Skill die Quelle als **Auftrag:** mit dem Pfad des Befunds fest und seine Annahmen als `- Annahme:`-Zeilen? Nein — ohne Spec hält nur die Skill Quelle und Annahmen in Hausform fest. Der Auftrag ändert den Konstruktor von User (neue öffentliche Schnittstelle) und berührt mehrere Dateien — er liegt über der Schwelle. Die erste Fassung fragte nur nach dem Zyklus; den löst eine Zeile in session.py, und die Skill antwortete zu Recht „Kein Plan nötig“."
     }
   ]
 }
