@@ -122,16 +122,16 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `fn:record(root, action, test_id, command)`, `token:Kein Test-Zyklus nötig`, `token:ungetestet auf Wunsch`
 - Produces: `token:anti-ceremony-doc-typo-runs-no-cycle`
 
-- [ ] **Step 1: Fixtures** — je `fixture.json` mit `"git": true`, pytest-Konfiguration
+- [x] **Step 1: Fixtures** — je `fixture.json` mit `"git": true`, pytest-Konfiguration
       und `tests/`; `tf-docs` mit README-Tippfehler „Helo"; `tf-feature` ohne `slugify`;
       `tf-existing` mit `slugify` samt Umlaut-Verhalten, ohne Test dafür. Kein Wert in
       den Fixtures, der wörtlich als Beispiel in SKILL.md oder `cycle.md` steht, außer
       dem Funktionsnamen aus dem Prompt.
-- [ ] **Step 2: Evals** — `anti-ceremony-doc-typo-runs-no-cycle`,
+- [x] **Step 2: Evals** — `anti-ceremony-doc-typo-runs-no-cycle`,
       `red-before-green-is-recorded`, `green-on-first-run-is-flagged`,
       `pressure-still-red-first`, `explicit-waiver-says-untested` mit den Assertions und
       Prompts der Spec, Diskriminator-Frage in `notes`.
-- [ ] **Step 3: Test** — `test_eval_patterns_match_only_real_cycles`: Logs aus echten
+- [x] **Step 3: Test** — `test_eval_patterns_match_only_real_cycles`: Logs aus echten
       `tdd_log.py`-Läufen in einem Temp-Repo; die Muster treffen Rot-Grün derselben ID
       und nicht `sofort-grün` → `green`, nicht zwei IDs, nicht `ungeprüft`. Dazu: fünf
       Evals laden, Fixtures mit `"git": true`. Commit.
@@ -154,15 +154,15 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `token:Kein Test-Zyklus nötig`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Test erweitern** — `test_no_superpowers_routing_targets` sucht zusätzlich
+- [x] **Step 1: Test erweitern** — `test_no_superpowers_routing_targets` sucht zusätzlich
       `test-driven-development` unter `skills/`. Rot sehen.
-- [ ] **Step 2: Verweise** — die Description von test-first grenzt sich gegen die
+- [x] **Step 2: Verweise** — die Description von test-first grenzt sich gegen die
       TDD-Skill von superpowers ohne das Präfix `superpowers:` ab (sonst zählt `--report`
       wieder 1); testing-strategy Description und Abgrenzung auf test-first;
       debug-ledger Abgrenzung (Regressionstest nach der Diagnose über test-first);
       Code-Task in `task-patterns.md` nennt test-first. `sync_skills.py`, `--check`,
       `lint_skill.py --base HEAD` je Skill ohne neuen Befund, `evals_due` notieren.
-- [ ] **Step 3: Plugin, Routing, README** — `./skills/test-first` in `cc-dev`; Spec 00
+- [x] **Step 3: Plugin, Routing, README** — `./skills/test-first` in `cc-dev`; Spec 00
       und README: test-driven-development → test-first in der Zeile testing-strategy,
       eigene Zeile test-first; README-Liste von `cc-dev`. `pytest
       tests/test_marketplace.py`; `lint_skill.py skills/test-first` meldet `routing`,
