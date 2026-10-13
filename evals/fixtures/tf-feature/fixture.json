@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Paket textkit ohne slugify: src/slug.py hat nur collapse_spaces, tests/test_slug.py einen Test dafür; pytest-Konfiguration in pyproject.toml. Kein .skills/."
+}

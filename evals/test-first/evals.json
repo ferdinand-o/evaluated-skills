@@ -1,0 +1,130 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-doc-typo-runs-no-cycle",
+      "class": "contract",
+      "fixture": "tf-docs",
+      "prompt": "Korrigiere in README.md ‚Helo' zu ‚Hello'.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "README.md",
+          "pattern": "Hello"
+        },
+        {
+          "type": "file_absent",
+          "path": ".skills/cache/test-first/log.md"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "Kein Test-Zyklus nötig"
+        },
+        {
+          "type": "git_head_unchanged"
+        }
+      ],
+      "must_not": [],
+      "notes": "Anti-Zeremonie (Spec 00 §2): Doku ohne Verhaltensänderung. Diskriminator: Sagt ein Agent ohne die Skill wörtlich „Kein Test-Zyklus nötig“? Nein — den Wortlaut der Ausnahme schreibt nur die Skill; ein Agent mit falsch verstandener Doktrin schriebe ein Log."
+    },
+    {
+      "id": "red-before-green-is-recorded",
+      "class": "contract",
+      "fixture": "tf-feature",
+      "prompt": "Füge `slugify(text)` in `src/slug.py` hinzu, das Umlaute als ae/oe/ue schreibt; der Test gehört nach `tests/test_slug.py`.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": ".skills/cache/test-first/log.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/test-first/log.md",
+          "pattern": "(?ms)^\\x7c (\\S+) \\x7c red \\x7c.*^\\x7c \\1 \\x7c green \\x7c"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/test-first/log.md",
+          "pattern": "Vollständige Zyklen: [1-9]"
+        },
+        {
+          "type": "file_matches",
+          "path": "tests/test_slug.py",
+          "pattern": "slugify"
+        },
+        {
+          "type": "file_matches",
+          "path": "src/slug.py",
+          "pattern": "def slugify"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: Schreibt ein Agent ohne die Skill ein Log mit Kopfzeile, in dem derselbe Test erst red und dann green steht? Nein — das schreibt nur tdd_log.py, und ein sofort grüner Lauf steht dort nie als red."
+    },
+    {
+      "id": "green-on-first-run-is-flagged",
+      "class": "contract",
+      "fixture": "tf-existing",
+      "prompt": "Füge `slugify(text)` in `src/slug.py` hinzu, das Umlaute als ae/oe/ue schreibt; der Test gehört nach `tests/test_slug.py`.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/test-first/log.md",
+          "pattern": "\\x7c sofort-grün \\x7c"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "src/slug.py"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "(?i)sofort.grün"
+        }
+      ],
+      "must_not": [],
+      "notes": "slugify mit dem verlangten Umlaut-Verhalten gibt es in der Fixture schon, einen Test dafür nicht. Diskriminator: Hält ein Agent ohne die Skill fest, dass der neue Test sofort grün war, und lässt src/slug.py unverändert? Nein — ohne Skill implementiert er neu oder schreibt einen grünen Test und meldet Erfolg."
+    },
+    {
+      "id": "pressure-still-red-first",
+      "class": "contract",
+      "fixture": "tf-feature",
+      "prompt": "Schnell bitte, keine Zeit für lange Tests: füge `slugify(text)` in `src/slug.py` hinzu, Umlaute als ae/oe/ue, Test nach `tests/test_slug.py`.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/test-first/log.md",
+          "pattern": "(?ms)^\\x7c (\\S+) \\x7c red \\x7c.*^\\x7c \\1 \\x7c green \\x7c"
+        },
+        {
+          "type": "file_matches",
+          "path": "src/slug.py",
+          "pattern": "def slugify"
+        }
+      ],
+      "must_not": [],
+      "notes": "Druckszenario mit mechanischen Assertions statt Judge (Spec 24, Constraints). Der Prompt verzichtet nicht ausdrücklich. Diskriminator: Schreibt ein Agent unter Zeitdruck ohne die Skill zuerst einen roten Test und belegt das im Log? Nein — das Basismodell schreibt Code ohne vorher roten Test."
+    },
+    {
+      "id": "explicit-waiver-says-untested",
+      "class": "contract",
+      "fixture": "tf-feature",
+      "prompt": "Füge `slugify(text)` in `src/slug.py` hinzu, Umlaute als ae/oe/ue — ausdrücklich ohne Tests, ich teste selbst.",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "ungetestet auf Wunsch"
+        },
+        {
+          "type": "file_absent",
+          "path": ".skills/cache/test-first/log.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "src/slug.py",
+          "pattern": "def slugify"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: Sagt ein Agent ohne die Skill wörtlich „ungetestet auf Wunsch“? Nein — den Wortlaut des Verzichts schreibt nur die Skill; ohne sie fehlt der Hinweis, oder es entsteht doch ein Test."
+    }
+  ]
+}
