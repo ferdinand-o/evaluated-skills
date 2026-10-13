@@ -139,6 +139,7 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 ### Task 5: Nachbarn
 
 **Files:**
+- Modify: `skills/test-first/SKILL.md`
 - Modify: `skills/testing-strategy/SKILL.md`
 - Modify: `skills/debug-ledger/SKILL.md`
 - Modify: `skills/work-plan/references/task-patterns.md`
@@ -155,7 +156,9 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 
 - [ ] **Step 1: Test erweitern** — `test_no_superpowers_routing_targets` sucht zusätzlich
       `test-driven-development` unter `skills/`. Rot sehen.
-- [ ] **Step 2: Verweise** — testing-strategy Description und Abgrenzung auf test-first;
+- [ ] **Step 2: Verweise** — die Description von test-first grenzt sich gegen die
+      TDD-Skill von superpowers ohne das Präfix `superpowers:` ab (sonst zählt `--report`
+      wieder 1); testing-strategy Description und Abgrenzung auf test-first;
       debug-ledger Abgrenzung (Regressionstest nach der Diagnose über test-first);
       Code-Task in `task-patterns.md` nennt test-first. `sync_skills.py`, `--check`,
       `lint_skill.py --base HEAD` je Skill ohne neuen Befund, `evals_due` notieren.
