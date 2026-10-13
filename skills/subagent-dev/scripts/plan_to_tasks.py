@@ -660,7 +660,8 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
 
 def _git(worktree: Path, *args: str) -> str:
     done = subprocess.run(
-        ["git", *args], cwd=worktree, capture_output=True, text=True, timeout=60, check=False,
+        ["git", *args], cwd=worktree, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, check=False,
     )
     if done.returncode != 0:
         raise PlanParseError(f"git {' '.join(args)} fehlgeschlagen: {done.stderr.strip()}")
@@ -671,25 +672,28 @@ def check_allowlist(worktree: Path, base_ref: str, allowlist: list[str]) -> list
     """Geänderte Dateien (committed seit `base_ref` und uncommittete), die außerhalb
     der Allowlist liegen — exakte, Verzeichnis-Präfix- oder Suffix-Treffer
     (siehe `_paths_overlap`) zählen als erlaubt."""
-    committed = _git(worktree, "diff", "--name-only", f"{base_ref}...HEAD").splitlines()
-    dirty = _git(worktree, "status", "--porcelain").splitlines()
+    # -z überall: ohne -z setzt git Pfade mit Leerzeichen oder Nicht-ASCII-Zeichen in
+    # Anführungszeichen und escapt sie (core.quotepath) — `specs/Spec 00 – x.md` passte
+    # dann auf keinen Allowlist-Eintrag (beim Bau von Spec 20 und 21 beobachtet).
+    committed = _git(worktree, "diff", "--name-only", "-z", f"{base_ref}...HEAD").split("\0")
+    entries = _git(worktree, "status", "--porcelain", "-z", "--untracked-files=all").split("\0")
 
     dirty_paths: list[str] = []
-    for line in dirty:
-        if not line.strip():
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
             continue
-        body = line[3:].strip()
-        if " -> " in body:
-            # `git status --porcelain` schreibt eine (auch nur staged, nicht
-            # committete) Umbenennung als "alt.py -> neu.py" in einer Zeile
-            # (L3). Ungeteilt übernommen wäre das ein Pfad, der weder alt noch
-            # neu ist und mit keinem Allowlist-Eintrag matchen kann — ein
-            # Fehlalarm gegen einen Task, der sich an seine Allowlist hielt.
-            old_path, _, new_path = body.partition(" -> ")
-            dirty_paths.append(old_path.strip())
-            dirty_paths.append(new_path.strip())
-        else:
-            dirty_paths.append(body)
+        code, path = entry[:2], entry[3:]
+        dirty_paths.append(path)
+        if "R" in code or "C" in code:
+            # Mit -z steht eine (auch nur staged) Umbenennung als zwei Einträge,
+            # erst der neue, dann der alte Pfad (L3). Beide zählen einzeln — ein
+            # Task, der sich an seine Allowlist hielt, darf keinen Fehlalarm sehen.
+            if i < len(entries) and entries[i]:
+                dirty_paths.append(entries[i])
+            i += 1
 
     changed = sorted({*committed, *dirty_paths} - {""})
     return [path for path in changed if not any(_paths_overlap(path, allowed) for allowed in allowlist)]

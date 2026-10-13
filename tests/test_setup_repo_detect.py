@@ -116,3 +116,17 @@ def test_detect_main_writes_detect_json_with_meta(tmp_path):
     assert data["_meta"]["skill"] == "setup-repo" and data["_meta"]["schema"] == 1
     assert data["runners"]["make"] == ["check"]
     assert sorted(p.name for p in repo.iterdir()) == [".skills", "Makefile"]
+
+
+def test_detect_skips_fixture_folders(tmp_path):
+    """Fixtures sind Testdaten, nicht der Stack des Repos: Auf cc-skills meldete
+    detect_repo.py TypeScript, weil Eval-Fixtures .ts-Dateien tragen."""
+    repo = tmp_path / "repo"
+    write(repo, "src/app.py", "x = 1\n")
+    write(repo, "evals/fixtures/web/src/App.tsx", "export {}\n")
+    write(repo, "tests/fixtures/legacy/Main.pas", "unit Main;\n")
+    write(repo, "pkg/testdata/sample.dproj", "<Project/>")
+    write(repo, "web/__fixtures__/x.test.ts", "export {}\n")
+    d = detect_mod.detect(repo, tmp_path / "cfg")
+    assert d["languages"] == ["python"]
+    assert d["delphi_projects"] == [] and d["tests"] is False

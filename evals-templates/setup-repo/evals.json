@@ -1,0 +1,47 @@
+{
+  "evals": [
+    {
+      "id": "goal-rule-records-unrelated-bug-as-candidate",
+      "class": "contract",
+      "fixture": "sr-goals-seeded",
+      "prompt": "Behebe den Tippfehler in greet.py (Ziel G1).",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "src/greet.py",
+          "pattern": "Hallo"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/goals.md",
+          "pattern": "(?s)## Kandidaten\\n.*\\| G\\d+ \\|[^\\n]*dates.*## Erledigt"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "src/dates.py"
+        }
+      ],
+      "must_not": [],
+      "notes": "Vorlagen-Messung (Spec 22, Abschnitt C), außerhalb des Eval-Vertrags: Die Zielregel lädt beim Sessionstart aus der Fixture, ein Lauf ohne Skill wäre genauso grün. Gemessen wird die Vorlage .claude/rules/goals.md: Der Schaltjahr-Fehler in src/dates.py ist nicht verlangt, nicht Teil von G1 und liegt in keiner Datei der Aufgabe — Klasse „Neues Ziel“, also eine Zeile unter Kandidaten und dates.py unverändert. Diskriminator: keiner gegen das Basismodell, das ist die Absicht; die Quote steht im Report."
+    },
+    {
+      "id": "goal-rule-leaves-requested-change-alone",
+      "class": "contract",
+      "fixture": "sr-goals-seeded",
+      "prompt": "Ändere in README.md ‚Helo' zu ‚Hello'.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "README.md",
+          "pattern": "Hello"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "docs/goals.md"
+        }
+      ],
+      "must_not": [],
+      "notes": "Vorlagen-Messung (Spec 22, Abschnitt C), außerhalb des Eval-Vertrags: Die Änderung ist vom Nutzer verlangt (Klasse 1); die Zielregel darf daraus weder ein Ziel noch einen Kandidaten machen. Anti-Zeremonie der Vorlage: Ein Tippfehler-Prompt erzeugt keine Ledger-Zeile. Diskriminator: keiner gegen das Basismodell, das ist die Absicht."
+    }
+  ]
+}

@@ -165,6 +165,13 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 ## Betrieb
 
+- **Gegenbefund 2026-10-12 zum folgenden Eintrag:** `claude -p` (CLI 2.1.296) läuft als
+  root, wenn man `--dangerously-skip-permissions` weglässt und die Werkzeuge mit
+  `--allowedTools "Read,Write,Edit,Glob,Grep,Bash,Skill"` und `--permission-mode
+  acceptEdits` freigibt; Skript-Aufrufe über Bash liefen damit ohne Verweigerung. So
+  liefen die setup-repo-Evals und die Vorlagen-Messung (Report setup-repo, Abschnitt C).
+  Der Harness selbst ist unverändert; ob `dispatch.py` auf diese Form umgestellt wird,
+  ist eine Entscheidung über die Isolationszusage unten.
 - **Der Harness läuft nicht als root — in keinem Container, keiner CI.**
   `evalkit/dispatch.py` setzt `permission_mode="bypassPermissions"` fest
   verdrahtet; die Claude-CLI verweigert diesen Modus unter uid 0 mit
@@ -509,6 +516,36 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   Storyboard-*Text* in der Chat-Antwort selbst (das, was SKILL.md als
   Pflicht-Output vor jeder Implementierung verlangt) hat keine mechanische
   Prüfung, nur Eval 1s Judge-Claims.
+## mobile-audit
+
+Gebaut nach Spec 15 (2026-08-20/21): Stufe 1 `audit_static.py` (Tier 1, nur Stdlib),
+Stufe 2 `audit_devices.py` (Tier 3, Playwright mit Chromium). Spec 15 verlangte diesen
+Abschnitt; er fehlte und ist am 2026-10-12 aus Spec, Docstrings und Commit-Historie
+nachgetragen.
+
+- **Hover-Menüs per JavaScript bleiben unerkannt.** `mouseenter`-Listener sind aus dem
+  Quelltext nicht verlässlich zu erkennen und aus der laufenden Seite nicht aufzählbar
+  (`getEventListeners` gibt es nur in der DevTools-Konsole). Der Hover-Check sieht nur
+  CSS-Regeln unter `:hover`, die Sichtbarkeit oder Position ändern, und rät nicht.
+- **Die Tastatur ist modelliert, nicht gemessen.** Im Spike schrumpfte
+  `Emulation.setDeviceMetricsOverride` Layout- und visuellen Viewport gemeinsam, und
+  `Emulation.setVisibleSize` tat nichts. Der Check nimmt deshalb an, dass die Tastatur
+  die unteren K Pixel verdeckt (K je Profil in `assets/audit-config.json`), und meldet
+  „modelliert". Ob die Seite beim Fokus richtig scrollt, prüft er nicht.
+- **Bedienelemente aus `div` ohne `role` zählen nicht als interaktiv.** Stufe 2 erkennt
+  `a[href]`, `button`, Formularfelder, `[role=button]`, `[role=link]` und `[onclick]`;
+  ein `div` mit per JavaScript angehängtem Klick-Handler fällt durch Hit-Area- und
+  Tastatur-Check.
+- **Stufe 2 braucht Playwright mit Chromium.** Fehlt es, steht im Bericht
+  `stage_2: ungeprüft`, nie „grün"; die e2e-Tests überspringen sich dann. Gemessen wird
+  Overflow gegen `window.visualViewport`, weil Chromium im mobilen Modus
+  `window.innerWidth` auf die Inhaltsbreite dehnt (gemessen 700 statt 360).
+- **Die Evals messen nur Stufe 1.** Alle sechs sind `contract` und laufen ohne Browser;
+  Stufe 2 prüfen nur Unit-Tests mit synthetischen Messwerten und drei e2e-Tests.
+- **Drei Geräteprofile.** Das Phablet trägt keinen eigenen Check und ist gestrichen,
+  ebenso CPU- und Netzdrosselung (Performance gehört zu motion-landing). PWA und React
+  Native liegen außerhalb.
+
 ## visual-summary
 
 - **HTML-Budget ist nur sichtprüfbar, nicht mechanisch.** `references/formats.md`
@@ -1717,15 +1754,14 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   alten Ein-Plugin neun Skills mit weniger als 20 Tokens, also ohne Description
   (`docs/superpowers/validation/2026-10-08-plugin-split-sync.md`). Ob die Aufteilung
   das behebt, misst der Nutzer nach dem Merge.
-- **`verify` von subagent-dev meldet Nicht-ASCII-Pfade als Allowlist-Verstoß.** Beim
-  Bau beobachtet: `check_allowlist` liest `git diff --name-only` mit `core.quotepath`,
-  `specs/Spec 00 – skill-foundation.md` kommt dann als `"specs/Spec 00 \342\200\223 …"`
-  zurück und passt auf keinen Eintrag. Umgangen mit
-  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_VALUE_0=false`. Das
-  hilft nur für Committetes: Für uncommittete Dateien liest `check_allowlist`
-  `git status --porcelain`, das Pfade mit Leerzeichen in Anführungszeichen setzt, und
-  entfernt sie nicht (beim Bau von Spec 21 gesehen). Umweg dort: erst committen, dann
-  gegen die Basis prüfen. Der Fix (`-z` für beide Aufrufe) gehört nach subagent-dev.
+- **Behoben (2026-10-12): `verify` von subagent-dev meldete Nicht-ASCII-Pfade als
+  Allowlist-Verstoß.** `check_allowlist` las `git diff --name-only` und
+  `git status --porcelain` ohne `-z`; git setzte `specs/Spec 00 – skill-foundation.md`
+  und Pfade mit Leerzeichen in Anführungszeichen und escapte sie, sodass sie auf keinen
+  Eintrag passten. Beim Bau von Spec 20 und 21 nur mit `core.quotepath=false` und
+  vorherigem Commit zu umgehen. Jetzt lesen beide Aufrufe mit `-z` und als UTF-8,
+  `git status` dazu mit `--untracked-files=all`, damit ein neuer Ordner seine Dateien
+  einzeln zeigt (`test_check_allowlist_reads_non_ascii_and_space_paths_without_quoting`).
 
 ## setup-user
 
@@ -1757,9 +1793,10 @@ Was ungemessen bleibt und wo es beißt:
 
 ## setup-repo
 
-Gebaut nach Spec 22, Abschnitt B (2026-10-12). Tier 1: `detect_repo.py`,
-`harvest_rules.py`, `plan_repo.py`, `apply_repo.py` (mit `--check`), dazu der opt-in-Hook
-`verify_stop.py` im Zielrepo. Was ungemessen bleibt und wo es beißt:
+Gebaut nach Spec 22, Abschnitt B und C (2026-10-12). Tier 1: `detect_repo.py`,
+`harvest_rules.py`, `plan_repo.py`, `apply_repo.py` (mit `--check`), dazu im Zielrepo der
+opt-in-Hook `verify_stop.py` und der vorausgewählte Bereichs-Hook `goal_scope.py`. Was
+ungemessen bleibt und wo es beißt:
 
 - **Der Starter ist unter Windows ungemessen.** `command -v python3 … || exec python …`
   läuft in den Tests unter bash mit `python3` und mit nur `python`. Ob der
@@ -1785,12 +1822,26 @@ Gebaut nach Spec 22, Abschnitt B (2026-10-12). Tier 1: `detect_repo.py`,
   von Hand ergänzt, ist keine Abweichung, solange das Budget hält. Der Plan liegt unter
   `.skills/cache/` und ist nicht committet; in einem frischen Clone heißt es „ungeprüft —
   kein Plan".
-- **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab; die fünf
-  Evals liefen mit je einem Agenten und `evalkit.runner.grade()`, die Läufe ohne Skill
-  ebenso (Report).
-- **Abschnitt C und D fehlen.** Kein Ledger `docs/goals.md`, keine Zielregel, kein
-  Bereichs-Hook, keine Vorlagen-Messung, kein Ziel-Reviewer; handoff nennt `docs/goals.md`
-  erst mit Abschnitt C.
+- **Eval-Läufe nur außerhalb des Harness.** `run_evals.py` bricht unter root ab. In
+  Abschnitt B liefen die fünf Evals mit je einem Agenten, in Abschnitt C als echte
+  kopflose Sessions (`claude -p` mit `--allowedTools`, siehe Betrieb), jeweils mit und
+  ohne Skill, bewertet mit `evalkit.runner.grade()` (Report).
+- **Der Bereichs-Hook sieht Dateien, nicht Absichten.** Eine neue Aufgabe, die nur Dateien
+  im Bereich des Ziels berührt, meldet er nicht; eine verlangte Änderung außerhalb meldet
+  er doch. Die Einordnung in die vier Klassen leistet die Zielregel, nicht der Hook.
+- **Mit `claude -p` sieht Claude die Meldung nie.** Sie kommt per `systemMessage` beim
+  Turn-Ende und als `additionalContext` erst beim nächsten Prompt, den es kopflos nicht
+  gibt. Eine Pipeline auf der Devbox bekommt die Bereichsprüfung damit nur im Log.
+- **Die Basis gilt je Turn und Session.** Ein Rebase oder Amend, der den Basis-HEAD
+  entfernt, lässt `git diff` scheitern; der Hook meldet das einmal je Session und
+  schweigt dann. Zwei gleichzeitige Sessions haben je eigene Basis und eigene Meldungen;
+  ihre Ledger-Änderungen können beim Mergen kollidieren, und die Regel lässt Claude dann
+  fragen statt lösen.
+- **Die Ausnahmen sind fest.** `docs/goals.md`, `handoff.md`, `docs/debugging/`,
+  `docs/decisions.md`, `docs/specs/wip/`, `.claude/`, `.skills/`, `CLAUDE.md` und
+  `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
+- **Abschnitt D fehlt.** Kein Ziel-Reviewer; er wartet auf die Delphi-Prüfpunkte des
+  Nutzers.
 
 ## impl-plan
 

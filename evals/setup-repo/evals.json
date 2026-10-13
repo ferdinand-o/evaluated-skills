@@ -28,6 +28,18 @@
           "path": ".claude/settings.json"
         },
         {
+          "type": "file_unchanged",
+          "path": ".claude/rules/goals.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude/hooks/goal_scope.py"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "docs/goals.md"
+        },
+        {
           "type": "file_absent",
           "path": ".skills/cache/setup-repo/apply.md"
         },
@@ -36,7 +48,7 @@
         }
       ],
       "must_not": [],
-      "notes": "Anti-Zeremonie: ein schon eingerichtetes Repo bleibt unberührt. Diskriminator: check.md mit Kopfzeile schreibt nur apply_repo.py --check; ein Agent ohne Skill schreibt keinen Bericht dieses Namens oder richtet neu ein. Die Fixture hat keine offenen Kandidaten, damit die Klassen des letzten Plans genügen. Abschnitt C ergänzt file_unchanged auf .claude/rules/goals.md, .claude/hooks/goal_scope.py und docs/goals.md."
+      "notes": "Anti-Zeremonie: ein schon eingerichtetes Repo bleibt unberührt. Diskriminator: check.md mit Kopfzeile schreibt nur apply_repo.py --check; ein Agent ohne Skill schreibt keinen Bericht dieses Namens oder richtet neu ein. Die Fixture hat keine offenen Kandidaten, damit die Klassen des letzten Plans genügen. Seit Abschnitt C trägt die Fixture Zielregel, Ledger und Bereichs-Hook; auch sie bleiben unberührt."
     },
     {
       "id": "plan-from-repo-writes-only-report",
@@ -122,6 +134,11 @@
         },
         {
           "type": "file_matches",
+          "path": ".claude/settings.json",
+          "pattern": "goal_scope"
+        },
+        {
+          "type": "file_matches",
           "path": ".skills/cache/setup-repo/apply.md",
           "pattern": "angewendet"
         },
@@ -141,7 +158,7 @@
           "pattern": "(?i)line.?length|100 Zeichen"
         }
       ],
-      "notes": "apply setzt den versionierten Plan treu um und committet nicht. Diskriminator: apply.md schreibt nur apply_repo.py; gemessen wird die Treue zum Plan, nicht die Klassifikation (die messen Eval 2 und 3). Das Budget 125 ist 150 minus die 25 Zeilen der Zielregel aus Abschnitt C; Abschnitt C ergänzt die Assertion auf goal_scope."
+      "notes": "apply setzt den versionierten Plan treu um und committet nicht. Diskriminator: apply.md schreibt nur apply_repo.py; gemessen wird die Treue zum Plan, nicht die Klassifikation (die messen Eval 2 und 3). Das Budget 125 ist 150 minus die 25 Zeilen der Zielregel aus Abschnitt C; goal_scope im Settings-Patch zeigt, dass der vorausgewählte Bereichs-Hook mitkommt."
     },
     {
       "id": "apply-refuses-tampered-plan",

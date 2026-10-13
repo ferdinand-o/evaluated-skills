@@ -61,6 +61,9 @@ des Nutzers weiterarbeiten kann.
 
 - **Max. 150 Zeilen.** Vorgefundene längere Datei beim Update aggressiv
   auf das Limit prunen.
+- **Ziele stehen nicht hier.** Existiert `docs/goals.md` mit lesbarer Kopfzeile von
+  setup-repo, nennt die Übergabe es unter „Einstiegspunkte" — der Zielstand über
+  Sitzungen gehört dorthin, `handoff.md` trägt nur den Stand dieser Sitzung.
 - Erledigtes fliegt raus, sobald es nicht mehr handlungsrelevant ist —
   die Git-Historie ist das Archiv.
 - Keine Diff-Nacherzählung: nur, was nicht aus Code/Git ableitbar ist

@@ -29,11 +29,16 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 CACHE = Path(".skills") / "cache" / "setup-repo"
 BLOCK_RE = re.compile(r"^```json setup-repo-plan\n(.*?)^```", re.MULTILINE | re.DOTALL)
-OWN_HOOK = ".claude/hooks/verify_stop.py"
+VERIFY_HOOK = ".claude/hooks/verify_stop.py"
+GOAL_HOOK = ".claude/hooks/goal_scope.py"
+OWN_HOOKS = (GOAL_HOOK, VERIFY_HOOK)
+LEDGER = "docs/goals.md"
+LEDGER_HEADER_RE = re.compile(r"^<!--\s*skill:\s*setup-repo\s*\|\s*schema:\s*1\s*\|")
 BUDGET_LIMIT = 150
 IMPORT_RE = re.compile(r"^@(\S+)\s*$")
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
@@ -112,8 +117,13 @@ def _git_state(root: Path, paths: list[str]) -> tuple[set[str], set[str]]:
 
 # --- Mischen und Schreiben ---------------------------------------------------------
 
+def _own_script(hook) -> str | None:
+    command = str(hook.get("command", "")).replace("\\", "/") if isinstance(hook, dict) else ""
+    return next((own for own in OWN_HOOKS if own in command), None)
+
+
 def _is_own(hook) -> bool:
-    return isinstance(hook, dict) and OWN_HOOK in str(hook.get("command", "")).replace("\\", "/")
+    return _own_script(hook) is not None
 
 
 def merge_settings(existing: dict, patch: dict) -> dict:
@@ -200,15 +210,58 @@ def _timestamp_dir(root: Path) -> Path:
     return candidate
 
 
-def _probe(root: Path) -> tuple[bool, str]:
-    script = root / OWN_HOOK
+def _probe_verify(root: Path) -> tuple[bool, str]:
+    """verify_stop.py nur mit --selftest: prüft das Programm, startet den Befehl nicht."""
     try:
-        proc = subprocess.run([sys.executable, str(script), "--selftest"], cwd=root, capture_output=True,
-                              timeout=30, env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)})
+        proc = subprocess.run([sys.executable, str(root / VERIFY_HOOK), "--selftest"], cwd=root,
+                              capture_output=True, timeout=30, env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)})
         result = json.loads(proc.stdout.decode("utf-8") or "{}")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         return False, f"Probe von verify_stop.py gescheitert ({type(exc).__name__})"
-    return bool(result.get("ok")), str(result.get("detail", ""))
+    return bool(result.get("ok")), "verify_stop.py --selftest: " + str(result.get("detail", ""))
+
+
+def _probe_goal(root: Path) -> tuple[bool, str]:
+    """goal_scope.py mit Beispiel-Payload an beiden Ereignissen, Zustand in einem
+    Temp-Verzeichnis — eine Probe legt nie einen echten Session-Zustand an."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root), "SETUP_REPO_GOAL_STATE": str(Path(tmp) / "state.json")}
+        for event in ("UserPromptSubmit", "Stop"):
+            payload = json.dumps({"session_id": "setup-repo-probe", "hook_event_name": event, "cwd": str(root)})
+            try:
+                proc = subprocess.run([sys.executable, str(root / GOAL_HOOK)], cwd=root, input=payload.encode("utf-8"),
+                                      capture_output=True, timeout=30, env=env)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return False, f"goal_scope.py ({event}) gescheitert ({type(exc).__name__})"
+            out = proc.stdout.decode("utf-8", "replace").strip()
+            if proc.returncode != 0:
+                return False, f"goal_scope.py ({event}) endete mit {proc.returncode}"
+            try:
+                if out and not isinstance(json.loads(out), dict):
+                    raise ValueError
+            except ValueError:
+                return False, f"goal_scope.py ({event}) gab kein JSON-Objekt aus"
+    return True, "goal_scope.py mit Beispiel-Payload an UserPromptSubmit und Stop: Exit 0, Ausgabe gültig"
+
+
+def _configured_hooks(root: Path) -> set[str]:
+    try:
+        data = json.loads(_read(root / SETTINGS) or "{}")
+    except ValueError:
+        return set()
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    return {own for entries in (hooks or {}).values() if isinstance(entries, list)
+            for entry in entries if isinstance(entry, dict) for h in entry.get("hooks") or []
+            if (own := _own_script(h))}
+
+
+def _probes(root: Path) -> list[tuple[bool, str]]:
+    configured = _configured_hooks(root)
+    probes = []
+    for own, probe in ((GOAL_HOOK, _probe_goal), (VERIFY_HOOK, _probe_verify)):
+        if own in configured and (root / own).is_file():
+            probes.append(probe(root))
+    return probes
 
 
 # --- apply -------------------------------------------------------------------------
@@ -264,17 +317,14 @@ def apply_plan(repo_root, plan_path) -> dict:
                executable=op["action"] == "copy")
         written.append(op["path"])
 
-    probes: list[tuple[bool, str]] = []
-    if (root / OWN_HOOK).is_file() and any(op["path"] == OWN_HOOK for op in ops):
-        probes.append(_probe(root))
+    probes = _probes(root)
     failed = [detail for ok, detail in probes if not ok]
     status = f"angewendet, ungeprüft — {'; '.join(failed)}" if failed else "angewendet und geprüft"
     details = ["## Geschrieben", "", *([f"- `{p}`" for p in written] or ["- nichts — Bestand entsprach dem Plan"]), ""]
     if backups:
         details += ["## Backups", "", *[f"- `{b}`" for b in backups], ""]
     if probes:
-        details += ["## Proben", "", *[f"- verify_stop.py --selftest: {'ok' if ok else 'gescheitert'} — {d}"
-                                         for ok, d in probes], ""]
+        details += ["## Proben", "", *[f"- {'ok' if ok else 'gescheitert'} — {d}" for ok, d in probes], ""]
     details += ["## Nächste Schritte", "",
                 "- Nicht committet — prüfen und committen ist Sache des Nutzers.",
                 "- Settings, Hooks und CLAUDE.md wirken ab der nächsten Session."]
@@ -308,16 +358,6 @@ def _always_loaded(root: Path) -> int:
         if text and not _has_paths(text):
             total += len(text.splitlines())
     return total
-
-
-def _own_hook_configured(root: Path) -> bool:
-    try:
-        data = json.loads(_read(root / SETTINGS) or "{}")
-    except ValueError:
-        return False
-    hooks = data.get("hooks") if isinstance(data, dict) else None
-    return any(_is_own(h) for entries in (hooks or {}).values() if isinstance(entries, list)
-               for entry in entries if isinstance(entry, dict) for h in entry.get("hooks") or [])
 
 
 def check_repo(repo_root) -> dict:
@@ -354,13 +394,17 @@ def check_repo(repo_root) -> dict:
         deviations.append(f"Budget: {budget} immer geladene Zeilen, Grenze {BUDGET_LIMIT}")
     else:
         notes.append(f"Budget: {budget} von {BUDGET_LIMIT} immer geladenen Zeilen")
-    if _own_hook_configured(root):
-        if not (root / OWN_HOOK).is_file():
-            if not any(d.startswith(f"`{OWN_HOOK}`") for d in deviations):
-                deviations.append(f"`{OWN_HOOK}`: in `.claude/settings.json` eingetragen, Skript fehlt")
-        else:
-            ok, detail = _probe(root)
-            notes.append(f"Verifikations-Hook: {'Probe ok' if ok else 'ungeprüft'} — {detail}")
+    for own in sorted(_configured_hooks(root)):
+        if not (root / own).is_file() and not any(d.startswith(f"`{own}`") for d in deviations):
+            deviations.append(f"`{own}`: in `.claude/settings.json` eingetragen, Skript fehlt")
+    for ok, detail in _probes(root):
+        notes.append(f"Hook-Probe {'ok' if ok else 'ungeprüft'} — {detail}")
+    ledger = _read(root / LEDGER)
+    if ledger is not None:
+        first = next((line.strip() for line in ledger.splitlines() if line.strip()), "")
+        if not LEDGER_HEADER_RE.match(first):
+            deviations.append(f"`{LEDGER}`: Kopfzeile fehlt oder ist unbekannt — Bereichs-Hook und Zielregel "
+                              "lesen den Ledger dann nicht")
 
     status = "keine Abweichung" if not deviations else f"{len(deviations)} Abweichung(en)"
     lines = [_header(" --check"), "# setup-repo — check", "", f"Ergebnis: {status}", ""]

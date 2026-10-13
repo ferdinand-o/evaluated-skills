@@ -247,3 +247,41 @@ def test_check_flags_tampered_plan(tmp_path):
     plan.write_text(text[:start] + text[start:].replace("make check", "make chek", 1), encoding="utf-8")
     assert apply_mod.check_repo(repo)["ok"] is False
     assert "Hash passt nicht" in check_text(repo)
+
+
+# --- Ziele (Abschnitt C) -----------------------------------------------------------
+
+def test_apply_probes_goal_hook_without_touching_state(tmp_path):
+    repo = committed_repo(tmp_path, {"Makefile": "check:\n\ttrue\n"})
+    plan, _ = make_plan(repo, tmp_path / "cfg")
+    result = apply_mod.apply_plan(repo, plan)
+    assert result["ok"] is True and result["status"] == "angewendet und geprüft", report(repo)
+    assert "goal_scope.py" in report(repo) and "Probe" in report(repo)
+    assert not (repo / CACHE / "goal-scope.json").exists()
+    assert (repo / "docs/goals.md").is_file() and (repo / ".claude/rules/goals.md").is_file()
+
+
+def test_apply_merges_goal_hook_once(tmp_path):
+    foreign = {"type": "command", "command": "echo fremd"}
+    settings = {"hooks": {"UserPromptSubmit": [{"hooks": [foreign]}]}}
+    repo = committed_repo(tmp_path, {"Makefile": "check:\n\ttrue\n",
+                                     ".claude/settings.json": json.dumps(settings, indent=2) + "\n"})
+    for _ in range(2):
+        plan, _ = make_plan(repo, tmp_path / "cfg")
+        assert apply_mod.apply_plan(repo, plan)["ok"] is True, report(repo)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "eingerichtet")
+    hooks = json.loads((repo / ".claude/settings.json").read_text(encoding="utf-8"))["hooks"]
+    for event in ("UserPromptSubmit", "Stop"):
+        commands = [h["command"] for entry in hooks[event] for h in entry["hooks"]]
+        assert sum("goal_scope.py" in c for c in commands) == 1, event
+    assert hooks["UserPromptSubmit"][0]["hooks"][0] == foreign
+
+
+def test_check_reads_ledger_header(tmp_path):
+    repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n"})
+    assert apply_mod.check_repo(repo)["ok"] is True
+    ledger = repo / "docs/goals.md"
+    ledger.write_text("# Ziele ohne Kopfzeile\n", encoding="utf-8")
+    result = apply_mod.check_repo(repo)
+    assert any(d.startswith("`docs/goals.md`") and "Kopfzeile" in d for d in result["deviations"])

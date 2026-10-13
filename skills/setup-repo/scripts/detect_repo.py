@@ -23,7 +23,9 @@ from pathlib import Path
 META = {"skill": "setup-repo", "schema": 1, "generated": "python skills/setup-repo/scripts/detect_repo.py"}
 CACHE = Path(".skills") / "cache" / "setup-repo"
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".skills", "dist", "build",
-             ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "target", "__history"}
+             ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "target", "__history",
+             # Testdaten, nicht der Stack des Repos (auf cc-skills meldeten Eval-Fixtures TypeScript)
+             "fixtures", "__fixtures__", "testdata"}
 MAX_FILES = 20000
 LANG_BY_SUFFIX = {".py": "python", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript",
                   ".jsx": "javascript", ".mjs": "javascript", ".pas": "delphi", ".dpr": "delphi",

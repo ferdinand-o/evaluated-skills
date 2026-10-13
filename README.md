@@ -9,6 +9,7 @@ Persönliche Claude-Skills und ihre Spezifikationen.
 | `skills/` | die gebauten Skills (je ein Ordner mit `SKILL.md`) |
 | `specs/` | Spezifikationen, Spec 00 ist die gemeinsame Grundlage |
 | `evals/` | Eval-Definitionen und Fixtures |
+| `evals-templates/` | Vorlagen-Messungen außerhalb des Eval-Vertrags (laufen mit `--evals-dir evals-templates`) |
 | `evalkit/` | der geteilte Eval-Harness |
 | `docs/` | Konventionen und Pläne |
 | `.claude/skills/` | generierte Projekt-Kopien für die Arbeit an diesem Repo, nie von Hand ändern |
@@ -105,7 +106,7 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | UI: Stil und Tokens | ui-architect | enterprise-ui (Produktoberfläche), motion-landing (Bewegung) |
 | UI: Produktoberfläche, Tabellen, Formulare | enterprise-ui | ui-architect (Marketing/Brand) |
 | Landing-Page-Bewegung | motion-landing *(geplant)* | ui-architect (Stil/Tokens), enterprise-ui |
-| mobil kaputt, „geht das auf dem Handy?" | mobile-audit *(im Bau)* | enterprise-ui/ui-architect/motion-landing — die *bauen* mobil mit `references/mobile.md`, mobile-audit prueft nur |
+| mobil kaputt, „geht das auf dem Handy?" | mobile-audit | enterprise-ui/ui-architect/motion-landing — die *bauen* mobil mit `references/mobile.md`, mobile-audit prueft nur |
 | ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |

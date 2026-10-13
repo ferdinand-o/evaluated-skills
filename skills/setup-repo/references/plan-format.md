@@ -23,7 +23,7 @@ setup-user (Spec 21), nur relativ zur Repo-Wurzel statt zum Config-Verzeichnis.
 | `schema` | `1` |
 | `verification` | `command` (Text oder `null`), `source` (etwa `Makefile: check`), `derived` (`true` nur bei abgeleitetem Befehl, etwa aus einer `.dproj`) |
 | `candidates` | je Kandidat `id`, `text`, `source`, `checked_by`, `class` (`ableitbar`, `werkzeug`, `regel` oder `offen`), `paths` (Liste, leer für alle Dateien) |
-| `options` | `verify_hook` (Standard `false`), `deny_secrets` (Standard `false`) |
+| `options` | `verify_hook` (Standard `false`), `goal_hook` (Standard `true`, abwählbar mit `--without-goal-hook`), `deny_secrets` (Standard `false`) |
 | `plugins` | Objekt ID → `true`/`false` für `.claude/settings.local.json`; leer, wenn keine ID gefunden wurde |
 | `budget` | `lines` (immer geladene Zeilen nach apply) und `limit` (`150`) |
 | `operations` | Liste, je Eintrag `path` relativ zur Repo-Wurzel, `action` und je nach Aktion `content`, `patch` oder `lines` |
@@ -39,6 +39,12 @@ Aktionen:
   ein Objekt nach den Mischregeln unten.
 - `copy` — Laufzeitskript aus `assets/runtime/` nach `.claude/hooks/`; `content` ist der
   Dateiinhalt, damit der Hash ihn deckt.
+
+Ziele (`references/goals.md`): `docs/goals.md` als `create` aus `assets/goals.md`, nur wenn
+die Datei fehlt — ein vorhandener Ledger wird nie angefasst; `.claude/rules/goals.md` als
+`create` aus `assets/rules/goals.md` oder, wenn vorhanden, gar nicht; mit `goal_hook`
+dazu `.claude/hooks/goal_scope.py` als `copy` und beide Ereignisse aus
+`assets/hooks/goal-scope.json` im Patch für `.claude/settings.json`.
 - `gitignore` — `lines` sind die Zeilen, die in `.gitignore` noch fehlen; `/x` und `x`
   gelten als dieselbe Zeile. `apply` hängt an, was dann noch fehlt.
 
@@ -46,8 +52,8 @@ Aktionen:
 
 - `.claude/settings.json`: `permissions.allow` und `permissions.deny` werden als Listen
   vereinigt, Reihenfolge des Bestands zuerst. Unter `hooks.<Ereignis>` wird der eigene
-  Eintrag am Suffix `.claude/hooks/verify_stop.py` im Kommando erkannt und ersetzt, sonst
-  angehängt; fremde Einträge bleiben. Alle anderen Schlüssel fasst `apply` nicht an,
+  Eintrag am Suffix `.claude/hooks/verify_stop.py` oder `.claude/hooks/goal_scope.py` im
+  Kommando erkannt und ersetzt, sonst angehängt; fremde Einträge bleiben. Alle anderen Schlüssel fasst `apply` nicht an,
   auch `enabledPlugins` nicht.
 - `.claude/settings.local.json`: nur `enabledPlugins`, je ID gesetzt; alles andere bleibt.
 - Schreibformat: Einrückung 2, ohne ASCII-Escapes, Schlüsselreihenfolge des Bestands, LF,

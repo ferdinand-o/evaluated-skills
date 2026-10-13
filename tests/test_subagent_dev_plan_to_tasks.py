@@ -1185,3 +1185,32 @@ def test_lint_out_json_carries_meta(tmp_path, capsys):
     assert ptt.main(["lint", str(plan), "--out", str(out)]) == 0
     meta = json.loads(out.read_text(encoding="utf-8"))["_meta"]
     assert meta["skill"] == "subagent-dev" and meta["schema"] == 1 and "lint" in meta["generated"]
+
+
+# --- Fix: -z für Pfade mit Nicht-ASCII und Leerzeichen (known-limits, Spec 20/21) ---
+
+def test_check_allowlist_reads_non_ascii_and_space_paths_without_quoting(tmp_path):
+    """Ohne -z setzt git solche Pfade in Anführungszeichen und escapt Nicht-ASCII
+    (core.quotepath); dann passt `specs/Spec 00 – x.md` auf keinen Allowlist-Eintrag.
+    Geprüft ohne jede Git-Konfiguration für quotepath."""
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "Spec 00 – grün.md").write_text("a\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "base")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+    (tmp_path / "specs" / "Spec 00 – grün.md").write_text("b\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "change")
+    (tmp_path / "docs" / "neu ordner").mkdir(parents=True)
+    (tmp_path / "docs" / "neu ordner" / "Übersicht.md").write_text("c\n", encoding="utf-8")
+    git(tmp_path, "mv", "specs/Spec 00 – grün.md", "specs/Spec 01 – grün.md")
+
+    allow = ["specs/Spec 00 – grün.md", "specs/Spec 01 – grün.md", "docs/neu ordner/Übersicht.md"]
+    assert ptt.check_allowlist(tmp_path, base, allow) == []
+    assert ptt.check_allowlist(tmp_path, base, ["specs/Spec 00 – grün.md", "specs/Spec 01 – grün.md"]) == \
+        ["docs/neu ordner/Übersicht.md"]
