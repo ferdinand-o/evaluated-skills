@@ -177,7 +177,7 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `token:anti-ceremony-doc-typo-runs-no-cycle`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt** — `## test-first`: Rot heißt Exit ≠ 0 (fehlendes
+- [x] **Step 1: Abschnitt** — `## test-first`: Rot heißt Exit ≠ 0 (fehlendes
       Runner-Modul zählt als Rot); Einschränkung auf einen Test nur für pytest geprüft;
       Windows-Shell `cmd.exe`; Auslösen ohne Plan und Listing in `cc-dev` ungemessen;
       Log nicht committet und nicht regenerierbar; keine Projekt-Kopie. Commit.
@@ -191,7 +191,7 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `token:anti-ceremony-doc-typo-runs-no-cycle`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe mit `claude -p` mit
+- [x] **Step 1: Report** — was entstanden ist, Testzahl, Eval-Läufe mit `claude -p` mit
       und ohne Skill, die Evals von testing-strategy nach der Description-Änderung
       erneut (`evals_due`), und „Was nicht gemessen wurde". `lint_skill.py
       skills/test-first` ganz sauber. Commit.
