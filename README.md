@@ -26,7 +26,7 @@ und Plugin zusammen:
 - `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
   architecture-map, debug-ledger, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, setup-repo, setup-user, sql-schema-architect,
-  subagent-dev, testing-strategy, work-plan. setup-user und setup-repo laufen nur als
+  subagent-dev, test-first, testing-strategy, work-plan. setup-user und setup-repo laufen nur als
   `/cc-dev:setup-user` und `/cc-dev:setup-repo`.
 - `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
   aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
@@ -100,7 +100,8 @@ nicht gebaut — die Matrix beschreibt den Zielzustand.
 | --- | --- | --- |
 | neues Feature, Codebase existiert | feature-spec | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), work-plan (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger | feature-spec |
-| Testplan, Repo-Typ-Frage | testing-strategy | test-driven-development (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
+| Testplan, Repo-Typ-Frage | testing-strategy | test-first (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
+| neues Verhalten implementieren, Regressionstest nach der Diagnose | test-first | testing-strategy (welche Tests fehlen), debug-ledger (Diagnose davor), superpowers:test-driven-development (Doktrin ohne Beleg) |
 | Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
 | UI: Stil und Tokens | ui-architect | enterprise-ui (Produktoberfläche), motion-landing (Bewegung) |

@@ -112,5 +112,7 @@ Fragment bewusst in seine `settings.json`. Ohne Hook bleibt es bei G2.
   füttert. Bei echtem Doppel-Trigger gewinnt die spezifischere, artefaktbasierte
   Beschreibung dieser Skill für Anfragen, die einen Bug/Testfehler benennen.
 - **`feature-spec`** — neues Feature, keine Fehlersuche. Nicht diese Skill.
+- **`test-first`** — der Regressionstest nach der Diagnose: rot vor dem Fix, grün
+  danach, belegt im Log. Diese Skill findet die Ursache; test-first hält den Fix fest.
 - Ohne Git-Repo funktioniert das Ledger trotzdem (reine Dateien unter
   `docs/debugging/`); nur `bisect_run.py` braucht Git.

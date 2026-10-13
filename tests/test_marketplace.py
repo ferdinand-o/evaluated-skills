@@ -252,15 +252,21 @@ def test_check_exit_codes(tmp_path, sync_mod, monkeypatch):
     assert sync_mod.main(["--check", "--repo", str(tmp_path)]) == 0
 
 
-ROUTING_TARGETS = ("superpowers:writing-plans", "superpowers:subagent-driven-development")
+ROUTING_TARGETS = ("superpowers:writing-plans", "superpowers:subagent-driven-development",
+                   "test-driven-development")
 # Herkunft, kein Routing-Ziel (Spec 23, „Bewusst bleiben").
-ROUTING_TARGET_ALLOWED = {"skills/impl-plan/references/reviewer-prompt.md"}
+ROUTING_TARGET_ALLOWED = {
+    "skills/impl-plan/references/reviewer-prompt.md",
+    # test-first grenzt sich gegen die TDD-Skill von superpowers ab, die es ersetzt (Spec 24).
+    "skills/test-first/SKILL.md",
+}
 
 
 def test_no_superpowers_routing_targets():
-    """Spec 23: Keine Description eines aktiven Plugins verweist auf superpowers, und
-    unter skills/ zeigt nichts mehr auf writing-plans oder subagent-driven-development
-    — work-plan und das eingebaute Agent-Werkzeug sind die Ziele."""
+    """Spec 23 und 24: Keine Description eines aktiven Plugins verweist auf superpowers,
+    und unter skills/ zeigt nichts mehr auf writing-plans, subagent-driven-development
+    oder test-driven-development — work-plan, das eingebaute Agent-Werkzeug und
+    test-first sind die Ziele."""
     sync = load_script("scripts/sync_skills.py")
     report = sync.superpowers_report(REPO_ROOT)
     assert sum(n for skills in report.values() for n in skills.values()) == 0, report

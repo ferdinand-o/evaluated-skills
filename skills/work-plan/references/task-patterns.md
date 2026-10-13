@@ -7,7 +7,8 @@ Repo braucht.
 
 ## Code-Task
 
-Für alles, was ein Test prüfen kann. Fünf Steps, weil der Zyklus fünf Zustände hat.
+Für alles, was ein Test prüfen kann. Fünf Steps, weil der Zyklus fünf Zustände hat;
+Rot und Grün laufen über test-first, das sie mit Befehl und Exit-Code belegt.
 
 ````markdown
 ### Task 1: CSV hat Kopfzeile

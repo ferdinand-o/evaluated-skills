@@ -81,7 +81,8 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | --- | --- | --- |
 | neues Feature, Codebase existiert | feature-spec (03) | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), work-plan (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger (01) | feature-spec |
-| Testplan, Repo-Typ-Frage | testing-strategy (05) | test-driven-development (Zyklus *während* der Implementierung) |
+| Testplan, Repo-Typ-Frage | testing-strategy (05) | test-first (24, Zyklus *während* der Implementierung) |
+| neues Verhalten implementieren, Regressionstest nach der Diagnose | test-first (24) | testing-strategy (05) (welche Tests fehlen), debug-ledger (01) (Diagnose davor), superpowers:test-driven-development (Doktrin ohne Beleg) |
 | Diff prüfen | `/code-review` (mitgeliefert) | Spec 04 — nur noch als Kontextpaket-Lieferant, siehe unten |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
 | Landing-Page-Bewegung | motion-landing (06) | ui-architect (Stil/Tokens), enterprise-ui (Produktoberfläche) |

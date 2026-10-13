@@ -1,6 +1,6 @@
 ---
 name: testing-strategy
-description: Use when planning how to test a repository or a change before any test is written — classifying the repo type, choosing test layers with a reason, deciding what deliberately stays untested, and scoping even a single new test for code that already exists ("I added a function, need a test for it"). Triggers include "Testplan", "Teststrategie", "wie teste ich das", "welche Tests brauche ich", "Testpyramide", "ich hab eine Funktion ergänzt, brauche einen Test", questions about repo type for testing purposes. Not for the red-green-refactor loop of writing a failing test and then the code to pass it during active implementation (use test-driven-development) and not for generating test stubs from Given/When/Then acceptance criteria (use feature-spec once built — testing-strategy implements the stubs feature-spec exports, it never generates them itself).
+description: Use when planning how to test a repository or a change before any test is written — classifying the repo type, choosing test layers with a reason, deciding what deliberately stays untested, and scoping even a single new test for code that already exists ("I added a function, need a test for it"). Triggers include "Testplan", "Teststrategie", "wie teste ich das", "welche Tests brauche ich", "Testpyramide", "ich hab eine Funktion ergänzt, brauche einen Test", questions about repo type for testing purposes. Not for the red-green-refactor loop of writing a failing test and then the code to pass it during active implementation (use test-first) and not for generating test stubs from Given/When/Then acceptance criteria (use feature-spec once built — testing-strategy implements the stubs feature-spec exports, it never generates them itself).
 ---
 
 # testing-strategy — Kern plus Adapter
@@ -125,8 +125,8 @@ schon Teil der Python-Stdlib ist.
 
 ## Abgrenzung
 
-- **test-driven-development** — der Rot-Grün-Refactor-Zyklus *während* der
-  Implementierung eines einzelnen, bereits geplanten Tests. Diese Skill plant
+- **test-first** — der Rot-Grün-Refactor-Zyklus *während* der
+  Implementierung eines einzelnen, bereits geplanten Tests, mit Beleg im Log. Diese Skill plant
   *davor*: welche Schichten, welcher Repo-Typ, was bewusst ausgelassen wird.
 - **feature-spec** *(geplant)* — erzeugt Test-Stubs aus Given/When/Then.
   `testing-strategy` implementiert diese Stubs aus, erzeugt sie nie selbst.

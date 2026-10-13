@@ -32,6 +32,7 @@
         "./skills/setup-user",
         "./skills/sql-schema-architect",
         "./skills/subagent-dev",
+        "./skills/test-first",
         "./skills/testing-strategy",
         "./skills/work-plan"
       ]
