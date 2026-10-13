@@ -1,0 +1,235 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "kuratiert von Hand — siehe skills/verified-research/references/rating-rubric.md"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "docs.python.org",
+        "name": "Python-Dokumentation (offiziell)",
+        "tier": 1,
+        "notiz": "Primärquelle des Sprach-Maintainers, keine Drittinterpretation."
+      },
+      {
+        "pattern": "datatracker.ietf.org",
+        "name": "IETF RFCs",
+        "tier": 1,
+        "notiz": "Primärquelle für Internet-Standards, Track Record seit Jahrzehnten stabil."
+      },
+      {
+        "pattern": "www.w3.org",
+        "name": "W3C-Spezifikationen",
+        "tier": 1,
+        "notiz": "Primärquelle für Web-Standards, redaktionelle Standards durch Working-Group-Prozess."
+      },
+      {
+        "pattern": "github.com",
+        "name": "GitHub Releases/Changelogs des jeweiligen Projekts",
+        "tier": 1,
+        "notiz": "Direkter Herausgeber-Kanal des Projekts, Primärquelle für Versionsstände — nur die Release-Seite selbst, nicht Issues/Kommentare."
+      },
+      {
+        "pattern": "developer.mozilla.org",
+        "name": "MDN Web Docs",
+        "tier": 2,
+        "notiz": "Community-kuratierte, redaktionell gepflegte Referenz mit Review-Prozess, aber kein Standardtext selbst — Sekundärquelle mit hohem Track Record."
+      },
+      {
+        "pattern": "stackoverflow.com",
+        "name": "Stack Overflow",
+        "tier": 3,
+        "notiz": "Community-Antworten ohne redaktionelle Prüfung, hohe Varianz in Aktualität und Korrektheit."
+      },
+      {
+        "pattern": "medium.com",
+        "name": "Medium (offene Publishing-Plattform)",
+        "tier": 3,
+        "notiz": "Kein einheitlicher redaktioneller Standard, Autoren-Anreizlage variiert stark (Reichweite, Werbung)."
+      },
+      {
+        "pattern": "dev.to",
+        "name": "dev.to",
+        "tier": 3,
+        "notiz": "Offene Blogging-Plattform ohne redaktionelle Prüfung, wie Medium."
+      }
+    ],
+    "recht-steuern-de-eu": [
+      {
+        "pattern": "www.gesetze-im-internet.de",
+        "name": "gesetze-im-internet.de (BMJ)",
+        "tier": 1,
+        "notiz": "Amtlicher Volltext geltenden Bundesrechts, herausgegeben vom Bundesministerium der Justiz — Primärquelle."
+      },
+      {
+        "pattern": "eur-lex.europa.eu",
+        "name": "EUR-Lex",
+        "tier": 1,
+        "notiz": "Amtsblatt der EU, Primärquelle für EU-Rechtsakte und konsolidierte Fassungen."
+      },
+      {
+        "pattern": "www.bundesfinanzministerium.de",
+        "name": "BMF-Schreiben",
+        "tier": 1,
+        "notiz": "Primärquelle für die Verwaltungsauffassung der Finanzverwaltung, direkt vom Herausgeber."
+      },
+      {
+        "pattern": "curia.europa.eu",
+        "name": "EuGH-Urteilsdatenbank",
+        "tier": 1,
+        "notiz": "Primärquelle für Gerichtsentscheidungen, amtliche Volltexte."
+      },
+      {
+        "pattern": "haufe.de",
+        "name": "Haufe (Fachverlag)",
+        "tier": 2,
+        "notiz": "Etablierter Fachverlag mit redaktionellem Standard und Track Record, aber Sekundärkommentar zur Rechtslage."
+      },
+      {
+        "pattern": "anwalt.de",
+        "name": "Kanzlei-Ratgeberseiten (generisch)",
+        "tier": 3,
+        "notiz": "Marketing-getriebene Zusammenfassungen, Anreizlage Mandantenakquise, Aktualität nicht verlässlich datiert."
+      }
+    ],
+    "wissenschaft": [
+      {
+        "pattern": "arxiv.org",
+        "name": "arXiv (Preprints)",
+        "tier": 1,
+        "notiz": "Primärquelle für die Autoren-Aussage selbst, aber kein Peer-Review — als Beleg für 'Autoren X behaupten Y', nicht für bereits geprüfte Wahrheit."
+      },
+      {
+        "pattern": "pubmed.ncbi.nlm.nih.gov",
+        "name": "PubMed",
+        "tier": 1,
+        "notiz": "Indexdienst für peer-reviewte Fachliteratur, führt direkt zur Primärpublikation."
+      },
+      {
+        "pattern": "doi.org",
+        "name": "DOI-Resolver",
+        "tier": 1,
+        "notiz": "Löst zur Originalpublikation auf — Primärquelle per Definition des Verweisziels."
+      },
+      {
+        "pattern": "www.nature.com",
+        "name": "Nature",
+        "tier": 1,
+        "notiz": "Peer-reviewte Erstveröffentlichung, hoher redaktioneller Standard und Track Record."
+      },
+      {
+        "pattern": "www.science.org",
+        "name": "Science",
+        "tier": 1,
+        "notiz": "Peer-reviewte Erstveröffentlichung, wie Nature."
+      },
+      {
+        "pattern": "www.semanticscholar.org",
+        "name": "Semantic Scholar",
+        "tier": 2,
+        "notiz": "Aggregations- und Suchdienst, verlässlicher Wegweiser zur Primärquelle, aber selbst keine Primärquelle."
+      },
+      {
+        "pattern": "www.researchgate.net",
+        "name": "ResearchGate",
+        "tier": 3,
+        "notiz": "Nutzer-Uploads ohne Prüfung, ob Preprint- oder Peer-Review-Version — Aktualität/Version unklar."
+      }
+    ],
+    "wirtschaft-statistik": [
+      {
+        "pattern": "www.destatis.de",
+        "name": "Statistisches Bundesamt (Destatis)",
+        "tier": 1,
+        "notiz": "Amtliche Primärstatistik, gesetzlicher Auftrag zur neutralen Erhebung."
+      },
+      {
+        "pattern": "ec.europa.eu/eurostat",
+        "name": "Eurostat",
+        "tier": 1,
+        "notiz": "Amtliche EU-Statistikbehörde, Primärquelle für EU-weite Kennzahlen."
+      },
+      {
+        "pattern": "www.bundesbank.de",
+        "name": "Deutsche Bundesbank",
+        "tier": 1,
+        "notiz": "Primärquelle für deutsche Geld- und Finanzstatistik, gesetzlicher Auftrag."
+      },
+      {
+        "pattern": "www.ecb.europa.eu",
+        "name": "Europäische Zentralbank",
+        "tier": 1,
+        "notiz": "Primärquelle für Euroraum-Geldpolitik und -statistik."
+      },
+      {
+        "pattern": "ir.",
+        "name": "Investor-Relations-Seiten (Muster ir.<firma>.*)",
+        "tier": 1,
+        "notiz": "Primärquelle für Unternehmenszahlen selbst, aber Anreizlage beachten: Darstellung ist unternehmensgesteuert, keine unabhängige Prüfung der Einordnung."
+      },
+      {
+        "pattern": "www.handelsblatt.com",
+        "name": "Handelsblatt",
+        "tier": 2,
+        "notiz": "Etablierte Wirtschaftsredaktion mit Track Record und redaktionellem Standard, aber Sekundärbericht über die Primärzahlen."
+      },
+      {
+        "pattern": "www.finanzen.net",
+        "name": "finanzen.net (Marktdaten-Aggregator)",
+        "tier": 3,
+        "notiz": "Aggregiert Drittdaten ohne eigene redaktionelle Prüfung der Ursprungsquelle."
+      }
+    ]
+  },
+  "allgemein": [
+    {
+      "pattern": "www.reuters.com",
+      "name": "Reuters",
+      "tier": 2,
+      "notiz": "Internationale Nachrichtenagentur mit redaktionellem Standard, bei Erstberichterstattung teils selbst Primärquelle für das Ereignis."
+    },
+    {
+      "pattern": "www.tagesschau.de",
+      "name": "Tagesschau",
+      "tier": 2,
+      "notiz": "Öffentlich-rechtliche Redaktion mit langem Track Record und redaktionellen Standards."
+    },
+    {
+      "pattern": "www.heise.de",
+      "name": "heise online",
+      "tier": 2,
+      "notiz": "Fachredaktion mit langem Track Record, im IT-Bereich etablierter redaktioneller Standard."
+    },
+    {
+      "pattern": "t3n.de",
+      "name": "t3n",
+      "tier": 3,
+      "notiz": "Verlagsangebot mit Mischung aus Redaktion und Sponsored Content — im Zweifel Primärquelle separat verifizieren."
+    },
+    {
+      "pattern": "de.wikipedia.org",
+      "name": "Wikipedia (deutsch)",
+      "tier": 3,
+      "notiz": "Guter Einstiegspunkt, aber kein Beleg selbst — Fußnoten zur zitierten Primärquelle durchverfolgen, nie direkt zitieren."
+    },
+    {
+      "pattern": "en.wikipedia.org",
+      "name": "Wikipedia (englisch)",
+      "tier": 3,
+      "notiz": "Wie de.wikipedia.org — Einstieg, kein Beleg."
+    },
+    {
+      "pattern": "www.forbes.com/sites",
+      "name": "Forbes Contributor-Netzwerk",
+      "tier": 3,
+      "notiz": "Contributor-Beiträge durchlaufen nicht dieselbe redaktionelle Prüfung wie die Forbes-Kernredaktion — Anreizlage der einzelnen Autoren unbekannt."
+    },
+    {
+      "pattern": "-vergleich.de",
+      "name": "Vergleichsportale (generisches Muster *-vergleich.de)",
+      "tier": 3,
+      "notiz": "Anreizlage Affiliate-Provisionen, Aktualität und Auswahlkriterien der verglichenen Angebote meist intransparent."
+    }
+  ]
+}

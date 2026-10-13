@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Wie sr-planned nach apply_repo.py: CLAUDE.md, .claude/settings.json und .gitignore aus dem Plan, der Plan liegt noch im Cache, kein apply.md; keine offenen Kandidaten."
+}

@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Leerer Workspace mit Projekt-Override-Verzeichnis für exercise-forge (.skills/verified-research/research/ existiert bereits, damit die Skill projektlokal statt in $HOME schreibt). Anti-Zeremonie-Fall: eine Ein-Karten-Anfrage darf kein Kartenset erzeugen."
+}

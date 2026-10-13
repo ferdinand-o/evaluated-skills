@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Zwei Skills, nur listed-x steht in der skills-Liste des einen Plugins; orphan-x steht in keiner Liste und nicht in excluded.json. specs/ ist der Repo-Marker, damit lint_skill.py die Wurzel findet. git: true, damit file_unchanged einen Basisstand hat."
+}

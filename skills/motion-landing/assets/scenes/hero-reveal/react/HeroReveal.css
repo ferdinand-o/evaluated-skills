@@ -1,0 +1,63 @@
+.hero-reveal {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 8vw;
+  background: var(--motion-bg, #0b0d12);
+  color: var(--motion-fg, #f4f5f7);
+}
+
+.hero-reveal__title,
+.hero-reveal__subtitle,
+.hero-reveal__cta {
+  /* Endzustand steht schon im Layout-Fluss — nur opacity/transform werden
+     animiert, nie Höhe oder Position (siehe Vanilla-Demo für die Begründung). */
+  opacity: 0;
+  transform: translateY(16px);
+  animation: hero-reveal-reveal 640ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.hero-reveal__title {
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  margin: 0;
+  animation-delay: 80ms;
+}
+
+.hero-reveal__subtitle {
+  font-size: clamp(1rem, 1.6vw, 1.25rem);
+  color: var(--motion-muted, #a3a9b7);
+  max-width: 40ch;
+  margin: 0;
+  animation-delay: 220ms;
+}
+
+.hero-reveal__cta {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 999px;
+  background: var(--motion-accent, #6ee7b7);
+  color: #06251a;
+  font-weight: 600;
+  text-decoration: none;
+  animation-delay: 360ms;
+}
+
+@keyframes hero-reveal-reveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-reveal__title,
+  .hero-reveal__subtitle,
+  .hero-reveal__cta {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

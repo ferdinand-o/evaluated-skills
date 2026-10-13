@@ -1,0 +1,20 @@
+{
+  "_meta": {"skill": "exercise-forge", "schema": 1, "generated": "von Hand für den Zu-enge-Kriterien-Eval angelegt"},
+  "topic": "python-basics",
+  "exercises": [
+    {
+      "id": "open-01",
+      "type": "open_question",
+      "learning_objective": "Unterschied zwischen Liste und Tupel in Python erklären",
+      "bloom_level": "verstehen",
+      "difficulty": {"steps": 1, "prerequisites": ["Python-Datentypen"], "transfer": "near", "label": "leicht"},
+      "stem": "Was ist der Unterschied zwischen einer Liste und einem Tupel in Python?",
+      "model_solution": "Listen sind veränderbar (mutable), Tupel sind unveränderlich (immutable). Tupel eignen sich z. B. für feste Koordinaten wie (x, y).",
+      "criteria": [
+        "Nennt wörtlich den englischen Begriff 'immutable' für Tupel",
+        "Nennt Koordinaten als Anwendungsbeispiel für Tupel"
+      ],
+      "verification": {"method": "not_run", "detail": "Blind-Gate noch nicht gelaufen", "checked_at": null, "protocol": null}
+    }
+  ]
+}

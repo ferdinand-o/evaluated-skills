@@ -1,0 +1,3 @@
+{
+ "description": "Zwei Hover-Regeln: ein echtes Flyout ohne Touch-Pfad (Verstoss) und ein reiner Hover-Stil auf .badge (kein Verstoss). Prueft die Abgrenzung, nicht nur das Finden."
+}

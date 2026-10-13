@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python3 >/dev/null 2>&1 && exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/verify_stop.py\" || exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/verify_stop.py\"",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}

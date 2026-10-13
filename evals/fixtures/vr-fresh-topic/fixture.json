@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Einfachste Anfrage ohne existierende Wissensdatei — prüft den Wissensdatei-Update-Contract (Kopfzeile, Pfad, Tier-Tag) auch am Minimalfall."
+}

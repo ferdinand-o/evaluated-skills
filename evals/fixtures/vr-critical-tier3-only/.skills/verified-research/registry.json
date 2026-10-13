@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "skill": "verified-research",
+    "schema": 1,
+    "generated": "Fixture-Baseline für Eval critical-claim-tier3-only-flagged — enthält absichtlich keinen Treffer für sources/blog-aggregator.md"
+  },
+  "domains": {
+    "software-tech": [
+      {
+        "pattern": "docs.python.org",
+        "name": "Python-Dokumentation (offiziell)",
+        "tier": 1,
+        "notiz": "Primärquelle, offizielle Sprachdokumentation — themenfremd zu diesem Fixture-Fall."
+      }
+    ]
+  },
+  "allgemein": []
+}

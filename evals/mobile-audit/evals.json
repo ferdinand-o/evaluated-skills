@@ -1,0 +1,184 @@
+{
+  "evals": [
+    {
+      "id": "vh-trap-measured-and-named",
+      "class": "contract",
+      "fixture": "mobile-vh-trap",
+      "prompt": "Funktioniert diese Seite auf dem Handy? Prüf sie und sag mir, was kaputt ist.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\"viewport-units\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"file\":\\s*\"app\\.css\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"evidence\":\\s*\"gemessen\""
+        },
+        {
+          "type": "output_matches",
+          "pattern": "(?i)dvh|svh"
+        }
+      ],
+      "must_not": [],
+      "notes": "Der Klassiker: 100vh plus fixierte Fussleiste. Der Befund muss aus dem Skript kommen, nicht aus dem Gedaechtnis — deshalb haengt die Assertion am erzeugten Bericht mit Datei-Fundstelle, nicht an der Formulierung. Das Rezept (dvh/svh) muss in der Antwort auftauchen: ein Befund ohne Fix ist eine Beschwerde."
+    },
+    {
+      "id": "zoom-lock-is-a-finding-not-a-preference",
+      "class": "contract",
+      "fixture": "mobile-zoom-lock",
+      "prompt": "Kurzer Mobil-Check dieser Seite bitte.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\"zoom-lock\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "user-scalable"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "(?i)zoom"
+        }
+      ],
+      "must_not": [],
+      "notes": "Zoom-Sperren werden oft als bewusste Designentscheidung verteidigt. Sie sind ein Zugaenglichkeitsdefekt (WCAG 1.4.4) und muessen als Befund erscheinen, nicht als Geschmacksfrage."
+    },
+    {
+      "id": "input-font-size-below-ios-threshold",
+      "class": "contract",
+      "fixture": "mobile-input-zoom",
+      "prompt": "Prüf das mal mobil.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\"input-font-size\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"measured\":\\s*\"14px\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"threshold\":\\s*\"16px\""
+        }
+      ],
+      "must_not": [],
+      "notes": "Der Defekt ist unsichtbar, solange niemand tippt — genau deshalb faellt er beim Draufschauen nie auf und braucht die Messung. Messwert und Grenzwert stehen beide im Bericht, damit der Befund nachrechenbar ist."
+    },
+    {
+      "id": "hover-discrimination-flyout-yes-badge-no",
+      "class": "contract",
+      "fixture": "mobile-hover-mixed",
+      "prompt": "Ist diese Navigation auf dem Handy bedienbar?",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\"hover-only\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "flyout"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "badge"
+        }
+      ],
+      "notes": "Der wichtigste Eval dieser Skill: Er prueft die Abgrenzung, nicht das Finden. Das Flyout ist ein Verstoss (Sichtbarkeit haengt allein an :hover), der .badge-Hover ist ein reiner Stil und darf nicht im Bericht stehen. Ein Check, der jeden :hover meldet, waere die Fehlalarm-Maschine, die gate.py in Spec 07 gekostet hat — dieses must_not haelt genau das fest."
+    },
+    {
+      "id": "anti-ceremony-clean-view-stays-a-short-green-report",
+      "class": "contract",
+      "fixture": "mobile-clean",
+      "prompt": "Schau dir das mobil an.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"status\":\\s*\"sauber\""
+        },
+        {
+          "type": "file_max_lines",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "max_lines": 30
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\""
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 Paragraph 2. Eine saubere Seite darf keine Befunde erzeugen — weder erfundene noch als 'Hinweis' getarnte. 30 Zeilen lassen den leeren Bericht mit beiden Stufen-Bloecken zu, keine Befundliste. Das must_not trifft nur Befund-Eintraege ('\"check\":'), nicht die Liste der gelaufenen Pruefungen ('\"checks\":')."
+    },
+    {
+      "id": "stage-one-never-speaks-for-stage-two",
+      "class": "contract",
+      "fixture": "mobile-vh-trap",
+      "prompt": "Prüf die Seite mobil. Die Seite liegt als index.html im Projektverzeichnis.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/mobile-audit-static.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"check\":\\s*\"viewport-units\""
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"stage_2\"[\\s\\S]{0,80}\"status\":\\s*\"ungeprüft\""
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/mobile-audit-static.json",
+          "pattern": "\"stage_2\"[\\s\\S]{0,80}\"status\":\\s*\"geprüft\""
+        }
+      ],
+      "notes": "Gate-Ehrlichkeit nach Spec 00 Paragraph 4 in der umgebungsunabhaengigen Form: Der Bericht der Stufe 1 fuehrt stage_2 immer als 'ungeprueft', egal ob die Matrix daneben lief oder nicht — eine Stufe spricht nie fuer eine andere. Vorgaenger-Fassung war 'stage-two-degrades-without-claiming-success' und pruefte per output_matches, dass der Agent die fehlende Toolchain benennt. Sie fiel im ersten echten Lauf durch, und zwar zu Recht am Eval: Der Agent fand einen Interpreter mit Playwright, fuhr die Matrix vollstaendig (drei Profile, zwei echte safe-area-Befunde) und hatte schlicht nichts zu degradieren. Der Eval hatte eine Umgebungsannahme einbetoniert, die eine Playwright-Installation ungueltig macht. Das echte Degradationsverhalten prueft tests/test_mobile_audit_devices.py::test_report_without_toolchain_is_ungeprueft_never_green, weil ein Unit-Test die fehlende Toolchain injizieren kann und ein Eval nicht."
+    }
+  ]
+}

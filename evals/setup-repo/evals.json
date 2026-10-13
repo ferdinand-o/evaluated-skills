@@ -1,0 +1,187 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-check-on-aligned-repo-changes-nothing",
+      "class": "contract",
+      "fixture": "sr-aligned",
+      "prompt": "/setup-repo check",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/setup-repo/check.md"
+        },
+        {
+          "type": "artifact_header",
+          "path": ".skills/cache/setup-repo/check.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/check.md",
+          "pattern": "keine Abweichung"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "CLAUDE.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude/settings.json"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude/rules/goals.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": ".claude/hooks/goal_scope.py"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "docs/goals.md"
+        },
+        {
+          "type": "file_absent",
+          "path": ".skills/cache/setup-repo/apply.md"
+        },
+        {
+          "type": "git_head_unchanged"
+        }
+      ],
+      "must_not": [],
+      "notes": "Anti-Zeremonie: ein schon eingerichtetes Repo bleibt unberührt. Diskriminator: check.md mit Kopfzeile schreibt nur apply_repo.py --check; ein Agent ohne Skill schreibt keinen Bericht dieses Namens oder richtet neu ein. Die Fixture hat keine offenen Kandidaten, damit die Klassen des letzten Plans genügen. Seit Abschnitt C trägt die Fixture Zielregel, Ledger und Bereichs-Hook; auch sie bleiben unberührt."
+    },
+    {
+      "id": "plan-from-repo-writes-only-report",
+      "class": "contract",
+      "fixture": "sr-fresh",
+      "prompt": "/setup-repo",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/setup-repo/plan.md"
+        },
+        {
+          "type": "file_exists",
+          "path": ".skills/cache/setup-repo/detect.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/plan.md",
+          "pattern": "setup-repo-plan"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/plan.md",
+          "pattern": "Verifikation:.*make check"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/plan.md",
+          "pattern": "(?i)line.?length.{0,120}Werkzeug"
+        },
+        {
+          "type": "file_absent",
+          "path": "CLAUDE.md"
+        },
+        {
+          "type": "file_absent",
+          "path": ".claude/settings.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "plan ist der Default und schreibt nur in den Cache. Diskriminator: den Block setup-repo-plan und detect.json schreiben nur die Skripte; die Fixture trägt line-length = 100 unter [tool.ruff], und nur die Klassifikation der Skill schreibt „Werkzeug“ in die Kandidatenzeile. Ein Agent ohne Skill schreibt eher gleich eine CLAUDE.md."
+    },
+    {
+      "id": "plan-without-tests-says-unverified",
+      "class": "contract",
+      "fixture": "sr-notests",
+      "prompt": "/setup-repo",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/plan.md",
+          "pattern": "Verifikation: keine"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/plan.md",
+          "pattern": "setup-repo-plan"
+        }
+      ],
+      "must_not": [],
+      "notes": "Ein Repo ohne Runner und Tests bekommt keinen erfundenen Testbefehl. Diskriminator: ohne Skill kein Plan mit Block; mit Skill der Wortlaut der Doktrin „Verifikation: keine — ungeprüft“ statt eines geratenen pytest."
+    },
+    {
+      "id": "apply-executes-plan-faithfully",
+      "class": "contract",
+      "fixture": "sr-planned",
+      "prompt": "/setup-repo apply — den Plan in .skills/cache/setup-repo/plan.md habe ich gelesen und bestätige ihn",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "CLAUDE.md",
+          "pattern": "Verifikation:.*make check"
+        },
+        {
+          "type": "file_max_lines",
+          "path": "CLAUDE.md",
+          "max_lines": 125
+        },
+        {
+          "type": "file_matches",
+          "path": ".claude/settings.json",
+          "pattern": "make check"
+        },
+        {
+          "type": "file_matches",
+          "path": ".claude/settings.json",
+          "pattern": "goal_scope"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/apply.md",
+          "pattern": "angewendet"
+        },
+        {
+          "type": "file_matches",
+          "path": ".gitignore",
+          "pattern": "settings\\.local\\.json"
+        },
+        {
+          "type": "git_head_unchanged"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_matches",
+          "path": "CLAUDE.md",
+          "pattern": "(?i)line.?length|100 Zeichen"
+        }
+      ],
+      "notes": "apply setzt den versionierten Plan treu um und committet nicht. Diskriminator: apply.md schreibt nur apply_repo.py; gemessen wird die Treue zum Plan, nicht die Klassifikation (die messen Eval 2 und 3). Das Budget 125 ist 150 minus die 25 Zeilen der Zielregel aus Abschnitt C; goal_scope im Settings-Patch zeigt, dass der vorausgewählte Bereichs-Hook mitkommt."
+    },
+    {
+      "id": "apply-refuses-tampered-plan",
+      "class": "contract",
+      "fixture": "sr-tampered",
+      "prompt": "/setup-repo apply — den Plan in .skills/cache/setup-repo/plan.md habe ich gelesen und bestätige ihn",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/setup-repo/apply.md",
+          "pattern": "(?i)hash"
+        },
+        {
+          "type": "file_absent",
+          "path": "CLAUDE.md"
+        },
+        {
+          "type": "file_absent",
+          "path": ".claude/settings.json"
+        }
+      ],
+      "must_not": [],
+      "notes": "Der Block wurde nach dem Hashen geändert (make check zu make deploy). Diskriminator: nur apply_repo.py prüft den Hash und schreibt den Abbruchgrund nach apply.md; ein Agent ohne Skill setzt den Plan um oder schweigt."
+    }
+  ]
+}

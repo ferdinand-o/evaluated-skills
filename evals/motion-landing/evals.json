@@ -1,0 +1,71 @@
+{
+  "evals": [
+    {
+      "id": "artifact-context-degrades-visibly",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Wir bauen das direkt als claude.ai-Artifact — keine lokale Toolchain, kein Playwright, kein Lighthouse installiert. Baue mit motion-landing eine kleine Landing Page mit einer Szene und verifiziere sie mit scripts/verify.py.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/motion-landing/verify-report.json"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"status\":\\s*\"ungeprüft\""},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "(?i)playwright"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "(?i)lighthouse"},
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"budgets_checklist\""},
+        {"type": "output_matches", "pattern": "(?i)ungeprüft"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/motion-landing/verify-report.json", "pattern": "\"status\":\\s*\"geprüft\""},
+        {"type": "output_matches", "pattern": "(?i)(erfolgreich (geprüft|verifiziert)|alle budgets (eingehalten|bestanden)|budgets? (sind|wurden) eingehalten)"}
+      ],
+      "notes": "Der wichtigste Eval, weil er das Gate-Ehrlichkeits-Gebot aus Spec 00 §4 trägt, und der einzige, dessen Mechanik in dieser Entwicklungsumgebung real geprüft wurde (Playwright/Lighthouse fehlen hier tatsächlich — main() nimmt echt den Degradationszweig, siehe tests/test_motion_landing_verify.py::test_main_degrades_visibly_when_toolchain_is_missing). Bewusst als contract: file_exists/file_matches/output_matches reichen, kein Judge nötig. Deckt Spec 06s vierten Eval und Spec 00 §3 (Sichtbarkeits-Regel: ein übersprungenes Gate wird nie stillschweigend übersprungen)."
+    },
+    {
+      "id": "google-labs-prompt-yields-single-highlight-storyboard",
+      "class": "behavior",
+      "fixture": "empty-dir",
+      "prompt": "Mach die Seite wie Google Labs.",
+      "must": [
+        {"type": "judge", "claim": "Die Abschlussantwort enthält eine erkennbare Szenenliste als Aufzählung — je Szene Name/Typ, Technik und ob sie der Höhepunkt ist —, nicht nur einen Verweis auf ein Storyboard ohne die Liste selbst (ein Satz wie 'nach dem Storyboard oben' ohne die Aufzählung reicht nicht)."},
+        {"type": "judge", "claim": "In dieser Szenenliste ist genau eine Szene als Höhepunkt markiert — nicht null und nicht mehrere."},
+        {"type": "judge", "claim": "Die geplante Bewegung ist zurückhaltend: Es wird nicht versucht, möglichst viele verschiedene Szenen-Typen oder Animationstechniken gleichzeitig einzubauen ('Effekt-Konfetti'), sondern eine kleine, dramaturgisch begründete Auswahl."}
+      ],
+      "must_not": [
+        {"type": "judge", "claim": "Der Storyboard-Block markiert mehr als eine Szene als Höhepunkt, oder es gibt gar keinen als Höhepunkt markiert."}
+      ],
+      "notes": "Spec 06s erster Eval, bewusst als behavior: 'ein Höhepunkt statt Effekt-Konfetti' ist ein Urteil über Form und Zurückhaltung der Antwort, keine Datei-Assertion. Fix-Runde 2 (echter Lauf): Der ursprüngliche erste Claim verlangte 'vor irgendein Code eingebaut wird' — eine Reihenfolge-Eigenschaft über mehrere Gesprächsrunden hinweg, die der Harness strukturell nicht beobachten kann. evalkit.dispatch.run_agent startet `claude -p` mit dem Default `--output-format text`; das liefert laut Test (siehe docs/known-limits.md, Abschnitt Betrieb) ausschließlich die LETZTE Assistant-Nachricht, keine früheren Turns. Der reale Lauf zeigte genau das: Der Agent hatte ein korrektes Storyboard erzeugt (scenes.json mit fünf typisierten Szenen, exakt ein 'highlight': true, HTML-Kommentare je Szene mit Typ und Status) und die Abschlussantwort verwies darauf ('Umgesetzt nach dem Storyboard oben') — aber die Liste selbst stand nur in einer früheren, nicht erfassten Runde, der Judge sah sie nie. Fix: SKILL.md verlangt jetzt (Ablauf, Schritt 6), dass die Abschlussmitteilung die Szenenliste wiederholt statt nur zu referenzieren; der Claim prüft entsprechend die Abschlussantwort statt einer unbeobachtbaren Reihenfolge über Turns hinweg."
+    },
+    {
+      "id": "cls-trap-hero-gets-fixed-to-transform",
+      "class": "contract",
+      "fixture": "cls-trap-hero",
+      "prompt": "Diese Landing Page hat einen Layout-Sprung beim Laden — der Hero fliegt sichtbar ruckelnd ein und schiebt den Text darunter herum. Prüf und behebe das mit motion-landing.",
+      "must": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "transform:\\s*translateY"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "@keyframes[\\s\\S]{0,300}?margin-top"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "@keyframes[\\s\\S]{0,300}?\\btop\\s*:"},
+        {"type": "file_matches", "path": "index.html", "pattern": "@keyframes[\\s\\S]{0,300}?margin-top"},
+        {"type": "file_matches", "path": "index.html", "pattern": "@keyframes[\\s\\S]{0,300}?\\btop\\s*:"}
+      ],
+      "notes": "Spec 06s zweiter Eval, mechanisch statt mit Judge, weil die NEVER-Liste ('nur transform/opacity animieren') eine falsifizierbare Datei-Eigenschaft ist. Die must_not-Muster laufen gegen beide Dateien der Fixture (styles.css und index.html) — sonst käme ein Fix durch, der transform: translateY in styles.css einbaut, aber die verbotene margin-top-Animation zusätzlich als inline <style> nach index.html verschiebt. Verbleibende Grenze (siehe docs/known-limits.md): Ein drittes, in der Fixture nicht vorhandenes File (z. B. ein separates <link>-Stylesheet, das der Fix selbst anlegt) bliebe außerhalb dieser beiden Pfade ungeprüft."
+    },
+    {
+      "id": "reduced-motion-scene-shows-static-content-not-frozen-hidden",
+      "class": "behavior",
+      "fixture": "frozen-reduced-motion",
+      "prompt": "Diese Szene wirkt komplett leer, wenn ich im Betriebssystem 'Bewegung reduzieren' aktiviere. Der Inhalt darf dabei nicht verschwinden, nur die Animation soll wegfallen. Behebe das mit motion-landing.",
+      "must": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce"},
+        {"type": "judge", "claim": "Im Endzustand der CSS-Datei ist der Panel-Inhalt sichtbar, wenn prefers-reduced-motion: reduce aktiv ist — die Kaskade ergibt für .panel eine Deckkraft größer 0, und der Inhalt wird weder ausgeblendet noch aus dem Layout entfernt. Ein Fix, der nur 'animation: none' im reduce-Block setzt, während die Basisregel .panel weiterhin opacity: 0 vorschreibt, erfüllt diesen Claim NICHT — die Kaskade muss tatsächlich zu sichtbarem Inhalt führen, nicht nur die Animation abschalten."}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?display:\\s*none"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?visibility:\\s*hidden"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?height:\\s*0"},
+        {"type": "file_matches", "path": "styles.css", "pattern": "prefers-reduced-motion:\\s*reduce\\)[\\s\\S]{0,300}?clip-path"}
+      ],
+      "notes": "Spec 06s dritter Eval, umgebaut von contract auf behavior (Fix-Runde): Ob der Panel-Inhalt am Ende sichtbar ist, ist eine Eigenschaft der CSS-Kaskade (Zusammenspiel von Basisregel und reduce-Block), keine Texteigenschaft einer einzelnen Datei — eine rein mechanische must-Assertion auf 'opacity: 1 ODER animation: none' im reduce-Block ließ genau den naheliegendsten falschen Fix durch (animation: none setzen, während die Basisregel opacity: 0 unverändert stehen bleibt — der Inhalt bleibt unsichtbar, der Eval wurde aber grün). Eine engere Regex (nur opacity: 1 verlangen) hätte im Gegenzug einen ebenso korrekten Fix (Basis auf opacity: 1, nur unter no-preference animieren) fälschlich rot gemacht. Die vier must_not-Muster bleiben als billige mechanische Vorfilter für die eindeutigen Verstecken-Fälle (display:none, visibility:hidden, height:0, clip-path); das tatsächliche Sichtbarkeits-Urteil trägt der Judge-Claim. Nach Spec 00 §2 korrekt: ein Urteil gehört in class 'behavior', nicht 'contract'."
+    }
+  ]
+}

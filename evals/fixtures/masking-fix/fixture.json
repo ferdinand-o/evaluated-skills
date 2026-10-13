@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Lagerbestand wird negativ. Der naheliegende Fix (auf 0 klammern) maskiert die echte Ursache: events.py verarbeitet dasselbe Event bei einem Retry zweimal, weil keine Idempotenz-Pruefung existiert."
+}

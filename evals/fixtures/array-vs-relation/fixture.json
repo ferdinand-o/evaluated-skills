@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Bestehende articles-Tabelle. Der Nutzer verlangt explizit eine Array-Spalte fuer Tag-IDs — die versteckte n:m-Relation aus Spec 08s zweitem Eval."
+}

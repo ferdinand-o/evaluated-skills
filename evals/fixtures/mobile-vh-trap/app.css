@@ -1,0 +1,4 @@
+body { margin: 0; font: 16px system-ui; }
+.hero { height: 100vh; display: grid; place-items: center; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px; }
+.bar button { min-height: 44px; font-size: 16px; }

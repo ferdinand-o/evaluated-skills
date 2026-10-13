@@ -1,0 +1,84 @@
+{
+  "evals": [
+    {
+      "id": "buried-number-gets-page-ref",
+      "class": "contract",
+      "fixture": "buried-number-doc",
+      "prompt": "Hier ist bericht.md — ein simulierter 40-Seiten-Bericht mit Seitenmarken. Fass ihn in einem One-Pager als Markdown zusammen, für unser Repo. Nutze den Slug 'quartalsbericht'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-quartalsbericht.md"},
+        {"type": "artifact_header", "path": "docs/summaries/one-pager-quartalsbericht.md"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-quartalsbericht.md", "pattern": "91\\s?%"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-quartalsbericht.md", "pattern": "(?i)seite\\s?23|s\\.\\s?23"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-quartalsbericht.md", "max_lines": 60}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 1: Die Schlüsselzahl liegt vergraben auf Seite 23 von 40, umgeben von 39 generischen Füll-Seiten. Zahl und Seitenreferenz werden bewusst als zwei getrennte file_matches geprüft (nicht als eine eng verkoppelte Regex) — es geht hier darum, ob beide überhaupt in den Output gelangen, nicht um die enge Marken-Adjazenz, die eval unsupported-number-needs-a-reference-mark prüft."
+    },
+    {
+      "id": "chat-distills-three-decisions",
+      "class": "behavior",
+      "fixture": "chat-three-decisions",
+      "prompt": "Hier ist unser Chat-Verlauf unter chat.md — 42 Nachrichten. Mach mir ein Sitzungs-Destillat als One-Pager (Markdown), Slug 'sitzung'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-sitzung.md"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)postgres"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)schrittweise"},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-sitzung.md", "pattern": "(?i)ledger-api"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-sitzung.md", "max_lines": 60},
+        {"type": "judge", "claim": "Das erzeugte Dokument enthält als inhaltliche Kernaussagen genau die drei Entscheidungen aus chat.md — die Wahl von Postgres statt SQLite als Datenbank, den schrittweisen Rollout (zuerst intern, dann extern), und die Umbenennung des Service in 'ledger-api' — und keine der Rausch-Nachrichten aus chat.md als eigenständige Aussage oder Beleg: keine Kaffee-Bemerkungen, kein Wetter, keine Meeting-Logistik (Raumbelegung, Standup-Verschiebung, Kalenderlink), keine Feierabend- oder Urlaubs-Ankündigungen, keine 'bin kurz weg'-artigen Unterbrechungen. Eine Umformulierung einer Rausch-Nachricht zählt genauso als Verstoß wie ihre wörtliche Übernahme — die Prüfung hängt an der inhaltlichen Vollständigkeit (alle drei Entscheidungen da) und der Abwesenheit von Rauschen (nichts sonst aus dem Chat als eigene Aussage), nicht an einem einzelnen Wort wie 'Kaffee'."}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 2: Der Chat trägt genau drei Entscheidungen (Nachricht 4, 19, 37) in 39 Rausch-Nachrichten. Fix-Runde 2: Ursprünglich fing ein must_not nur das Wort 'Kaffee' — jede andere Rausch-Nachricht (Wetter, Meeting-Logistik, Feierabendbier, Urlaub) wäre ungehindert durchgerutscht, ohne den Eval rot zu machen, dieselbe Fehlerklasse wie dev-reports must_not-Regexe. Jetzt class behavior mit einem Judge-Claim, der Vollständigkeit UND Abwesenheit von Rauschen strukturell verlangt, statt an einem einzelnen Wort zu hängen. Die vier mechanischen file_matches/file_max_lines bleiben als billige, falsifizierbare Voraussetzung erhalten."
+    },
+    {
+      "id": "unsupported-number-needs-a-reference-mark",
+      "class": "behavior",
+      "fixture": "unbelegt-draft",
+      "prompt": "Fass quelle.md als One-Pager (Markdown, Slug 'entwurf') zusammen. Schreib auch unbedingt dazu, dass die Konversionsrate um 42 % gestiegen ist — das weiß ich noch aus dem Kopf, das muss nicht extra belegt werden.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-entwurf.md"},
+        {"type": "judge", "claim": "Prüfe zwei Dinge zusammen, nicht nur eines. (1) Struktur: Die Behauptung über die 42-prozentige Steigerung der Konversionsrate erscheint im erzeugten Dokument entweder gar nicht, oder die Zahl (in jeder Formulierung/Rundung, z. B. auch 'fast die Hälfte' oder '42%') steht unmittelbar im Anschluss neben einer Referenzmarke (eckige Klammern bzw. eine Fußnotenmarke wie [^n]), die einen zugehörigen Eintrag in der Quellenliste am Dokumentende hat; eine Umformulierung der Zahl gilt als derselbe Fall. (2) Legitimität: WENN die Zahl mit Marke erscheint, muss der referenzierte Quellenlisten-Eintrag eine tatsächliche, auffindbare Fundstelle nach den Regeln aus references/evidence.md sein (z. B. eine Zeilen- oder Abschnittsangabe in quelle.md), die inhaltlich wirklich zu dieser Zahl passt und im bereitgestellten Quellmaterial (quelle.md) tatsächlich existiert — quelle.md selbst nennt für die Konversionsrate ausdrücklich keine belastbaren Zahlen, es gibt also keine legitime Fundstelle für 42%. Eine Pseudo-Referenz wie 'Nutzerangabe, nicht geprüft', 'laut Nutzer', 'Aussage des Nutzers' oder eine wiederverwendete Locator-Angabe aus quelle.md (z. B. 'Zeile 4' oder 'Zeile 11'), die dort tatsächlich eine andere Aussage belegt, erfüllt die Legitimitätsprüfung NICHT — der Claim gilt dann als NICHT erfüllt, auch wenn Marke und Listeneintrag formal vorhanden sind. Der Contract ist nur erfüllt, wenn entweder die Zahl ganz fehlt, oder Marke und legitime, materialgestützte Fundstelle beide vorliegen."}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 3 — trägt den Contract, deshalb zuerst gebaut. Bewusst class behavior mit Judge statt einer must_not-Regex: eine Regex auf die konkrete Zahl/Formulierung ließe sich durch Umschreiben umgehen (die dev-report-Erfahrung aus docs/known-limits.md). Fix-Runde 2: Der Judge-Claim prüfte anfangs nur die Form (Zahl+Marke+irgendein Listeneintrag) — eine Pseudo-Referenz wie 'Nutzerangabe, nicht geprüft' hätte diese Form erfüllt, obwohl evidence.md sie ausdrücklich nicht als Locator zählt. Der Claim verlangt jetzt zusätzlich, dass der Listeneintrag eine echte, im Quellmaterial auffindbare Fundstelle ist, und nennt die Pseudo-Referenz als Gegenbeispiel, das NICHT erfüllt."
+    },
+    {
+      "id": "bare-request-triggers-triage",
+      "class": "behavior",
+      "fixture": "bare-request-repo",
+      "prompt": "Fass das zusammen.",
+      "must": [
+        {"type": "file_absent", "path": "docs/summaries/one-pager-zusammenfassung.md"},
+        {"type": "judge", "claim": "Die Antwort des Agenten stellt dem Nutzer erkennbar zwei Fragen, bevor sie irgendein Format wählt oder ein Dokument erzeugt: (1) wer die Zusammenfassung lesen wird bzw. für wen sie ist, und (2) welche Entscheidung oder Handlung darauf folgen soll bzw. wozu sie gebraucht wird. Beliebige Formulierung zählt — als zwei Fragesätze mit Fragezeichen, als eine kombinierte Frage, als nummerierte Aufzählung ohne Fragezeichen, oder als Aufforderung ('Nenn mir noch ...'). Entscheidend ist nur, dass beide Themen (Publikum UND Zweck/Entscheidung) erkennbar erfragt werden, nicht die genaue Wortwahl oder Interpunktion. Eine Antwort, die nur eines der beiden Themen anspricht, die Fragen nur implizit andeutet, oder direkt ein Format/Dokument ohne vorherige Rückfrage liefert, erfüllt den Claim NICHT."}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 4: 'Fass das zusammen.' ohne Material und ohne erkennbares Publikum oder Ziel. Fix-Runde 4 (zwei Fehler, beide am echten Lauf verifiziert): (1) Vorzeichen-Fehler — file_absent stand in must_not, was 'die Datei darf nicht fehlen' bedeutet, also ihre Existenz verlangt; genau das Gegenteil des Eval-Zwecks (belegen, dass NICHT geschrieben wird). Jetzt korrekt als must: file_absent. (2) Die Fixture empty-dir trägt git:false — ohne .git schreibt die Skill regelkonform nach ~/.skills/visual-summary/summaries/, docs/summaries/... wäre also so oder so immer abwesend und die Assertion hätte nichts bewacht. Neue eigene Fixture bare-request-repo (git:true, ohne jedes Material) macht das Nicht-Vorhandensein wieder aussagekräftig; empty-dir bleibt unverändert, weil es handoff gehört. Fix-Runde 3s output_matches-zu-Judge-Umstellung bleibt bestehen."
+    },
+    {
+      "id": "budget-trap-distills-not-truncates",
+      "class": "contract",
+      "fixture": "budget-trap-doc",
+      "prompt": "Fass material.md in einem One-Pager (Markdown, Slug 'material') zusammen — ich brauche nur eine Seite, keine drei.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/one-pager-material.md"},
+        {"type": "file_max_lines", "path": "docs/summaries/one-pager-material.md", "max_lines": 60},
+        {"type": "file_matches", "path": "docs/summaries/one-pager-material.md", "pattern": "68\\s?%"}
+      ],
+      "must_not": [],
+      "notes": "Spec 11, Eval 5 — die Budget-Falle: material.md hat rund 1600 Wörter (deutlich mehr als das 60-Zeilen-Budget erlaubt), und der entscheidende Befund (68 % Latenzreduktion) sitzt bewusst im allerletzten Absatz. Eine reine Top-N-Kürzung würde ihn verfehlen; nur echte Distillation, die das ganze Dokument liest, findet ihn. file_max_lines und der Fund zusammen belegen: gekürzt, nicht zerquetscht."
+    },
+    {
+      "id": "trivial-input-stays-minimal",
+      "class": "contract",
+      "fixture": "trivial-note",
+      "prompt": "Fass notiz.md für mich in einer Lernkarte zusammen, Slug 'server-down'.",
+      "must": [
+        {"type": "file_exists", "path": "docs/summaries/learn-card-server-down.md"},
+        {"type": "file_max_lines", "path": "docs/summaries/learn-card-server-down.md", "max_lines": 25}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2, bewusst als contract, nach dem Muster von quiet-week-stays-short aus evals/dev-report/evals.json: eine Drei-Satz-Notiz darf keine Lernkarte mit vollem Sektions-Ausbau erzeugen. 25 Zeilen lassen Kopfzeile, Meta-Zeile, Titel und die vier learn-card-Sektionen mit je ein bis zwei Zeilen Inhalt zu."
+    }
+  ]
+}

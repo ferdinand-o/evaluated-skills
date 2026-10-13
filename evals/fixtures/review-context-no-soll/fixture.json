@@ -1,0 +1,7 @@
+{
+  "git": true,
+  "description": "Ein einzelner Commit ändert calc.py. Keine Feature-Spec, keine PR-Beschreibung — das Kontextpaket muss den Befund 'nicht reviewbar' tragen statt eines geratenen Solls.",
+  "commits": [
+    {"message": "fix: add rundet jetzt", "touch": {"src/calc.py": "def add(a, b):\n    return round(a + b, 2)\n"}}
+  ]
+}

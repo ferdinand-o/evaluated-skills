@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Anti-Zeremonie-Fall für impl-plan: eine bestehende Mini-Skill (SKILL.md + eine References-Datei) und eine Spec, die zwei Zeilen in der References-Datei ändert. Nichts unter docs/superpowers/plans/ — der Plan, den die Skill schreibt, ist der einzige Treffer des Globs."
+}

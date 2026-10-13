@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Ein fälliges Thema mit einer Aufgaben-Datei, die zwei Aufgaben enthält — beide mit verification.method 'not_run', also frisch erzeugt und nie durchs Blind-Gate gelaufen. exercise-forges export.py würde beide als 'unverified' überspringen; learning-coach darf sie deshalb nicht als verifizierten Bestand anbieten."
+}

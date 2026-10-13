@@ -1,0 +1,77 @@
+{
+  "evals": [
+    {
+      "id": "creates-handoff-with-all-sections",
+      "class": "contract",
+      "fixture": "dirty-worktree",
+      "prompt": "Ich habe heute den Parser in src/parser.py gebaut und die Tests dazu geschrieben. Der CLI-Einstieg in src/cli.py importiert noch falsch — das ist offen. Wir hören hier auf für heute.",
+      "must": [
+        {"type": "file_exists", "path": "handoff.md"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^# Handoff — .+\\(Stand: \\d{4}-\\d{2}-\\d{2}\\)[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Status[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Implementiert[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Offene Probleme[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Erkenntnisse & Entscheidungen[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Nächste Schritte[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Einstiegspunkte[ \\t]*$"},
+        {"type": "file_max_lines", "path": "handoff.md", "max_lines": 150}
+      ],
+      "must_not": [],
+      "notes": "Kern-Contract aus skills/handoff/SKILL.md: sechs Sektionen, Titelzeile mit absolutem Datum, harte Zeilengrenze. Das [ \\t]* am Zeilenende toleriert Trailing Whitespace — der Contract ist inhaltlich, nicht typografisch."
+    },
+    {
+      "id": "never-touches-claude-md-or-history",
+      "class": "contract",
+      "fixture": "dirty-worktree",
+      "prompt": "Übergabe bitte, ich mache morgen weiter.",
+      "must": [
+        {"type": "file_exists", "path": "handoff.md"},
+        {"type": "file_unchanged", "path": "CLAUDE.md"},
+        {"type": "git_head_unchanged"}
+      ],
+      "must_not": [],
+      "notes": "SKILL.md verbietet beides ausdrücklich: CLAUDE.md nie anfassen, kein git commit."
+    },
+    {
+      "id": "asks-before-creating-in-non-project-dir",
+      "class": "contract",
+      "fixture": "empty-dir",
+      "prompt": "Sichere den Stand.",
+      "must": [
+        {"type": "file_absent", "path": "handoff.md"},
+        {"type": "output_matches", "pattern": "(?is)(?=.*(?:git|code|projekt))(?=.*(?:handoff|anlegen|erstellen|übergabe)).*\\?"}
+      ],
+      "must_not": [],
+      "notes": "Randfall aus SKILL.md: kein Git, kein Code → erst nachfragen, nichts anlegen. Die output_matches-Assertion ist nötig, damit der Eval nicht vakuös besteht: Ohne sie wäre er auch dann grün, wenn die Skill gar nicht ausgelöst hätte und der Agent einfach nichts tat. Ein nacktes '\\?' wäre themen-blind — es würde auch auf eine völlig themenfremde Rückfrage anspringen. Das Muster verlangt stattdessen zwei unabhängige Lookaheads (case-insensitive via (?is)): einen Beleg, dass der Agent den Randfall erkannt hat (git/code/projekt — die Begriffe aus der SKILL.md-Randfall-Zeile), und einen Beleg, dass es um das Anlegen der handoff.md geht (handoff/anlegen/erstellen/übergabe), plus ein Fragezeichen irgendwo im Text. Gegen vier plausible korrekte Formulierungen und drei themenfremde Rückfragen verifiziert (siehe Report)."
+    },
+    {
+      "id": "update-prunes-instead-of-appending",
+      "class": "contract",
+      "fixture": "stale-handoff",
+      "prompt": "Wir hören auf. Heute habe ich nur die Tests in tests/test_parser.py ergänzt.",
+      "must": [
+        {"type": "file_max_lines", "path": "handoff.md", "max_lines": 150},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^# Handoff — .+\\(Stand: \\d{4}-\\d{2}-\\d{2}\\)[ \\t]*$"},
+        {"type": "file_matches", "path": "handoff.md", "pattern": "^## Einstiegspunkte[ \\t]*$"}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": "handoff.md", "pattern": "Erledigter Punkt 159"}
+      ],
+      "notes": "Update-Pfad: SKILL.md verlangt komplettes Neuschreiben statt Anhängen und aggressives Prunen auf 150 Zeilen. Die must_not-Zeile fängt genau die Regression 'angehängt statt ersetzt' — der Füllzeilen-Rest aus dem Fixture dürfte dann noch dastehen."
+    },
+    {
+      "id": "anti-ceremony-invents-nothing",
+      "class": "behavior",
+      "fixture": "dirty-worktree",
+      "prompt": "Wir hören hier auf für heute. Ich habe heute nur den README-Text gelesen, sonst nichts gemacht.",
+      "must": [
+        {"type": "file_exists", "path": "handoff.md"},
+        {"type": "file_max_lines", "path": "handoff.md", "max_lines": 60},
+        {"type": "judge", "claim": "Die Sektion 'Implementiert' behauptet keine Arbeit, die über das Lesen des README hinausgeht — sie erfindet insbesondere keine Implementierung am Parser oder an den Tests."},
+        {"type": "judge", "claim": "Leere Sektionen sind mit 'Keine.' gefüllt statt weggelassen oder mit Fülltext aufgeblasen."}
+      ],
+      "must_not": [],
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2: Der triviale Fall muss klein bleiben — dafür braucht es eine eigene Größen-Assertion, nicht nur Faktentreue-Judges (die prüfen nur, dass nichts erfunden wird, nicht dass das Dokument klein bleibt). max_lines aus dem Contract abgeleitet und an einem echten Lauf kalibriert, nicht geraten: 6 Sektionsüberschriften + Titelzeile + Leerzeilen ergeben ~13-15 strukturelle Zeilen. Diese Fixture (dirty-worktree) ist aber nicht leer — sie enthält den kaputten Import als echtes, vorbestehendes Problem. SKILL.md Schritt 2 verlangt Grounding per git log/status unabhängig davon, was der Nutzer über die Sitzung sagt, und Schritt 3 verlangt, offene Probleme mit Symptom/Stand zu dokumentieren — eine gründlich fundierte, aber vollständig legitime (nichts erfundene) Antwort darf also den kaputten Import und ggf. weitere real vorgefundene Probleme in 'Offene Probleme' aufführen. Ein Diagnoselauf mit identischer Fixture/Prompt außerhalb des offiziellen Batches (evalkit.dispatch direkt) erzeugte genau so eine Antwort: 46 Zeilen, sachlich korrekt, nichts erfunden, zwei echte Probleme (kaputter Import, fehlendes pytest) je mit Symptom/Stand dokumentiert. Eine erste Kalibrierung auf 40 Zeilen (reine 'Keine.'-Skelett-Annahme) hätte diese korrekte Antwort fälschlich durchfallen lassen — deshalb auf 60 angehoben: rund 30 % Spielraum über dem beobachteten legitimen Maximum (46), aber immer noch weit unter den 150 aus Eval 1 und mit klarem Abstand (>2×) unter dem im Review beschriebenen 145-Zeilen-Aufblähfall, der weiterhin sicher durchfällt. Zwei offizielle Läufe dieses Evals kamen auf 23 bzw. 25 Zeilen (PASS, siehe Report) — beide weit im sicheren Bereich. Fix-Runde 2: Der Prompt lautete ursprünglich 'Wir hören auf...' — ohne das 'hier', anders als der in SKILL.md wörtlich deklarierte Trigger 'wir hören hier auf'. Zusammen mit der leeren Ausgangslage (keine handoff.md, Nutzer sagt 'nichts gemacht') zog das in Richtung Nicht-Auslösen und vermischte zwei verschiedene Prüfziele (löst die Skill aus? bleibt sie klein?) in einer Assertion-Kette. Prompt auf den wörtlichen Trigger korrigiert, Trivialität der Sitzung unverändert gelassen; max_lines und beide judge-Claims unverändert."
+    }
+  ]
+}

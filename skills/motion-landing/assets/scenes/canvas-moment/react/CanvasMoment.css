@@ -1,0 +1,34 @@
+.canvas-moment {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--motion-bg, #05060a);
+}
+
+.canvas-moment__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-moment__caption {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 2rem;
+  max-width: 42ch;
+  color: var(--motion-fg, #f4f5f7);
+}
+
+.canvas-moment__caption h2 {
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  margin: 0 0 0.75rem;
+}
+
+.canvas-moment__caption p {
+  color: var(--motion-muted, #a3a9b7);
+  margin: 0;
+}

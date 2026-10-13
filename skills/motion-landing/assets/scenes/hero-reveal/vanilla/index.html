@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hero-reveal — motion-landing Demo</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --fg: #f4f5f7;
+    --muted: #a3a9b7;
+    --accent: #6ee7b7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1.25rem;
+    padding: 8vw;
+  }
+  .hero h1,
+  .hero p,
+  .hero .cta {
+    /* Endzustand steht schon im Layout-Fluss — es wird nur opacity/transform
+       animiert, nie Höhe oder Position, sonst zählt jeder Schritt als CLS. */
+    opacity: 0;
+    transform: translateY(16px);
+    animation: reveal 640ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .hero h1 { font-size: clamp(2.25rem, 5vw, 4rem); margin: 0; animation-delay: 80ms; }
+  .hero p  { font-size: clamp(1rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 40ch; margin: 0; animation-delay: 220ms; }
+  .hero .cta {
+    margin-top: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #06251a;
+    font-weight: 600;
+    text-decoration: none;
+    animation-delay: 360ms;
+  }
+
+  @keyframes reveal {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Pflicht-Gate, kein Feature: reduced-motion zeigt den Endzustand sofort,
+     kein Versatz, kein "eingefroren auf halbem Weg". */
+  @media (prefers-reduced-motion: reduce) {
+    .hero h1, .hero p, .hero .cta {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+  }
+</style>
+</head>
+<body>
+  <section class="hero">
+    <h1>Ein Werkzeug, das mitdenkt.</h1>
+    <p>Hero-Reveal orchestriert drei Elemente beim Laden — nacheinander, mit kurzem Versatz, nie alle gleichzeitig.</p>
+    <a class="cta" href="#">Jetzt starten</a>
+  </section>
+</body>
+</html>

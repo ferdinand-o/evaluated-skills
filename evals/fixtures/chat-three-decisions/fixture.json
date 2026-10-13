@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Chat-Verlauf mit 42 Nachrichten, davon drei klare Entscheidungen (Postgres, schrittweiser Rollout, Umbenennung) in viel Small-Talk-Rauschen."
+}
