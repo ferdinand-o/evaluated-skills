@@ -1279,7 +1279,8 @@ def _cmd_lint(args: argparse.Namespace) -> int:
     if report.coverage["status"] != "checked":
         print(f"Hinweis: Spec-Coverage NICHT geprüft — {report.coverage['reason']}.")
     else:
-        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} Eval-ID(s) aus {report.coverage['spec']}.")
+        unit = "Eval-ID(s)" if report.coverage["eval_table"] else "Akzeptanzkriterien"
+        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} {unit} aus {report.coverage['spec']}.")
 
     if findings:
         for f in findings:

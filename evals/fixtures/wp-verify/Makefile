@@ -1,4 +1,4 @@
-.PHONY: check
+.PHONY: ci
 
-check:
+ci:
 	python -m pytest -q

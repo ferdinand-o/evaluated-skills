@@ -34,7 +34,7 @@ def _file_patterns(ev) -> list[str]:
     return [a.pattern for a in ev.must if a.type == "file_matches"]
 
 
-def _template_plan(source: str, *, criteria=(), command="make check") -> str:
+def _template_plan(source: str, *, criteria=(), command="make ci") -> str:
     """Ein Plan, wie die Skill ihn aus dem Template schreibt: Quelle ersetzt, ein
     Code-Task je Kriterium, Verifikations-Task mit dem Befehl des Repos zuletzt."""
     text = TEMPLATE.read_text(encoding="utf-8")

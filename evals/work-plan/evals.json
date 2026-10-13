@@ -79,7 +79,7 @@
         {
           "type": "file_matches",
           "path": "docs/plans/*.md",
-          "pattern": "(?s)### Task \\d+: Verifikation.*make check"
+          "pattern": "(?s)### Task \\d+: Verifikation.*make ci\\b"
         },
         {
           "type": "file_unchanged",
@@ -91,7 +91,7 @@
         }
       ],
       "must_not": [],
-      "notes": "Die Fixture nennt make check nur in der CLAUDE.md-Zeile Verifikation:. Im Eval-Workspace liegt nur work-plan, nicht subagent-dev — der Lint ist nicht verfügbar. Diskriminator: Setzt ein Agent ohne die Skill einen Task Verifikation mit dem Befehl aus CLAUDE.md und sagt „ungeprüft“, weil der Lint fehlt? Nein — beides verlangt nur die Skill."
+      "notes": "Die Fixture nennt make ci nur in der CLAUDE.md-Zeile Verifikation: — nicht make check, das als Beispiel in task-patterns.md steht. Im Eval-Workspace liegt nur work-plan, nicht subagent-dev — der Lint ist nicht verfügbar. Diskriminator: Setzt ein Agent ohne die Skill einen Task Verifikation mit dem Befehl aus CLAUDE.md und sagt „ungeprüft“, weil der Lint fehlt? Nein — beides verlangt nur die Skill."
     },
     {
       "id": "plan-from-finding-records-assignment",

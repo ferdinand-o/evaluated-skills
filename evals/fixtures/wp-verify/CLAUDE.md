@@ -2,4 +2,4 @@
 
 Kleines Berichts-Paket, nur Stdlib.
 
-Verifikation: `make check`
+Verifikation: `make ci`
