@@ -58,19 +58,19 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: (nichts Neues)
 - Produces: `fn:main(argv)`, `fn:record(root, action, test_id, command)`, `token:sofort-grün`, `token:Vollständige Zyklen:`
 
-- [ ] **Step 1: Tests schreiben** — `test_state_model` (jede Zeile der Zustandstabelle,
+- [x] **Step 1: Tests schreiben** — `test_state_model` (jede Zeile der Zustandstabelle,
       `red` nach `grün` beginnt einen neuen Zyklus), `test_sofort_gruen_never_counts_as_red`,
       `test_unverified_runs` (fehlendes Programm, Exit 127, Zeitgrenze per
       `monkeypatch` auf `TIMEOUT`), `test_log_format` (Kopfzeile, ID mit Leerzeichen
       oder `|` → Exit 2, `|` → `¦`, zehn Zeilen, Nicht-ASCII, UTF-8),
       `test_start_and_status`.
-- [ ] **Step 2: Rot sehen** — `pytest tests/test_test_first_log.py`.
-- [ ] **Step 3: Implementieren** — Unterbefehle `start`, `red`, `green`, `refactor`,
+- [x] **Step 2: Rot sehen** — `pytest tests/test_test_first_log.py`.
+- [x] **Step 3: Implementieren** — Unterbefehle `start`, `red`, `green`, `refactor`,
       `status`; Befehl nach `--`; Zustand je ID aus dem letzten Abschnitt des Logs
       gelesen, nicht aus einer zweiten Datei; `missing_program` wie in
       `verify_stop.py`; Zeile `Vollständige Zyklen: <n>` bei jedem Schreiben neu.
-- [ ] **Step 4: Grün sehen**, dann die ganze Suite.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, dann die ganze Suite.
+- [x] **Step 5: Commit.**
 
 ### Task 2: references/cycle.md
 
@@ -81,11 +81,11 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `token:sofort-grün`, `token:Vollständige Zyklen:`
 - Produces: `token:Zustandsmodell`
 
-- [ ] **Step 1: Schreiben** — Zustandsmodell als Tabelle (wörtlich aus der Spec), was
+- [x] **Step 1: Schreiben** — Zustandsmodell als Tabelle (wörtlich aus der Spec), was
       ein Verhalten ist (ein Satz, eine Eigenschaft), sofort grün und was dann zu tun
       ist, Einschränkung auf einen Test je Runner (pytest Knoten-ID und `-k`,
       vitest/jest `-t`, go `-run`), die Grenze „fehlendes Runner-Modul zählt als Rot".
-- [ ] **Step 2: Prüfen** — jede Phase der Tabelle steht auch in `tdd_log.py`; der
+- [x] **Step 2: Prüfen** — jede Phase der Tabelle steht auch in `tdd_log.py`; der
       pytest-Aufruf aus dem Beispiel läuft gegen eine Fixture. Commit.
 
 ### Task 3: SKILL.md
@@ -97,15 +97,15 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 - Consumes: `fn:main(argv)`, `token:Zustandsmodell`
 - Produces: `token:Kein Test-Zyklus nötig`, `token:ungetestet auf Wunsch`
 
-- [ ] **Step 1: Frontmatter** — Description mit Triggern („test first", „TDD",
+- [x] **Step 1: Frontmatter** — Description mit Triggern („test first", „TDD",
       „rot-grün", „schreib erst den Test") und Abgrenzung gegen testing-strategy,
       debug-ledger und, solange installiert, `superpowers:test-driven-development`.
-- [ ] **Step 2: Rumpf** — Eiserne Regel, Ablauf in sieben Schritten mit den Aufrufen,
+- [x] **Step 2: Rumpf** — Eiserne Regel, Ablauf in sieben Schritten mit den Aufrufen,
       Ausnahmen mit „Kein Test-Zyklus nötig", Verzicht mit „ungetestet auf Wunsch",
       „Druck ist kein Verzicht", Bootstrap-Satz zu `.skills/cache/`, Übergabe aus
       `status`; Contract; Anti-Rationalisierung; Abgrenzung mit **testing-strategy**,
       **debug-ledger**, **work-plan**.
-- [ ] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/test-first` ohne
+- [x] **Step 3: Prüfen** — `wc -l` unter 150; `lint_skill.py skills/test-first` ohne
       Befund außer `evals-exist`, `routing`, `neighbors`, `report-section`,
       `plugin-membership`. Commit.
 
