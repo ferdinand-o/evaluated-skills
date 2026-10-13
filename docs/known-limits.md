@@ -2022,6 +2022,35 @@ wo es beißt:
   `PROJECT_SKILLS` von `scripts/sync_skills.py` und lädt in diesem Repo nur, wenn
   jemand `cc-dev` einschaltet.
 
+## test-first
+
+Gebaut nach Spec 24 (2026-10-13). Tier 1: `tdd_log.py` führt den Testbefehl aus und
+schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es beißt:
+
+- **Rot heißt Exit ≠ 0.** Ein Import- oder Sammelfehler zählt als Rot, und so auch ein
+  fehlendes Runner-Modul (`python -m pytest` ohne pytest) — das Skript sieht nur, dass
+  `python` existiert. Die Skill lässt die Ausgabe vor dem ersten `red` lesen; geprüft
+  wird das nicht.
+- **Ein Test je Lauf ist Disziplin, kein Mechanismus.** `references/cycle.md` nennt die
+  Form je Runner; gemessen ist nur pytest. Wer die ganze Suite übergibt, bekommt ein Rot,
+  das ein fremder Test färben kann.
+- **Windows:** Die Shell ist `cmd.exe`, Exit 127 heißt dort nichts; deshalb die
+  Vorprüfung mit `shutil.which`. Die Prozessgruppe für die Zeitgrenze gibt es nur unter
+  POSIX — unter Windows endet bei der Zeitgrenze nur die Shell, und ein Kindprozess, der
+  die Pipe offen hält, kann den Aufruf weiter blockieren. Beides ungemessen.
+- **Das Log ist der Beleg, nicht der Beweis.** Es hält fest, was `tdd_log.py` ausgeführt
+  hat; ob der Befehl wirklich den genannten Test ausführt, prüft nichts. Wer das Log von
+  Hand ändert, ändert den Zustand.
+- **Nicht committet, nicht regenerierbar.** Das Log liegt unter `.skills/cache/`; geht
+  es verloren, fehlt der Beleg dieser Arbeit. Subagenten von subagent-dev schreiben es in
+  ihren Worktree, `verify` liest es nicht (Spec 24, Out of scope).
+- **Auslösen ungemessen.** Die Evals installieren test-first allein. Ob die Skill bei
+  „füge X hinzu" ohne Plan auslöst und ob sie im Listing von `cc-dev` sichtbar bleibt,
+  zeigt kein Lauf (Spec 20 hat neun Skills ohne Description im Listing gemessen).
+  Der Druckfall (`pressure-still-red-first`) misst nur einen Prompt.
+- **Keine Projekt-Kopie.** test-first steht nicht in `PROJECT_SKILLS`; in diesem Repo
+  lädt es nur über `cc-dev`, das hier ausgeschaltet ist.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
