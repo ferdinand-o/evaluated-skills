@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Kopie von cyclic-imports: Python-Paket mit Import-Zyklus src.domain.models.user <-> src.infra.db.session und einem ARCHITECTURE.md von architecture-map, das den Zyklus unter Befunde meldet. Keine Spec, kein docs/plans/."
+}
