@@ -5,13 +5,15 @@ aus dem Fragment über `bash -c`, mit `CLAUDE_PROJECT_DIR` auf einem Temp-Repo u
 Hook-Payload auf stdin."""
 
 import json
+import re
+from pathlib import Path
 import os
 import shutil
 import subprocess
 import sys
 
 import pytest
-from conftest import REPO_ROOT, git
+from conftest import REPO_ROOT, git, load_script
 
 HOOKS = {
     "debug-ledger": ("check-ledger.json", "check_ledger.py"),
@@ -93,3 +95,35 @@ def test_hook_scripts_are_standalone():
                    if line.startswith(("import ", "from "))}
         assert not imports & siblings, (skill, imports & siblings)
     assert sys.version_info >= (3, 8)
+
+
+SKILL_DIR_CALL = re.compile(r"\$\{CLAUDE_SKILL_DIR\}/(?:\.\./(?P<other>[a-z0-9-]+)/)?scripts/(?P<script>[A-Za-z0-9_]+\.py)")
+
+
+def _calls():
+    for md in sorted((REPO_ROOT / "skills").glob("*/SKILL.md")):
+        for m in SKILL_DIR_CALL.finditer(md.read_text(encoding="utf-8")):
+            yield md.parent.name, m.group("other"), m.group("script")
+
+
+def test_skill_md_calls_resolve_from_skill_dir():
+    calls = list(_calls())
+    assert len(calls) > 40
+    for skill, other, script in calls:
+        target = REPO_ROOT / "skills" / (other or skill) / "scripts" / script
+        assert target.is_file(), (skill, other, script)
+
+
+def test_neighbor_paths_stay_inside_a_plugin():
+    """`${CLAUDE_SKILL_DIR}/../<x>/` trägt nur, wenn <x> neben der Skill liegt: im selben
+    Plugin-Cache oder unter .claude/skills/ (Spec 20, kein Verweis über eine Plugin-Grenze)."""
+    manifest = json.loads((REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    plugin_of = {Path(s).name: p["name"] for p in manifest["plugins"] for s in p["skills"]}
+    sync = load_script("scripts/sync_skills.py")
+    project = set(sync.PROJECT_SKILLS)
+    neighbors = {(skill, other) for skill, other, _ in _calls() if other}
+    assert neighbors, "kein Nachbaraufruf gefunden — Test misst nichts"
+    for skill, other in neighbors:
+        same_plugin = skill in plugin_of and plugin_of.get(skill) == plugin_of.get(other)
+        both_project = skill in project and other in project
+        assert same_plugin or both_project, (skill, other)

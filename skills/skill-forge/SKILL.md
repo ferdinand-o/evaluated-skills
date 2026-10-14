@@ -72,7 +72,7 @@ stehen im Register des Repo-Tests und sind nicht Sache dieser Änderung.
 
 ## Contract
 
-- **Vierzehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
+- **Fünfzehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
   `unchecked` mit Grund. **`unchecked` und `hint` zählen nie als `pass`**: Was der
   Lint nicht sehen konnte (kein `docs/`, keine Nachbarn, keine `evals.json`), hat er
   nicht bestanden — er sagt es. Im Eval-Workspace sind die Regeln zu `docs/`,

@@ -99,7 +99,7 @@ def test_good_skill_passes_every_rule(tmp_path):
 
 
 def test_rule_ids_are_stable_and_unique():
-    assert len(set(ls.RULE_IDS)) == 14
+    assert len(set(ls.RULE_IDS)) == 15
 
 
 def test_repo_root_is_found_upwards_and_missing_root_means_unchecked(tmp_path):
@@ -117,7 +117,9 @@ def test_repo_root_is_found_upwards_and_missing_root_means_unchecked(tmp_path):
     assert status_of(report, "neighbors")[0] == "unchecked"
     # asset-headers: ohne Assets gibt es nichts zu prüfen — das ist ein echtes pass
     assert status_of(report, "asset-headers")[0] == "pass"
-    assert report.summary()["pass"] == 6 and report.summary()["unchecked"] == 8
+    # script-paths braucht keine Repo-Wurzel: auch ohne sie ein echtes pass (Spec 25)
+    assert status_of(report, "script-paths")[0] == "pass"
+    assert report.summary()["pass"] == 7 and report.summary()["unchecked"] == 8
 
 
 # --- Regeln 1–5 (immer prüfbar) ---------------------------------------------------
@@ -606,3 +608,61 @@ def test_disable_model_invocation_only_for_claude_code_only(tmp_path):
     root, skill = make_repo(tmp_path / "b", md)
     status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
     assert status == "finding" and "disable-model-invocation" in reason
+
+
+# --- script-paths (Spec 25) ----------------------------------------------------------
+
+def _script_paths(skill):
+    return next(r for r in ls.lint_skill(skill).rules if r.id == "script-paths")
+
+
+def test_script_paths_rule(tmp_path):
+    root, skill = make_repo(tmp_path)
+    assert _script_paths(skill).status == "pass"   # Skill ohne Skripte: Anti-Zeremonie
+
+    md = skill / "SKILL.md"
+    clean = md.read_text(encoding="utf-8")
+    cases = {
+        "eigener Pfad mit python": '   python skills/note-tag/scripts/run.py --x\n',
+        "ohne python": "2. `skills/note-tag/scripts/run.py lookup <a>`\n",
+        "fremder Skill": "   python skills/subagent-dev/scripts/plan_to_tasks.py lint <plan>\n",
+        "skill-dir-Platzhalter": "   python <skill-dir>/scripts/run.py\n",
+    }
+    for name, line in cases.items():
+        md.write_text(clean + line, encoding="utf-8")
+        result = _script_paths(skill)
+        assert result.status == "finding" and "SKILL.md" in result.reason, (name, result)
+    md.write_text(clean + '   python "${CLAUDE_SKILL_DIR}/scripts/run.py"\n'
+                  '   python "${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/plan_to_tasks.py" lint x\n'
+                  "<!-- skill: note-tag | schema: 1 | generated: python skills/note-tag/scripts/run.py -->\n",
+                  encoding="utf-8")
+    assert _script_paths(skill).status == "pass"
+
+    ref = skill / "references" / "tags.md"
+    ref.parent.mkdir(exist_ok=True)
+    text = "# Tags\n"
+    ref.write_text(text + 'Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/run.py"`\n', encoding="utf-8")
+    result = _script_paths(skill)
+    assert result.status == "finding" and "references/tags.md" in result.reason
+    ref.write_text(text + "Die Variable `${CLAUDE_SKILL_DIR}` ersetzt Claude Code nur in der SKILL.md.\n", encoding="utf-8")
+    assert _script_paths(skill).status == "pass"
+    ref.write_text(text, encoding="utf-8")
+
+    hooks = skill / "assets" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "h.json").write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [
+        {"type": "command", "command": "python3 skills/note-tag/scripts/run.py"}]}]}}), encoding="utf-8")
+    result = _script_paths(skill)
+    assert result.status == "finding" and "assets/hooks/h.json" in result.reason
+
+
+def test_script_paths_passes_for_every_skill_of_the_collection():
+    """Nach der Umstellung meldet keine Skill der Sammlung einen repo-relativen Aufruf —
+    auch nicht skill-forge, dessen checklist.md die Regel beschreibt."""
+    from conftest import REPO_ROOT
+    bad = {}
+    for skill in sorted(p for p in (REPO_ROOT / "skills").iterdir() if (p / "SKILL.md").is_file()):
+        result = _script_paths(skill)
+        if result.status != "pass":
+            bad[skill.name] = result.reason
+    assert bad == {}
