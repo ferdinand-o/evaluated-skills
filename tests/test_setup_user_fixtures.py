@@ -88,3 +88,37 @@ def test_replayed_eval_passes_its_own_assertions(eval_id, tmp_path):
     failures += [f"must_not: {a.type}" for a in ev.must_not if check(a, ws, baseline, output).ok]
     assert not failures, (failures, output)
     assert not any((ws / ".home").iterdir()), "nichts im Home"
+
+
+GAPS = REPO_ROOT / "skills" / "setup-user" / "references" / "superpowers-gaps.json"
+GAP_STATUS = {"vorhanden", "Regel", "nativ", "bleibt bewusst", "entfällt", "Lücke"}
+
+
+def _spec20_gap_names() -> set[str]:
+    """Erste Spalte der Lückentabelle in Spec 20, Namen einzeln."""
+    text = (REPO_ROOT / "specs" / "Spec 20 – plugin-split.md").read_text(encoding="utf-8")
+    section = text.split("### Lückentabelle superpowers → Haus", 1)[1].split("\n### ", 1)[0]
+    names = set()
+    for line in section.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not line.startswith("| ") or cells[0] in ("superpowers", "---"):
+            continue
+        names.update(n.strip() for n in cells[0].split(","))
+    return names
+
+
+def test_gaps_json_names_match_spec_20():
+    """Spec 21 (B): jede Zeile nennt nur Skills aus der Lückentabelle in Spec 20, jede
+    Tabellenzeile kommt vor. Den Status prüft der Test nicht gegen die Spec — er ändert
+    sich mit Spec 23 und 24 hier, nicht dort."""
+    data = json.loads(GAPS.read_text(encoding="utf-8"))
+    assert data["_meta"]["skill"] == "setup-user"
+    rows = data["rows"]
+    listed = [name for row in rows for name in row["superpowers"]]
+    assert len(listed) == len(set(listed))
+    assert set(listed) == _spec20_gap_names()
+    for row in rows:
+        assert row["status"] in GAP_STATUS, row
+        assert row["replacement"], row
+        if row["status"] == "Regel":
+            assert row["rules"] and all(r.endswith(".md") and "/" not in r for r in row["rules"]), row

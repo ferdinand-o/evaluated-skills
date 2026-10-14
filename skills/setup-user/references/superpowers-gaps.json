@@ -1,0 +1,129 @@
+{
+  "_meta": {
+    "skill": "setup-user",
+    "schema": 1,
+    "generated": "von Hand nach der Lückentabelle in Spec 20; Status nach Spec 23 und 24"
+  },
+  "statuses": {
+    "Lücke": "kein Ersatz — sperrt die Abschaltbedingung (a)",
+    "Regel": "Ersatz ist eine User-Regel; Teil (c) verlangt die Dateien unter rules",
+    "vorhanden": "Haus-Skill oder Profil-Skill vorhanden",
+    "nativ": "Claude Code kann es selbst",
+    "bleibt bewusst": "Abgrenzung bleibt, kein Routing-Ziel",
+    "entfällt": "kein Ersatz nötig"
+  },
+  "rows": [
+    {
+      "superpowers": [
+        "systematic-debugging"
+      ],
+      "replacement": "debug-ledger",
+      "status": "vorhanden",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "subagent-driven-development"
+      ],
+      "replacement": "subagent-dev mit Plan; ohne Plan das eingebaute Agent-Werkzeug",
+      "status": "vorhanden",
+      "source": "Spec 23"
+    },
+    {
+      "superpowers": [
+        "requesting-code-review"
+      ],
+      "replacement": "review-context plus /code-review",
+      "status": "vorhanden",
+      "source": "Spec 04"
+    },
+    {
+      "superpowers": [
+        "receiving-code-review"
+      ],
+      "replacement": "User-Regel verification.md: Befunde vor dem Umsetzen nachmessen",
+      "status": "Regel",
+      "source": "Spec 21",
+      "rules": [
+        "verification.md"
+      ]
+    },
+    {
+      "superpowers": [
+        "verification-before-completion"
+      ],
+      "replacement": "User-Regel verification.md und Verifikationsbefehl (setup-repo)",
+      "status": "Regel",
+      "source": "Spec 21, 22",
+      "rules": [
+        "verification.md"
+      ]
+    },
+    {
+      "superpowers": [
+        "using-git-worktrees"
+      ],
+      "replacement": "eingebaute Worktrees (claude --worktree)",
+      "status": "nativ",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "brainstorming"
+      ],
+      "replacement": "Profil-Skill anthropic-skills:brainstorming",
+      "status": "vorhanden",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "writing-plans"
+      ],
+      "replacement": "work-plan für fremde Repos; impl-plan für Specs dieser Sammlung",
+      "status": "vorhanden",
+      "source": "Spec 23"
+    },
+    {
+      "superpowers": [
+        "test-driven-development"
+      ],
+      "replacement": "test-first",
+      "status": "vorhanden",
+      "source": "Spec 24"
+    },
+    {
+      "superpowers": [
+        "writing-skills"
+      ],
+      "replacement": "Abgrenzung in skill-forge; für eine Disziplin-Skill superpowers von Hand einschalten",
+      "status": "bleibt bewusst",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "executing-plans",
+        "dispatching-parallel-agents"
+      ],
+      "replacement": "subagent-dev (sequenziell als Default) bzw. Agent-Werkzeug",
+      "status": "entfällt",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "finishing-a-development-branch"
+      ],
+      "replacement": "dev-report und handoff",
+      "status": "entfällt",
+      "source": "Spec 20"
+    },
+    {
+      "superpowers": [
+        "using-superpowers",
+        "diagnosing-superpowers"
+      ],
+      "replacement": "—",
+      "status": "entfällt",
+      "source": "Spec 20"
+    }
+  ]
+}
