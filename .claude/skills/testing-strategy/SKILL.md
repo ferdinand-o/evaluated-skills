@@ -26,7 +26,7 @@ Versehen.
 1. **Immer zuerst klassifizieren**, auch wenn der Repo-Typ schon bekannt
    scheint:
    ```bash
-   python skills/testing-strategy/scripts/detect_stack.py
+   python "${CLAUDE_SKILL_DIR}/scripts/detect_stack.py"
    ```
    Schreibt `.skills/cache/detect_stack.json` neu — der Cache ist reine
    Ephemera und wird nie gelesen, nur überschrieben. Jeder explizite Aufruf
