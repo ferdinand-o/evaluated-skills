@@ -1,0 +1,14 @@
+{
+  "name": "cc-skills",
+  "plugins": [
+    {
+      "name": "cc-dev",
+      "source": "./",
+      "defaultEnabled": true,
+      "skills": [
+        "./skills/debug-ledger",
+        "./skills/handoff"
+      ]
+    }
+  ]
+}

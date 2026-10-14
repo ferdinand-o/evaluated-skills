@@ -31,9 +31,9 @@ def _evals() -> dict:
     return {ev.id: ev for ev in load_evals(EVALS)}
 
 
-def test_four_contract_evals_load_with_anti_ceremony():
+def test_five_contract_evals_load_with_anti_ceremony():
     evals = load_evals(EVALS)
-    assert len(evals) == 4 and all(ev.eval_class == "contract" for ev in evals)
+    assert len(evals) == 5 and all(ev.eval_class == "contract" for ev in evals)
     assert any(ev.id.startswith("anti-ceremony-") for ev in evals)
     assert all("Diskriminator" in (ev.notes or "") for ev in evals)
 
@@ -67,7 +67,8 @@ def _run(script: str, *args: str, cwd: Path) -> str:
 
 
 def _replay(eval_id: str, ws: Path) -> str:
-    if eval_id.startswith("anti-ceremony-"):
+    prompt = _evals()[eval_id].prompt
+    if prompt.startswith("/setup-user check"):
         return _run("verify_install.py", "--config-dir", "cfg", "--write-check", cwd=ws)
     if eval_id == "plan-is-default-and-writes-only-plan":
         return _run("inspect_config.py", "--config-dir", "cfg", cwd=ws)
@@ -122,3 +123,16 @@ def test_gaps_json_names_match_spec_20():
         assert row["replacement"], row
         if row["status"] == "Regel":
             assert row["rules"] and all(r.endswith(".md") and "/" not in r for r in row["rules"]), row
+
+
+def test_plugin_fixture_reaches_plugins_only_through_the_cache():
+    """su-plugins: installPath stammt von einem anderen Rechner; ohne Cache-Fallback fände
+    route_check.py keinen Hook — der Eval prüfte dann nichts."""
+    cfg = FIXTURES / "su-plugins" / "cfg"
+    installed = json.loads((cfg / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
+    for installs in installed["plugins"].values():
+        assert not Path(installs[0]["installPath"]).exists()
+    aligned = FIXTURES / "su-aligned" / "cfg"
+    for path in aligned.rglob("*"):
+        if path.is_file() and path.name != "settings.json":
+            assert (cfg / path.relative_to(aligned)).read_bytes() == path.read_bytes(), path
