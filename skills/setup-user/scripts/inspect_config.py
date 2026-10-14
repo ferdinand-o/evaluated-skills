@@ -11,6 +11,11 @@ Skript — den Hash rechnet apply_config.py selbst, ein Test hält beide gleich.
 
 Ohne --config-dir gilt $CLAUDE_CONFIG_DIR, sonst ~/.claude. Exit 0 mit Plan, 2 wenn das
 Verzeichnis fehlt oder settings.json unlesbar ist.
+
+Abschnitt B: Das Plugin-Profil (references/routing.md) kommt aus `route_check.py --json`,
+als Unterprozess aufgerufen, nicht importiert. Ein gesetzter Wert in enabledPlugins wird
+nie umgedreht, sondern als Konflikt geführt, bis die Antwort `plugins_off` die Plugin-ID
+nennt.
 """
 
 import argparse
@@ -20,10 +25,12 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
+ROUTE_CHECK = Path(__file__).resolve().parent / "route_check.py"
 PLACEHOLDER = "<config-dir>"
 MARKER = "# setup-user: statusline"
 RULES = ("communication", "verification", "context", "git")
@@ -134,6 +141,53 @@ def _hook_patch(python: str) -> dict:
     return json.loads(text)
 
 
+def _routing(config_dir):
+    """Bericht von route_check.py oder None, wenn das Skript nicht lief."""
+    try:
+        proc = subprocess.run([sys.executable, str(ROUTE_CHECK), "--config-dir", str(config_dir), "--json"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        return json.loads(proc.stdout) if proc.returncode == 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def plugin_profile(routing, answers, planned_rules):
+    """(Feld `plugins` des Blocks, enabledPlugins-Patch) nach references/routing.md."""
+    if routing is None:
+        return {"checked": False, "reason": "route_check.py lief nicht", "profile": [], "condition": None}, {}
+    condition = json.loads(json.dumps(routing["condition"]))
+    missing = [f for f in condition["c"]["missing"] if f"rules/{f}" not in planned_rules]
+    condition["c"] = {"ok": not missing, "missing": missing}
+    condition["met"] = routing["checked"] and all(condition[k]["ok"] for k in "abc")
+    if not routing["checked"]:
+        return {"checked": False, "reason": routing["reason"], "profile": [], "condition": condition}, {}
+    off = {str(i) for i in answers.get("plugins_off") or []} if isinstance(answers.get("plugins_off"), list) else set()
+    unmet = "; ".join(f"({k}) " + ", ".join(condition[k].get("gaps") or condition[k].get("refs") or
+                                            [f"rules/{f}" for f in condition[k].get("missing", [])])
+                      for k in "abc" if not condition[k]["ok"])
+    profile, patch = [], {}
+    for plugin in routing["plugins"]:
+        if plugin["role"] == "superpowers":
+            if not condition["met"]:
+                profile.append({"id": plugin["id"], "action": "keep",
+                                "reason": f"Abschaltbedingung nicht erfüllt: {unmet}"})
+                continue
+            reason = "Abschaltbedingung erfüllt"
+        elif plugin["role"] == "engineering":
+            reason = "Annahme: überlappt mit testing-strategy, debug-ledger und review-context"
+        else:
+            continue
+        if plugin["explicit"] is False:
+            profile.append({"id": plugin["id"], "action": "none", "reason": "schon aus"})
+        elif plugin["explicit"] is True and plugin["id"] not in off:
+            profile.append({"id": plugin["id"], "action": "conflict",
+                            "reason": f"{reason}; in enabledPlugins auf true gesetzt — ausschalten nur mit plugins_off"})
+        else:
+            profile.append({"id": plugin["id"], "action": "set", "reason": reason})
+            patch[plugin["id"]] = False
+    return {"checked": True, "reason": None, "profile": profile, "condition": condition}, patch
+
+
 def build_plan(config_dir, answers, python):
     config_dir = Path(config_dir).resolve()
     settings = _settings(config_dir)
@@ -162,6 +216,10 @@ def build_plan(config_dir, answers, python):
     patch: dict = _hook_patch(resolved_python)
     if status["kind"] != "foreign":
         patch["statusLine"] = {"command": f'{resolved_python} "{PLACEHOLDER}/setup-user/runtime/statusline.py"'}
+    planned_rules = {op["path"] for op in ops if op["path"].startswith("rules/")}
+    plugins, plugin_patch = plugin_profile(_routing(config_dir), answers or {}, planned_rules)
+    if plugin_patch:
+        patch["enabledPlugins"] = plugin_patch
     if (answers or {}).get("deny_secrets") is True:
         patch["permissions"] = {"deny": ["Read(./.env)", "Read(./.env.*)", "Read(~/.ssh/**)", "Read(**/*.pem)", "Read(**/*.key)"]}
     ops.append({"path": "settings.json", "action": "merge", "patch": patch})
@@ -171,7 +229,7 @@ def build_plan(config_dir, answers, python):
         text = _read(config_dir / op["path"])
         base[op["path"]] = _sha(normalize(text, config_dir)) if text is not None else None
     block = {"schema": 1, "python": resolved_python, "answers": merged_answers, "assumed": assumed,
-             "statusline": status, "operations": ops, "base": base}
+             "statusline": status, "plugins": plugins, "operations": ops, "base": base}
     block["hash"] = plan_hash(block)
     return block
 
@@ -202,7 +260,7 @@ def render_plan(block, config_dir):
         lines += [f"- {k}: {block['answers'][k]} (Asset-Wert, nicht gefragt oder nicht beantwortet)" for k in block["assumed"]]
     else:
         lines.append("- keine")
-    lines += ["", "## Änderungen", ""]
+    lines += ["", *render_plugins(block["plugins"]), "", "## Änderungen", ""]
     for op in block["operations"]:
         state = "neu" if block["base"].get(op["path"]) is None else "vorhanden"
         lines.append(f"### `{op['path']}` — {op['action']} ({state})")
@@ -222,7 +280,6 @@ def render_plan(block, config_dir):
         "- `permissions.deny` für `.env`, `~/.ssh` und Schlüsseldateien wird nur auf Bestätigung gesetzt "
         "(Antwort `deny_secrets: true`). Ein Read-Deny gilt für die Datei-Werkzeuge und erkannte "
         "Bash-Dateikommandos, nicht für beliebige Unterprozesse.",
-        "- `enabledPlugins` fasst Abschnitt A nicht an.",
         "",
         "## Block für apply",
         "",
@@ -232,6 +289,29 @@ def render_plan(block, config_dir):
         "",
     ]
     return "\n".join(lines)
+
+
+ACTION_TEXT = {"set": "→ false", "conflict": "Konflikt", "keep": "bleibt an", "none": "unverändert"}
+
+
+def render_plugins(plugins):
+    lines = ["## Plugins", ""]
+    if not plugins["checked"]:
+        lines.append(f"- ungeprüft — {plugins['reason']}; `enabledPlugins` bleibt unberührt.")
+        return lines
+    cond = plugins["condition"]
+    lines.append(f"Abschaltbedingung für superpowers (Spec 20): {'erfüllt' if cond['met'] else 'nicht erfüllt'} "
+                 f"— (a) {'ok' if cond['a']['ok'] else 'Lücke'}, (b) {'ok' if cond['b']['ok'] else 'Verweise'}, "
+                 f"(c) {'ok' if cond['c']['ok'] else 'Regel fehlt'}.")
+    lines.append("")
+    if not plugins["profile"]:
+        lines.append("- Profil: nichts zu ändern; `cc-*`-Plugins bleiben ungesetzt.")
+    for entry in plugins["profile"]:
+        lines.append(f"- `{entry['id']}`: {ACTION_TEXT[entry['action']]} — {entry['reason']}")
+    if any(e["action"] == "conflict" for e in plugins["profile"]):
+        lines += ["", "Konflikt: Der Wert steht schon in `enabledPlugins` (eine Installation per CLI setzt `true`). "
+                  "Ausschalten nur auf ausdrückliche Antwort: `--answers '{\"plugins_off\": [\"<id>\"]}'`, dann neu planen."]
+    return lines
 
 
 def _answers(arg: str | None) -> dict:

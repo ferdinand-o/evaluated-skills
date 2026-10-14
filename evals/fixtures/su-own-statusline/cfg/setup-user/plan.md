@@ -2,7 +2,7 @@
 
 # setup-user — Plan
 
-Ziel: `/home/user/cc-skills/evals/fixtures/su-own-statusline/cfg` · Hash `fd4f09d6d0e7be69` · Interpreter `python3`
+Ziel: `/home/user/cc-skills/evals/fixtures/su-own-statusline/cfg` · Hash `31cb07feb9a5fb0c` · Interpreter `python3`
 
 ## Statusline
 
@@ -14,6 +14,10 @@ Fremde Statusline (`python3 cfg/my-status.py`) bleibt eingetragen. Kontext-Hinwe
 - language: Deutsch (Asset-Wert, nicht gefragt oder nicht beantwortet)
 - shell: bash (Asset-Wert, nicht gefragt oder nicht beantwortet)
 - tone: knapp und sachlich (Asset-Wert, nicht gefragt oder nicht beantwortet)
+
+## Plugins
+
+- ungeprüft — keine Plugins unter <config-dir>/plugins; `enabledPlugins` bleibt unberührt.
 
 ## Änderungen
 
@@ -215,7 +219,6 @@ Fremde Statusline (`python3 cfg/my-status.py`) bleibt eingetragen. Kontext-Hinwe
 ## Nicht gesetzt
 
 - `permissions.deny` für `.env`, `~/.ssh` und Schlüsseldateien wird nur auf Bestätigung gesetzt (Antwort `deny_secrets: true`). Ein Read-Deny gilt für die Datei-Werkzeuge und erkannte Bash-Dateikommandos, nicht für beliebige Unterprozesse.
-- `enabledPlugins` fasst Abschnitt A nicht an.
 
 ## Block für apply
 
@@ -243,7 +246,7 @@ Fremde Statusline (`python3 cfg/my-status.py`) bleibt eingetragen. Kontext-Hinwe
     "setup-user/runtime/context_hint.py": null,
     "setup-user/thresholds.json": null
   },
-  "hash": "fd4f09d6d0e7be69dace81a71a5090c6fa9f8b036997c5d6c5bfc37cd7da4199",
+  "hash": "31cb07feb9a5fb0ce3067f63cd8b20252ad1f1ccb8ec60720a33acac8706c987",
   "operations": [
     {
       "action": "copy",
@@ -299,6 +302,26 @@ Fremde Statusline (`python3 cfg/my-status.py`) bleibt eingetragen. Kontext-Hinwe
       "path": "settings.json"
     }
   ],
+  "plugins": {
+    "checked": false,
+    "condition": {
+      "a": {
+        "gaps": [],
+        "ok": true
+      },
+      "b": {
+        "ok": true,
+        "refs": []
+      },
+      "c": {
+        "missing": [],
+        "ok": true
+      },
+      "met": false
+    },
+    "profile": [],
+    "reason": "keine Plugins unter <config-dir>/plugins"
+  },
   "python": "python3",
   "schema": 1,
   "statusline": {

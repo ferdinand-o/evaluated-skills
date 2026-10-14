@@ -141,6 +141,10 @@ def merge_settings(current: dict, patch: dict) -> dict:
                 kept.append({**group, "hooks": items})
         hooks[event] = kept + groups
         result["hooks"] = hooks
+    if isinstance(patch.get("enabledPlugins"), dict):
+        plugins = dict(result["enabledPlugins"]) if isinstance(result.get("enabledPlugins"), dict) else {}
+        plugins.update(patch["enabledPlugins"])
+        result["enabledPlugins"] = plugins
     if "permissions" in patch:
         perms = dict(result["permissions"]) if isinstance(result.get("permissions"), dict) else {}
         for key, values in patch["permissions"].items():
