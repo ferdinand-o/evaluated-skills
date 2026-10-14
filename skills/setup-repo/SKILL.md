@@ -32,9 +32,9 @@ Quelle, Freigaben —, gehört deshalb committet ins Repo.
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/plan_repo.py" --classes '{"c1": "werkzeug", "c2": "regel"}'
    ```
-   Optionen: `--with-verify-hook`, `--without-goal-hook`, `--deny-secrets`. Schreibt nur `plan.md`. Zeig dem
-   Nutzer die Ansicht daraus: Verifikation mit Quelle, Kandidaten mit Klasse, Budget,
-   Plugins, Hooks, Änderungen. Dann endet der Lauf; angewendet wird in einem späteren Aufruf.
+   Optionen: `--with-verify-hook`, `--without-goal-hook`, `--without-reviewer`, `--deny-secrets`. Schreibt nur
+   `plan.md`. Zeig dem Nutzer die Ansicht daraus: Verifikation mit Quelle, Kandidaten mit Klasse,
+   Budget, Plugins, Hooks und Ziel-Reviewer, Änderungen. Dann endet der Lauf; angewendet wird in einem späteren Aufruf.
 3. **apply**, erst nach ausdrücklicher Bestätigung des gezeigten Plans:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/apply_repo.py"
@@ -89,6 +89,12 @@ wird Kandidat. Der Bereichs-Hook `goal_scope.py` (vorausgewählt, abwählbar mit
 `--without-goal-hook`) meldet Dateien, die ein Turn außerhalb der Bereiche geändert hat:
 dem Nutzer sofort, Claude beim nächsten Prompt. Er hält nie etwas an. Schema, Glob-Dialekt
 und Klassen: `references/goals.md`.
+
+Der Ziel-Reviewer `.claude/agents/reviewer.md` (vorausgewählt, abwählbar mit
+`--without-reviewer`, ein vorhandener bleibt unberührt) prüft vor *Erledigt*, ob der Diff
+„Fertig wenn" erfüllt, im Bereich bleibt und die Prüfpunkte des Stacks einhält
+(`references/review/`, jeder mit Quelle). Einen Stack ohne Prüfpunkte — heute Delphi —
+meldet er „ungeprüft". Fehler im Code sucht er nicht; das ist `/code-review`.
 
 Format, Mischregeln und Hash: `references/plan-format.md`.
 
