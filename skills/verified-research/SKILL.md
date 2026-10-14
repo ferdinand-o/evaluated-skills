@@ -18,7 +18,7 @@ sie sagt.
 ## Ablauf
 
 1. **Scope.** Nur bei vagen Aufträgen nachfragen (eine Frage, nicht drei).
-2. **Register-Phase — zuerst und verpflichtend.** `skills/verified-research/scripts/registry.py lookup <adresse>`
+2. **Register-Phase — zuerst und verpflichtend.** `python "${CLAUDE_SKILL_DIR}/scripts/registry.py" lookup <adresse>`
    für jede in Frage kommende Domäne/Quelle, *bevor* frei gesucht wird. Ein Treffer
    liefert Tier und `notiz` direkt; in der Antwort an den Nutzer (der Prosa-Bericht,
    nicht die Wissensdatei — die hat ihr eigenes Schema, `references/delta-mode.md`)
@@ -27,12 +27,12 @@ sie sagt.
 3. **Freie Suche** ergänzt, wo das Register nichts liefert. Jeder Treffer wird getiert:
    Registertreffer übernehmen ihr Tier, alles andere ist Tier 3, bis bewertet.
 4. **Unbekannte Quelle bewerten.** Nach `references/rating-rubric.md` einordnen, dann
-   `skills/verified-research/scripts/registry.py add --domain … --pattern … --name … --tier … --notiz …`
+   `python "${CLAUDE_SKILL_DIR}/scripts/registry.py" add --domain … --pattern … --name … --tier … --notiz …`
    eintragen. Einmal bewerten, nicht bei jedem Lauf neu.
 5. **Synthese mit Tier-Tag pro Claim.** Format, Zeile für Zeile:
    `- <Aussage>. [Tier <1-3>{, kritisch}?, Quelle: <adresse>]`
    Beispiel: `- Die Konfigurationsdatei heißt config.toml. [Tier 1, Quelle: docs.example/config]`
-6. **Verifikations-Pass.** `skills/verified-research/scripts/spotcheck.py --report <pfad>` auf dem fertigen
+6. **Verifikations-Pass.** `python "${CLAUDE_SKILL_DIR}/scripts/spotcheck.py" --report <pfad>` auf dem fertigen
    Bericht laufen lassen. Für jeden Claim der Stichprobe: Quelle öffnen, prüfen, ob der
    Wert dort im selben Kontext steht. Abweichung → Tag durch `[VERWORFEN nach Spotcheck,
    Quelle: <adresse>]` ersetzen, nie still stehen lassen.
