@@ -30,8 +30,15 @@ Schwelle. Der Hook hält nie einen Prompt an.
    python "${CLAUDE_SKILL_DIR}/scripts/inspect_config.py" --config-dir <pfad> --answers '{"language": "Deutsch"}'
    ```
    Schreibt nur `<config-dir>/setup-user/plan.md`. Zeig dem Nutzer die Ansicht daraus:
-   Statusline-Befund, Änderungen, Annahmen. Dann endet der Lauf; angewendet wird in
-   einem späteren Aufruf.
+   Statusline-Befund, Plugins, Änderungen, Annahmen. Dann endet der Lauf; angewendet wird
+   in einem späteren Aufruf.
+
+   **Plugins:** Der Plan schlägt das Profil aus `references/routing.md` vor — superpowers
+   aus, sobald die Abschaltbedingung aus Spec 20 erfüllt ist, engineering aus als
+   Annahme. Steht ein Plugin schon in `enabledPlugins` (eine Installation per CLI setzt
+   `true`), führt der Plan es als Konflikt und dreht es nie selbst um. Frag den Nutzer
+   einmal; nur ein ausdrückliches Ja geht als `"plugins_off": ["<id>"]` in `--answers`,
+   dann neu planen.
 4. **apply**, erst nach ausdrücklicher Bestätigung und nur mit `--config-dir` auf der
    Kommandozeile:
    ```bash
@@ -48,7 +55,10 @@ Schwelle. Der Hook hält nie einen Prompt an.
    `<config-dir>/setup-user/check.md` mit Kopfzeile, mit Abweichungen oder „keine
    Abweichung". Ein fehlendes Hook- oder Statusline-Skript ist die erste Abweichung.
    Ein relativer Skriptpfad steht als Hinweis „nur im Arbeitsverzeichnis gültig" da, nicht
-   als Abweichung. Ein ausstehender `plan.md` bleibt unberührt.
+   als Abweichung. Ein ausstehender `plan.md` bleibt unberührt. Am Ende steht der
+   Abschnitt `## Plugins` aus `route_check.py`: aktive Plugins, SessionStart-Hooks,
+   Kollisionen, `superpowers:`-Verweise, Stand der Abschaltbedingung — Information, keine
+   Abweichung. Nenn dem Nutzer die SessionStart-Hooks und den Stand der Bedingung.
 
 **Übergabe nach apply**, wörtlich eine von zwei Formen:
 
@@ -69,7 +79,8 @@ Schwelle. Der Hook hält nie einen Prompt an.
 
 Was gemischt, ersetzt und nie angefasst wird: `references/settings-merge.md`. Format,
 Normalisierung und Hash des Plans: `references/plan-format.md`. Schwellen, Merker und
-Wortlaut der Hinweise: `references/thresholds.md`.
+Wortlaut der Hinweise: `references/thresholds.md`. Plugin-Profil, aktive Plugins und
+Abschaltbedingung: `references/routing.md`, Lückentabelle `references/superpowers-gaps.json`.
 
 ## Contract
 
@@ -95,6 +106,7 @@ Wortlaut der Hinweise: `references/thresholds.md`.
 | --- | --- |
 | „Der Nutzer hat ja gesagt, er will es eingerichtet haben — ich wende gleich an" | Bestätigt wird der gezeigte Plan, nicht der Wunsch. Ohne gezeigten `plan.md` kein `apply`. |
 | „Die alte Statusline läuft schon, die prüfe ich gleich mit" | Sie ignoriert `CLAUDE_CONFIG_DIR` und schriebe Beispielwerte in den echten Cache. Fremd heißt: nicht ausführen, „ungeprüft" sagen. |
+| „superpowers ist laut Bedingung abschaltbar, der Nutzer will das bestimmt" | Ein gesetzter Wert ist eine Entscheidung, auch wenn die CLI sie getroffen hat. Fragen, und nur ein Ja wird `plugins_off`. |
 | „Der Hash passt nicht, ich korrigiere den Block schnell von Hand" | Dann bestätigt der Nutzer etwas, das er nie gesehen hat. Neu planen, neu zeigen. |
 | „verify schweigt sich aus, das ist schon gut gegangen" | Ohne Lauf heißt die Übergabe „angewendet, ungeprüft — Grund". |
 | „Ich schreibe die Regel direkt in die vorhandene CLAUDE.md, das ist praktischer" | Vorhandenes bekommt nur bestätigte Ergänzungen; der Plan zeigt sie vorher. |
