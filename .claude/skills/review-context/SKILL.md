@@ -26,9 +26,9 @@ muss, was eine Änderung erreichen sollte.
 
 1. **Sammeln:**
    ```bash
-   python skills/review-context/scripts/collect_context.py --range HEAD~1..HEAD
-   python skills/review-context/scripts/collect_context.py                      # Arbeitsverzeichnis gg. HEAD
-   python skills/review-context/scripts/collect_context.py --range main..feature/x --pr-description "…"
+   python "${CLAUDE_SKILL_DIR}/scripts/collect_context.py" --range HEAD~1..HEAD
+   python "${CLAUDE_SKILL_DIR}/scripts/collect_context.py"                      # Arbeitsverzeichnis gg. HEAD
+   python "${CLAUDE_SKILL_DIR}/scripts/collect_context.py" --range main..feature/x --pr-description "…"
    ```
    Schreibt `.skills/cache/review-context.json` (Ephemera nach Spec 00 §1, gitignored,
    jederzeit neu erzeugbar — kein Grund, es zu committen oder von Hand zu pflegen).

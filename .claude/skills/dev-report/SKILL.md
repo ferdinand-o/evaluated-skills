@@ -26,9 +26,9 @@ Report rendert `facts.json`, nicht deine Erinnerung.
    „Für dich, fürs Team, oder für Vorgesetzte?"
 3. **Sammeln:**
    ```bash
-   python skills/dev-report/scripts/collect.py --mode weekly --since 2026-08-01
-   python skills/dev-report/scripts/collect.py --mode feature --branch feature/x
-   python skills/dev-report/scripts/collect.py --mode release --range v1.2..HEAD
+   python "${CLAUDE_SKILL_DIR}/scripts/collect.py" --mode weekly --since 2026-08-01
+   python "${CLAUDE_SKILL_DIR}/scripts/collect.py" --mode feature --branch feature/x
+   python "${CLAUDE_SKILL_DIR}/scripts/collect.py" --mode release --range v1.2..HEAD
    ```
    Das Skript schreibt `.skills/cache/facts.json` und nennt den Zielpfad des
    Reports. Meldet es übersprungene Quellen, erwähne das im Report — eine

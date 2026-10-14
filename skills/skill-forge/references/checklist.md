@@ -24,7 +24,7 @@ Der Plan ist Sache von `impl-plan` (16). Hier nur, was der Skill-Bau zusätzlich
 | # | Punkt | Prüft | Quelle |
 | --- | --- | --- | --- |
 | 6 | Ein Eval-Task mit ID-Präfix `anti-ceremony-` steht im Plan; bei Tier 0 vor der SKILL.md | mechanisch (Plan): `plan_to_tasks.py lint --spec` prüft nur, dass jede Eval-ID der Spec einen Task hat — das Präfix prüft erst `anti-ceremony-eval` an der fertigen Skill | Spec 00 §2; `impl-plan/references/task-patterns.md` |
-| 19 | Der Skriptaufruf ist repo-relativ und scheitert installiert. Frage: Nennt die SKILL.md beide Pfade — `skills/<name>/scripts/…` und `.claude/skills/<name>/scripts/…`? | Ermessen (repo-weit ungelöst) | known-limits, learning-coach Fix-Runde 4; Spec 17 Entscheidung 4 |
+| 19 | Ein Skriptaufruf steht in der SKILL.md und beginnt mit `${CLAUDE_SKILL_DIR}/scripts/…` (ein Nachbar-Skill: `${CLAUDE_SKILL_DIR}/../<name>/scripts/…`, nur im selben Plugin); References nennen das Skript beim Namen und verweisen auf die SKILL.md, weil Claude Code die Variable nur dort ersetzt; Hook-Vorlagen rufen eine Kopie unter `.claude/hooks/` auf | mechanisch: `script-paths` | Spec 25 (Messung 2026-10-14) |
 
 ## Phase Bau
 

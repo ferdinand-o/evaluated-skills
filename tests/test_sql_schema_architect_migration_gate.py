@@ -815,3 +815,10 @@ def test_hook_check_allows_when_no_versions_dir(tmp_path, monkeypatch):
 def _stdin(text):
     import io
     return io.StringIO(text)
+
+
+def test_hardness_is_g3_when_hook_points_to_project_copy(tmp_path):
+    """Spec 25: Die Vorlage ruft die Kopie unter .claude/hooks/ auf; auch das ist G3."""
+    write(tmp_path / ".claude" / "settings.json", json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "if [ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration_gate.py\" ]; then exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration_gate.py\" --hook-check; fi"}]}]}}))
+    assert gate.detect_hook_installed(tmp_path) is True

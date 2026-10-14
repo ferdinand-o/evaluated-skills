@@ -46,7 +46,7 @@ macht die Testsuite rot. Das ist G2 — ein Skript meldet, sobald jemand `pytest
    und Step 1.
 5. **Lint:**
    ```bash
-   python skills/subagent-dev/scripts/plan_to_tasks.py lint <plan> --skill <skill> --out .skills/cache/tasks/lint.json
+   python "${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/plan_to_tasks.py" lint <plan> --skill <skill> --out .skills/cache/tasks/lint.json
    ```
    Befunde beheben — nicht umformulieren, bis das Gate `parallel` sagt. Ist die Spec
    noch ohne Eval-Tabelle, meldet der Lint das als Hinweis und prüft Coverage nicht.

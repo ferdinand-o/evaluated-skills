@@ -40,7 +40,7 @@ Fragen sind die Ausnahme (siehe Fallback in Schritt 2), nicht der Einstieg.
    Annahmen, beantwortet offene Fragen. Kein „ist das ok?" ohne Inhalt.
 5. **Stubs exportieren**, sobald der Entwurf steht:
    ```bash
-   python skills/feature-spec/scripts/export_stubs.py docs/specs/wip/<feature>.md
+   python "${CLAUDE_SKILL_DIR}/scripts/export_stubs.py" docs/specs/wip/<feature>.md
    ```
    Verweigert der Export (Prosa-Kriterien, fehlende Non-Goals,
    Slug-Kollision), meldet er jede betroffene Zeile — das ist der Contract,

@@ -85,7 +85,8 @@ def test_excluded_json_names_existing_skills_with_reason():
         assert isinstance(reason, str) and reason.strip(), f"{name}: Grund fehlt"
 
 
-_SKILL_REF = re.compile(r"skills/([a-z0-9][a-z0-9-]*)/")
+# Seit Spec 25 auch `${CLAUDE_SKILL_DIR}/../<andere>/`: der Nachbar liegt nur im selben Plugin daneben.
+_SKILL_REF = re.compile(r"(?:skills/|/\.\./)([a-z0-9][a-z0-9-]*)/")
 
 
 def test_no_file_refs_across_plugins():
@@ -107,7 +108,7 @@ def test_no_file_refs_across_plugins():
                     if other == name:
                         continue
                     if other in excluded or (other in listed and listed[other] != plugins):
-                        findings.append(f"{path.relative_to(REPO_ROOT)}:{lineno} -> skills/{other}/")
+                        findings.append(f"{path.relative_to(REPO_ROOT)}:{lineno} -> {other}/")
     assert not findings, findings
 
 
@@ -281,3 +282,9 @@ def test_no_superpowers_routing_targets():
         if rel not in ROUTING_TARGET_ALLOWED and any(t in text for t in ROUTING_TARGETS):
             hits.append(rel)
     assert hits == [], hits
+
+
+def test_cross_plugin_check_sees_skill_dir_neighbors():
+    """Die Erweiterung greift: ein `../<x>/` in einem fremden Plugin wäre ein Befund."""
+    assert _SKILL_REF.findall('python "${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/plan_to_tasks.py"') == ["subagent-dev"]
+    assert _SKILL_REF.findall("skills/explain/references/x.md") == ["explain"]

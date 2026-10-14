@@ -30,7 +30,7 @@ ist das kein Fehler — es gibt schlicht keinen Treffer, weiter zu Schritt 1.
 
 1. **Mini-Ledger anlegen, ausnahmslos:**
    ```bash
-   python skills/debug-ledger/scripts/new_ledger.py \
+   python "${CLAUDE_SKILL_DIR}/scripts/new_ledger.py" \
      --symptom "…" --repro "…" --expected "…" --observed "…"
    ```
    Auch bei einem Tippfehler-Bug. Das Mini-Ledger ist drei Zeilen Aufwand, kein
@@ -40,7 +40,7 @@ ist das kein Fehler — es gibt schlicht keinen Treffer, weiter zu Schritt 1.
    Multi-Komponenten-Verdacht, kein zuverlässiges Repro, oder der Nutzer meldet
    „immer noch kaputt".
    ```bash
-   python skills/debug-ledger/scripts/new_ledger.py --escalate PFAD
+   python "${CLAUDE_SKILL_DIR}/scripts/new_ledger.py" --escalate PFAD
    ```
    Sonst bleibt es beim Mini-Ledger — das ist der Normalfall, nicht die Ausnahme.
 3. **Im vollen Modus:** Evidenz sammeln (`references/tooling-python.md`,
@@ -49,13 +49,13 @@ ist das kein Fehler — es gibt schlicht keinen Treffer, weiter zu Schritt 1.
    bekommt.
 4. **Vor jedem Fix-Vorschlag im vollen Modus prüfen:**
    ```bash
-   python skills/debug-ledger/scripts/check_ledger.py PFAD
+   python "${CLAUDE_SKILL_DIR}/scripts/check_ledger.py" PFAD
    ```
    Exit 1 heißt: Verstoß, nicht vorschlagen. Der Fix-Commit referenziert die
    Ledger-Datei in der Commit-Message.
 5. **Nach Auflösung:**
    ```bash
-   python skills/debug-ledger/scripts/new_ledger.py --resolve PFAD --cause "…"
+   python "${CLAUDE_SKILL_DIR}/scripts/new_ledger.py" --resolve PFAD --cause "…"
    ```
    Das Ledger bleibt im Archiv, `INDEX.md` bekommt seine Symptom→Ursache-Zeile.
    So verzinst sich jeder gelöste Bug in Phase 0 aller zukünftigen.
@@ -101,8 +101,16 @@ Adaptiert aus obra/superpowers (MIT License, Copyright (c) 2025 Jesse Vincent).
 
 `assets/hooks/check-ledger.json` ist eine Vorlage für einen `PreToolUse`-Hook,
 der `git commit` abfängt und `check_ledger.py --staged` laufen lässt. **Wird von
-dieser Skill nie automatisch installiert** (Spec 00 §4) — der Nutzer kopiert das
-Fragment bewusst in seine `settings.json`. Ohne Hook bleibt es bei G2.
+dieser Skill nie automatisch installiert** (Spec 00 §4) — der Nutzer übernimmt ihn
+bewusst, in zwei Schritten:
+
+```bash
+mkdir -p .claude/hooks && cp "${CLAUDE_SKILL_DIR}/scripts/check_ledger.py" .claude/hooks/
+```
+
+dann das Fragment in `.claude/settings.json` unter `hooks` mischen. Der Hook ruft die
+Kopie über `$CLAUDE_PROJECT_DIR` auf; fehlt sie, meldet er „Hook ungeprüft" und hält
+nichts an. Ohne Hook bleibt es bei G2.
 
 ## Abgrenzung
 

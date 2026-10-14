@@ -32,10 +32,9 @@ KEIN BEFUND OHNE FUNDSTELLE. KEINE STUFE SPRICHT FÜR EINE ANDERE.
 
 1. **Modus klären.** Selbst-Modus (eigene Views vor der Lieferung) oder Fremd-Modus
    (bestehende Seite). Im Selbst-Modus wird repariert, im Fremd-Modus berichtet.
-2. **Stufe 1 — läuft immer.** `<skill-dir>` ist der Pfad, den die Skill-Aktivierung
-   als „Base directory for this skill" nennt — vor dem Ausführen einsetzen:
+2. **Stufe 1 — läuft immer.**
    ```bash
-   python <skill-dir>/scripts/audit_static.py --repo .
+   python "${CLAUDE_SKILL_DIR}/scripts/audit_static.py" --repo .
    ```
    Findet `100vh`, Eingabefelder unter 16 px, Zoom-Sperren im Viewport-Meta und
    Hover-Interaktionen ohne Touch-Pfad. Exit 1 heißt Befunde, nicht Fehler.

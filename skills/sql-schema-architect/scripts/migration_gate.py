@@ -29,7 +29,8 @@ RED = "red"
 UNKNOWN = "unknown"
 _RANK = {GREEN: 0, YELLOW: 1, RED: 2}
 
-HOOK_MARKER = "sql-schema-architect/scripts/migration_gate.py"
+# Der alte Pfad (Vorlage vor Spec 25) und die Kopie, die die Vorlage heute aufruft.
+HOOK_MARKERS = ("sql-schema-architect/scripts/migration_gate.py", ".claude/hooks/migration_gate.py")
 MULTISTEP_RE = re.compile(r"mehrschritt-plan:\s*(.{11,})", re.IGNORECASE)
 SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json")
 
@@ -532,7 +533,7 @@ def detect_hook_installed(repo: Path) -> bool:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        if HOOK_MARKER in text:
+        if any(marker in text for marker in HOOK_MARKERS):
             return True
     return False
 

@@ -24,9 +24,9 @@ Regelverstoß, kein Stilmittel.
    Im Monorepo: ein `ARCHITECTURE.md` je Service-Verzeichnis, nie eines fürs ganze Repo.
 2. **Extrahieren** (Tier 1, nur Stdlib):
    ```bash
-   python skills/architecture-map/scripts/extract_py.py --root <service> \
+   python "${CLAUDE_SKILL_DIR}/scripts/extract_py.py" --root <service> \
      --out .skills/cache/architecture-map/<service>-module.json
-   python skills/architecture-map/scripts/extract_ts.py --root <service> \
+   python "${CLAUDE_SKILL_DIR}/scripts/extract_ts.py" --root <service> \
      --out .skills/cache/architecture-map/<service>-module-ts.json
    ```
    `extract_ts.py` ist eine **Textsuche, kein echter Parser** — ts-morph/`npx` sind in
@@ -45,7 +45,7 @@ Regelverstoß, kein Stilmittel.
    zwischen „niemand hat hingesehen" und „geprüft, für gesund befunden".
 4. **Analysieren:**
    ```bash
-   python skills/architecture-map/scripts/analyze_graph.py \
+   python "${CLAUDE_SKILL_DIR}/scripts/analyze_graph.py" \
      --graph .skills/cache/architecture-map/<service>-module.json \
      --layers .skills/architecture-map/layers.json \
      --out .skills/cache/architecture-map/<service>-findings.json
@@ -53,13 +53,13 @@ Regelverstoß, kein Stilmittel.
 5. **Hotspots für die Klassenebene wählen** (aus Ausreißern oder Nutzerwunsch, nie die
    ganze Codebase):
    ```bash
-   python skills/architecture-map/scripts/extract_py.py --root <service> \
+   python "${CLAUDE_SKILL_DIR}/scripts/extract_py.py" --root <service> \
      --level class --files pfad/a.py pfad/b.py \
      --out .skills/cache/architecture-map/<service>-classes.json
    ```
 6. **Mermaid rendern**, unverändert übernehmen:
    ```bash
-   python skills/architecture-map/scripts/to_mermaid.py \
+   python "${CLAUDE_SKILL_DIR}/scripts/to_mermaid.py" \
      --graph .skills/cache/architecture-map/<service>-module.json
    ```
 7. **`ARCHITECTURE.md` schreiben:** drei getrennte Abschnitte (Kontext/Module/Klassen,
@@ -73,10 +73,10 @@ Regelverstoß, kein Stilmittel.
    {"module": {"command": "<_meta.generated aus dem Graph-JSON>", "graph_hash": "<via --graph berechnet>", "external": ["<external aus dem Graph-JSON>"]}}
    -->
    ```
-   Hash je Ebene: `python skills/architecture-map/scripts/drift_check.py --graph <graph.json>`.
+   Hash je Ebene: `python "${CLAUDE_SKILL_DIR}/scripts/drift_check.py" --graph <graph.json>`.
 8. **Drift-Check** (auf Wunsch oder als CI-Schritt, meldet nur, schreibt nie):
    ```bash
-   python skills/architecture-map/scripts/drift_check.py --doc <service>/ARCHITECTURE.md
+   python "${CLAUDE_SKILL_DIR}/scripts/drift_check.py" --doc <service>/ARCHITECTURE.md
    ```
 
 ## `layers.json`

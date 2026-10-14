@@ -190,11 +190,11 @@ def main(argv: list[str] | None = None) -> int:
 
     known_count = len(discover_modules(args.root))
     graph = build_module_graph(args.root)
-    # sys.argv[0] statt eines hartkodierten Pfads — siehe Kommentar in extract_py.py.
+    # `scripts/extract_ts.py` statt sys.argv[0] — siehe Kommentar in extract_py.py.
     graph["_meta"] = {
         "skill": "architecture-map",
         "schema": SCHEMA_VERSION,
-        "generated": f"python {sys.argv[0]} --root {args.root} --out {args.out}",
+        "generated": f"python scripts/extract_ts.py --root {args.root} --out {args.out}",
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(graph, indent=2, ensure_ascii=False), encoding="utf-8")

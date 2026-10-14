@@ -26,7 +26,7 @@ deshalb mindestens Schritt 1 und 2 unten, auch eine beiläufig wirkende Anfrage
 
 1. **Fällige Themen abrufen:**
    ```bash
-   python skills/learning-coach/scripts/due_topics.py --repo . due
+   python "${CLAUDE_SKILL_DIR}/scripts/due_topics.py" --repo . due
    ```
    Liefert fällige Themen samt Grad, Überfälligkeits-Status und — pro Thema — den
    Zustand der zugehörigen Aufgaben-Datei unter

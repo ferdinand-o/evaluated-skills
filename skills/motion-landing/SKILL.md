@@ -68,8 +68,8 @@ Ein Verstoß meldet `scripts/verify.py` (G2 nach Spec 00 §4: das Skript fällt
 das Urteil, der Aufruf bleibt Teil des Workflows — kein Hook erzwingt ihn).
 
 ```bash
-python skills/motion-landing/scripts/verify.py --scenes scenes.json --url http://localhost:8000
-python skills/motion-landing/scripts/verify.py --scenes scenes.json --url http://localhost:8000 --video
+python "${CLAUDE_SKILL_DIR}/scripts/verify.py" --scenes scenes.json --url http://localhost:8000
+python "${CLAUDE_SKILL_DIR}/scripts/verify.py" --scenes scenes.json --url http://localhost:8000 --video
 ```
 
 **Fehlt die Toolchain** (Playwright und/oder Lighthouse nicht installiert),
