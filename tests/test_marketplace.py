@@ -259,6 +259,8 @@ ROUTING_TARGET_ALLOWED = {
     "skills/impl-plan/references/reviewer-prompt.md",
     # test-first grenzt sich gegen die TDD-Skill von superpowers ab, die es ersetzt (Spec 24).
     "skills/test-first/SKILL.md",
+    # Die Lückentabelle nennt die superpowers-Skills als Daten (Spec 21 B).
+    "skills/setup-user/references/superpowers-gaps.json",
 }
 
 
