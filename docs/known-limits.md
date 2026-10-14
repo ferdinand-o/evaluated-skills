@@ -109,6 +109,17 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   logged in". Ein Agent, der bewusst oder unbewusst `$HOME` liest oder beschreibt,
   trifft auf das echte Home-Verzeichnis des Aufrufers.
 
+- **Eval-Workspaces liegen nebeneinander und sehen einander.** Der Runner legt jeden
+  Workspace mit `tempfile.mkdtemp(prefix="eval-<id>-")` im System-Temp an; ein Agent, der
+  über sein Arbeitsverzeichnis hinaus sucht, findet die Workspaces gleichzeitiger oder
+  liegengebliebener Läufe und deren installierte Skills. Gemessen am 2026-10-13 bei
+  Läufen außerhalb des Harness (work-plan-Report): Ein Agent meldete Kopien von
+  `plan_to_tasks.py` in Nachbar-Workspaces und benutzte sie bewusst nicht; ein weniger
+  vorsichtiger hätte einen fremden Lint aufgerufen. Ein eigener Elternordner je Lauf
+  ändert daran nichts, solange der Agent als derselbe Nutzer läuft und das Dateisystem
+  lesen darf; erst eine Sandbox je Lauf (eigener Container oder Nutzer) trennt das.
+  Bis dahin: Läufe nacheinander fahren und `--keep-workspace` nur zur Diagnose.
+
 ## Assertion-Vokabular
 
 - **Negative Strukturprüfung fehlt.** Es gibt kein Primitiv für „keine anderen

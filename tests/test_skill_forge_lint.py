@@ -131,6 +131,21 @@ def test_frontmatter_rejects_foreign_fields_and_missing_description(tmp_path):
     assert status == "finding" and "description" in reason
 
 
+def test_frontmatter_enforces_agent_skills_length_limits(tmp_path):
+    """description höchstens 1024 Zeichen, name höchstens 64 (Agent Skills, overview und
+    best-practices). Claude Code kürzt die Skill-Liste erst bei 1536 — portabel gilt 1024."""
+    long_desc = "Use when " + "x" * 1015          # 1024 Zeichen: noch erlaubt
+    root, skill = make_repo(tmp_path, GOOD_SKILL_MD.replace(f"description: {GOOD_DESC}", f"description: {long_desc}"))
+    assert status_of(ls.lint_skill(skill, root), "frontmatter")[0] == "pass"
+    (skill / "SKILL.md").write_text(GOOD_SKILL_MD.replace(f"description: {GOOD_DESC}", f"description: {long_desc}y"),
+                                    encoding="utf-8")
+    status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
+    assert status == "finding" and "1025" in reason and "1024" in reason
+    (skill / "SKILL.md").write_text(GOOD_SKILL_MD.replace("name: note-tag", "name: " + "n" * 65), encoding="utf-8")
+    status, reason = status_of(ls.lint_skill(skill, root), "frontmatter")
+    assert status == "finding" and "64" in reason
+
+
 def test_skill_md_line_limit(tmp_path):
     root, skill = make_repo(tmp_path, GOOD_SKILL_MD + "\n" * 160)
     status, reason = status_of(ls.lint_skill(skill, root), "skill-md-lines")

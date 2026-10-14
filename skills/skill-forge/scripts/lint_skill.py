@@ -226,6 +226,13 @@ def _assertions(ev: dict) -> list[dict]:
 
 # --- Regeln -----------------------------------------------------------------------
 
+# Agent Skills (platform.claude.com, overview und best-practices): name höchstens 64,
+# description höchstens 1024 Zeichen. Claude Code kürzt die Skill-Liste erst bei 1536
+# (description plus when_to_use); portabel gilt die strengere Grenze.
+NAME_MAX = 64
+DESCRIPTION_MAX = 1024
+
+
 def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     md = skill_dir / "SKILL.md"
     if not md.is_file():
@@ -243,15 +250,18 @@ def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
         m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", line)
         if m and (problem := yaml_plain_scalar_problem(m.group(2).strip())):
             invalid.append(f"{m.group(1)} {problem} — in Anführungszeichen setzen")
-    if missing or extra or invalid:
-        parts = []
+    too_long = [f"{key} hat {len(fields[key])} Zeichen, Grenze {limit} (Agent Skills)"
+                for key, limit in (("name", NAME_MAX), ("description", DESCRIPTION_MAX))
+                if len(fields.get(key) or "") > limit]
+    if missing or extra or invalid or too_long:
+        parts = list(too_long)
         if missing:
             parts.append("fehlt: " + ", ".join(missing))
         if extra:
             parts.append("nicht erlaubt (Spec 00 §5): " + ", ".join(extra))
         parts.extend("YAML lädt nicht: " + i for i in invalid)
         return RuleResult("frontmatter", "finding", "; ".join(parts))
-    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder, YAML-Skalare gültig")
+    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder, YAML-Skalare gültig, Längen in der Grenze")
 
 
 def rule_skill_md_lines(skill_dir: Path, repo_root: Path | None) -> RuleResult:
