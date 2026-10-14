@@ -1765,8 +1765,9 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
 
 ## setup-user
 
-Gebaut nach Spec 21, Abschnitt A (2026-10-09). Tier 1: `inspect_config.py`,
-`apply_config.py`, `verify_install.py`, dazu zwei Laufzeitskripte im Config-Verzeichnis.
+Gebaut nach Spec 21, Abschnitt A (2026-10-09) und B (2026-10-14). Tier 1:
+`inspect_config.py`, `apply_config.py`, `verify_install.py`, `route_check.py`, dazu zwei
+Laufzeitskripte im Config-Verzeichnis.
 Was ungemessen bleibt und wo es beißt:
 
 - **Windows ist ungemessen.** Ob `|| true` im Hook-Kommando dort greift, ob `python` oder
@@ -1784,9 +1785,22 @@ Was ungemessen bleibt und wo es beißt:
 - **Die Prüfung führt nur Asset-Befehle aus.** Eine fremde Statusline bleibt
   „ungeprüft (fremd, nicht ausgeführt)", auch wenn sie richtig wäre. `verify_install.py`
   braucht `bash`; ohne heißt das Ergebnis „ungeprüft — keine bash".
-- **Abschnitt B fehlt.** `route_check.py`, die Lückentabelle als Daten, das Plugin-Profil
-  in `enabledPlugins` und der Eval `superpowers-sessionstart-is-reported` kommen erst nach
-  Spec 23; bis dahin fasst setup-user `enabledPlugins` nicht an.
+- **Gemessen ist nur das Layout eines lokalen Marketplace.** `route_check.py` folgt dem,
+  was `claude plugin install` am 2026-10-14 (CLI 2.1.296) in einem Wegwerf-Verzeichnis
+  angelegt hat. Ein Marketplace aus GitHub, ein Plugin unter `plugins/synced/` (beim
+  Nutzer leer, hier ein leerer UUID-Ordner) und das Feld `hooks` in `plugin.json` sind
+  nach Doku gebaut, nicht gemessen.
+- **Jedes per CLI installierte Plugin gilt als gesetzt.** Die Installation schreibt
+  `true` nach `enabledPlugins`; das Profil dreht gesetzte Werte nie um. superpowers geht
+  deshalb nur aus, wenn der Nutzer es mit `plugins_off` ausdrücklich freigibt — der Plan
+  fragt, er schaltet nicht.
+- **`defaultEnabled` kommt nur aus dem Marketplace-Eintrag** im Installationsordner. Ein
+  Plugin ohne Eintrag und ohne Wert in `enabledPlugins` gilt als an.
+- **Teil (b) der Abschaltbedingung prüft den installierten Cache,** nicht das Repo. Ein
+  veralteter Cache meldet Verweise, die die Quelle nicht mehr hat; dann hilft
+  `claude plugin update`.
+- **Projekt-Settings bewertet `route_check.py` nicht.** Ein Projekt, das superpowers
+  wieder einschaltet, sieht `check` nicht.
 - **Die Statusline-Vorlage stammt vom Nutzer.** Asset und Anzeige-Test bauen auf seiner
   Fassung vom 2026-10-07 auf (`tests/fixtures/setup-user/`); ohne sie gibt es kein Asset
   und keinen Anzeige-Vergleich.
