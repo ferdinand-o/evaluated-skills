@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
 from evalkit.assertions import check
-from evalkit.dispatch import DEFAULT_TIMEOUT, run_agent
+from evalkit.dispatch import DEFAULT_TIMEOUT, PERMISSION_PROFILES, run_agent
 from evalkit.judge import JudgeError, judge
 from evalkit.report import EvalResult, exit_code, format_report
 from evalkit.schema import JUDGE_TYPE, Eval, EvalSchemaError, load_evals
@@ -134,6 +135,7 @@ def run_one(
     keep: bool,
     skill_name: str | None = None,
     without_skill: bool = False,
+    permissions: str = "auto",
 ) -> EvalResult:
     """Ein Eval in einem frischen Workspace. `without_skill` ist der Baseline-Lauf
     (Spec 18): dieselbe Fixture, derselbe Prompt, derselbe Judge, aber nichts
@@ -146,8 +148,14 @@ def run_one(
     home_before = _home_skills_state()
     try:
         workspace = prepare(workdir / "ws", None if without_skill else skill_dir, fixture_dir)
-        transcript = run_agent(ev.prompt, workspace.root, cli=cli, timeout=timeout)
+        transcript = run_agent(ev.prompt, workspace.root, cli=cli, timeout=timeout, permissions=permissions)
         _report_escapes(home_before, _home_skills_state(), ev.id)
+        if transcript.exit_code != 0 and "dangerously-skip-permissions" in transcript.stderr:
+            # Kein stiller SKIP: Die CLI verweigert bypassPermissions unter root. Ein Lauf,
+            # der so endet, hat nichts gemessen — das muss laut sein und die Abhilfe nennen.
+            hint = "CLI verweigert bypassPermissions (root?) — neu fahren mit --permissions allowed-tools"
+            print(f"  FEHLER: {hint}", file=sys.stderr)
+            return EvalResult(ev.id, False, (f"harness: {hint}",), True, "Rechte-Modus verweigert", baseline=without_skill)
         if transcript.exit_code != 0:
             note = "Timeout" if transcript.timed_out else f"Agent exit {transcript.exit_code}"
             return EvalResult(ev.id, False, (f"harness: {note}: {transcript.stderr.strip()[:200]}",), True, note, baseline=without_skill)
@@ -169,7 +177,8 @@ def run_one(
             judge_dir = workdir / "judge"
             judge_dir.mkdir(exist_ok=True)
             dump = dump_changed_files(workspace.root, workspace.baseline)
-            verdicts = judge(claims, transcript.text, dump, judge_dir, cli=cli, timeout=timeout)
+            verdicts = judge(claims, transcript.text, dump, judge_dir, cli=cli, timeout=timeout,
+                             permissions=permissions)
         result = grade(ev, workspace.root, workspace.baseline, verdicts, transcript.text)
         return replace(result, note=note, baseline=without_skill)
     except (WorkspaceError, JudgeError) as exc:
@@ -205,6 +214,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Baseline: dieselben Evals ohne installierte Skill fahren — ein Eval, der dort grün ist, "
              "misst nichts (Exit 1); Exit 0, wenn alle rot sind (Spec 18)",
     )
+    parser.add_argument(
+        "--permissions", choices=PERMISSION_PROFILES, default="auto",
+        help="Rechte des Eval-Agenten: bypass (bypassPermissions), allowed-tools (--allowedTools mit "
+             "acceptEdits; läuft auch als root) oder auto (allowed-tools unter root, sonst bypass)",
+    )
     args = parser.parse_args(argv)
 
     fixtures_dir = args.evals_dir / "fixtures"
@@ -231,6 +245,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ev, skill_dir=skill_dir, fixtures_dir=fixtures_dir,
                 cli=args.cli, timeout=args.timeout, keep=args.keep_workspace,
                 skill_name=skill_name, without_skill=args.without_skill,
+                permissions=args.permissions,
             ))
 
     if not results:

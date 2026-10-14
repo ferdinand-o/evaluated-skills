@@ -95,6 +95,7 @@ def judge(
     *,
     cli: str = "claude",
     timeout: int = 300,
+    permissions: str = "auto",
 ) -> dict[str, bool]:
     """Lasse alle Behauptungen in einem Durchgang beurteilen.
 
@@ -103,7 +104,8 @@ def judge(
     """
     if not claims:
         return {}
-    result = run_agent(build_prompt(claims, transcript, workspace_dump), cwd, cli=cli, timeout=timeout)
+    result = run_agent(build_prompt(claims, transcript, workspace_dump), cwd, cli=cli, timeout=timeout,
+                       permissions=permissions)
     if result.exit_code != 0:
         raise JudgeError(f"Judge-Prozess scheiterte (exit {result.exit_code}): {result.stderr.strip()[:200]}")
     # `text`, nicht `stdout`: Letzteres ist seit der Umstellung auf stream-json das
