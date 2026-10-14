@@ -181,7 +181,7 @@ bis die Quote stimmt.
 
 ## Offen für die nächste Runde
 
-- Abschnitt D, sobald die Delphi-Prüfpunkte vorliegen.
+- Die Delphi-Prüfpunkte des Nutzers nach `references/review/delphi.md`.
 - Den Eval-Harness auf `--allowedTools` statt `--dangerously-skip-permissions` umstellen;
   dann läuft er auch als root (known-limits, „Der Harness läuft nicht als root").
 - Vorlagen-Messung mit einer Fixture, in der der Nebenbefund beim Arbeiten zwangsläufig
@@ -190,3 +190,67 @@ bis die Quote stimmt.
 - Behoben am 2026-10-12: `detect_repo.py` zählte Sprachen auch aus Fixture-Ordnern und
   meldete auf diesem Repo TypeScript; Ordner `fixtures`, `__fixtures__` und `testdata`
   werden jetzt übersprungen.
+
+## Abschnitt D — Ziel-Reviewer (2026-10-14)
+
+Gebaut nach `docs/superpowers/plans/2026-10-14-setup-repo-d.md` (8 Tasks, das Gate
+koppelte alle), sequenziell im Hauptkontext, jeder Task mit `verify` im sauberen Worktree
+abgenommen. Auf Wunsch des Nutzers ohne Delphi-Prüfpunkte gebaut.
+
+### Was entstanden ist
+
+- `references/review/python.md`, `typescript.md`, `generic.md` mit je einer Zeile pro
+  Prüfpunkt (ID, Text, Quelle); `delphi.md` leer mit Hinweis, dass die Punkte vom Nutzer
+  kommen.
+- `assets/agents/reviewer.md`: Subagent mit drei Prüfungen („Fertig wenn" belegt, Bereich,
+  Prüfpunkte des Stacks), Urteil je Punkt und Failure-Szenario je Befund; sucht keine Bugs.
+- `plan_repo.py` plant `.claude/agents/reviewer.md` mit den Prüfpunkten der erkannten
+  Sprachen und den allgemeinen; ein vorhandener bleibt unberührt, `--without-reviewer`
+  wählt ab. Ein Stack ohne Prüfpunkte steht als „ungeprüft — keine Prüfpunkte für …" da.
+- Die Zielregel nennt den Reviewer vor *Erledigt* (jetzt 25 von 25 Zeilen); SKILL.md,
+  `references/goals.md`, `plan-format.md`, `docs/artifact-header.md` und review-context
+  ziehen nach.
+
+### Entscheidungen
+
+- **Ohne Delphi bauen.** Der Nutzer entschied am 2026-10-14, D nicht länger an seinen
+  Delphi-Punkten hängen zu lassen. Sie kommen später als reine Datenergänzung; Code und
+  Tests ändern sich dafür nicht.
+- **Prüfpunkte als Daten, nicht im Asset.** Das Asset hat einen Platzhalter;
+  `plan_repo.py` setzt die Zeilen ein. So landen im Zielrepo nur die Punkte seines Stacks.
+- **Quellen ohne Sprungmarken.** PEP 8, PEP 621 und die npm-Doku waren aus dem Container
+  nicht erreichbar (Netzwerk-Policy, auch WebFetch). Die Prüfpunkte nennen Seite und
+  Abschnittsnamen; Anker aus dem Gedächtnis wären unbelegt gewesen.
+
+### Was gemessen wurde
+
+Suite: 1 542 grün, 3 übersprungen, 1 rot (`test_rest_api_architect_gate`, Spectral fehlt
+in der Umgebung). `lint_skill.py skills/setup-repo` ohne neuen Befund.
+
+Echte kopflose Sessions (`claude -p` mit `--allowedTools`, CLI 2.1.296), je ein Lauf,
+bewertet mit `evalkit.runner.grade()` — alle fünf Evals erneut, weil sich SKILL.md,
+Zielregel und Fixtures geändert haben:
+
+| Eval | mit Skill | ohne Skill |
+| --- | --- | --- |
+| `anti-ceremony-check-on-aligned-repo-changes-nothing` | bestanden | — |
+| `plan-from-repo-writes-only-report` | bestanden | — |
+| `plan-without-tests-says-unverified` | bestanden | — |
+| `apply-executes-plan-faithfully` | bestanden | nicht bestanden |
+| `apply-refuses-tampered-plan` | bestanden | — |
+
+**Die neue Assertion diskriminiert nicht.** Eval 4 prüft jetzt auch, dass
+`.claude/agents/reviewer.md` die ID `py-test-for-public` trägt. Ohne Skill las der Agent
+den Block aus `plan.md`, setzte ihn mit einem eigenen Skript um und erzeugte
+`reviewer.md` byte-gleich; gescheitert ist der Lauf nur an `apply.md`. Die Notiz des
+Evals behauptete vorher das Gegenteil und ist korrigiert. Die Assertion bleibt, weil sie
+prüft, dass die Prüfpunkte im Zielrepo ankommen.
+
+### Was nicht gemessen wurde
+
+- **Ein Lauf, in dem ein Ziel abgeschlossen wird** — ob Claude den Reviewer aufruft und
+  ob dessen Urteile stimmen.
+- **Ob ein Projekt-Agent mit diesem Frontmatter lädt**; geprüft ist nur der Inhalt.
+- **Die Quellen der Prüfpunkte** (nicht erreichbar, siehe oben).
+- **Delphi** — keine Prüfpunkte.
+
