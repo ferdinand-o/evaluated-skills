@@ -2,13 +2,17 @@
 """Schreibt den Einrichtungsplan eines Repos (setup-repo, Spec 22). Tier 1.
 
     python plan_repo.py [--repo <pfad>] [--classes '<json>'] [--with-verify-hook] [--without-goal-hook]
-                        [--deny-secrets]
+                        [--deny-secrets] [--without-reviewer]
 
 Liest `.skills/cache/setup-repo/detect.json` und `candidates.json`, schreibt nur
 `.skills/cache/setup-repo/plan.md`: oben die Ansicht für den Nutzer, darunter den Block
 `json setup-repo-plan` mit Hash (Format: references/plan-format.md). Klassen je Kandidat
 kommen aus `--classes`; ohne Angabe gelten die Klassen des letzten Plans, sonst „offen".
 Der Hash kennt weder Ort noch HEAD noch Zeilenenden; `.claude/skills/` steht nie im Block.
+
+Abschnitt D: Ohne `--without-reviewer` plant es `.claude/agents/reviewer.md` aus
+`assets/agents/reviewer.md` mit den Prüfpunkten aus `references/review/` für die erkannten
+Sprachen; ein vorhandener `reviewer.md` bekommt keine Operation.
 """
 from __future__ import annotations
 
@@ -219,6 +223,42 @@ def _plugins(detect: dict) -> dict[str, bool]:
     return dict(sorted(result.items()))
 
 
+REVIEW = ASSETS.parent / "references" / "review"
+REVIEW_FILES = {"python": "python", "typescript": "typescript", "javascript": "typescript", "delphi": "delphi"}
+REVIEWER_PATH = ".claude/agents/reviewer.md"
+
+
+def _checkpoint_lines(stack: str) -> list[str]:
+    text = _read(REVIEW / f"{stack}.md") or ""
+    section = text.split("## Prüfpunkte", 1)[1].split("\n## ", 1)[0] if "## Prüfpunkte" in text else ""
+    return [line for line in section.splitlines() if line.startswith("- ")]
+
+
+def reviewer_stacks(detect) -> list[str]:
+    stacks: list[str] = []
+    for lang in detect.get("languages") or []:
+        stack = REVIEW_FILES.get(lang)
+        if stack and stack not in stacks:
+            stacks.append(stack)
+    return stacks
+
+
+def reviewer_content(detect) -> str:
+    """Asset reviewer.md mit den Prüfpunkten der erkannten Stacks und den allgemeinen (Abschnitt D)."""
+    parts: list[str] = []
+    stacks = reviewer_stacks(detect)
+    if not stacks:
+        parts += ["- Stack nicht erkannt — nur die allgemeinen Prüfpunkte.", ""]
+    for stack in stacks:
+        lines = _checkpoint_lines(stack)
+        parts += [f"### {stack}", ""]
+        parts += lines or [f"- ungeprüft — keine Prüfpunkte für {stack} (references/review/{stack}.md ist leer)"]
+        parts.append("")
+    parts += ["### allgemein", "", *_checkpoint_lines("generic")]
+    asset = _norm((ASSETS / "agents" / "reviewer.md").read_text(encoding="utf-8"))
+    return asset.replace("{{checkpoints}}", "\n".join(parts))
+
+
 def build_plan(repo_root, detect, candidates, options) -> dict:
     """Der Block samt Hash; liest das Repo, schreibt nichts."""
     root = Path(repo_root)
@@ -250,6 +290,14 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
     for rel, asset in (("docs/goals.md", "goals.md"), (".claude/rules/goals.md", "rules/goals.md")):
         if _read(root / rel) is None:
             operations.append({"path": rel, "action": "create", "content": _norm((ASSETS / asset).read_text(encoding="utf-8"))})
+
+    # Ziel-Reviewer (Abschnitt D): nur anlegen, einen vorhandenen nie überschreiben.
+    want_reviewer = bool(options.get("reviewer", True))
+    reviewer_present = _read(root / REVIEWER_PATH) is not None
+    if want_reviewer and not reviewer_present:
+        operations.append({"path": REVIEWER_PATH, "action": "create", "content": reviewer_content(detect)})
+    reviewer = {"state": "vorhanden" if reviewer_present else ("an" if want_reviewer else "aus"),
+                "stacks": reviewer_stacks(detect)}
 
     verify_hook = bool(options.get("verify_hook")) and verification["command"] is not None \
         and not verification["derived"]
@@ -295,8 +343,9 @@ def build_plan(repo_root, detect, candidates, options) -> dict:
         "schema": 1,
         "verification": verification,
         "candidates": cands,
-        "options": {"verify_hook": verify_hook, "goal_hook": goal_hook,
+        "options": {"verify_hook": verify_hook, "goal_hook": goal_hook, "reviewer": want_reviewer,
                     "deny_secrets": bool(options.get("deny_secrets"))},
+        "reviewer": reviewer,
         "plugins": plugins,
         "budget": {"lines": _always_loaded(root, after), "limit": BUDGET_LIMIT},
         "operations": operations,
@@ -357,6 +406,15 @@ def render_plan(block) -> str:
                      "`--without-goal-hook`.")
     else:
         lines.append("- Bereichs-Hook (`UserPromptSubmit`, `Stop`): aus — Ledger und Zielregel kommen trotzdem.")
+    rev = block.get("reviewer") or {}
+    stacks = ", ".join(rev.get("stacks") or []) or "Stack nicht erkannt"
+    if rev.get("state") == "vorhanden":
+        lines.append(f"- Ziel-Reviewer `{REVIEWER_PATH}`: vorhanden, bleibt unberührt.")
+    elif rev.get("state") == "an":
+        lines.append(f"- Ziel-Reviewer `{REVIEWER_PATH}`: **an** — Subagent vor *Erledigt*, Prüfpunkte für "
+                     f"{stacks} und allgemein. Abwählen: neu planen mit `--without-reviewer`.")
+    else:
+        lines.append(f"- Ziel-Reviewer `{REVIEWER_PATH}`: aus — zuschalten ohne `--without-reviewer`.")
     if v["command"] is None or v["derived"]:
         lines.append("- Verifikations-Hook: nicht angeboten — kein belegter Verifikationsbefehl.")
     elif block["options"]["verify_hook"]:
@@ -406,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--with-verify-hook", action="store_true")
     parser.add_argument("--without-goal-hook", action="store_true")
     parser.add_argument("--deny-secrets", action="store_true")
+    parser.add_argument("--without-reviewer", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.repo).resolve()
     cache = root / CACHE
@@ -430,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         block = build_plan(root, detect, candidates, {"classes": classes, "verify_hook": args.with_verify_hook,
                                                       "goal_hook": not args.without_goal_hook,
+                                                      "reviewer": not args.without_reviewer,
                                                       "deny_secrets": args.deny_secrets})
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

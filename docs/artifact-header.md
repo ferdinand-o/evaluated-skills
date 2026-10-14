@@ -142,7 +142,8 @@ beschreibt.
 **Für Skill-Autoren:** Diese Regel gilt für *jedes* Artefakt (siehe oben).
 Die vier dokumentierten Ausnahmen sind `handoff.md`, die Stub-Dateien von
 `feature-spec`, die Anki-CSV von `exercise-forge` und die Kopfzeile nach dem
-Frontmatter bei den Rules von `setup-repo` — jede mit einem hier
+Frontmatter bei den Rules und dem Ziel-Reviewer (`.claude/agents/reviewer.md`) von
+`setup-repo` — jede mit einem hier
 ausgeschriebenen Grund, keine davon, weil die Kopf-Regel optional wäre. Wer
 eine neue Skill baut und eine ähnliche Ausnahme für gerechtfertigt hält,
 dokumentiert sie hier nach demselben Muster, statt sich stillschweigend auf

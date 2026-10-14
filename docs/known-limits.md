@@ -1844,8 +1844,20 @@ ungemessen bleibt und wo es beißt:
 - **Die Ausnahmen sind fest.** `docs/goals.md`, `handoff.md`, `docs/debugging/`,
   `docs/decisions.md`, `docs/specs/wip/`, `docs/plans/` (seit Spec 23), `.claude/`,
   `.skills/`, `CLAUDE.md` und `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
-- **Abschnitt D fehlt.** Kein Ziel-Reviewer; er wartet auf die Delphi-Prüfpunkte des
-  Nutzers.
+- **Delphi hat keine Prüfpunkte.** `references/review/delphi.md` ist leer, bis der Nutzer
+  seine Punkte liefert (Entscheidung vom 2026-10-14: D ohne Delphi bauen). Der
+  Ziel-Reviewer meldet den Stack bis dahin „ungeprüft — keine Prüfpunkte für delphi".
+- **Ob der Reviewer aufgerufen wird und ob die Prüfpunkte greifen, misst nichts.** Die
+  Zielregel nennt ihn vor *Erledigt*; ein Eval prüft nur, dass `apply` ihn mit den
+  richtigen Prüfpunkten anlegt. Ein Lauf, in dem ein Ziel abgeschlossen wird, fehlt.
+- **Die Quellen der Prüfpunkte sind nicht nachgemessen.** PEP 8, PEP 621 und die npm-Doku
+  waren aus dem Bau-Container nicht erreichbar (Netzwerk-Policy); die Prüfpunkte nennen
+  Seite und Abschnittsnamen statt Sprungmarken.
+- **Agent-Frontmatter nach Doku.** `name`, `description` und `tools` folgen der
+  Subagent-Doku von Claude Code; ob ein Projekt-Agent mit diesem Frontmatter lädt, ist im
+  Eval nur am Datei-Inhalt geprüft, nicht an einem Aufruf.
+- **JavaScript nutzt die TypeScript-Prüfpunkte;** reine JS-Repos ohne `package.json`
+  bekommen dieselben Punkte und melden die Manifest-Punkte dann „ungeprüft".
 
 ## impl-plan
 

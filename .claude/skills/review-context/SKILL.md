@@ -83,5 +83,8 @@ muss, was eine Änderung erreichen sollte.
   Security-Linse (Spec 04, Constraints) und routet nicht selbst dorthin weiter, sondern nennt
   nur die Zuständigkeit.
 - setup-repo — richtet ein Repo für Claude Code ein (Verifikation, CLAUDE.md, Regeln mit
-  Quelle); ein Kontextpaket für einen Diff baut es nicht.
+  Quelle); ein Kontextpaket für einen Diff baut es nicht. Sein Ziel-Reviewer
+  (`.claude/agents/reviewer.md`) liest das Paket dieser Skill, wenn der Hauptagent es im
+  selben Lauf erzeugt und den Pfad übergeben hat — das Paket nennt einen symbolischen
+  Bereich, keinen SHA.
 - Diese Skill braucht ein Git-Repository für den Diff. Ohne Repo sagst du das und hörst auf.

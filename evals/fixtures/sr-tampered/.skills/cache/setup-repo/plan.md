@@ -13,7 +13,7 @@ Quelle: Makefile: check. Vor jeder Erfolgsmeldung laufen lassen.
 
 ## Budget
 
-Immer geladen nach apply: 44 von 150 Zeilen (CLAUDE.md samt Importen, Rules ohne `paths`).
+Immer geladen nach apply: 45 von 150 Zeilen (CLAUDE.md samt Importen, Rules ohne `paths`).
 
 ## Plugins je Repo
 
@@ -22,6 +22,7 @@ ungeprüft — Plugin-ID nicht gefunden; `apply` schreibt keine `enabledPlugins`
 ## Hooks (abwählbar)
 
 - Bereichs-Hook (`UserPromptSubmit`, `Stop`): **an** — meldet Dateien außerhalb der Bereiche aktiver Ziele in `docs/goals.md`, hält nie etwas an. Abwählen: neu planen mit `--without-goal-hook`.
+- Ziel-Reviewer `.claude/agents/reviewer.md`: **an** — Subagent vor *Erledigt*, Prüfpunkte für python und allgemein. Abwählen: neu planen mit `--without-reviewer`.
 - Verifikations-Hook (`Stop`): aus — zuschalten mit `--with-verify-hook`.
 - `permissions.deny` für `.env` und Schlüsseldateien: aus — zuschalten mit `--deny-secrets`.
   Ein Read-Deny gilt für die Datei-Werkzeuge und erkannte Bash-Dateikommandos, nicht für beliebige Unterprozesse.
@@ -101,11 +102,58 @@ ungeprüft — Plugin-ID nicht gefunden; `apply` schreibt keine `enabledPlugins`
 +
 +Unter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit
 +prüfbarem „Fertig wenn", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*
-+wandert ein Ziel nur mit Beleg (Befehl und Ergebnis).
++wandert ein Ziel nur mit Beleg (Befehl und Ergebnis); gibt es `.claude/agents/reviewer.md`,
++prüft vorher der Subagent `reviewer` das Ziel mit seiner ID.
 +
 +Eine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen
 +außerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.
 +Einen Merge-Konflikt in `docs/goals.md` nicht selbst lösen — fragen.
+```
+
+### `.claude/agents/reviewer.md` (create)
+
+```diff
++---
++name: reviewer
++description: Ziel-Reviewer — use before an active goal in docs/goals.md moves to Erledigt. Checks the goal's diff against its "Fertig wenn", its Bereich and the stack's conformance checkpoints, each verdict with evidence. Does not hunt for bugs in the code (that is /code-review).
++tools: Read, Grep, Glob, Bash
++---
++<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->
++
++# Ziel-Reviewer
++
++Du prüfst, ob ein Ziel aus `docs/goals.md` fertig ist — nicht, ob der Code Fehler hat.
++Fehler im Code sucht `/code-review`. Du änderst keine Datei.
++
++## Eingaben
++
++- **Ziel-ID** (`G<n>`) aus `docs/goals.md`, Tabelle *Aktiv*: „Fertig wenn" und „Bereich".
++- **Diff-Bereich**, etwa `main...HEAD` oder `HEAD~3..HEAD`; ohne Angabe `git diff HEAD`
++  plus `git status --short`.
++- **Optional ein Kontextpaket von review-context**, nur wenn der Hauptagent es im selben
++  Lauf erzeugt und den Pfad übergeben hat. Es nennt einen symbolischen Bereich, keinen SHA —
++  ein älteres Paket passt womöglich nicht zum Diff.
++
++Fehlt die Ziel-ID oder steht das Ziel nicht unter *Aktiv*: nichts prüfen, das melden.
++
++## Drei Prüfungen
++
++1. **Fertig wenn.** Jede Bedingung belegt: eine Stelle im Diff (Datei und Zeile) oder ein
++   Befehl, den du ausführst, mit Ergebnis. Was du nicht belegen kannst, ist „ungeprüft",
++   nicht „erfüllt".
++2. **Bereich.** Jede geänderte Datei liegt in einem Glob des Bereichs oder ist ein
++   Hausartefakt (`docs/goals.md`, `handoff.md`, `docs/debugging/`, `docs/decisions.md`,
++   `docs/specs/wip/`, `docs/plans/`, `.claude/`, `.skills/`, `CLAUDE.md`, `.gitignore`).
++3. **Prüfpunkte des Stacks** unten, je Punkt nur am Diff dieses Ziels.
++
++## Ausgabe
++
++Je Prüfung und je Prüfpunkt eine Zeile: `erfüllt`, `verletzt` oder `ungeprüft`, mit
++Beleg. Jeder Befund `verletzt` trägt ein **Failure-Szenario**: konkrete Eingabe oder
++Lage → was dann schiefgeht. Ohne Failure-Szenario ist es kein Befund, sondern eine
++Anmerkung. Am Ende ein Satz: „Ziel G<n> kann nach *Erledigt*" oder „Ziel G<n> bleibt
++aktiv — <die verletzten Punkte>".
+… 15 Zeilen mehr
 ```
 
 ### `.claude/hooks/goal_scope.py` (copy)
@@ -170,6 +218,7 @@ Gemischt wird:
 ```json setup-repo-plan
 {
   "base": {
+    ".claude/agents/reviewer.md": null,
     ".claude/hooks/goal_scope.py": null,
     ".claude/rules/goals.md": null,
     ".claude/settings.json": null,
@@ -179,7 +228,7 @@ Gemischt wird:
   },
   "budget": {
     "limit": 150,
-    "lines": 44
+    "lines": 45
   },
   "candidates": [
     {
@@ -191,7 +240,7 @@ Gemischt wird:
       "text": "`line-length = 100`"
     }
   ],
-  "hash": "aa3ecf6e6d458fefcb14227f2bea961ba93325697db41482da11e108137b8651",
+  "hash": "1d50d3d20c5bcf9ead2a4e734359cb2d9dab5b70c6624e1e9082a6c1e97f3d0f",
   "operations": [
     {
       "action": "create",
@@ -205,8 +254,13 @@ Gemischt wird:
     },
     {
       "action": "create",
-      "content": "<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->\n# Ziele und entdeckte Arbeit\n\nGilt nur, solange `docs/goals.md` unter *Aktiv* mindestens ein Ziel hat; sonst nichts tun.\nKopfzeile von `docs/goals.md` zuerst prüfen; vor jedem Schreiben die Datei neu lesen.\n\nJede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:\n\n1. **Vom Nutzer verlangt** — steht im aktuellen Prompt: erledigen.\n2. **Teil des Ziels** — nötig, damit „Fertig wenn\" eintritt: erledigen.\n3. **Trivial** — in einer Datei, die die Aufgabe ohnehin ändert, höchstens fünf Zeilen,\n   keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.\n4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen\n   (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.\n   Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie außerhalb\n   eines Bereichs.\n\nUnter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit\nprüfbarem „Fertig wenn\", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*\nwandert ein Ziel nur mit Beleg (Befehl und Ergebnis).\n\nEine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen\naußerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.\nEinen Merge-Konflikt in `docs/goals.md` nicht selbst lösen — fragen.\n",
+      "content": "<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->\n# Ziele und entdeckte Arbeit\n\nGilt nur, solange `docs/goals.md` unter *Aktiv* mindestens ein Ziel hat; sonst nichts tun.\nKopfzeile von `docs/goals.md` zuerst prüfen; vor jedem Schreiben die Datei neu lesen.\n\nJede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:\n\n1. **Vom Nutzer verlangt** — steht im aktuellen Prompt: erledigen.\n2. **Teil des Ziels** — nötig, damit „Fertig wenn\" eintritt: erledigen.\n3. **Trivial** — in einer Datei, die die Aufgabe ohnehin ändert, höchstens fünf Zeilen,\n   keine neue öffentliche Schnittstelle, kein neuer Test nötig: erledigen, im Turn-Ende nennen.\n4. **Neues Ziel** — alles andere: nicht umsetzen. Unter *Kandidaten* anhängen\n   (`G<n>`, eins über dem höchsten `n` aller Tabellen), im Turn-Ende nennen.\n   Eintragen ist kein Umsetzen: ohne Rückfrage, und `docs/goals.md` liegt nie außerhalb\n   eines Bereichs.\n\nUnter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit\nprüfbarem „Fertig wenn\", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*\nwandert ein Ziel nur mit Beleg (Befehl und Ergebnis); gibt es `.claude/agents/reviewer.md`,\nprüft vorher der Subagent `reviewer` das Ziel mit seiner ID.\n\nEine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen\naußerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.\nEinen Merge-Konflikt in `docs/goals.md` nicht selbst lösen — fragen.\n",
       "path": ".claude/rules/goals.md"
+    },
+    {
+      "action": "create",
+      "content": "---\nname: reviewer\ndescription: Ziel-Reviewer — use before an active goal in docs/goals.md moves to Erledigt. Checks the goal's diff against its \"Fertig wenn\", its Bereich and the stack's conformance checkpoints, each verdict with evidence. Does not hunt for bugs in the code (that is /code-review).\ntools: Read, Grep, Glob, Bash\n---\n<!-- skill: setup-repo | schema: 1 | generated: python skills/setup-repo/scripts/plan_repo.py -->\n\n# Ziel-Reviewer\n\nDu prüfst, ob ein Ziel aus `docs/goals.md` fertig ist — nicht, ob der Code Fehler hat.\nFehler im Code sucht `/code-review`. Du änderst keine Datei.\n\n## Eingaben\n\n- **Ziel-ID** (`G<n>`) aus `docs/goals.md`, Tabelle *Aktiv*: „Fertig wenn\" und „Bereich\".\n- **Diff-Bereich**, etwa `main...HEAD` oder `HEAD~3..HEAD`; ohne Angabe `git diff HEAD`\n  plus `git status --short`.\n- **Optional ein Kontextpaket von review-context**, nur wenn der Hauptagent es im selben\n  Lauf erzeugt und den Pfad übergeben hat. Es nennt einen symbolischen Bereich, keinen SHA —\n  ein älteres Paket passt womöglich nicht zum Diff.\n\nFehlt die Ziel-ID oder steht das Ziel nicht unter *Aktiv*: nichts prüfen, das melden.\n\n## Drei Prüfungen\n\n1. **Fertig wenn.** Jede Bedingung belegt: eine Stelle im Diff (Datei und Zeile) oder ein\n   Befehl, den du ausführst, mit Ergebnis. Was du nicht belegen kannst, ist „ungeprüft\",\n   nicht „erfüllt\".\n2. **Bereich.** Jede geänderte Datei liegt in einem Glob des Bereichs oder ist ein\n   Hausartefakt (`docs/goals.md`, `handoff.md`, `docs/debugging/`, `docs/decisions.md`,\n   `docs/specs/wip/`, `docs/plans/`, `.claude/`, `.skills/`, `CLAUDE.md`, `.gitignore`).\n3. **Prüfpunkte des Stacks** unten, je Punkt nur am Diff dieses Ziels.\n\n## Ausgabe\n\nJe Prüfung und je Prüfpunkt eine Zeile: `erfüllt`, `verletzt` oder `ungeprüft`, mit\nBeleg. Jeder Befund `verletzt` trägt ein **Failure-Szenario**: konkrete Eingabe oder\nLage → was dann schiefgeht. Ohne Failure-Szenario ist es kein Befund, sondern eine\nAnmerkung. Am Ende ein Satz: „Ziel G<n> kann nach *Erledigt*\" oder „Ziel G<n> bleibt\naktiv — <die verletzten Punkte>\".\n\n## Prüfpunkte des Stacks\n\n### python\n\n- **py-test-for-public** — Eine neue öffentliche Funktion, Methode oder Klasse (Name ohne führenden Unterstrich) wird von mindestens einem Test im Diff oder im Repo aufgerufen. Quelle: Spec 22, Abschnitt „Review\" (Beispiel „neue öffentliche Funktion hat einen Test\").\n- **py-dependency-in-manifest** — Ein neuer Import eines Drittpakets steht als Abhängigkeit im Manifest des Repos (`pyproject.toml` unter `[project] dependencies` oder einer optionalen Gruppe, sonst `requirements*.txt`). Quelle: PEP 621, Abschnitt „dependencies/optional-dependencies\", https://peps.python.org/pep-0621/\n- **py-naming** — Neue Namen folgen PEP 8: Funktionen und Variablen `snake_case`, Klassen `CapWords`, Konstanten `UPPER_CASE`. Quelle: PEP 8, Abschnitt „Naming Conventions\", https://peps.python.org/pep-0008/\n- **py-no-bare-except** — Kein neues `except:` ohne Ausnahmetyp. Quelle: PEP 8, Abschnitt „Programming Recommendations\", https://peps.python.org/pep-0008/\n\n### allgemein\n\n- **gen-done-when** — Jede Bedingung unter „Fertig wenn\" des Ziels ist belegt: durch eine Stelle im Diff oder durch einen Befehl mit Ergebnis. Quelle: Spec 22, Abschnitt „Review\"; Zielregel `.claude/rules/goals.md`.\n- **gen-scope** — Jede geänderte Datei liegt im Bereich des Ziels oder ist ein Hausartefakt, das der Bereichs-Hook ausnimmt. Quelle: Spec 22, Abschnitt „Bereichs-Hook\"; `references/goals.md` von setup-repo.\n- **gen-verification** — Der Verifikationsbefehl aus der CLAUDE.md-Zeile `Verifikation:` lief nach der letzten Änderung grün; fehlt die Zeile, heißt der Punkt „ungeprüft\". Quelle: Spec 22, Eiserne Regel.\n",
+      "path": ".claude/agents/reviewer.md"
     },
     {
       "action": "copy",
@@ -262,9 +316,16 @@ Gemischt wird:
   "options": {
     "deny_secrets": false,
     "goal_hook": true,
+    "reviewer": true,
     "verify_hook": false
   },
   "plugins": {},
+  "reviewer": {
+    "stacks": [
+      "python"
+    ],
+    "state": "an"
+  },
   "schema": 1,
   "verification": {
     "command": "make deploy",

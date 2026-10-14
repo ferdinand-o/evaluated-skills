@@ -31,7 +31,9 @@ kein Eintrag unter *Aktiv*.
 
 **Aktiv** entsteht nur, wenn der Nutzer etwas ausdrücklich ein Ziel nennt; dann schlägt
 Claude die passende `/goal`-Zeile aus „Fertig wenn" vor. Nach *Erledigt* wandert ein Ziel
-mit Beleg (Befehl und Ergebnis).
+mit Beleg (Befehl und Ergebnis). Gibt es `.claude/agents/reviewer.md`, ruft Claude vorher
+den Subagenten `reviewer` mit der Ziel-ID und dem Diff-Bereich auf; bleibt ein Prüfpunkt
+„verletzt", bleibt das Ziel aktiv.
 
 ## Bereich
 
