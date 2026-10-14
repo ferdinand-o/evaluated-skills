@@ -56,15 +56,15 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: (nichts Neues)
 - Produces: `token:Quelle:`
 
-- [ ] **Step 1: Test schreiben** — `test_checkpoints_have_sources`: jede Zeile unter
+- [x] **Step 1: Test schreiben** — `test_checkpoints_have_sources`: jede Zeile unter
       `## Prüfpunkte` hat ID, Text und Quelle; IDs eindeutig; `delphi.md` ohne Zeile, mit
       Hinweis, dass die Punkte vom Nutzer kommen.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Schreiben** — Python und TypeScript je Test für Neues und Abhängigkeit im
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Schreiben** — Python und TypeScript je Test für Neues und Abhängigkeit im
       Manifest (Quellen: Spec 22, PEP 621, npm-Doku), dazu PEP 8; generic: „Fertig
       wenn" belegt, Bereich, Verifikation grün.
-- [ ] **Step 4: Grün sehen.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen.**
+- [x] **Step 5: Commit.**
 
 ### Task 2: reviewer.md
 
@@ -76,14 +76,14 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:Quelle:`
 - Produces: `token:{{checkpoints}}`
 
-- [ ] **Step 1: Test schreiben** — Frontmatter mit `name: reviewer`, `description`,
+- [x] **Step 1: Test schreiben** — Frontmatter mit `name: reviewer`, `description`,
       `tools`; Kopfzeile in der ersten Zeile danach; Platzhalter `{{checkpoints}}` genau
       einmal; Befunde mit Failure-Szenario verlangt; „/code-review" als Abgrenzung.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Schreiben** — Eingaben (Ziel-ID, Diff-Bereich, optional Kontextpaket von
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Schreiben** — Eingaben (Ziel-ID, Diff-Bereich, optional Kontextpaket von
       review-context), drei Prüfungen, Ausgabeformat mit Urteil je Prüfpunkt.
-- [ ] **Step 4: Grün sehen.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen.**
+- [x] **Step 5: Commit.**
 
 ### Task 3: reviewer.md im Plan
 
@@ -101,17 +101,17 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:{{checkpoints}}`
 - Produces: `fn:reviewer_content(detect)`, `token:.claude/agents/reviewer.md`
 
-- [ ] **Step 1: Test schreiben** — Python-Repo → `create` mit Python- und allgemeinen
+- [x] **Step 1: Test schreiben** — Python-Repo → `create` mit Python- und allgemeinen
       Prüfpunkten; Delphi-Repo → „ungeprüft — keine Prüfpunkte für delphi"; ohne erkannte
       Sprache nur allgemeine; vorhandener `reviewer.md` → keine Operation; Option
       `reviewer: false` → keine Operation; Zielregel nennt den Reviewer und bleibt ≤ 25
       Zeilen.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Implementieren** — `reviewer_content(detect)`; Option `reviewer`
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Implementieren** — `reviewer_content(detect)`; Option `reviewer`
       (Default an) im Block; Ansicht nennt den Reviewer; Zielregel ergänzen; Fixtures mit
       dem Generator neu erzeugen, `sr-goals-seeded` gleichziehen.
-- [ ] **Step 4: Grün sehen**, alle `tests/test_setup_repo_*.py`.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, alle `tests/test_setup_repo_*.py`.
+- [x] **Step 5: Commit.**
 
 ### Task 4: SKILL.md und goals.md
 
@@ -124,9 +124,9 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:.claude/agents/reviewer.md`
 - Produces: `token:Ziel-Reviewer`
 
-- [ ] **Step 1: Schreiben** — Ablauf nennt den Reviewer und `reviewer: false`; goals.md:
+- [x] **Step 1: Schreiben** — Ablauf nennt den Reviewer und `reviewer: false`; goals.md:
       Reviewer vor *Erledigt*; artifact-header: Satz zu den Ausnahmen nennt reviewer.md.
-- [ ] **Step 2: Prüfen** — `wc -l` ≤ 150; `lint_skill.py skills/setup-repo --base HEAD`
+- [x] **Step 2: Prüfen** — `wc -l` ≤ 150; `lint_skill.py skills/setup-repo --base HEAD`
       ohne neuen Befund, `evals_due` notieren. Commit.
 
 ### Task 5: Evals
@@ -139,10 +139,10 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:Ziel-Reviewer`
 - Produces: `token:py-test-for-public`
 
-- [ ] **Step 1: Assertion** — `apply-executes-plan-faithfully` prüft zusätzlich
+- [x] **Step 1: Assertion** — `apply-executes-plan-faithfully` prüft zusätzlich
       `.claude/agents/reviewer.md` auf `py-test-for-public` (nur der Plan trägt die ID);
       Diskriminator in `notes` ergänzen.
-- [ ] **Step 2: Test** — Replay der Evals besteht weiter, auch
+- [x] **Step 2: Test** — Replay der Evals besteht weiter, auch
       `anti-ceremony-check-on-aligned-repo-changes-nothing`. Commit.
 
 ### Task 6: Nachbarn
@@ -155,7 +155,7 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:py-test-for-public`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Rückverweis** — review-context: der Ziel-Reviewer von setup-repo liest das
+- [x] **Step 1: Rückverweis** — review-context: der Ziel-Reviewer von setup-repo liest das
       Kontextpaket, wenn es im selben Lauf erzeugt wurde. Plugin-Zuordnung und Routing
       unverändert. `sync_skills.py`, `--check`, Lint ohne neuen Befund. Commit.
 
@@ -168,7 +168,7 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:py-test-for-public`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt setup-repo** — „Abschnitt D fehlt" ersetzen: Delphi ohne
+- [x] **Step 1: Abschnitt setup-repo** — „Abschnitt D fehlt" ersetzen: Delphi ohne
       Prüfpunkte, ob der Reviewer aufgerufen wird und ob Prüfpunkte greifen, misst nichts;
       Agent-Frontmatter nach Doku, nicht gemessen. Commit.
 
@@ -181,7 +181,7 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 - Consumes: `token:py-test-for-public`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — Abschnitt D: was entstanden ist, Entscheidung zu Delphi,
+- [x] **Step 1: Report** — Abschnitt D: was entstanden ist, Entscheidung zu Delphi,
       Eval-Läufe mit `claude -p` für die Evals mit geänderter Wirkung
       (`anti-ceremony-check-on-aligned-repo-changes-nothing`,
       `plan-from-repo-writes-only-report`, `plan-without-tests-says-unverified`,
