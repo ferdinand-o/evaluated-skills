@@ -174,10 +174,10 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:plugins_off`, `token:## Plugins`
 - Produces: `token:Abschaltbedingung`
 
-- [ ] **Step 1: Ablauf** — plan zeigt das Plugin-Profil; ein Konflikt wird einmal
+- [x] **Step 1: Ablauf** — plan zeigt das Plugin-Profil; ein Konflikt wird einmal
       gefragt und als `plugins_off` übergeben; check meldet Plugins; Verweis auf
       `references/routing.md`.
-- [ ] **Step 2: Prüfen** — `wc -l` ≤ 150; `lint_skill.py skills/setup-user --base HEAD`
+- [x] **Step 2: Prüfen** — `wc -l` ≤ 150; `lint_skill.py skills/setup-user --base HEAD`
       ohne neuen Befund, `evals_due` notieren. Commit.
 
 ### Task 7: Evals
@@ -191,14 +191,14 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:SessionStart-Hook`, `token:Abschaltbedingung`
 - Produces: `token:superpowers-sessionstart-is-reported`
 
-- [ ] **Step 1: Fixture** — `su-plugins` wie `su-aligned`, dazu `cfg/plugins/` mit
+- [x] **Step 1: Fixture** — `su-plugins` wie `su-aligned`, dazu `cfg/plugins/` mit
       `installed_plugins.json` (veralteter `installPath`, Cache-Fallback), superpowers
       mit SessionStart-Hook und einer Skill, ein `cc-*`-Plugin.
-- [ ] **Step 2: Eval** — `superpowers-sessionstart-is-reported`, Prompt
+- [x] **Step 2: Eval** — `superpowers-sessionstart-is-reported`, Prompt
       „/setup-user check --config-dir ./cfg", Assertion `file_matches`
       `cfg/setup-user/check.md` auf `superpowers · SessionStart-Hook`, Diskriminator in
       `notes`.
-- [ ] **Step 3: Test** — fünf Evals laden; das Replay von Eval 5 besteht; Eval 1 bleibt
+- [x] **Step 3: Test** — fünf Evals laden; das Replay von Eval 5 besteht; Eval 1 bleibt
       grün. Commit.
 
 ### Task 8: Nachbarn
@@ -211,11 +211,11 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:superpowers-sessionstart-is-reported`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Spec 21** — Annahme zu `enabledPlugins` nach der Messung: Installation
+- [x] **Step 1: Spec 21** — Annahme zu `enabledPlugins` nach der Messung: Installation
       setzt `true`, deshalb Konflikt und `plugins_off`.
-- [ ] **Step 2: Spec 20** — die Lückentabelle verweist auf `superpowers-gaps.json` als
+- [x] **Step 2: Spec 20** — die Lückentabelle verweist auf `superpowers-gaps.json` als
       Quelle; Status writing-plans und test-driven-development dort, nicht hier.
-- [ ] **Step 3: Prüfen** — Plugin-Zuordnung unverändert (setup-user in `cc-dev`), keine
+- [x] **Step 3: Prüfen** — Plugin-Zuordnung unverändert (setup-user in `cc-dev`), keine
       neuen Rückverweise, Routing unverändert; `pytest tests/test_marketplace.py`. Commit.
 
 ### Task 9: known-limits
@@ -227,7 +227,7 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:superpowers-sessionstart-is-reported`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Abschnitt setup-user ergänzen** — gemessen ist nur das lokale Layout;
+- [x] **Step 1: Abschnitt setup-user ergänzen** — gemessen ist nur das lokale Layout;
       Marketplace aus GitHub und `synced/` ungemessen; jeder per CLI installierte Wert
       gilt als gesetzt; `defaultEnabled` nur aus dem Marketplace-Eintrag; Abschnitt
       „Abschnitt B fehlt" entfernen. Commit.
@@ -241,7 +241,7 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:superpowers-sessionstart-is-reported`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Report** — Abschnitt B: was entstanden ist, Messung des Layouts, Eval 5
+- [x] **Step 1: Report** — Abschnitt B: was entstanden ist, Messung des Layouts, Eval 5
       mit `claude -p` mit und ohne Skill, die Evals 1 bis 4 erneut (`evals_due`):
       `anti-ceremony-check-on-aligned-config-changes-nothing`,
       `plan-is-default-and-writes-only-plan`, `apply-merges-existing-plan-and-backs-up`,
