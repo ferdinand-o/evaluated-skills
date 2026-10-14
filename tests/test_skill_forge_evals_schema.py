@@ -36,9 +36,9 @@ def _lint_json(skill_dir: Path, out: Path, *extra: str) -> str:
     return out.read_text(encoding="utf-8")
 
 
-def test_six_contract_evals_load():
+def test_seven_contract_evals_load():
     evals = load_evals(EVALS_PATH)
-    assert len(evals) == 6 and all(ev.eval_class == "contract" for ev in evals)
+    assert len(evals) == 7 and all(ev.eval_class == "contract" for ev in evals)
 
 
 def test_anti_ceremony_eval_binds_to_lint_json_and_untouched_files():
@@ -176,3 +176,24 @@ def test_routing_eval_plugin_assertions_grip_a_built_skill(tmp_path):
     text = _lint_json(skill, root / LINT_PATH, "--repo-root", str(root))
     for pattern, expected in _lint_patterns(routing):
         assert bool(re.search(pattern, text, re.MULTILINE)) is expected, pattern
+
+
+def test_relpath_pattern_grips_real_script_output_and_not_a_clean_skill(tmp_path):
+    """Spec 25, Eval 7: Das Muster trifft die echte Lint-Ausgabe auf relpath-x, nicht die auf
+    listed-x (ohne Skript) — und Eval 1 bindet an das pass derselben Regel auf sf-existing."""
+    ev = _evals()["repo-relative-script-path-is-reported"]
+    assert ev.fixture == "sf-relpath"
+    bad = _lint_json(FIXTURES / "sf-relpath" / "skills" / "relpath-x", tmp_path / "bad.json")
+    clean = _lint_json(FIXTURES / "sf-relpath" / "skills" / "listed-x", tmp_path / "clean.json")
+    patterns = _lint_patterns(ev)
+    assert patterns
+    for pattern, expected in patterns:
+        assert bool(re.search(pattern, bad, re.MULTILINE)) is expected, pattern
+        assert not re.search(pattern, clean, re.MULTILINE), f"{pattern} greift auch an listed-x"
+    assert {a.path for a in ev.must if a.type == "file_unchanged"} == {"skills/relpath-x/SKILL.md"}
+    anti = _evals()["anti-ceremony-one-sentence-change-lints-only"]
+    existing = _lint_json(FIXTURES / "sf-existing" / "skills" / "note-tag", tmp_path / "existing.json")
+    assert any("script-paths" in p for p, _ in _lint_patterns(anti))
+    for pattern, expected in _lint_patterns(anti):
+        if "script-paths" in pattern:
+            assert bool(re.search(pattern, existing, re.MULTILINE)) is expected
