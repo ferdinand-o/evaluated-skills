@@ -116,3 +116,14 @@ def test_replayed_eval_passes_its_own_assertions(eval_id, tmp_path):
     failures += [f"must_not: {a.type} {a.pattern}" for a in ev.must_not if check(a, ws.root, ws.baseline, output).ok]
     assert not failures, (failures, output)
     assert not any((tmp_path / "home").iterdir()), "nichts im Home"
+
+
+def test_apply_eval_binds_to_the_reviewer():
+    """Abschnitt D: Eval 4 prüft den Ziel-Reviewer an einer Prüfpunkt-ID, die nur im Block
+    des Plans steht, nicht in seiner Ansicht."""
+    ev = next(e for e in load_evals(EVALS) if e.id == "apply-executes-plan-faithfully")
+    reviewer = [a for a in ev.must if a.path == ".claude/agents/reviewer.md"]
+    assert reviewer and reviewer[0].pattern == "py-test-for-public"
+    plan = (FIXTURES / "sr-planned" / ".skills" / "cache" / "setup-repo" / "plan.md").read_text(encoding="utf-8")
+    view = plan.split("## Block für apply", 1)[0]
+    assert "py-test-for-public" not in view and "py-test-for-public" in plan
