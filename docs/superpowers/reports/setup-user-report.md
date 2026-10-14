@@ -83,13 +83,94 @@ Kopfzeile des Fixture-Plans den Pfad trägt, unter dem er erzeugt wurde; der Blo
 - **Echte Nutzerdaten.** Die Statusline lief nur mit Beispiel-Eingaben; ob das
   agent-dashboard den erweiterten Cache (`_meta`, behaltene Fenster) liest, ist
   ungeprüft.
-- **Abschnitt B.** Kein Routing, kein Plugin-Profil, kein Eval 5.
 
 ## Offen für die nächste Runde
 
 - Erster echter Lauf auf dem Windows-PC je Config-Verzeichnis, danach auf der Devbox;
   dabei die Windows-Punkte oben messen und hier eintragen.
 - Die vier Evals im Harness außerhalb eines Root-Containers fahren, mit und ohne Skill.
-- Abschnitt B nach Spec 23.
 - Die Kopfzeile von `plan.md` nennt den absoluten Erzeugungspfad; für versionierte
   Fixture-Pläne wäre der Pfad wie getippt (`cfg`) lesbarer.
+
+## Abschnitt B — Routing und Plugin-Profil (2026-10-14)
+
+Gebaut nach `docs/superpowers/plans/2026-10-14-setup-user-b.md` (10 Tasks, das Gate
+koppelte alle), sequenziell im Hauptkontext, jeder Task mit `verify` im sauberen Worktree
+abgenommen; nach Spec 23 (work-plan) und Spec 24 (test-first).
+
+### Was entstanden ist
+
+- `scripts/route_check.py`: aktive Plugins aus `installed_plugins.json`, `synced/`,
+  `enabledPlugins` und `defaultEnabled`; SessionStart-Hooks, Kollisionen,
+  `superpowers:`-Verweise und die Abschaltbedingung (a) bis (c). Ausgabe als JSON (für den
+  Plan) oder als Abschnitt `## Plugins` (für `check.md`), ohne absolute Pfade.
+- `references/superpowers-gaps.json`: die Lückentabelle aus Spec 20 als Daten; keine
+  Zeile heißt mehr „Lücke".
+- `references/routing.md`: Profil, aktive Plugins, Layout mit Messung, Abschaltbedingung.
+- `inspect_config.py` ruft `route_check.py` als Unterprozess auf und schreibt das Profil in
+  den Plan; `apply_config.py` mischt `enabledPlugins`; `verify_install.py --write-check`
+  hängt den Abschnitt `## Plugins` an `check.md`, ohne Abweichungen zu zählen.
+- Eval 5 `superpowers-sessionstart-is-reported` mit Fixture `su-plugins`, deren
+  `installPath`-Werte von einem anderen Rechner stammen; das Skript findet die Plugins über
+  den Cache-Fallback.
+
+### Entscheidungen
+
+- **Erst gemessen, dann geplant.** In einem Wegwerf-Config-Verzeichnis lief `claude
+  plugin marketplace add` mit diesem Repo und `claude plugin install cc-dev@cc-skills`.
+  Ergebnis: `installed_plugins.json` in Version 2, `installPath` unter
+  `plugins/cache/cc-skills/cc-dev/<sha12>` mit der ganzen Repo-Kopie — und
+  `"enabledPlugins": {"cc-dev@cc-skills": true}` in den User-Settings.
+- **Gesetzte Werte bleiben, auch die der CLI.** Weil die Installation `true` schreibt,
+  wäre jedes Plugin „ausdrücklich gesetzt". Die Regel der Spec blieb trotzdem: Der Plan
+  führt den Wert als Konflikt, und nur die Antwort `plugins_off` macht daraus einen Patch.
+  Ein stilles Abschalten von superpowers wäre die schlechtere Fehlerart. Spec 21 trägt die
+  Messung nach.
+- **Unterprozess statt Import.** `inspect_config.py` und `verify_install.py` rufen
+  `route_check.py` auf; so bleibt die Regel „Nachbarskripte werden nicht importiert", und
+  ein fehlendes oder kaputtes Skript heißt „ungeprüft" statt Absturz.
+- **Plugins informieren, sie weichen nicht ab.** Ein SessionStart-Hook ist kein Fehler der
+  Einrichtung; der Anti-Zeremonie-Fall auf `su-aligned` meldet weiter „keine Abweichung".
+
+### Was gemessen wurde
+
+Suite: 1 534 grün, 3 übersprungen, 1 rot (`test_rest_api_architect_gate`, Spectral fehlt
+in der Umgebung). `lint_skill.py skills/setup-user` ohne Befund.
+
+`route_check.py` gegen die echte CLI-Installation: `cc-dev@cc-skills` aktiv über
+`enabledPlugins`, 14 Skills aus der `skills`-Liste erkannt, Abschaltbedingung am
+installierten Bestand erfüllt (keine Lücke, kein `superpowers:`-Verweis im Cache von
+heute, Regel installiert).
+
+Echte kopflose Sessions (`claude -p` mit `--allowedTools`, `--permission-mode
+acceptEdits`, CLI 2.1.296), je ein Lauf, bewertet mit `evalkit.runner.grade()`:
+
+| Eval | mit Skill | ohne Skill |
+| --- | --- | --- |
+| 1 `anti-ceremony-check-on-aligned-config-changes-nothing` | bestanden | — |
+| 2 `plan-is-default-and-writes-only-plan` | bestanden | — |
+| 3 `apply-merges-existing-plan-and-backs-up` | bestanden | — |
+| 4 `foreign-statusline-is-kept-while-hook-is-merged` | bestanden | — |
+| 5 `superpowers-sessionstart-is-reported` | bestanden | nicht bestanden |
+
+Evals 1 bis 4 liefen erneut, weil sich SKILL.md geändert hat (`evals_due`). Im Lauf zu
+Eval 5 nannte Claude den Hook, die erfüllte Bedingung und fragte, statt abzuschalten:
+„Das Plugin steht in `enabledPlugins`. Ich schalte es deshalb nicht selbst ab." Ohne
+Skill prüfte der Agent von Hand, schrieb kein `check.md` und meldete als Befund, dass in
+der Fixture das Hook-Skript `session-start.sh` fehlt — die Fixture trägt nur
+`hooks.json`, weil `route_check.py` das Skript nicht liest.
+
+Beim Bau gefunden: `superpowers-gaps.json` nennt `test-driven-development` als Datenwert
+und machte `test_no_superpowers_routing_targets` rot. `verify` je Task fährt nur die Tests
+des Tasks; erst die Suite vor dem Report fand es. Behoben in einem eigenen Commit.
+
+### Was nicht gemessen wurde
+
+- **Ein Marketplace aus GitHub und `plugins/synced/` mit Inhalt.** Gemessen ist nur der
+  lokale Marketplace; der synchronisierte Ordner hier ist leer.
+- **Der echte superpowers-Cache des Nutzers.** Matcher und Hook-Ort stammen aus der
+  Fixture, nicht aus seiner Installation.
+- **Ob `enabledPlugins: false` superpowers wirklich ausschaltet** — weder hier noch beim
+  Nutzer gelaufen.
+- **Eval 5 mit Wiederholung und Evals 1 bis 4 ohne Skill** in diesem Durchgang.
+
