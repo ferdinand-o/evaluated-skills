@@ -69,16 +69,16 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: (nichts Neues)
 - Produces: `token:"rules"`
 
-- [ ] **Step 1: Test schreiben** — `test_gaps_json_names_match_spec_20`: jede Zeile nennt
+- [x] **Step 1: Test schreiben** — `test_gaps_json_names_match_spec_20`: jede Zeile nennt
       in `superpowers` nur Namen aus der Lückentabelle in Spec 20, jede Tabellenzeile
       kommt vor, `status` aus der festen Menge, Zeilen mit `Regel` tragen `rules`.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Schreiben** — `_meta` nach `docs/artifact-header.md`; Status nach dem
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Schreiben** — `_meta` nach `docs/artifact-header.md`; Status nach dem
       Stand von heute: writing-plans → work-plan, test-driven-development → test-first,
       beide `vorhanden`; receiving-code-review und verification-before-completion
       `Regel` mit `rules: ["verification.md"]`.
-- [ ] **Step 4: Grün sehen.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen.**
+- [x] **Step 5: Commit.**
 
 ### Task 2: route_check.py
 
@@ -90,19 +90,19 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `token:"rules"`
 - Produces: `fn:main(argv)`, `fn:route_report(config_dir)`, `fn:render_markdown(report)`, `token:SessionStart-Hook`
 
-- [ ] **Step 1: Test schreiben** — `test_route_check_layouts_and_condition`: Fake-Plugins
+- [x] **Step 1: Test schreiben** — `test_route_check_layouts_and_condition`: Fake-Plugins
       in Cache (`installPath` gültig und veraltet mit Cache-Fallback, auch über
       `CLAUDE_CODE_PLUGIN_CACHE_DIR`), lokalem Marketplace mit `skills`-Liste und
       `defaultEnabled`, und `synced/`; gemeldet werden SessionStart-Hook mit Matcher,
       `superpowers:`-Verweis, Kollision, alle drei Teile der Abschaltbedingung; `cc-dev`
       nie als engineering; ohne `plugins/` „ungeprüft"; abgeschaltete Plugins zählen nicht.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Implementieren** — `route_report` liefert ein JSON-fähiges Dict ohne
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Implementieren** — `route_report` liefert ein JSON-fähiges Dict ohne
       absolute Pfade; `render_markdown` den Abschnitt `## Plugins` mit Zeilen
       `<plugin> · SessionStart-Hook · <matcher>`; CLI `--config-dir`, `--json`,
       `--markdown`.
-- [ ] **Step 4: Grün sehen.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen.**
+- [x] **Step 5: Commit.**
 
 ### Task 3: references/routing.md
 
@@ -113,10 +113,10 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `fn:route_report(config_dir)`
 - Produces: `token:Plugin-Profil`
 
-- [ ] **Step 1: Schreiben** — Plugin-Profil (Tabelle der Spec), Bestimmung aktiver
+- [x] **Step 1: Schreiben** — Plugin-Profil (Tabelle der Spec), Bestimmung aktiver
       Plugins, Layout auf der Platte samt Messung vom 2026-10-14, Abschaltbedingung mit
       Quelle je Teil, was `plugins_off` bedeutet.
-- [ ] **Step 2: Prüfen** — jedes genannte Feld steht in `route_check.py`. Commit.
+- [x] **Step 2: Prüfen** — jedes genannte Feld steht in `route_check.py`. Commit.
 
 ### Task 4: Profil im Plan
 
@@ -133,17 +133,17 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `fn:main(argv)`, `token:Plugin-Profil`
 - Produces: `token:plugins_off`, `token:enabledPlugins`
 
-- [ ] **Step 1: Test schreiben** — `test_profile_keeps_explicit_user_values`: gesetzter
+- [x] **Step 1: Test schreiben** — `test_profile_keeps_explicit_user_values`: gesetzter
       Wert bleibt und steht als Konflikt im Plan; mit `plugins_off` wird er zum Patch;
       ungesetzt und Bedingung erfüllt → `false`; Bedingung nicht erfüllt → superpowers
       bleibt mit Grund; engineering → `false` als Annahme; `apply` mischt
       `enabledPlugins`, fremde Schlüssel bleiben.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Implementieren** — Unterprozess `route_check.py --json`; Feld `plugins`
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Implementieren** — Unterprozess `route_check.py --json`; Feld `plugins`
       im Block; Abschnitt `## Plugins` in der Ansicht; `merge_settings` für
       `enabledPlugins`; References nachziehen; Pläne der Fixtures neu erzeugen.
-- [ ] **Step 4: Grün sehen**, alle `tests/test_setup_user_*.py`.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Grün sehen**, alle `tests/test_setup_user_*.py`.
+- [x] **Step 5: Commit.**
 
 ### Task 5: Plugins in check.md
 
@@ -155,15 +155,15 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 - Consumes: `fn:render_markdown(report)`
 - Produces: `token:## Plugins`
 
-- [ ] **Step 1: Test schreiben** — `check.md` trägt den Abschnitt aus
+- [x] **Step 1: Test schreiben** — `check.md` trägt den Abschnitt aus
       `route_check.py --markdown`; fehlt das Skript, steht dort „ungeprüft"; Plugin-Befunde
       zählen nicht als Abweichung.
-- [ ] **Step 2: Rot sehen.**
-- [ ] **Step 3: Implementieren** — Unterprozess mit Zeitgrenze, Ausgabe unverändert
+- [x] **Step 2: Rot sehen.**
+- [x] **Step 3: Implementieren** — Unterprozess mit Zeitgrenze, Ausgabe unverändert
       angehängt.
-- [ ] **Step 4: Grün sehen**, Anti-Zeremonie-Replay auf `su-aligned` weiter „keine
+- [x] **Step 4: Grün sehen**, Anti-Zeremonie-Replay auf `su-aligned` weiter „keine
       Abweichung".
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 6: SKILL.md
 
