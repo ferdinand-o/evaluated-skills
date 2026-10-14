@@ -109,6 +109,17 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
   logged in". Ein Agent, der bewusst oder unbewusst `$HOME` liest oder beschreibt,
   trifft auf das echte Home-Verzeichnis des Aufrufers.
 
+- **Eval-Workspaces liegen nebeneinander und sehen einander.** Der Runner legt jeden
+  Workspace mit `tempfile.mkdtemp(prefix="eval-<id>-")` im System-Temp an; ein Agent, der
+  über sein Arbeitsverzeichnis hinaus sucht, findet die Workspaces gleichzeitiger oder
+  liegengebliebener Läufe und deren installierte Skills. Gemessen am 2026-10-13 bei
+  Läufen außerhalb des Harness (work-plan-Report): Ein Agent meldete Kopien von
+  `plan_to_tasks.py` in Nachbar-Workspaces und benutzte sie bewusst nicht; ein weniger
+  vorsichtiger hätte einen fremden Lint aufgerufen. Ein eigener Elternordner je Lauf
+  ändert daran nichts, solange der Agent als derselbe Nutzer läuft und das Dateisystem
+  lesen darf; erst eine Sandbox je Lauf (eigener Container oder Nutzer) trennt das.
+  Bis dahin: Läufe nacheinander fahren und `--keep-workspace` nur zur Diagnose.
+
 ## Assertion-Vokabular
 
 - **Negative Strukturprüfung fehlt.** Es gibt kein Primitiv für „keine anderen
@@ -165,30 +176,23 @@ Konsequenzen für die Lesart jedes Ergebnisses in diesem Repo:
 
 ## Betrieb
 
-- **Gegenbefund 2026-10-12 zum folgenden Eintrag:** `claude -p` (CLI 2.1.296) läuft als
-  root, wenn man `--dangerously-skip-permissions` weglässt und die Werkzeuge mit
-  `--allowedTools "Read,Write,Edit,Glob,Grep,Bash,Skill"` und `--permission-mode
-  acceptEdits` freigibt; Skript-Aufrufe über Bash liefen damit ohne Verweigerung. So
-  liefen die setup-repo-Evals und die Vorlagen-Messung (Report setup-repo, Abschnitt C).
-  Der Harness selbst ist unverändert; ob `dispatch.py` auf diese Form umgestellt wird,
-  ist eine Entscheidung über die Isolationszusage unten.
-- **Der Harness läuft nicht als root — in keinem Container, keiner CI.**
-  `evalkit/dispatch.py` setzt `permission_mode="bypassPermissions"` fest
-  verdrahtet; die Claude-CLI verweigert diesen Modus unter uid 0 mit
-  „--dangerously-skip-permissions cannot be used with root/sudo privileges for
-  security reasons". Der Runner meldet das nicht als Fehler, sondern als
-  `[SKIP] … Agent exit 1` pro Eval und beendet sich mit „0 bestanden,
-  0 gefallen, N übersprungen" — ein Lauf, der aussieht, als wäre nichts kaputt,
-  obwohl nichts gemessen wurde. Gemessen am 2026-09-01 beim Versuch, die
-  learning-coach-Evals in einem Root-Container zu fahren: alle sechs
-  contract-Evals übersprungen. Wer den Harness in einer solchen Umgebung fährt,
-  braucht einen Nicht-root-Nutzer mit Zugriff auf `~/.claude/.credentials.json`;
-  ein abgeschwächter Permission-Modus ist **kein** Ersatz, weil die Skills im
-  Eval Bash brauchen (Skript-Aufrufe) und deren Verweigerung im `-p`-Modus
-  Rot erzeugt, das nichts über die Skill aussagt. Nicht behoben: der feste
-  Modus in `dispatch.py` ist eine bewusste Isolationszusage, kein Versehen —
-  aber ein `--permission-mode`-Flag am Runner plus eine laute Fehlermeldung
-  statt eines stillen SKIP wäre die naheliegende Verbesserung.
+- **Der Harness läuft als root, seit 2026-10-14.** Die CLI verweigert
+  `bypassPermissions` unter uid 0 („--dangerously-skip-permissions cannot be used with
+  root/sudo privileges"); bis zum 2026-10-13 endete deshalb jeder Lauf in einem
+  Root-Container mit `[SKIP] … Agent exit 1` und „0 bestanden, 0 gefallen, N
+  übersprungen". Seit dem Gegenbefund vom 2026-10-12 ist bekannt, dass `claude -p` als
+  root läuft, wenn man stattdessen `--allowedTools` mit `--permission-mode acceptEdits`
+  setzt; Skript-Aufrufe über Bash laufen damit ohne Verweigerung. `run_evals.py` hat
+  dafür `--permissions {auto,bypass,allowed-tools}`; `auto` (Default) nimmt
+  `allowed-tools` unter root und sonst `bypassPermissions` wie bisher. Die freigegebenen
+  Werkzeuge stehen in `evalkit/dispatch.py` (`ALLOWED_TOOLS`: Dateien, Bash, Skill,
+  Agent/Task, TodoWrite, WebFetch, WebSearch, NotebookEdit). Was nicht in der Liste
+  steht, verweigert `-p` — ein Eval, der ein anderes Werkzeug braucht, wird rot, ohne
+  dass das etwas über die Skill sagt. Verweigert die CLI den Modus doch, meldet der Runner
+  das laut auf stderr mit der Abhilfe statt eines stillen SKIP. Gemessen am 2026-10-14:
+  die fünf test-first-Evals als root, mit Skill 5 von 5 bestanden, ohne Skill
+  0 von 5 — der Harness meldete alle fünf „rot ohne Skill". Ältere Abschnitte, die „nicht im Harness gefahren (root,
+  `bypassPermissions`)" sagen, beschreiben den Stand ihres Baus.
 - **Kein Transcript wird persistiert.** Spec 00 §2 verlangt „`run_evals.py` …
   protokolliert den Verlauf" — der Harness hält die Agent-Ausgabe nur im
   Prozessspeicher (`Transcript.stdout`) und schreibt sie nirgends auf Platte. Ein
@@ -1544,15 +1548,8 @@ offen:
   schwer nachholen: Der Harness gibt jedem Agenten eine Shell, „kein Dateizugriff"
   ist darin nicht abbildbar. Der Pfad ist damit dokumentiert, aber ungemessen —
   dieselbe Kategorie wie die ungeprüften Degradationspfade von `motion-landing`.
-- **Nicht behoben, repo-weit: der Skriptaufruf ist repo-relativ.** SKILL.md nennt
-  `python skills/learning-coach/scripts/due_topics.py --repo .`; dieser Pfad löst
-  nur innerhalb dieses Checkouts auf. Als persönliche Skill unter
-  `~/.claude/skills/`, als Plugin oder als Upload installiert, schlägt der Aufruf
-  fehl, und die Skill fällt auch dort auf Tier 0 zurück, wo eine Shell vorhanden
-  wäre. Alle vierzehn Skills schreiben es so — die Tier-Tabelle in Spec 00 §3
-  („Tier 1: überall mit Shell") gilt faktisch nur für dieses Repo. Bewusst nicht
-  einseitig in learning-coach geändert: eine Konvention repariert man überall oder
-  gar nicht.
+- **Behoben am 2026-10-14 (Spec 25): der Skriptaufruf war repo-relativ.** Die SKILL.md
+  ruft `due_topics.py` jetzt über `${CLAUDE_SKILL_DIR}` auf; siehe Abschnitt skill-dir.
 ## exercise-forge
 
 Fünf Fix-Runden (Details in `docs/superpowers/reports/exercise-forge-report.md`).
@@ -1687,15 +1684,10 @@ behoben zu werden:
 
 ## Marketplace (2026-09-23)
 
-- **Skriptpfade kennen das Plugin nicht.** Die SKILL.md-Dateien nennen zwei Formen,
-  `python skills/<name>/scripts/…` im Repo und `python .claude/skills/<name>/scripts/…`
-  installiert (Spec 17, Entscheidung 4). Als Plugin liegt das Skript unter
-  `${CLAUDE_PLUGIN_ROOT}/skills/<name>/scripts/…`; laut Claude-Code-Doku
-  (plugins-reference, „Environment variables") wird der Platzhalter in Skill-Inhalten
-  ersetzt. Keine SKILL.md trägt diese dritte Form, und `lint_skill.py` prüft sie nicht.
-  Ein Agent, der die Skill aus dem Plugin lädt, findet das Skript nur, wenn er den
-  Plugin-Pfad selbst kennt. Nachziehen heißt 21 SKILL.md-Dateien ändern, mit
-  `evals_due` dort, wo ein Pattern die geänderte Zeile trifft.
+- **Skriptpfade kennen das Plugin — seit Spec 25.** Bis zum 2026-10-14 nannten die
+  SKILL.md-Dateien `skills/<name>/scripts/…` und `.claude/skills/<name>/scripts/…`; heute
+  steht überall `${CLAUDE_SKILL_DIR}/scripts/…`, das Claude Code im Skill-Text ersetzt
+  (Abschnitt skill-dir).
 - **Das ganze Repo wird kopiert.** `source: "./"` macht das Repo-Root zum Plugin-Root;
   Claude Code klont es in seinen Plugin-Cache, samt `evals/`, `tests/`, `docs/`,
   `evalkit/`. Die Doku empfiehlt, Tests und Fixtures draußen zu lassen; hier sind sie
@@ -1735,11 +1727,9 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   Nutzer bindet Plugins nur per CLI an, `plugins/synced/` enthält keine Plugins, und
   Cloud-Sessions laden Plugins gar nicht (gemeldeter Bug); dort helfen nur die
   Projekt-Kopien unter `.claude/skills/`.
-- **Skriptpfade in fremden Repos.** Die SKILL.md-Dateien rufen ihre Skripte über
-  `skills/<name>/scripts/…` relativ zum Arbeitsverzeichnis auf. In einem fremden Repo
-  laufen deshalb die Skripte von 9 der 10 Skills in `cc-dev`, 1 der 4 in `cc-ui` und 4
-  der 6 in `cc-knowledge` nicht; das Plugin liefert dort Doktrin ohne lauffähiges
-  Skript. Die Umstellung auf `${CLAUDE_SKILL_DIR}` ist eine eigene Folgespec.
+- **Skriptpfade in fremden Repos — behoben am 2026-10-14 (Spec 25).** Vorher liefen dort
+  die Skripte von 9 der 14 Skills in `cc-dev`, 2 der 4 in `cc-ui` und 4 der 6 in
+  `cc-knowledge` nicht. Was bleibt, steht im Abschnitt skill-dir.
 - **Projekt-Kopien driften nur bis zum Sync-Check.** `scripts/sync_skills.py --check`
   steht in skill-forge Schritt 4 (G1) und in `tests/test_marketplace.py` (G2). Wer ein
   Original außerhalb von skill-forge ändert und nicht `pytest` fährt, committet eine
@@ -1963,10 +1953,9 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   Die Description-Doktrin („keine Prozessbeschreibung") ist eine Entscheidung mit je
   einem Beleg pro Seite, keine Messung; ein Trigger-Eval-Set steht in
   `references/evals.md` für den Tag, an dem der Harness läuft.
-- **Der Skriptpfad ist eine dokumentierte Zweiform.** Im Repo
-  `skills/skill-forge/scripts/`, installiert `.claude/skills/skill-forge/scripts/`;
-  die SKILL.md nennt beide. Das ist das repo-weite Problem aus Punkt 19 der Prüfung,
-  ausgesprochen, nicht gelöst. Ein Bootstrap bleibt offen.
+- **Der Skriptpfad war eine dokumentierte Zweiform** — bis Spec 25. Heute ruft die SKILL.md
+  `lint_skill.py` über `${CLAUDE_SKILL_DIR}` auf, und die Regel `script-paths` meldet jeden
+  repo-relativen Aufruf; Punkt 19 der Prüfliste ist mechanisch.
 - **Heuristiken mit bekannter Unschärfe.** `description` erkennt zwölf Prozessverben
   und drei Trigger-Formen — „Use when a plan exists" ist eine Prozessbeschreibung ohne
   Verb der Liste und geht durch. `gate-language` entkräftet per Negation im Absatz —
@@ -2020,11 +2009,9 @@ Gebaut nach Spec 23 (2026-10-13). Tier 1 ohne eigenes Skript; der Lint gehört
 subagent-dev und kennt seitdem die Kopfzeile `skill: work-plan`. Was ungemessen bleibt und
 wo es beißt:
 
-- **In einem fremden Repo reicht der Weg bis zum Lint, nicht bis zum Dispatch.** work-plan
-  ruft `plan_to_tasks.py lint` über `${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/` auf.
-  subagent-dev selbst ruft `generate` und `verify` repo-relativ auf
-  (`python skills/subagent-dev/scripts/…`); das läuft nur in diesem Repo, bis die
-  Folgespec für `${CLAUDE_SKILL_DIR}` es umstellt (Spec 20, Out of scope).
+- **In einem fremden Repo reicht der Weg jetzt bis zum Dispatch** (Spec 25): subagent-dev
+  ruft `generate` und `verify` über `${CLAUDE_SKILL_DIR}` auf, work-plan den Lint über
+  `${CLAUDE_SKILL_DIR}/../subagent-dev/`.
 - **`${CLAUDE_SKILL_DIR}` ist nur für die lokale Installation gemessen.** Nach
   `claude plugin marketplace add` mit lokalem Pfad liegt die ganze Repo-Kopie im
   Plugin-Cache, das Nachbarverzeichnis also daneben (CLI 2.1.296). Ob das bei einer
@@ -2076,6 +2063,29 @@ schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es bei�
   Der Druckfall (`pressure-still-red-first`) misst nur einen Prompt.
 - **Keine Projekt-Kopie.** test-first steht nicht in `PROJECT_SKILLS`; in diesem Repo
   lädt es nur über `cc-dev`, das hier ausgeschaltet ist.
+
+## skill-dir
+
+Spec 25 (2026-10-14): Jeder Skript-Aufruf steht in der SKILL.md als
+`python "${CLAUDE_SKILL_DIR}/scripts/…"`; die Lint-Regel `script-paths` (skill-forge) hält
+das. Gemessen mit einer Probe-Skill (CLI 2.1.296): Claude Code ersetzt die Variable im Text
+der SKILL.md, in der Bash-Umgebung ist sie nicht gesetzt, in einer Reference bleibt sie
+wörtlich. Was ungemessen bleibt und wo es beißt:
+
+- **Eine SKILL.md, die mit Read statt über das Skill-Werkzeug geladen wird** (Subagent,
+  Cowork, claude.ai), behält `${CLAUDE_SKILL_DIR}` wörtlich; die Shell macht daraus
+  `/scripts/…`, und der Aufruf scheitert wie früher der repo-relative.
+- **Hook-Vorlagen mit fehlender Kopie** geben eine `systemMessage` aus und enden mit 0. Ob
+  Claude Code sie bei `PreToolUse` anzeigt, ist nach Doku angenommen, nicht gemessen;
+  setup-repo nutzt denselben Weg für `Stop`.
+- **Die Kopie unter `.claude/hooks/` veraltet.** Ein Update der Skill erreicht sie nicht;
+  wer das Skript ändert, kopiert es erneut.
+- **Nachbarn nur im selben Plugin.** `${CLAUDE_SKILL_DIR}/../<skill>/` trägt nur, wenn beide
+  im selben Plugin-Cache oder beide unter `.claude/skills/` liegen; im Eval-Workspace liegt
+  kein Nachbar, impl-plan und skill-forge sagen dann „ungeprüft".
+- **Kopfzeilen nennen weiter `python skills/<name>/scripts/…`** — Herkunft, kein Aufruf;
+  nur architecture-map schreibt `python scripts/<datei>`, weil `drift_check.py` das
+  Kommando wieder ausführt.
 
 ## Verweise
 

@@ -36,10 +36,15 @@
         {
           "type": "file_unchanged",
           "path": ".claude-plugin/marketplace.json"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"script-paths\", \"status\": \"pass\""
         }
       ],
       "must_not": [],
-      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein geänderter Satz im Body: Der Lint läuft im Diff-Modus (findings_mode new-vs-base), meldet evals_due: false, und die Skill tut sonst nichts — evals.json und Report bleiben unverändert. Die Fixture ist an der Basis lint-sauber, damit der Eval misst, ob die Änderung zur Zeremonie eskaliert, nicht ob Altlasten aufgeräumt werden. Diskriminator: lint.json unter .skills/cache/skill-forge/ schreibt nur diese Skill, und evals_due: false ist ihr mechanisches Urteil; ein Basismodell hat weder die Datei noch die Regel, und superpowers:writing-skills verlangte für jede Änderung einen Test. Seit Spec 20: Die Fixture trägt ein Manifest, plugin-membership ist pass, und ein geänderter Satz ändert das Manifest nicht."
+      "notes": "Pflicht-Anti-Zeremonie-Eval nach Spec 00 §2. Ein geänderter Satz im Body: Der Lint läuft im Diff-Modus (findings_mode new-vs-base), meldet evals_due: false, und die Skill tut sonst nichts — evals.json und Report bleiben unverändert. Die Fixture ist an der Basis lint-sauber, damit der Eval misst, ob die Änderung zur Zeremonie eskaliert, nicht ob Altlasten aufgeräumt werden. Diskriminator: lint.json unter .skills/cache/skill-forge/ schreibt nur diese Skill, und evals_due: false ist ihr mechanisches Urteil; ein Basismodell hat weder die Datei noch die Regel, und superpowers:writing-skills verlangte für jede Änderung einen Test. Seit Spec 20: Die Fixture trägt ein Manifest, plugin-membership ist pass, und ein geänderter Satz ändert das Manifest nicht. Spec 25: Die Fixture-Skill hat keine Skripte; das pass von script-paths schreibt nur der Lint."
     },
     {
       "id": "token-change-makes-evals-due",
@@ -150,6 +155,25 @@
       ],
       "must_not": [],
       "notes": "Spec 20: orphan-x steht in keiner skills-Liste und nicht in excluded.json. „Prüfe“ heißt melden, nicht beheben — die SKILL.md sagt „Prüfen ändert nichts“. Diskriminator: Die Regel-ID plugin-membership und lint.json gibt es nur in lint_skill.py; ein hilfsbereiter Agent ohne die Skill trüge orphan-x in die Liste ein und ließe die zwei file_unchanged-Assertions fallen."
+    },
+    {
+      "id": "repo-relative-script-path-is-reported",
+      "class": "contract",
+      "fixture": "sf-relpath",
+      "prompt": "Prüfe die Skill relpath-x mit skill-forge.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/skill-forge/lint.json",
+          "pattern": "\\{\"id\": \"script-paths\", \"status\": \"finding\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": "skills/relpath-x/SKILL.md"
+        }
+      ],
+      "must_not": [],
+      "notes": "Spec 25: relpath-x ruft ihr Skript mit python skills/relpath-x/scripts/run.py auf — der Pfad stimmt nur im Checkout dieser Sammlung. „Prüfe“ heißt melden, nicht beheben: Die SKILL.md von skill-forge sagt „Prüfen ändert nichts“. Diskriminator: Die Regel-ID script-paths und lint.json gibt es nur in lint_skill.py; ein hilfsbereiter Agent ohne die Skill schriebe den Aufruf um und ließe die file_unchanged-Assertion fallen."
     }
   ]
 }

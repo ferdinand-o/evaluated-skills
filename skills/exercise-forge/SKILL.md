@@ -27,8 +27,8 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
    Existiert die Datei noch nicht, kündige den Pfad an, bevor du sie anlegst.
 4. **Blind-Gate:**
    ```bash
-   python skills/exercise-forge/scripts/verify_blind.py --exercises <pfad> --id <id>
-   python skills/exercise-forge/scripts/verify_blind.py --exercises <pfad> --all
+   python "${CLAUDE_SKILL_DIR}/scripts/verify_blind.py" --exercises <pfad> --id <id>
+   python "${CLAUDE_SKILL_DIR}/scripts/verify_blind.py" --exercises <pfad> --all
    ```
    Für Coding-Aufgaben ruft das Skript automatisch `run_coding.py` (pytest)
    auf. Fehlt `pytest` oder die `claude`-CLI, wird das benannt gemeldet und die
@@ -47,7 +47,7 @@ die Aufgabe verdächtig — nicht der Blind-Löser.
    Skriptlauf tut das (siehe Contract).
 6. **Export:**
    ```bash
-   python skills/exercise-forge/scripts/export.py --exercises <pfad> --out-dir docs/exercises
+   python "${CLAUDE_SKILL_DIR}/scripts/export.py" --exercises <pfad> --out-dir docs/exercises
    ```
    Schreibt `docs/exercises/<thema>.md` (Aufgaben/Lösungen getrennt) und
    `docs/exercises/<thema>-anki.csv`. Jede Aufgabe trägt sichtbar ihren

@@ -14,8 +14,7 @@ ist, prüft `scripts/…` (G2) und meldet, ein Hook fehlt.
 1. **…** — erster Schritt, mit dem beobachtbaren Ergebnis.
 2. **…** — der Schritt, an dem das Skript läuft:
    ```bash
-   python skills/…/scripts/….py …
-   # installiert: python .claude/skills/…/scripts/….py …
+   python "${CLAUDE_SKILL_DIR}/scripts/….py" …
    ```
    Fehlt das Skript, lautet die Übergabe „ungeprüft — … nicht verfügbar", nie „fertig".
 3. **…** — Übergabe: was jetzt wo liegt, und was ungeprüft blieb.

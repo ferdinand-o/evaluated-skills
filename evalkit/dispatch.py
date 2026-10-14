@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,15 +88,48 @@ class Transcript:
     skills: frozenset[str] | None = None
 
 
+# Werkzeuge, die ein Eval-Agent ohne Rückfrage nutzen darf, wenn bypassPermissions nicht
+# geht. Bash und Skill sind Pflicht: Die Skills rufen ihre Skripte über Bash auf.
+ALLOWED_TOOLS = "Read,Write,Edit,MultiEdit,Glob,Grep,Bash,Skill,Agent,Task,TodoWrite,WebFetch,WebSearch,NotebookEdit"
+PERMISSION_PROFILES = ("auto", "bypass", "allowed-tools")
+
+
+def _is_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+def resolve_permissions(profile: str) -> str:
+    """`auto` → `allowed-tools` unter root, sonst `bypass`.
+
+    Die CLI verweigert `--permission-mode bypassPermissions` unter uid 0 („cannot be used
+    with root/sudo privileges"); gemessen ab 2026-10-12 läuft `claude -p` als root, wenn
+    man stattdessen `--allowedTools` mit `--permission-mode acceptEdits` setzt."""
+    if profile not in PERMISSION_PROFILES:
+        raise ValueError(f"unbekannter Rechte-Modus {profile!r}, erlaubt: {', '.join(PERMISSION_PROFILES)}")
+    if profile == "auto":
+        return "allowed-tools" if _is_root() else "bypass"
+    return profile
+
+
+def permission_argv(profile: str) -> list[str]:
+    if resolve_permissions(profile) == "allowed-tools":
+        return ["--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS]
+    return ["--permission-mode", "bypassPermissions"]
+
+
 def run_agent(
     prompt: str,
     cwd: Path,
     *,
     cli: str = "claude",
     timeout: int = DEFAULT_TIMEOUT,
-    permission_mode: str = "bypassPermissions",
+    permission_mode: str | None = None,
+    permissions: str = "auto",
 ) -> Transcript:
     """Starte `claude -p <prompt>` in `cwd`.
+
+    Rechte: `permissions` (`auto`, `bypass`, `allowed-tools`, siehe resolve_permissions);
+    ein ausdrücklich gesetztes `permission_mode` gewinnt und setzt nur diesen Modus.
 
     `bypassPermissions` ist vertretbar, weil `cwd` immer ein Wegwerf-Workspace
     unter tempfile ist — nie ein echtes Repo. Der Runner erzwingt nur das:
@@ -117,10 +151,11 @@ def run_agent(
         # "CLI nicht gefunden" gemeldet, obwohl das CLI da ist.
         return Transcript(stdout="", stderr=f"Arbeitsverzeichnis nicht gefunden: {cwd}", exit_code=127, timed_out=False)
 
+    rights = ["--permission-mode", permission_mode] if permission_mode else permission_argv(permissions)
     argv = [
         cli,
         "-p",
-        "--permission-mode", permission_mode,
+        *rights,
         # Sorgt dafür, dass die Repo-Version der Skill aus dem Workspace gilt und
         # nicht eine global installierte gleichen Namens. Es hält fremde Skills
         # aber NICHT heraus: gemessen sind 16 global installierte Skills im

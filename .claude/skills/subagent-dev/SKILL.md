@@ -16,7 +16,7 @@ kein Fehlschlag.
    Kopfzeile eines der beiden Templates (Format aus `writing-plans` übernommen).
 2. **Gate fällen und Task-Dateien erzeugen:**
    ```bash
-   python skills/subagent-dev/scripts/plan_to_tasks.py generate docs/superpowers/plans/<plan>.md
+   python "${CLAUDE_SKILL_DIR}/scripts/plan_to_tasks.py" generate docs/superpowers/plans/<plan>.md
    ```
    Schreibt `.skills/cache/tasks/gate.json` (Verdikt + Begründung) und je Task
    eine Handoff-Datei. Sagt das Gate `sequential` und du verstehst nicht warum:
@@ -39,7 +39,7 @@ kein Fehlschlag.
    [references/task-file.md](references/task-file.md) für das Schema.
 5. **Abnahme (zweistufig):**
    ```bash
-   python skills/subagent-dev/scripts/plan_to_tasks.py verify \
+   python "${CLAUDE_SKILL_DIR}/scripts/plan_to_tasks.py" verify \
      --task-file .skills/cache/tasks/task-3-x.md --worktree <pfad> --base <commit-vor-dispatch> \
      --out .skills/cache/tasks/verify-task-3.json
    ```

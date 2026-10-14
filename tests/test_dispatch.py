@@ -207,3 +207,36 @@ def test_run_agent_fills_skills_on_timeout(tmp_path):
     result = run_agent("prompt", tmp_path, cli=cli, timeout=1)
     assert result.timed_out
     assert result.skills == frozenset({"probe"})
+
+
+# --- Rechte-Modus: bypass oder --allowedTools ------------------------------------------
+
+def test_auto_uses_allowed_tools_under_root(tmp_path, monkeypatch):
+    """Die CLI verweigert bypassPermissions unter uid 0 (known-limits). Unter root nimmt
+    `auto` deshalb --allowedTools mit acceptEdits — gemessen: so läuft claude -p als root."""
+    import evalkit.dispatch as dispatch
+    cli = fake_cli(tmp_path, 'echo "$@"\n')
+    monkeypatch.setattr(dispatch, "_is_root", lambda: True)
+    out = run_agent("p", tmp_path, cli=cli).stdout
+    assert "--permission-mode acceptEdits" in out and "bypassPermissions" not in out
+    assert f"--allowedTools {dispatch.ALLOWED_TOOLS}" in out
+    assert {"Bash", "Skill", "Write", "Edit", "Read"} <= set(dispatch.ALLOWED_TOOLS.split(","))
+    monkeypatch.setattr(dispatch, "_is_root", lambda: False)
+    out = run_agent("p", tmp_path, cli=cli).stdout
+    assert "--permission-mode bypassPermissions" in out and "--allowedTools" not in out
+
+
+def test_explicit_permission_profiles(tmp_path, monkeypatch):
+    import evalkit.dispatch as dispatch
+    cli = fake_cli(tmp_path, 'echo "$@"\n')
+    monkeypatch.setattr(dispatch, "_is_root", lambda: True)
+    assert "--permission-mode bypassPermissions" in run_agent("p", tmp_path, cli=cli, permissions="bypass").stdout
+    monkeypatch.setattr(dispatch, "_is_root", lambda: False)
+    assert "--allowedTools" in run_agent("p", tmp_path, cli=cli, permissions="allowed-tools").stdout
+    assert dispatch.resolve_permissions("auto") in ("bypass", "allowed-tools")
+    try:
+        dispatch.resolve_permissions("alles")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unbekannter Modus muss ValueError werfen")

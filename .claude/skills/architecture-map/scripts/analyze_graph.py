@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     findings["_meta"] = {
         "skill": "architecture-map",
         "schema": SCHEMA_VERSION,
-        "generated": f"python {sys.argv[0]} --graph {args.graph}"
+        "generated": f"python scripts/analyze_graph.py --graph {args.graph}"
         + (f" --layers {args.layers}" if args.layers else "")
         + f" --out {args.out}",
     }

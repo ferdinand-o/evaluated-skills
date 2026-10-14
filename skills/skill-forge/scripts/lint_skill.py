@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Skill-Ordner gegen die Hausmethode prüfen. Tier 1: nur Stdlib.
 
-Vierzehn Regeln aus Spec 00, `docs/artifact-header.md`, `docs/known-limits.md` und dem
-Plugin-Manifest (Spec 17, Spec 20). Jede Regel liefert `pass`, `finding`, `hint` oder `unchecked` mit Grund;
+Fünfzehn Regeln aus Spec 00, `docs/artifact-header.md`, `docs/known-limits.md` und dem
+Plugin-Manifest (Spec 17, Spec 20, Spec 25). Jede Regel liefert `pass`, `finding`, `hint` oder `unchecked` mit Grund;
 `unchecked` und `hint` zählen nie als `pass` — ein übersprungener Check meldet nie
 Erfolg. Das Skript importiert weder `evalkit` noch ein anderes Skill-Skript: Im
 Eval-Workspace gibt es nur diesen Ordner, und Regeln, die `docs/`, `README.md` oder
@@ -226,6 +226,13 @@ def _assertions(ev: dict) -> list[dict]:
 
 # --- Regeln -----------------------------------------------------------------------
 
+# Agent Skills (platform.claude.com, overview und best-practices): name höchstens 64,
+# description höchstens 1024 Zeichen. Claude Code kürzt die Skill-Liste erst bei 1536
+# (description plus when_to_use); portabel gilt die strengere Grenze.
+NAME_MAX = 64
+DESCRIPTION_MAX = 1024
+
+
 def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
     md = skill_dir / "SKILL.md"
     if not md.is_file():
@@ -243,15 +250,18 @@ def rule_frontmatter(skill_dir: Path, repo_root: Path | None) -> RuleResult:
         m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", line)
         if m and (problem := yaml_plain_scalar_problem(m.group(2).strip())):
             invalid.append(f"{m.group(1)} {problem} — in Anführungszeichen setzen")
-    if missing or extra or invalid:
-        parts = []
+    too_long = [f"{key} hat {len(fields[key])} Zeichen, Grenze {limit} (Agent Skills)"
+                for key, limit in (("name", NAME_MAX), ("description", DESCRIPTION_MAX))
+                if len(fields.get(key) or "") > limit]
+    if missing or extra or invalid or too_long:
+        parts = list(too_long)
         if missing:
             parts.append("fehlt: " + ", ".join(missing))
         if extra:
             parts.append("nicht erlaubt (Spec 00 §5): " + ", ".join(extra))
         parts.extend("YAML lädt nicht: " + i for i in invalid)
         return RuleResult("frontmatter", "finding", "; ".join(parts))
-    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder, YAML-Skalare gültig")
+    return RuleResult("frontmatter", "pass", "name und description, keine fremden Felder, YAML-Skalare gültig, Längen in der Grenze")
 
 
 def rule_skill_md_lines(skill_dir: Path, repo_root: Path | None) -> RuleResult:
@@ -601,6 +611,42 @@ def rule_plugin_membership(skill_dir: Path, repo_root: Path | None) -> RuleResul
     return RuleResult("plugin-membership", "finding", f"in {len(hits)} Plugins: {', '.join(hits)}")
 
 
+REPO_RELATIVE_SCRIPT_RE = re.compile(r"(?<![\w.-])skills/[a-z0-9-]+/scripts/|<skill-dir>/scripts/")
+
+
+def rule_script_paths(skill_dir: Path, repo_root: Path | None) -> RuleResult:
+    """Spec 25: Skript-Aufrufe stehen in der SKILL.md als `${CLAUDE_SKILL_DIR}/scripts/…`.
+
+    Claude Code ersetzt `${CLAUDE_SKILL_DIR}` nur im Text der SKILL.md (gemessen
+    2026-10-14); in der Bash-Umgebung ist die Variable nicht gesetzt, in References bleibt
+    sie wörtlich. Finding: (a) in der SKILL.md eine Zeile mit `skills/<name>/scripts/` oder
+    `<skill-dir>/scripts/`, (b) in einer Reference eine Zeile mit `${CLAUDE_SKILL_DIR}` und
+    `python`, (c) in `assets/hooks/` ein Pfad `skills/<name>/scripts/`. Zeilen mit
+    `generated:` sind Herkunft, kein Aufruf, und zählen nie."""
+    hits: list[str] = []
+
+    def scan(path: Path, test) -> None:
+        rel = path.relative_to(skill_dir).as_posix()
+        for no, line in enumerate(_read(path).splitlines(), 1):
+            if "generated:" not in line and test(line):
+                hits.append(f"{rel}:{no}")
+
+    md = skill_dir / "SKILL.md"
+    if md.is_file():
+        scan(md, lambda line: REPO_RELATIVE_SCRIPT_RE.search(line) is not None)
+    for ref in sorted((skill_dir / "references").rglob("*.md")) if (skill_dir / "references").is_dir() else []:
+        scan(ref, lambda line: "${CLAUDE_SKILL_DIR}" in line and "python" in line)
+    for hook in sorted((skill_dir / "assets" / "hooks").rglob("*")) if (skill_dir / "assets" / "hooks").is_dir() else []:
+        if hook.is_file():
+            scan(hook, lambda line: re.search(r"(?<![\w.-])skills/[a-z0-9-]+/scripts/", line) is not None)
+    if hits:
+        return RuleResult("script-paths", "finding",
+                          "Skriptpfad läuft nur in diesem Checkout — python \"${CLAUDE_SKILL_DIR}/scripts/…\" in der "
+                          "SKILL.md, References verweisen darauf (Spec 25): " + ", ".join(hits[:8])
+                          + (f" (+{len(hits) - 8})" if len(hits) > 8 else ""))
+    return RuleResult("script-paths", "pass", "keine repo-relativen Skriptaufrufe")
+
+
 RULES = [
     ("frontmatter", rule_frontmatter),
     ("skill-md-lines", rule_skill_md_lines),
@@ -616,12 +662,13 @@ RULES = [
     ("neighbors", rule_neighbors),
     ("report-section", rule_report_section),
     ("plugin-membership", rule_plugin_membership),
+    ("script-paths", rule_script_paths),
 ]
 RULE_IDS = tuple(rule_id for rule_id, _ in RULES)
 
 
 def lint_skill(skill_dir: Path | str, repo_root: Path | str | None = None) -> LintReport:
-    """Alle vierzehn Regeln über einen Skill-Ordner. `repo_root=None` heißt: selbst
+    """Alle fünfzehn Regeln über einen Skill-Ordner. `repo_root=None` heißt: selbst
     suchen; wird keine gefunden, sind die Repo-Regeln `unchecked`."""
     skill_dir = Path(skill_dir)
     root = Path(repo_root) if repo_root is not None else find_repo_root(skill_dir)

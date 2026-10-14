@@ -21,8 +21,7 @@ vierzehn Prüfpunkte aus `references/rules.md` finden, und schreibt es nach
    ist. Ab 120 Wörtern kommt der Entwurf nach `.skills/cache/human-prose/draft.md`
    und wird gemessen:
    ```bash
-   python skills/human-prose/scripts/measure.py .skills/cache/human-prose/draft.md --register fach --out .skills/cache/human-prose/measure.json
-   # installiert: python .claude/skills/human-prose/scripts/measure.py …
+   python "${CLAUDE_SKILL_DIR}/scripts/measure.py" .skills/cache/human-prose/draft.md --register fach --out .skills/cache/human-prose/measure.json
    ```
    Befunde beheben, dann die Übergabe mit der Zeile
    `Nachgemessen: <p> pass, <f> Befunde, <u> ungeprüft`. Unter 120 Wörtern gelten die
@@ -33,7 +32,7 @@ vierzehn Prüfpunkte aus `references/rules.md` finden, und schreibt es nach
    die R5.1 verlangt, fällt die vage Formel, die Stelle bleibt allgemein, und die
    Antwort endet mit `Rückfrage:` und der Liste der Stellen.
    ```bash
-   python skills/human-prose/scripts/measure.py original.md --after text.md --register kurz --out .skills/cache/human-prose/measure.json
+   python "${CLAUDE_SKILL_DIR}/scripts/measure.py" original.md --after text.md --register kurz --out .skills/cache/human-prose/measure.json
    ```
    Liegt der Text in einer Datei, ersetzt das Ergebnis sie; sonst steht es in der
    Antwort.

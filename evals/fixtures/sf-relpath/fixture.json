@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Zwei Skills im Plugin fx-work; relpath-x ruft ihr Skript repo-relativ auf (python skills/relpath-x/scripts/run.py), listed-x hat kein Skript. specs/ ist der Repo-Marker. git: true, damit file_unchanged einen Basisstand hat."
+}

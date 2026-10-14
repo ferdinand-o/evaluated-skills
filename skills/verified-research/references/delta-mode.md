@@ -9,7 +9,7 @@ schon für `docs/decisions.md` und `docs/debugging/INDEX.md`.
 `.skills/verified-research/research/<thema>.md`, projektlokal, sobald
 `.skills/verified-research/` im Projekt existiert — sonst
 `~/.skills/verified-research/research/<thema>.md`
-(`skills/verified-research/scripts/registry.py` implementiert diese Auflösung in `resolve_base_dir()`, dieselbe
+(`scripts/registry.py` implementiert diese Auflösung in `resolve_base_dir()`, dieselbe
 Logik gilt für das Register). `<thema>` ist ein kurzer, sprechender Slug
 (Kleinbuchstaben, Bindestriche) — kein UUID, keine Zeitstempel im Dateinamen.
 
@@ -84,7 +84,7 @@ zu berichten.
 
 ## 30-Themen-Warnung
 
-`skills/verified-research/scripts/registry.py --repo . topics` zählt `*.md`-Dateien unter `research/` und warnt
+`registry.py --repo . topics` (Aufruf wie in der SKILL.md) zählt `*.md`-Dateien unter `research/` und warnt
 ab `TOPIC_WARNING_THRESHOLD` (30). Die Warnung ist eine Empfehlung an den Nutzer, selbst
 über eine Gliederung zu entscheiden — die Skill gliedert nicht automatisch um. Flach
 bleibt der Standard, auch über der Schwelle, bis der Nutzer etwas anderes anordnet.

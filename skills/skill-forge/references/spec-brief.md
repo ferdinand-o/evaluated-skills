@@ -53,5 +53,5 @@ einzeln widersprechbar.
 
 Die Spec nach `assets/spec-template.md` unter `specs/Spec NN – <name>.md`; dann der
 Review nach `references/spec-reviewer-prompt.md` und der Vermerk in der Kopfzeile;
-dann `python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec "specs/Spec NN – <name>.md"`
-— der Lint verlangt den Vermerk, deshalb diese Reihenfolge. Erst danach `impl-plan`.
+dann `plan_to_tasks.py lint-spec` von subagent-dev (Aufruf wie in Schritt 1 der SKILL.md
+von skill-forge) — der Lint verlangt den Vermerk, deshalb diese Reihenfolge. Erst danach `impl-plan`.

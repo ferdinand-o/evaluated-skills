@@ -27,14 +27,14 @@ mit `ast`.
    1:n/n:m-Fehler prüfen (Array-Spalte statt Relation ist der Klassiker).
 2. Models nach `assets/conventions.json` schreiben (Projekt-Override unter
    `.skills/sql-schema-architect/conventions.json`).
-3. `python skills/sql-schema-architect/scripts/gen_erd.py <models-pfad>`
+3. `python "${CLAUDE_SKILL_DIR}/scripts/gen_erd.py" <models-pfad>`
    erzeugt `docs/schema/erd.md` — generiert, nie von Hand gezeichnet.
    Statisch nicht Auflösbares (dynamische `__tablename__`, Mixin-Ketten)
    erscheint sichtbar als Warnung im Diagramm, nie stillschweigend weg.
 4. Pro Tabelle ein Steckbrief aus `assets/table-template.md` nach
    `docs/schema/<table>.md`: Zweck, Owner, erwartetes Wachstum,
    Hauptzugriffsmuster (begründet jeden Index).
-5. `python skills/sql-schema-architect/scripts/lint_schema.py <models-pfad>`
+5. `python "${CLAUDE_SKILL_DIR}/scripts/lint_schema.py" <models-pfad>`
    — Naming, Typen, Pflichtspalten, FK-Verhalten, Steckbrief-Vollständigkeit.
    Meldet sqlfluff-Verfügbarkeit **immer sichtbar**, auch wenn es fehlt.
    Spalten im SQLAlchemy-2.0-`Mapped[T]`-Stil ohne explizites Typ-Argument
@@ -46,7 +46,7 @@ mit `ast`.
 1. Alembic-Revision erzeugen, `upgrade()` **und** `downgrade()`. Ein leerer
    `downgrade()` ist ein Regelverstoß, außer als begründete Einbahn-Migration
    (`raise NotImplementedError("<Grund>")`, siehe `references/migration-safety.md`).
-2. `python skills/sql-schema-architect/scripts/migration_gate.py <revision-datei-oder-verzeichnis>`
+2. `python "${CLAUDE_SKILL_DIR}/scripts/migration_gate.py" <revision-datei-oder-verzeichnis>`
    klassifiziert jede Operation: **grün** (additiv, locksicher), **gelb**
    (kurzer Lock — `lock_timeout` setzen, Off-Peak-Hinweis), **rot**
    (Tabellen-Rewrite/Langzeit-Lock).
@@ -70,7 +70,10 @@ mit `ast`.
    Härte: **G2** ohne installierten Hook (meldet, blockiert nicht) oder
    **G3** mit installiertem Hook aus `assets/hooks/migration-gate.json`
    (blockiert `alembic upgrade` tatsächlich). Dieser Hook wird nie
-   automatisch installiert — der Nutzer übernimmt ihn bewusst. Bekannte
+   automatisch installiert — der Nutzer übernimmt ihn bewusst: zuerst
+   `mkdir -p .claude/hooks && cp "${CLAUDE_SKILL_DIR}/scripts/migration_gate.py" .claude/hooks/`,
+   dann das Fragment in `.claude/settings.json` mischen. Fehlt die Kopie, meldet der
+   Hook „ungeprüft" und hält nichts an. Bekannte
    Grenze: Indirektion über ein Makefile-Target oder CI-Skript, dessen
    Bash-Aufruf den Text „alembic upgrade" nicht enthält, umgeht den Hook.
 

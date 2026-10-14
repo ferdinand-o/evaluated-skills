@@ -32,10 +32,11 @@ Klasse: Ob das Werkzeug im Projekt läuft, entscheidet Claude.
 | `regel` | sonst | eine Zeile in der CLAUDE.md, oder mit `paths` eine eigene Datei unter `.claude/rules/` |
 | `offen` | noch nicht klassifiziert | keine Regelzeile; die Ansicht nennt den Kandidaten als offen |
 
-Eingetragen wird über
+Eingetragen wird über die Option `--classes` von `plan_repo.py` (Aufruf in der SKILL.md,
+Schritt plan), etwa:
 
 ```bash
-python plan_repo.py --classes '{"c1": "werkzeug", "c4": {"class": "regel", "paths": ["src/**/*.py"]}}'
+--classes '{"c1": "werkzeug", "c4": {"class": "regel", "paths": ["src/**/*.py"]}}'
 ```
 
 Eine Regel bekommt `paths`, wenn sie nur einen Teil des Repos betrifft; dann lädt Claude

@@ -1,4 +1,5 @@
 import json
+import sys
 
 from conftest import REPO_ROOT, load_script
 
@@ -120,7 +121,7 @@ def _write_py_project(root, a_imports_b=True):
 def _build_and_write_module_doc(project_dir, cache_out):
     """Baut den ersten Graph-Stand über eine echte `python skills/.../extract_py.py`-
     Subprocess-Invokation (nicht `extract_py.main()` in-process) — die aufgezeichnete
-    `_meta.generated`-Kette nutzt `sys.argv[0]` und muss deshalb genauso entstehen, wie
+    `_meta.generated`-Kette (`python scripts/extract_py.py …`) muss genauso entstehen, wie
     `drift_check.regenerate_graph()` sie später erneut ausführt."""
     import subprocess
 
@@ -256,3 +257,27 @@ def test_main_exit_code_reflects_drift(tmp_path, capsys):
     rc = drift_check.main(["--doc", str(doc), "--cwd", str(REPO_ROOT)])
     assert rc == 0
     assert "unverändert" in capsys.readouterr().out
+
+
+def test_drift_check_resolves_old_and_new_paths(tmp_path):
+    """Spec 25: Die Erzeuger schreiben `python scripts/<datei>` statt eines Pfads, der nur
+    auf einer Maschine stimmt; drift_check führt jede Form mit dem eigenen Skript aus —
+    auch Footer, die vor der Umstellung entstanden sind."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    _write_py_project(project_dir)
+    cache_out = tmp_path / "graph.json"
+    block, footer = _build_and_write_module_doc(project_dir, cache_out)
+    command = footer["module"]["command"]
+    assert command.startswith("python scripts/extract_py.py "), command
+    rest = command[len("python scripts/extract_py.py "):]
+    for script in ("scripts/extract_py.py", "skills/architecture-map/scripts/extract_py.py",
+                   ".claude/skills/architecture-map/scripts/extract_py.py",
+                   "/nirgends/anderer-rechner/architecture-map/scripts/extract_py.py"):
+        footer["module"]["command"] = f"python {script} {rest}"
+        doc = project_dir / "ARCHITECTURE.md"
+        doc.write_text(doc_with_footer(block, footer), encoding="utf-8")
+        result = drift_check.check(doc, cwd=tmp_path)
+        assert result["levels"]["module"]["status"] == "unchanged", (script, result)
+    parts = drift_check.resolve_script("python scripts/analyze_graph.py --graph g.json")
+    assert parts[1].endswith("/architecture-map/scripts/analyze_graph.py") and parts[0] == sys.executable

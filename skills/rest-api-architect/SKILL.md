@@ -24,13 +24,13 @@ Konventionsdatei. Implementierung läuft im normalen Entwicklungsfluss.
 3. Jede Design-Entscheidung gegen `assets/conventions.json` (Override:
    `.skills/rest-api-architect/conventions.json`, falls vorhanden). Abweichung → begründeter
    `x-deviation`-Eintrag in der Spec, nie stillschweigend im Code.
-4. `python skills/rest-api-architect/scripts/gate.py --openapi api/openapi.yaml --ruleset <ruleset> --conventions <conventions> [--previous <letzte committete Version>]`
+4. `python "${CLAUDE_SKILL_DIR}/scripts/gate.py" --openapi api/openapi.yaml --ruleset <ruleset> --conventions <conventions> [--previous <letzte committete Version>]`
 5. Nur echte Preset-Abweichungen zurück an den Nutzer — keine Architekturberatung für einen
    bereits konformen, trivialen Endpoint.
 
 ## Brownfield-Ablauf
 
-1. `python skills/rest-api-architect/scripts/extract_openapi.py --framework {fastapi,express,hono,auto} --src <verzeichnis> --out api/openapi.yaml` — **statische Analyse, importiert die Anwendung nie** (R2: das ist eine Sicherheitsfrage, nicht nur eine Abhängigkeitsfrage — ein Import führt DB-Verbindungen, Netzwerkaufrufe und Migrationen aus).
+1. `python "${CLAUDE_SKILL_DIR}/scripts/extract_openapi.py" --framework {fastapi,express,hono,auto} --src <verzeichnis> --out api/openapi.yaml` — **statische Analyse, importiert die Anwendung nie** (R2: das ist eine Sicherheitsfrage, nicht nur eine Abhängigkeitsfrage — ein Import führt DB-Verbindungen, Netzwerkaufrufe und Migrationen aus).
 2. Was nicht deterministisch extrahiert wurde, trägt `x-verified: false` — sichtbar, nicht
    stillschweigend geraten. Liest du (Claude) danach Code, um Lücken zu schließen, bleibt die
    Markierung bestehen, bis ein Mensch sie bestätigt.

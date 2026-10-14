@@ -57,9 +57,7 @@ Den Plan zeigen ist G1 — diese Datei verlangt es. Der Lint ist G2 — ein Skri
 
 **Ohne das Skript** (nur work-plan installiert, claude.ai, `CLAUDE_SKILL_DIR` leer)
 entfällt der Lint. Die Übergabe heißt dann: „Plan liegt unter …, **ungeprüft** — Lint
-nicht verfügbar." Nie stillschweigend als fertig melden. subagent-dev ruft seine eigenen
-Skripte heute repo-relativ auf; in einem fremden Repo reicht der Weg bis zum Lint, nicht
-bis zum Dispatch (`docs/known-limits.md`).
+nicht verfügbar." Nie stillschweigend als fertig melden.
 
 ## Contract
 

@@ -22,10 +22,11 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    „Überarbeitet nach unabhängigem Review". Drei von drei so geprüften Specs brauchten
    119–217 Diff-Zeilen — vor dem Plan ist das eine Überarbeitung, danach eine
    Fix-Runde. **Zuletzt der Lint**, wenn der Vermerk steht:
-   `python skills/subagent-dev/scripts/plan_to_tasks.py lint-spec "specs/Spec NN – <name>.md"`
+   `python "${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/plan_to_tasks.py" lint-spec "specs/Spec NN – <name>.md"`
    — Kopfzeile mit Vermerk, sieben Abschnitte, Eval-Tabelle mit `id`-Spalte,
    Skill-Struktur, Tier, Abgrenzung, Template-Reste. Ohne Eval-Tabelle prüft niemand
-   Coverage.
+   Coverage. Liegt subagent-dev nicht neben dieser Skill, entfällt der Lint, und die
+   Übergabe sagt „Spec ungeprüft — lint-spec nicht verfügbar".
 2. **Plan** mit `impl-plan` (16). Bei Tier 0 stehen die Evals vor der SKILL.md.
 3. **Bau** im Hauptkontext oder in Paketen mit `subagent-dev` (09), eine neue Skill
    unter `skills/<name>/` (nie unter `.claude/skills/`, das ist der Installationsort). Vorher
@@ -34,8 +35,7 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    welches Versagen). Gerüste: `assets/skill-template/`.
 4. **Lint, vor dem Commit:**
    ```bash
-   python skills/skill-forge/scripts/lint_skill.py skills/<name> --base HEAD --out .skills/cache/skill-forge/lint.json
-   # installiert: python .claude/skills/skill-forge/scripts/lint_skill.py skills/<name> --base HEAD --out …
+   python "${CLAUDE_SKILL_DIR}/scripts/lint_skill.py" skills/<name> --base HEAD --out .skills/cache/skill-forge/lint.json
    ```
    `--base HEAD` vergleicht mit dem letzten Commit; nur neue Befunde zählen. Ohne
    `--base` zählt alles: bei einer neuen Skill und beim reinen Prüfen ohne Änderung
@@ -72,7 +72,7 @@ stehen im Register des Repo-Tests und sind nicht Sache dieser Änderung.
 
 ## Contract
 
-- **Vierzehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
+- **Fünfzehn Regeln, vier Zustände.** Jede Regel meldet `pass`, `finding`, `hint` oder
   `unchecked` mit Grund. **`unchecked` und `hint` zählen nie als `pass`**: Was der
   Lint nicht sehen konnte (kein `docs/`, keine Nachbarn, keine `evals.json`), hat er
   nicht bestanden — er sagt es. Im Eval-Workspace sind die Regeln zu `docs/`,

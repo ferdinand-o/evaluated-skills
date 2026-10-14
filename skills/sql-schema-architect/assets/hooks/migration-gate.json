@@ -1,5 +1,5 @@
 {
-  "_comment": "G3-Vorlage (Spec 00 §4) — wird NIE automatisch installiert. Ohne diesen Hook bleibt migration_gate.py G2: Es urteilt und meldet, blockiert aber nicht. Diesen Block bewusst in .claude/settings.json oder .claude/settings.local.json übernehmen, wenn ein blockierendes Gate gewuenscht ist (der Pfad muss zum Ort dieser Skill im jeweiligen Projekt passen).",
+  "_comment": "G3-Vorlage (Spec 00 §4) — wird NIE automatisch installiert. Ohne diesen Hook bleibt migration_gate.py G2: Es urteilt und meldet, blockiert aber nicht. Übernehmen: scripts/migration_gate.py nach .claude/hooks/ kopieren, dann diesen Block in .claude/settings.json oder .claude/settings.local.json mischen. Fehlt die Kopie, meldet der Hook „ungeprüft\" und hält nichts an (Spec 25).",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 skills/sql-schema-architect/scripts/migration_gate.py --hook-check --versions-dir alembic/versions"
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration_gate.py\" ]; then exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration_gate.py\" --hook-check --versions-dir alembic/versions; else echo '{\"systemMessage\": \"[sql-schema-architect] Hook ungeprüft — .claude/hooks/migration_gate.py fehlt\"}'; fi"
           }
         ]
       }
