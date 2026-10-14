@@ -250,3 +250,34 @@ def test_check_exit_codes(tmp_path, sync_mod, monkeypatch):
     assert sync_mod.main(["--check", "--repo", str(tmp_path)]) == 1
     assert sync_mod.main(["--repo", str(tmp_path)]) == 0
     assert sync_mod.main(["--check", "--repo", str(tmp_path)]) == 0
+
+
+ROUTING_TARGETS = ("superpowers:writing-plans", "superpowers:subagent-driven-development",
+                   "test-driven-development")
+# Herkunft, kein Routing-Ziel (Spec 23, „Bewusst bleiben").
+ROUTING_TARGET_ALLOWED = {
+    "skills/impl-plan/references/reviewer-prompt.md",
+    # test-first grenzt sich gegen die TDD-Skill von superpowers ab, die es ersetzt (Spec 24).
+    "skills/test-first/SKILL.md",
+    # Die Lückentabelle nennt die superpowers-Skills als Daten (Spec 21 B).
+    "skills/setup-user/references/superpowers-gaps.json",
+}
+
+
+def test_no_superpowers_routing_targets():
+    """Spec 23 und 24: Keine Description eines aktiven Plugins verweist auf superpowers,
+    und unter skills/ zeigt nichts mehr auf writing-plans, subagent-driven-development
+    oder test-driven-development — work-plan, das eingebaute Agent-Werkzeug und
+    test-first sind die Ziele."""
+    sync = load_script("scripts/sync_skills.py")
+    report = sync.superpowers_report(REPO_ROOT)
+    assert sum(n for skills in report.values() for n in skills.values()) == 0, report
+    hits = []
+    for path in sorted((REPO_ROOT / "skills").rglob("*")):
+        if path.suffix not in (".md", ".py", ".json") or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        if rel not in ROUTING_TARGET_ALLOWED and any(t in text for t in ROUTING_TARGETS):
+            hits.append(rel)
+    assert hits == [], hits

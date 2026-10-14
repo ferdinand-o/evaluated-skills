@@ -1,0 +1,122 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-one-file-change-gets-no-plan",
+      "class": "contract",
+      "fixture": "wp-small",
+      "prompt": "Schreib einen Plan: in src/greet.py den Tippfehler ‚Helo' korrigieren.",
+      "must": [
+        {
+          "type": "file_absent",
+          "path": "docs/plans/*.md"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "Kein Plan nötig"
+        },
+        {
+          "type": "git_head_unchanged"
+        }
+      ],
+      "must_not": [],
+      "notes": "Anti-Zeremonie (Spec 00 §2): eine Datei, keine neue Schnittstelle, keine Reihenfolge — unter der Schwelle. Diskriminator: Würde ein Agent ohne die Skill wörtlich „Kein Plan nötig“ sagen und keine Datei unter docs/plans/ anlegen? Nein — ohne sie entsteht ein Plan im Gespräch oder als Datei, den Wortlaut der Schwelle schreibt nur die Skill."
+    },
+    {
+      "id": "plan-from-feature-spec-covers-criteria",
+      "class": "contract",
+      "fixture": "wp-spec",
+      "prompt": "Schreib den Plan zur Spec docs/specs/wip/export.md.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": "docs/plans/*.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "skill: work-plan"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "\\*\\*Spec:\\*\\* .docs/specs/wip/export\\.md."
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "\\*\\*Interfaces:\\*\\*"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "(?s)### Task \\d+: Verifikation\\n(?!.*### Task)"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "CSV hat eine Kopfzeile"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "Option --csv schreibt die Datei"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "Leerer Bericht ergibt nur die Kopfzeile"
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Spec ist ein feature-spec-Entwurf mit drei Akzeptanzkriterien; jeder Titel steht wörtlich in einem Task. Diskriminator: Schreibt ein Agent ohne die Skill eine Datei mit Kopfzeile skill: work-plan, Interfaces-Blöcken und einem Task Verifikation als letztem Task? Nein — Kopfzeile, Interfaces und der Verifikations-Task zuletzt entstehen nur mit der Skill."
+    },
+    {
+      "id": "verification-task-uses-repo-command",
+      "class": "contract",
+      "fixture": "wp-verify",
+      "prompt": "Schreib einen Plan für einen CSV-Export der Berichte mit CLI-Option `--csv` und einem Abschnitt in der README.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "(?s)### Task \\d+: Verifikation.*make ci\\b"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "CLAUDE.md"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "ungeprüft"
+        }
+      ],
+      "must_not": [],
+      "notes": "Die Fixture nennt make ci nur in der CLAUDE.md-Zeile Verifikation: — nicht make check, das als Beispiel in task-patterns.md steht. Im Eval-Workspace liegt nur work-plan, nicht subagent-dev — der Lint ist nicht verfügbar. Diskriminator: Setzt ein Agent ohne die Skill einen Task Verifikation mit dem Befehl aus CLAUDE.md und sagt „ungeprüft“, weil der Lint fehlt? Nein — beides verlangt nur die Skill."
+    },
+    {
+      "id": "plan-from-finding-records-assignment",
+      "class": "contract",
+      "fixture": "wp-finding",
+      "prompt": "Schreib einen Plan für den Zyklus, den ARCHITECTURE.md meldet: Danach soll die Domäne gar nicht mehr von der Persistenz abhängen — User bekommt seine Session von außen, statt get_session() selbst aufzurufen.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "skill: work-plan"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "\\*\\*Auftrag:\\*\\*.*ARCHITECTURE\\.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/plans/*.md",
+          "pattern": "(?m)^- Annahme:"
+        }
+      ],
+      "must_not": [],
+      "notes": "Quelle ist ein Befund von architecture-map, keine Spec. Diskriminator: Hält ein Agent ohne die Skill die Quelle als **Auftrag:** mit dem Pfad des Befunds fest und seine Annahmen als `- Annahme:`-Zeilen? Nein — ohne Spec hält nur die Skill Quelle und Annahmen in Hausform fest. Der Auftrag ändert den Konstruktor von User (neue öffentliche Schnittstelle) und berührt mehrere Dateien — er liegt über der Schwelle. Die erste Fassung fragte nur nach dem Zyklus; den löst eine Zeile in session.py, und die Skill antwortete zu Recht „Kein Plan nötig“."
+    }
+  ]
+}

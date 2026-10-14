@@ -263,3 +263,73 @@ def test_apply_keeps_foreign_keys_and_statusline_options(tmp_path, assets):
     assert json.loads((Path(result["backup"]) / "settings.json").read_text(encoding="utf-8")) == settings
     text = (cfg / "settings.json").read_text(encoding="utf-8")
     assert text.endswith("\n") and "\r" not in text and text.startswith('{\n  "model"')
+
+
+# --- Plugin-Profil (Abschnitt B) -------------------------------------------------------
+
+def _profile(block):
+    return {p["id"]: p for p in block["plugins"]["profile"]}
+
+
+def _settings_patch(block):
+    return next(op["patch"] for op in block["operations"] if op["path"] == "settings.json")
+
+
+def test_profile_keeps_explicit_user_values(tmp_path, assets):
+    """Spec 21 B: Ein gesetzter Wert in enabledPlugins bleibt und steht als Konflikt im
+    Plan; erst plugins_off macht daraus einen Patch. Ungesetzt → false, sobald die
+    Abschaltbedingung erfüllt ist; engineering → false als Annahme."""
+    from test_setup_user_route import make_config, skill
+    sp, eng = "superpowers@claude-plugins-official", "engineering@knowledge-work"
+
+    # Bedingung nicht erfüllt (cc-dev verweist auf superpowers:) → superpowers bleibt, mit Grund
+    cfg = make_config(tmp_path / "a")
+    block = inspect.build_plan(cfg, {}, "python3")
+    profile = _profile(block)
+    assert profile[sp]["action"] == "keep" and "(b)" in profile[sp]["reason"]
+    assert profile[eng]["action"] == "set" and _settings_patch(block)["enabledPlugins"] == {eng: False}
+    assert "cc-dev@cc-skills" not in profile
+    assert str(tmp_path) not in json.dumps(block["plugins"])
+
+    # Bedingung erfüllt, superpowers gesetzt (wie nach `claude plugin install`) → Konflikt
+    cfg = make_config(tmp_path / "b")
+    skill(tmp_path / "b" / "mkt", "feature-spec", "Use for specs. Not for plans (use work-plan).")
+    block = inspect.build_plan(cfg, {}, "python3")
+    assert block["plugins"]["condition"]["met"] is True
+    assert _profile(block)[sp]["action"] == "conflict"
+    assert sp not in _settings_patch(block).get("enabledPlugins", {})
+    text = inspect.render_plan(block, cfg)
+    assert "## Plugins" in text and "plugins_off" in text and "Konflikt" in text
+
+    # ausdrücklich freigegeben → Patch, und apply mischt enabledPlugins
+    out = plan_for(cfg, {"plugins_off": [sp]})
+    block = apply.read_block(out)
+    assert _settings_patch(block)["enabledPlugins"] == {sp: False, eng: False}
+    apply.apply_plan(out, cfg)
+    settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    assert settings["enabledPlugins"] == {sp: False, "cc-dev@cc-skills": True, eng: False}
+
+    # ungesetzt und Bedingung erfüllt → false ohne Rückfrage; schon false → nichts
+    cfg = make_config(tmp_path / "c", enabled={"cc-dev@cc-skills": True, eng: False})
+    skill(tmp_path / "c" / "mkt", "feature-spec", "Use for specs.")
+    block = inspect.build_plan(cfg, {}, "python3")
+    assert _profile(block)[sp]["action"] == "set" and _profile(block)[eng]["action"] == "none"
+    assert _settings_patch(block)["enabledPlugins"] == {sp: False}
+
+
+def test_profile_counts_rules_planned_in_the_same_plan(tmp_path, assets):
+    from test_setup_user_route import make_config, skill
+    cfg = make_config(tmp_path, rules=(), enabled={"cc-dev@cc-skills": True})
+    skill(tmp_path / "mkt", "feature-spec", "Use for specs.")
+    block = inspect.build_plan(cfg, {}, "python3")
+    assert any(op["path"] == "rules/verification.md" for op in block["operations"])
+    assert block["plugins"]["condition"]["c"]["ok"] is True
+    assert _profile(block)["superpowers@claude-plugins-official"]["action"] == "set"
+
+
+def test_profile_without_plugins_is_unchecked(tmp_path, assets):
+    cfg = cfg_with(tmp_path, "cfg", {})
+    block = inspect.build_plan(cfg, {}, "python3")
+    assert block["plugins"]["checked"] is False and block["plugins"]["profile"] == []
+    assert "enabledPlugins" not in _settings_patch(block)
+    assert "ungeprüft" in inspect.render_plan(block, cfg)

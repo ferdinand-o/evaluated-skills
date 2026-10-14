@@ -11,8 +11,7 @@ Byte im Sinn des Inhalts erhalten.
 | `statusLine.command` | nur `command`; `type`, `padding`, `refreshInterval` und andere Felder bleiben. Fehlt `statusLine`, entsteht `{"type": "command", "command": …}` |
 | `hooks.UserPromptSubmit` | ein eigener Eintrag mit dem Hook-Fragment aus `assets/settings/context-hint.json`; vorhandene fremde Einträge bleiben |
 | `permissions.deny` | nur, wenn der Nutzer das Angebot im Plan bestätigt hat; Liste wird vereinigt |
-
-Abschnitt A fasst `enabledPlugins` nicht an.
+| `enabledPlugins` | nur die Plugin-IDs aus dem Profil (`references/routing.md`), je auf `false`; andere Einträge bleiben. Ein schon gesetzter Wert kommt nur in den Patch, wenn die Antwort `plugins_off` die ID nennt |
 
 ## Was apply nie anfasst
 

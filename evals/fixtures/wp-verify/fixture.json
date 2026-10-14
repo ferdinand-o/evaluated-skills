@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Berichts-Paket mit setup-repo-artiger CLAUDE.md; den Befehl make ci nennt nur deren Zeile Verifikation:, das Makefile hat das Ziel ci. Absichtlich nicht make check — das steht als Beispiel in task-patterns.md und hätte nicht diskriminiert. Kein docs/plans/."
+}

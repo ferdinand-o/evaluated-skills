@@ -1214,3 +1214,83 @@ def test_check_allowlist_reads_non_ascii_and_space_paths_without_quoting(tmp_pat
     assert ptt.check_allowlist(tmp_path, base, allow) == []
     assert ptt.check_allowlist(tmp_path, base, ["specs/Spec 00 – grün.md", "specs/Spec 01 – grün.md"]) == \
         ["docs/neu ordner/Übersicht.md"]
+
+
+# --- work-plan (Spec 23): zweite Kopfzeile, Quelle, Verifikation zuletzt, Coverage ---
+
+WP_HEADER = "<!-- skill: work-plan | schema: 1 | generated: von Hand nach skills/work-plan/assets/plan-template.md -->"
+
+
+def _wp_plan(source="**Auftrag:** CSV-Export der Berichte", tasks=None):
+    tasks = tasks if tasks is not None else [
+        ("Export schreiben", "- Create: `src/export.py`", "- Consumes: (nichts Neues)\n- Produces: `fn:write_csv(rows, path)`"),
+        ("Verifikation", "- Test: `Makefile`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
+    ]
+    body = "".join(
+        f"\n### Task {i}: {title}\n\n**Files:**\n{files}\n\n**Interfaces:**\n{iface}\n\n"
+        f"- [ ] **Step 1: Tun** — etwas Beobachtbares.\n"
+        for i, (title, files, iface) in enumerate(tasks, 1)
+    )
+    return f"{WP_HEADER}\n\n# Plan\n\n**Goal:** Export.\n\n{source}\n\n- Annahme: keine\n{body}"
+
+
+def _wp_findings(text, plan_path=None):
+    return [f.render() for f in ptt.lint_plan(text, plan_path=plan_path)]
+
+
+def test_lint_accepts_work_plan_header():
+    assert _wp_findings(_wp_plan()) == []
+    assert ptt.check_header(WP_HEADER + "\n") is None
+    foreign = _wp_plan().replace("skill: work-plan", "skill: writing-plans")
+    assert any("Kopfzeile fremd" in f for f in _wp_findings(foreign))
+    impl = _wp_plan().replace("skill: work-plan", "skill: impl-plan")
+    assert any("**Spec:**" in f for f in _wp_findings(impl)), "impl-plan verlangt weiter **Spec:**"
+
+
+def test_work_plan_needs_one_source_and_final_verification(tmp_path):
+    none = _wp_plan(source="")
+    assert any("Quelle" in f for f in _wp_findings(none))
+    spec = tmp_path / "x.md"
+    spec.write_text("# x\n", encoding="utf-8")
+    both = _wp_plan(source=f"**Spec:** `{spec}`\n\n**Auftrag:** auch noch")
+    assert any("genau eine Quelle" in f for f in _wp_findings(both))
+    no_verify = _wp_plan(tasks=[("Export schreiben", "- Create: `src/export.py`",
+                                 "- Consumes: (nichts Neues)\n- Produces: `fn:write_csv(rows, path)`")])
+    assert any("Verifikation" in f for f in _wp_findings(no_verify))
+    not_last = _wp_plan(tasks=[
+        ("Verifikation", "- Test: `Makefile`", "- Consumes: (nichts Neues)\n- Produces: (nichts Neues)"),
+        ("Export schreiben", "- Create: `src/export.py`", "- Consumes: (nichts Neues)\n- Produces: `fn:write_csv(rows, path)`"),
+    ])
+    assert any("letzte Task" in f for f in _wp_findings(not_last))
+
+
+def test_work_plan_coverage_against_feature_spec_criteria(tmp_path):
+    """Kriterien-Titel zählen auch im Task-Titel — ganz, nicht nur so weit, wie die
+    repr eines Match-Objekts reicht (der zweite Titel ist länger als 50 Zeichen)."""
+    spec = tmp_path / "docs" / "specs" / "wip" / "export.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(
+        "<!-- skill: feature-spec | schema: 1 | generated: feature-spec Draft für \"Export\" -->\n"
+        "# Feature: Export\n\n## Akzeptanzkriterien\n\n### CSV hat Kopfzeile\n- Given a\n- When b\n- Then c\n\n"
+        "### Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts\n- Given a\n- When b\n- Then c\n\n## Offene Fragen\n\n- keine\n",
+        encoding="utf-8")
+    plan_path = tmp_path / "docs" / "plans" / "p.md"
+    plan_path.parent.mkdir(parents=True)
+    tasks = [
+        ("CSV hat Kopfzeile", "- Create: `src/export.py`", "- Consumes: (nichts Neues)\n- Produces: `fn:write_csv(rows, path)`"),
+        ("Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts", "- Modify: `src/export.py`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
+        ("Verifikation", "- Test: `Makefile`", "- Consumes: `fn:write_csv(rows, path)`\n- Produces: (nichts Neues)"),
+    ]
+    text = _wp_plan(source="**Spec:** `../specs/wip/export.md`", tasks=tasks)
+    report = ptt.lint_report(text, plan_path=plan_path)
+    assert [f.render() for f in report.findings] == [] and report.coverage["status"] == "checked"
+    assert report.coverage["ids_checked"] == 2
+
+    missing = _wp_plan(source="**Spec:** `../specs/wip/export.md`", tasks=[tasks[0], tasks[2]])
+    findings = _wp_findings(missing, plan_path=plan_path)
+    assert any("Leere Liste ergibt eine Datei mit genau der einen Kopfzeile und sonst nichts" in f for f in findings)
+
+    plain = tmp_path / "docs" / "specs" / "plain.md"
+    plain.write_text("# Irgendeine Spec\n\n## Akzeptanzkriterien\n\n### X\n", encoding="utf-8")
+    report = ptt.lint_report(_wp_plan(source="**Spec:** `../specs/plain.md`"), plan_path=plan_path)
+    assert report.coverage["status"] == "unchecked" and "feature-spec" in report.coverage["reason"]

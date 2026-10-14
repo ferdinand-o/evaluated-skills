@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Wie tf-feature, aber src/slug.py enthält slugify schon mit genau dem verlangten Umlaut-Verhalten (ä→ae, ö→oe, ü→ue) — ohne Test dafür. Ein neuer Test ist sofort grün."
+}

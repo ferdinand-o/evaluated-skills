@@ -11,6 +11,7 @@ ptt = load_script("skills/subagent-dev/scripts/plan_to_tasks.py")
 
 PLANS_DIR = REPO_ROOT / "docs" / "superpowers" / "plans"
 PLAN_TEMPLATE = REPO_ROOT / "skills" / "impl-plan" / "assets" / "plan-template.md"
+WORK_PLAN_TEMPLATE = REPO_ROOT / "skills" / "work-plan" / "assets" / "plan-template.md"
 
 # Schuldenregister: die 16 Pläne, die vor Spec 15 (explain) ohne Lint entstanden
 # sind. Bewusst eine Konstante und keine Datei — die Menge darf nur schrumpfen,
@@ -74,3 +75,11 @@ def test_legacy_register_never_grows():
 def test_plan_template_is_lint_clean():
     findings = _findings(PLAN_TEMPLATE)
     assert findings == [], "\n".join(["plan-template.md:"] + findings)
+
+
+def test_work_plan_template_is_lint_clean():
+    """Spec 23: das Template von work-plan ist so, wie es kopiert wird, lint-sauber —
+    auch der Verifikations-Task, der keine Datei anlegt."""
+    findings = _findings(WORK_PLAN_TEMPLATE)
+    assert findings == [], "\n".join(["work-plan/assets/plan-template.md:"] + findings)
+    assert ptt.plan_kind(WORK_PLAN_TEMPLATE.read_text(encoding="utf-8")) == "work-plan"

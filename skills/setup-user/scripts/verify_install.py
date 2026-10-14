@@ -26,6 +26,10 @@ Kopfzeile und Zeilenbudget, thresholds.json, Hook-Eintrag) und schreibt nur
 Ein fehlendes Skript steht als erste Abweichung da; ein relativer Skriptpfad ist ein
 Hinweis „nur im Arbeitsverzeichnis gültig", keine Abweichung. Befehle laufen vom
 aktuellen Arbeitsverzeichnis aus, damit relative Pfade sich wie in Claude Code auflösen.
+
+Abschnitt B: An check.md hängt der Abschnitt `## Plugins` aus `route_check.py --markdown`,
+als Unterprozess aufgerufen, nicht importiert. Er informiert und zählt keine Abweichung;
+läuft das Skript nicht, steht dort „ungeprüft — route_check.py …".
 """
 
 import argparse
@@ -41,6 +45,8 @@ import time
 from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
+ROUTE_CHECK = Path(__file__).resolve().parent / "route_check.py"
+ROUTE_TIMEOUT = 60
 SCRIPT_RE = re.compile(r'"([^"]+\.py)"|\'([^\']+\.py)\'|(\S+\.py)\b')
 SESSION = "setup-user-verify"
 TIMEOUT = 10
@@ -246,6 +252,20 @@ def render_check(config_dir, result, deviations, notes, argv_text) -> str:
     return "\n".join(lines) + "\n"
 
 
+def plugin_section(config_dir) -> str:
+    """Abschnitt `## Plugins` von route_check.py, oder „ungeprüft" mit Grund."""
+    if not Path(ROUTE_CHECK).is_file():
+        return "## Plugins\n\n- ungeprüft — route_check.py nicht gefunden\n"
+    try:
+        proc = subprocess.run([sys.executable, str(ROUTE_CHECK), "--config-dir", str(config_dir), "--markdown"],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=ROUTE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"## Plugins\n\n- ungeprüft — route_check.py lief nicht ({type(exc).__name__})\n"
+    if proc.returncode != 0 or not proc.stdout.startswith("## Plugins"):
+        return f"## Plugins\n\n- ungeprüft — route_check.py endete mit Exit {proc.returncode}\n"
+    return proc.stdout
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="setup-user-Installation in einer Sandbox prüfen (Spec 21)")
     parser.add_argument("--config-dir")
@@ -259,7 +279,8 @@ def main(argv=None):
         out = config_dir / "setup-user" / "check.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         argv_text = " ".join(argv if argv is not None else sys.argv[1:])
-        out.write_text(render_check(config_dir, result, deviations, notes, argv_text), encoding="utf-8", newline="\n")
+        text = render_check(config_dir, result, deviations, notes, argv_text) + "\n" + plugin_section(config_dir)
+        out.write_text(text, encoding="utf-8", newline="\n")
         print(f"check.md: {out} — " + (f"{len(deviations)} Abweichung(en)" if deviations else "keine Abweichung"))
         return 1 if deviations else 0
     for item in result["ran"]:

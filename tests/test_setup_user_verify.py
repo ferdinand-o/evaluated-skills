@@ -175,3 +175,26 @@ def test_relative_script_paths_run_from_cwd_and_are_noted(tmp_path, monkeypatch)
     assert verify_mod.main(["--config-dir", "cfg", "--write-check"]) == 0
     text = (cfg / "setup-user" / "check.md").read_text(encoding="utf-8")
     assert "keine Abweichung" in text and "nur im Arbeitsverzeichnis gültig" in text
+
+
+def test_write_check_appends_plugin_section_without_deviation(tmp_path, monkeypatch):
+    """Spec 21 B: check.md trägt den Abschnitt aus route_check.py --markdown; Plugin-Befunde
+    zählen nicht als Abweichung. Ohne Skript steht dort „ungeprüft"."""
+    from test_setup_user_route import make_config
+    cfg = make_install(tmp_path, monkeypatch)
+    write_profile(cfg)
+    fake = make_config(tmp_path / "plugins-src")
+    shutil.copytree(fake / "plugins", cfg / "plugins")
+    settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
+    settings["enabledPlugins"] = json.loads((fake / "settings.json").read_text(encoding="utf-8"))["enabledPlugins"]
+    (cfg / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    assert verify_mod.main(["--config-dir", str(cfg), "--write-check"]) == 0
+    text = (cfg / "setup-user" / "check.md").read_text(encoding="utf-8")
+    assert "keine Abweichung" in text
+    assert "## Plugins" in text and "superpowers · SessionStart-Hook · startup|clear|compact" in text
+    assert "Abschaltbedingung: nicht erfüllt" in text
+
+    monkeypatch.setattr(verify_mod, "ROUTE_CHECK", tmp_path / "fehlt.py")
+    assert verify_mod.main(["--config-dir", str(cfg), "--write-check"]) == 0
+    text = (cfg / "setup-user" / "check.md").read_text(encoding="utf-8")
+    assert "## Plugins" in text and "ungeprüft — route_check.py" in text

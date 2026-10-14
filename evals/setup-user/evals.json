@@ -193,6 +193,21 @@
       ],
       "must_not": [],
       "notes": "Eine fremde Statusline bleibt eingetragen, der Hook kommt dazu. Diskriminator: thresholds.json und Backup nur durch apply_config.py; die fremde Statusline führt verify_install.py nie aus, die Übergabe sagt deshalb „ungeprüft“. Ohne Skill bliebe die Fixture unverändert und das Hook-Fragment fehlte."
+    },
+    {
+      "id": "superpowers-sessionstart-is-reported",
+      "class": "contract",
+      "fixture": "su-plugins",
+      "prompt": "/setup-user check --config-dir ./cfg",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "cfg/setup-user/check.md",
+          "pattern": "superpowers · SessionStart-Hook"
+        }
+      ],
+      "must_not": [],
+      "notes": "Abschnitt B. Diskriminator: Schreibt ein Agent ohne die Skill eine Zeile „superpowers · SessionStart-Hook“ in cfg/setup-user/check.md? Nein — nur route_check.py schreibt die Zeile in diesem Format, und eine feste Überschriftenliste trifft das Muster nicht. Die Plugins liegen nur im Cache, installPath zeigt ins Leere: Auch das muss das Skript auflösen."
     }
   ]
 }

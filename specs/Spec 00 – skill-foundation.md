@@ -79,16 +79,18 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
-| neues Feature, Codebase existiert | feature-spec (03) | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), writing-plans (das *Wie* danach) |
+| neues Feature, Codebase existiert | feature-spec (03) | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), work-plan (das *Wie* danach) |
 | Bug, Testfehler | debug-ledger (01) | feature-spec |
-| Testplan, Repo-Typ-Frage | testing-strategy (05) | test-driven-development (Zyklus *während* der Implementierung) |
+| Testplan, Repo-Typ-Frage | testing-strategy (05) | test-first (24, Zyklus *während* der Implementierung) |
+| neues Verhalten implementieren, Regressionstest nach der Diagnose | test-first (24) | testing-strategy (05) (welche Tests fehlen), debug-ledger (01) (Diagnose davor), superpowers:test-driven-development (Doktrin ohne Beleg) |
 | Diff prüfen | `/code-review` (mitgeliefert) | Spec 04 — nur noch als Kontextpaket-Lieferant, siehe unten |
 | Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
 | Landing-Page-Bewegung | motion-landing (06) | ui-architect (Stil/Tokens), enterprise-ui (Produktoberfläche) |
 | mobil kaputt, „geht das auf dem Handy?", bestehende Seite mobil prüfen | mobile-audit (15) | enterprise-ui, ui-architect, motion-landing (bauen mobil mit `references/mobile.md`; mobile-audit prüft nur) |
 | ad-hoc „fass zusammen" | visual-summary (11) | dev-report (periodisch), handoff (Sitzungsende) |
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
-| Implementierungsplan zu einer Spec | impl-plan (16) | superpowers:writing-plans (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Implementierungsplan zu einer Spec | impl-plan (16) | work-plan (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| Plan für Arbeit in einem beliebigen Repo (Spec, Befund, Auftrag) | work-plan (23) | impl-plan (16) (Specs dieser Sammlung), eingebauter Plan-Modus (Plan nur im Gespräch), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Skill bauen oder ändern | skill-forge (17) | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 | eigenen Claude-Code-User-Scope einrichten oder prüfen (Statusline, Kontext-Hinweise, Regeln) | setup-user (21) | `/statusline` (Statusline nach Freitext-Wunsch), setup-repo (22, was in Cloud und CI gelten muss), handoff (sichert den Stand, setup-user rät nur dazu) |
 | ein Repo für Claude Code einrichten oder prüfen (Verifikationsbefehl, CLAUDE.md, Regeln mit Quelle, Freigaben) | setup-repo (22) | setup-user (21, persönlicher User-Scope), testing-strategy (welche Tests fehlen), `/init` (CLAUDE.md ohne Beleg und Budget) |
@@ -96,7 +98,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 
 **Ausnahme für Claude-Code-spezifische Skills** (Spec 21, 22): `setup-user` und `setup-repo` richten Claude Code selbst ein und laufen nur als Slash-Befehl. Sie tragen `disable-model-invocation: true`, das der Lint nur für die Liste `CLAUDE_CODE_ONLY` erlaubt, und schreiben nach gezeigtem Plan in Settings-Dateien; ihre Portabilität über Agenten hinweg ist bewusst aufgegeben.
 
-*Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `superpowers:writing-plans`. *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
+*Annahme:* `to-tickets` wird nicht gebaut; die Verweise in 03, 07 und 10 zeigen künftig auf `work-plan` (23). *Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst.
 
 ## Alternatives considered
 

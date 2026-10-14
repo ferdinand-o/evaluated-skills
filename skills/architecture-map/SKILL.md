@@ -1,6 +1,6 @@
 ---
 name: architecture-map
-description: Use when the user wants an architecture overview, diagram, or documentation of a codebase's structure — "erklär mir die Architektur", "dokumentiere die Architektur", "zeig mir die Abhängigkeiten", "wo sind die Zyklen", "Klassenstruktur von X", or when ARCHITECTURE.md exists and might be stale ("ist die Doku noch aktuell?"). Generates import/inheritance graphs statically (ast for Python, text search for TS/JS) into a committed, deterministic ARCHITECTURE.md with a drift check — never a hand-drawn or guessed diagram. Not for executing refactors the findings suggest (use superpowers:writing-plans) and not for runtime/sequence diagrams (out of scope).
+description: Use when the user wants an architecture overview, diagram, or documentation of a codebase's structure — "erklär mir die Architektur", "dokumentiere die Architektur", "zeig mir die Abhängigkeiten", "wo sind die Zyklen", "Klassenstruktur von X", or when ARCHITECTURE.md exists and might be stale ("ist die Doku noch aktuell?"). Generates import/inheritance graphs statically (ast for Python, text search for TS/JS) into a committed, deterministic ARCHITECTURE.md with a drift check — never a hand-drawn or guessed diagram. Not for executing refactors the findings suggest (use work-plan) and not for runtime/sequence diagrams (out of scope).
 ---
 
 # architecture-map — generierte Architektur-Landkarten
@@ -125,7 +125,7 @@ gemeldete Verletzung.
 
 ## Abgrenzung
 
-- **superpowers:writing-plans** — Befunde münden in einen Refactoring-Plan, aber diese
+- **work-plan** — Befunde münden in einen Refactoring-Plan, aber diese
   Skill führt keine Refactorings aus.
 - Laufzeit-/Sequenzdiagramme, weitere Sprachen als Python/TS/JS, automatischer
   Export nach drawio/PNG: out of scope.

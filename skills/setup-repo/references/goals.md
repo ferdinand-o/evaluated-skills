@@ -72,7 +72,7 @@ Datei der Aufgabe: Kandidat, `src/dates.py` bleibt unverändert.
   Prompt. Er hält das Turn-Ende nie an.
 
 Ausgenommen, weil sie keine Zielarbeit sind: `docs/goals.md`, `handoff.md`,
-`docs/debugging/`, `docs/decisions.md`, `docs/specs/wip/`, `.claude/`, `.skills/`,
+`docs/debugging/`, `docs/decisions.md`, `docs/specs/wip/`, `docs/plans/`, `.claude/`, `.skills/`,
 `CLAUDE.md`, `.gitignore`.
 
 Schweigen: ohne Repo-Commit, ohne `docs/goals.md`, ohne aktives Ziel mit Bereich.

@@ -2,7 +2,7 @@
 
 # setup-user — Plan
 
-Ziel: `/home/user/cc-skills/evals/fixtures/su-planned/cfg` · Hash `53d7177fc337851c` · Interpreter `python3`
+Ziel: `/home/user/cc-skills/evals/fixtures/su-planned/cfg` · Hash `5944f63b0ed43783` · Interpreter `python3`
 
 ## Statusline
 
@@ -14,6 +14,10 @@ Keine Statusline eingetragen; `apply` setzt das Asset ein.
 - language: Deutsch (Asset-Wert, nicht gefragt oder nicht beantwortet)
 - shell: bash (Asset-Wert, nicht gefragt oder nicht beantwortet)
 - tone: knapp und sachlich (Asset-Wert, nicht gefragt oder nicht beantwortet)
+
+## Plugins
+
+- ungeprüft — keine Plugins unter <config-dir>/plugins; `enabledPlugins` bleibt unberührt.
 
 ## Änderungen
 
@@ -264,7 +268,6 @@ Keine Statusline eingetragen; `apply` setzt das Asset ein.
 ## Nicht gesetzt
 
 - `permissions.deny` für `.env`, `~/.ssh` und Schlüsseldateien wird nur auf Bestätigung gesetzt (Antwort `deny_secrets: true`). Ein Read-Deny gilt für die Datei-Werkzeuge und erkannte Bash-Dateikommandos, nicht für beliebige Unterprozesse.
-- `enabledPlugins` fasst Abschnitt A nicht an.
 
 ## Block für apply
 
@@ -293,7 +296,7 @@ Keine Statusline eingetragen; `apply` setzt das Asset ein.
     "setup-user/runtime/statusline.py": null,
     "setup-user/thresholds.json": null
   },
-  "hash": "53d7177fc337851ca5e2e69d84d2bd05fc56dfeda94198905589f63ee7f63b2e",
+  "hash": "5944f63b0ed43783380295177582b59c44ff27af02cf2031e49bccde876e4156",
   "operations": [
     {
       "action": "copy",
@@ -357,6 +360,26 @@ Keine Statusline eingetragen; `apply` setzt das Asset ein.
       "path": "settings.json"
     }
   ],
+  "plugins": {
+    "checked": false,
+    "condition": {
+      "a": {
+        "gaps": [],
+        "ok": true
+      },
+      "b": {
+        "ok": true,
+        "refs": []
+      },
+      "c": {
+        "missing": [],
+        "ok": true
+      },
+      "met": false
+    },
+    "profile": [],
+    "reason": "keine Plugins unter <config-dir>/plugins"
+  },
   "python": "python3",
   "schema": 1,
   "statusline": {

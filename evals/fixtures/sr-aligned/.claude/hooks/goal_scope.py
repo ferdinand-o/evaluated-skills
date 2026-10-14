@@ -35,7 +35,7 @@ MAX_LISTED = 10
 HEADER_RE = re.compile(r"^<!--\s*skill:\s*setup-repo\s*\|\s*schema:\s*1\s*\|")
 GOAL_ID_RE = re.compile(r"^G\d+$")
 EXCLUDED_FILES = {"docs/goals.md", "handoff.md", "docs/decisions.md", "CLAUDE.md", ".gitignore"}
-EXCLUDED_DIRS = ("docs/debugging/", "docs/specs/wip/", ".claude/", ".skills/")
+EXCLUDED_DIRS = ("docs/debugging/", "docs/specs/wip/", "docs/plans/", ".claude/", ".skills/")
 
 
 class GitError(Exception):

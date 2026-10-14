@@ -172,7 +172,8 @@ def test_goal_scope_ignores_house_artifacts(tmp_path):
     hook.prompt()
     write(repo, "docs/goals.md", (repo / "docs/goals.md").read_text(encoding="utf-8") + "\n")
     for rel in ("handoff.md", ".claude/rules/x.md", ".skills/cache/x.json", "CLAUDE.md", ".gitignore",
-                "docs/debugging/2026-10-12-x.md", "docs/decisions.md", "docs/specs/wip/x.md"):
+                "docs/debugging/2026-10-12-x.md", "docs/decisions.md", "docs/specs/wip/x.md",
+                "docs/plans/2026-10-13-x.md"):
         write(repo, rel, "x\n")
     assert hook.stop() == {}
 

@@ -22,6 +22,7 @@ daraus nur den Block; alles andere ist für den Menschen.
 | `python` | aufgelöster Interpreter für die Kommandos, etwa `python3` |
 | `answers` | Interview-Antworten: `language`, `tone`, `shell`, `git`; fehlende als Asset-Wert |
 | `statusline` | `own` (Kennzeile oder bekannter Hash), `none`, `foreign`; bei `foreign` der Pfad |
+| `plugins` | Plugin-Profil aus `route_check.py`: `checked`, `reason`, `profile` (je Eintrag `id`, `action` `set`/`conflict`/`keep`/`none`, `reason`) und `condition` (Teile a bis c, `met`); ohne absolute Pfade |
 | `operations` | Liste, je Eintrag `path` relativ zu `<config-dir>`, `action`, und je nach Aktion `content` oder `patch` |
 | `base` | je berührtem Pfad der SHA-256 des Bestands oder `null`, wenn die Datei fehlt |
 | `hash` | SHA-256 über den Block ohne `hash` |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plan -> Tasks für subagent-dev. Tier 1: nur Stdlib.
 
-`generate` parst einen superpowers:writing-plans-Plan, baut die Datei- und
+`generate` parst einen impl-plan- oder work-plan-Plan, baut die Datei- und
 Interface-Überlappungsmatrix, fällt ein Gate-Urteil (parallel/sequenziell/keine
 Delegation) und schreibt pro Task eine Handoff-Datei nach `.skills/cache/tasks/`.
 
@@ -54,14 +54,15 @@ NOTHING_NEW_RE = re.compile(r"^\(?nichts neues\)?\.?$", re.IGNORECASE)
 # Interface-Vokabular (Spec 16): `fn:name(args)`, `token:Name`, `file:pfad`.
 # Additiv zu nackten Bezeichnern; jedes andere Präfix bleibt fail-closed.
 PREFIXED_SYMBOL_RE = re.compile(r"`(fn|token|file):([^`]+)`")
-# Kopfzeile eines impl-plan-Plans (docs/artifact-header.md, Spec 16).
-PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*impl-plan\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
+# Kopfzeile eines Plans (docs/artifact-header.md): impl-plan (Spec 16) für Specs dieser
+# Sammlung, work-plan (Spec 23) für fremde Repos.
+PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*(impl-plan|work-plan)\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
 # Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
 GLOB_CHARS = frozenset("*?[")
 
 
 class PlanParseError(ValueError):
-    """Der Plan-Text folgt nicht dem superpowers:writing-plans-Format genug, um sicher geparst zu werden."""
+    """Der Plan-Text folgt nicht dem Planformat von impl-plan und work-plan genug, um sicher geparst zu werden."""
 
 
 @dataclass(frozen=True)
@@ -257,7 +258,7 @@ def _parse_steps(block: str) -> list[str]:
 
 
 def parse_plan(text: str) -> PlanDoc:
-    """Parse einen superpowers:writing-plans-Plan in `PlanDoc`.
+    """Parse einen impl-plan- oder work-plan-Plan in `PlanDoc`.
 
     Wirft `PlanParseError`, wenn kein einziger `### Task N:`-Header gefunden
     wird — ein leerer Task-Zerlegung wäre sonst ein stiller Erfolg über einem
@@ -271,7 +272,7 @@ def parse_plan(text: str) -> PlanDoc:
     if not headers:
         raise PlanParseError(
             "kein einziger '### Task N: Titel'-Header gefunden — ist das ein "
-            "superpowers:writing-plans-Plan?"
+            "impl-plan- oder work-plan-Plan?"
         )
 
     gc_start = text.find("## Global Constraints")
@@ -930,16 +931,68 @@ def _explain_files(block: str) -> list[str]:
     return reasons
 
 
+def plan_kind(text: str) -> str | None:
+    """`impl-plan`, `work-plan` oder None — aus der ersten nicht-leeren Zeile."""
+    for line in text.splitlines():
+        if line.strip():
+            m = PLAN_HEADER_RE.match(line.strip())
+            return m.group(1) if m else None
+    return None
+
+
 def check_header(text: str) -> str | None:
-    """Befund, falls die erste nicht-leere Zeile keine impl-plan-Kopfzeile ist."""
+    """Befund, falls die erste nicht-leere Zeile keine Kopfzeile von impl-plan oder
+    work-plan ist."""
     for line in text.splitlines():
         if line.strip():
             if PLAN_HEADER_RE.match(line.strip()):
                 return None
             if line.strip().startswith("<!--"):
                 return f"Kopfzeile fremd oder fehlerhaft: {line.strip()[:70]!r}"
-            return "Kopfzeile fehlt (docs/artifact-header.md, skill: impl-plan)"
+            return "Kopfzeile fehlt (docs/artifact-header.md, skill: impl-plan oder work-plan)"
     return "Datei leer, keine Kopfzeile"
+
+
+AUFTRAG_LINE_RE = re.compile(r"^\*\*Auftrag:\*\*\s*\S", re.MULTILINE)
+FEATURE_SPEC_HEADER_RE = re.compile(r"^<!--\s*skill:\s*feature-spec\s*\|")
+
+
+def check_work_plan(text: str, plan_path: Path | None) -> list[str]:
+    """Regeln nur für work-plan (Spec 23): genau eine Quelle — `**Spec:**` oder
+    `**Auftrag:**` — und als letzter Task `Verifikation`. `plan_path` bleibt für
+    künftige Pfadregeln in der Signatur; heute prüft die Funktion nur den Text."""
+    del plan_path
+    masked = _mask_fenced_blocks(text)
+    problems: list[str] = []
+    has_spec = SPEC_LINE_RE.search(masked) is not None or "**Spec:**" in masked
+    has_auftrag = AUFTRAG_LINE_RE.search(masked) is not None
+    if has_spec and has_auftrag:
+        problems.append("work-plan braucht genau eine Quelle: **Spec:** oder **Auftrag:**, nicht beide")
+    elif not has_spec and not has_auftrag:
+        problems.append("work-plan ohne Quelle: **Spec:** (feature-spec) oder **Auftrag:** fehlt")
+    headers = list(TASK_HEADER_RE.finditer(masked))
+    titles = [m.group(2).strip() for m in headers]
+    if "Verifikation" not in titles:
+        problems.append("work-plan ohne Task `Verifikation` (Spec 23: der letzte Task führt den Verifikationsbefehl aus)")
+    elif titles[-1] != "Verifikation":
+        problems.append("Task `Verifikation` ist nicht der letzte Task")
+    return problems
+
+
+def feature_spec_criteria(spec_text: str) -> list[str] | None:
+    """Titel der `### `-Kriterien unter `## Akzeptanzkriterien` einer feature-spec-Spec,
+    oder None, wenn die Datei keine feature-spec-Kopfzeile trägt."""
+    first = next((line.strip() for line in spec_text.splitlines() if line.strip()), "")
+    if not FEATURE_SPEC_HEADER_RE.match(first):
+        return None
+    titles: list[str] = []
+    in_section = False
+    for line in spec_text.splitlines():
+        if line.startswith("## "):
+            in_section = line.strip() == "## Akzeptanzkriterien"
+        elif in_section and line.startswith("### "):
+            titles.append(line[4:].strip())
+    return titles
 
 
 # Überschrift des Evals-Abschnitts: ab Ebene 2 (ein H1-Titel, der „Evals" nennt,
@@ -1106,10 +1159,14 @@ def lint_report(
     header_problem = check_header(text)
     if header_problem:
         findings.append(LintFinding(None, header_problem))
+    kind = plan_kind(text)
 
-    for field_name in ("**Goal:**", "**Spec:**"):
+    required = ("**Goal:**",) if kind == "work-plan" else ("**Goal:**", "**Spec:**")
+    for field_name in required:
         if field_name not in masked:
             findings.append(LintFinding(None, f"Kopffeld {field_name} fehlt"))
+    if kind == "work-plan":
+        findings.extend(LintFinding(None, problem) for problem in check_work_plan(text, plan_path))
     spec_match = SPEC_LINE_RE.search(masked)
     if spec_match:
         spec_ref = Path(spec_match.group(1))
@@ -1133,7 +1190,21 @@ def lint_report(
     }
     blocks = _task_blocks(masked)
     task_region = "\n".join(block for _, _, block in blocks)
-    if spec_path is not None:
+    if kind == "work-plan" and spec_path is None:
+        coverage["reason"] = "Quelle ist ein Auftrag, keine Spec"
+    elif kind == "work-plan":
+        spec_text = spec_path.read_text(encoding="utf-8")
+        criteria = feature_spec_criteria(spec_text)
+        if criteria is None:
+            coverage["reason"] = "Spec ohne feature-spec-Kopfzeile — Kriterien nicht abgeglichen"
+        else:
+            coverage.update(ids_checked=len(criteria), status="checked", reason=None)
+            # Kriterien-Titel stehen oft im Task-Titel; der zählt hier mit.
+            titled_region = "\n".join(f"{header.group(0)}{block}" for _, header, block in blocks)
+            for title in criteria:
+                if title not in titled_region:
+                    findings.append(LintFinding(None, f"Akzeptanzkriterium „{title}“ aus der Spec hat keinen Task"))
+    elif spec_path is not None:
         spec_text = spec_path.read_text(encoding="utf-8")
         table = spec_eval_table(spec_text)
         if table is None:
@@ -1208,7 +1279,8 @@ def _cmd_lint(args: argparse.Namespace) -> int:
     if report.coverage["status"] != "checked":
         print(f"Hinweis: Spec-Coverage NICHT geprüft — {report.coverage['reason']}.")
     else:
-        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} Eval-ID(s) aus {report.coverage['spec']}.")
+        unit = "Eval-ID(s)" if report.coverage["eval_table"] else "Akzeptanzkriterien"
+        print(f"Spec-Coverage geprüft: {report.coverage['ids_checked']} {unit} aus {report.coverage['spec']}.")
 
     if findings:
         for f in findings:
@@ -1591,7 +1663,7 @@ def main(argv: list[str] | None = None) -> int:
     spec_lint.set_defaults(func=_cmd_lint_spec)
 
     gen = sub.add_parser("generate", help="Plan parsen, Gate fällen, Task-Dateien schreiben")
-    gen.add_argument("plan", help="Pfad zum superpowers:writing-plans-Plan")
+    gen.add_argument("plan", help="Pfad zum impl-plan- oder work-plan-Plan")
     gen.add_argument("--tasks", help="Kommagetrennte Task-IDs, sonst alle")
     gen.add_argument("--out-dir", default=str(Path(".skills") / "cache" / "tasks"))
     gen.set_defaults(func=_cmd_generate)

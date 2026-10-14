@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "skill": "setup-user",
+    "schema": 1,
+    "generated": "scripts/apply_config.py"
+  },
+  "context": [
+    60,
+    80
+  ],
+  "five_hour": [
+    80
+  ],
+  "seven_day": [
+    85
+  ]
+}

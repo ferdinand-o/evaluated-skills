@@ -1765,8 +1765,9 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
 
 ## setup-user
 
-Gebaut nach Spec 21, Abschnitt A (2026-10-09). Tier 1: `inspect_config.py`,
-`apply_config.py`, `verify_install.py`, dazu zwei Laufzeitskripte im Config-Verzeichnis.
+Gebaut nach Spec 21, Abschnitt A (2026-10-09) und B (2026-10-14). Tier 1:
+`inspect_config.py`, `apply_config.py`, `verify_install.py`, `route_check.py`, dazu zwei
+Laufzeitskripte im Config-Verzeichnis.
 Was ungemessen bleibt und wo es beißt:
 
 - **Windows ist ungemessen.** Ob `|| true` im Hook-Kommando dort greift, ob `python` oder
@@ -1784,9 +1785,22 @@ Was ungemessen bleibt und wo es beißt:
 - **Die Prüfung führt nur Asset-Befehle aus.** Eine fremde Statusline bleibt
   „ungeprüft (fremd, nicht ausgeführt)", auch wenn sie richtig wäre. `verify_install.py`
   braucht `bash`; ohne heißt das Ergebnis „ungeprüft — keine bash".
-- **Abschnitt B fehlt.** `route_check.py`, die Lückentabelle als Daten, das Plugin-Profil
-  in `enabledPlugins` und der Eval `superpowers-sessionstart-is-reported` kommen erst nach
-  Spec 23; bis dahin fasst setup-user `enabledPlugins` nicht an.
+- **Gemessen ist nur das Layout eines lokalen Marketplace.** `route_check.py` folgt dem,
+  was `claude plugin install` am 2026-10-14 (CLI 2.1.296) in einem Wegwerf-Verzeichnis
+  angelegt hat. Ein Marketplace aus GitHub, ein Plugin unter `plugins/synced/` (beim
+  Nutzer leer, hier ein leerer UUID-Ordner) und das Feld `hooks` in `plugin.json` sind
+  nach Doku gebaut, nicht gemessen.
+- **Jedes per CLI installierte Plugin gilt als gesetzt.** Die Installation schreibt
+  `true` nach `enabledPlugins`; das Profil dreht gesetzte Werte nie um. superpowers geht
+  deshalb nur aus, wenn der Nutzer es mit `plugins_off` ausdrücklich freigibt — der Plan
+  fragt, er schaltet nicht.
+- **`defaultEnabled` kommt nur aus dem Marketplace-Eintrag** im Installationsordner. Ein
+  Plugin ohne Eintrag und ohne Wert in `enabledPlugins` gilt als an.
+- **Teil (b) der Abschaltbedingung prüft den installierten Cache,** nicht das Repo. Ein
+  veralteter Cache meldet Verweise, die die Quelle nicht mehr hat; dann hilft
+  `claude plugin update`.
+- **Projekt-Settings bewertet `route_check.py` nicht.** Ein Projekt, das superpowers
+  wieder einschaltet, sieht `check` nicht.
 - **Die Statusline-Vorlage stammt vom Nutzer.** Asset und Anzeige-Test bauen auf seiner
   Fassung vom 2026-10-07 auf (`tests/fixtures/setup-user/`); ohne sie gibt es kein Asset
   und keinen Anzeige-Vergleich.
@@ -1838,8 +1852,8 @@ ungemessen bleibt und wo es beißt:
   ihre Ledger-Änderungen können beim Mergen kollidieren, und die Regel lässt Claude dann
   fragen statt lösen.
 - **Die Ausnahmen sind fest.** `docs/goals.md`, `handoff.md`, `docs/debugging/`,
-  `docs/decisions.md`, `docs/specs/wip/`, `.claude/`, `.skills/`, `CLAUDE.md` und
-  `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
+  `docs/decisions.md`, `docs/specs/wip/`, `docs/plans/` (seit Spec 23), `.claude/`,
+  `.skills/`, `CLAUDE.md` und `.gitignore` zählen nie; weitere Hausartefakte eines Repos lassen sich nicht ergänzen.
 - **Abschnitt D fehlt.** Kein Ziel-Reviewer; er wartet auf die Delphi-Prüfpunkte des
   Nutzers.
 
@@ -1987,6 +2001,69 @@ Diff-Modus. Was ungemessen bleibt und wo die Grenzen beißen:
   Trigger zu ändern. Die Description ist aber die Stelle, die der Harness beim Routing
   liest — wer die Routing-Kollision der zwei `brainstorming`-Skills misst, sollte sie
   dort ebenfalls benennen und die impl-plan-Evals mitfahren.
+
+## work-plan
+
+Gebaut nach Spec 23 (2026-10-13). Tier 1 ohne eigenes Skript; der Lint gehört
+subagent-dev und kennt seitdem die Kopfzeile `skill: work-plan`. Was ungemessen bleibt und
+wo es beißt:
+
+- **In einem fremden Repo reicht der Weg bis zum Lint, nicht bis zum Dispatch.** work-plan
+  ruft `plan_to_tasks.py lint` über `${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/` auf.
+  subagent-dev selbst ruft `generate` und `verify` repo-relativ auf
+  (`python skills/subagent-dev/scripts/…`); das läuft nur in diesem Repo, bis die
+  Folgespec für `${CLAUDE_SKILL_DIR}` es umstellt (Spec 20, Out of scope).
+- **`${CLAUDE_SKILL_DIR}` ist nur für die lokale Installation gemessen.** Nach
+  `claude plugin marketplace add` mit lokalem Pfad liegt die ganze Repo-Kopie im
+  Plugin-Cache, das Nachbarverzeichnis also daneben (CLI 2.1.296). Ob das bei einer
+  Installation aus dem GitHub-Marketplace genauso ist, misst nichts; fehlt das Skript,
+  sagt die Skill „ungeprüft — Lint nicht verfügbar".
+- **Im Eval-Workspace gibt es keinen Lint.** Dort liegt nur work-plan, nicht subagent-dev;
+  Eval 3 (`verification-task-uses-repo-command`) macht genau das zur Prüfung des
+  Vermerks „ungeprüft". Ob ein Plan aus einem echten Lauf lint-sauber ist, prüft der
+  Report von Hand nach.
+- **Die Schwelle ist eine Regel, kein Messwert.** Mehr als zwei Dateien, neue öffentliche
+  Schnittstelle oder Reihenfolge — die Grenze misst nur der Anti-Zeremonie-Eval
+  `anti-ceremony-one-file-change-gets-no-plan` an einem Tippfehler. Ob drei kleine
+  Dateien ohne Abhängigkeit einen Plan verdienen, entscheidet Claude.
+- **Coverage nur gegen feature-spec-Kriterien.** Zeigt `**Spec:**` auf eine Datei ohne
+  Kopfzeile `skill: feature-spec`, bleibt die Coverage `unchecked`; ein Auftrag hat
+  keine. Die `- Annahme:`-Zeilen prüft kein Lint.
+- **`cc-dev` listet eine Skill mehr.** work-plan lädt mit jeder `cc-dev`-Installation und
+  konkurriert im Routing mit impl-plan und dem eingebauten Plan-Modus; die Descriptions
+  grenzen ab, gemessen ist die Kollision nicht.
+- **Keine Projekt-Kopie in diesem Repo.** Hier gilt impl-plan; work-plan steht nicht in
+  `PROJECT_SKILLS` von `scripts/sync_skills.py` und lädt in diesem Repo nur, wenn
+  jemand `cc-dev` einschaltet.
+
+## test-first
+
+Gebaut nach Spec 24 (2026-10-13). Tier 1: `tdd_log.py` führt den Testbefehl aus und
+schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es beißt:
+
+- **Rot heißt Exit ≠ 0.** Ein Import- oder Sammelfehler zählt als Rot, und so auch ein
+  fehlendes Runner-Modul (`python -m pytest` ohne pytest) — das Skript sieht nur, dass
+  `python` existiert. Die Skill lässt die Ausgabe vor dem ersten `red` lesen; geprüft
+  wird das nicht.
+- **Ein Test je Lauf ist Disziplin, kein Mechanismus.** `references/cycle.md` nennt die
+  Form je Runner; gemessen ist nur pytest. Wer die ganze Suite übergibt, bekommt ein Rot,
+  das ein fremder Test färben kann.
+- **Windows:** Die Shell ist `cmd.exe`, Exit 127 heißt dort nichts; deshalb die
+  Vorprüfung mit `shutil.which`. Die Prozessgruppe für die Zeitgrenze gibt es nur unter
+  POSIX — unter Windows endet bei der Zeitgrenze nur die Shell, und ein Kindprozess, der
+  die Pipe offen hält, kann den Aufruf weiter blockieren. Beides ungemessen.
+- **Das Log ist der Beleg, nicht der Beweis.** Es hält fest, was `tdd_log.py` ausgeführt
+  hat; ob der Befehl wirklich den genannten Test ausführt, prüft nichts. Wer das Log von
+  Hand ändert, ändert den Zustand.
+- **Nicht committet, nicht regenerierbar.** Das Log liegt unter `.skills/cache/`; geht
+  es verloren, fehlt der Beleg dieser Arbeit. Subagenten von subagent-dev schreiben es in
+  ihren Worktree, `verify` liest es nicht (Spec 24, Out of scope).
+- **Auslösen ungemessen.** Die Evals installieren test-first allein. Ob die Skill bei
+  „füge X hinzu" ohne Plan auslöst und ob sie im Listing von `cc-dev` sichtbar bleibt,
+  zeigt kein Lauf (Spec 20 hat neun Skills ohne Description im Listing gemessen).
+  Der Druckfall (`pressure-still-red-first`) misst nur einen Prompt.
+- **Keine Projekt-Kopie.** test-first steht nicht in `PROJECT_SKILLS`; in diesem Repo
+  lädt es nur über `cc-dev`, das hier ausgeschaltet ist.
 
 ## Verweise
 

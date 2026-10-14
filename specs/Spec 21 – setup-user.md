@@ -264,7 +264,11 @@ Projekt-Settings bewertet es nicht. Es meldet Namenskollisionen, Plugins mit
 mit `superpowers:` und den Stand der Abschaltbedingung aus Spec 20 mit ihren drei Teilen.
 Teil (c) gilt als erfüllt, wenn die Regeldateien der Zeilen mit Status „Regel" im
 Config-Verzeichnis liegen. Ausdrücklich gesetzte Werte des Nutzers in `enabledPlugins`
-dreht das Profil nie um; der Plan führt sie als Konflikt. Das Profil im Plan:
+dreht das Profil nie um; der Plan führt sie als Konflikt. *Gemessen beim Bau (2026-10-14, CLI 2.1.296):* `claude plugin install`
+schreibt den Wert `true` selbst in `enabledPlugins`; jedes per CLI installierte Plugin
+gilt damit als gesetzt. Der Plan führt superpowers und engineering deshalb in der Regel
+als Konflikt, und erst die Antwort `plugins_off` (Liste von Plugin-IDs) macht daraus einen
+Patch (`references/routing.md`). Das Profil im Plan:
 
 | Plugin | User-Scope |
 | --- | --- |
@@ -423,7 +427,7 @@ Modell- und Effort-Voreinstellungen, MCP-Server, Output-Styles, ein
 Benachrichtigungs-Hook, Synchronisation zwischen Rechnern, Änderungen am
 agent-dashboard, Cloud-Sessions (Spec 22), das Installieren von Plugins (`/plugin`), eine
 Erweiterung der Ausbruchsbeobachtung im Runner um `~/.claude/usage-cache.json` (heute
-beobachtet er nur `~/.skills`; vorgemerkt für evalkit). Abschnitt B vor Spec 23.
+beobachtet er nur `~/.skills`; vorgemerkt für evalkit). Abschnitt B vor Spec 23 (gebaut 2026-10-14, nach Spec 23 und 24).
 
 ## Open questions
 
