@@ -17,7 +17,8 @@ Jede während der Arbeit entdeckte Aufgabe gehört in genau eine Klasse:
 
 Unter *Aktiv* trägt Claude nur ein, was der Nutzer ausdrücklich ein Ziel nennt, mit
 prüfbarem „Fertig wenn", und schlägt die passende `/goal`-Zeile vor. Nach *Erledigt*
-wandert ein Ziel nur mit Beleg (Befehl und Ergebnis).
+wandert ein Ziel nur mit Beleg (Befehl und Ergebnis); gibt es `.claude/agents/reviewer.md`,
+prüft vorher der Subagent `reviewer` das Ziel mit seiner ID.
 
 Eine Meldung `[setup-repo] Geändert außerhalb des Bereichs …` heißt: Diese Dateien liegen
 außerhalb der Bereiche aktiver Ziele. Ordne sie einer der vier Klassen zu und sag welcher.

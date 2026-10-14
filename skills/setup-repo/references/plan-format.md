@@ -23,7 +23,8 @@ setup-user (Spec 21), nur relativ zur Repo-Wurzel statt zum Config-Verzeichnis.
 | `schema` | `1` |
 | `verification` | `command` (Text oder `null`), `source` (etwa `Makefile: check`), `derived` (`true` nur bei abgeleitetem Befehl, etwa aus einer `.dproj`) |
 | `candidates` | je Kandidat `id`, `text`, `source`, `checked_by`, `class` (`ableitbar`, `werkzeug`, `regel` oder `offen`), `paths` (Liste, leer für alle Dateien) |
-| `options` | `verify_hook` (Standard `false`), `goal_hook` (Standard `true`, abwählbar mit `--without-goal-hook`), `deny_secrets` (Standard `false`) |
+| `options` | `verify_hook` (Standard `false`), `goal_hook` (Standard `true`, abwählbar mit `--without-goal-hook`), `reviewer` (Standard `true`, abwählbar mit `--without-reviewer`), `deny_secrets` (Standard `false`) |
+| `reviewer` | `state` `an`, `aus` oder `vorhanden` (ein vorhandener `.claude/agents/reviewer.md` bekommt keine Operation) und `stacks`, die erkannten Stacks mit Prüfpunkt-Datei |
 | `plugins` | Objekt ID → `true`/`false` für `.claude/settings.local.json`; leer, wenn keine ID gefunden wurde |
 | `budget` | `lines` (immer geladene Zeilen nach apply) und `limit` (`150`) |
 | `operations` | Liste, je Eintrag `path` relativ zur Repo-Wurzel, `action` und je nach Aktion `content`, `patch` oder `lines` |
