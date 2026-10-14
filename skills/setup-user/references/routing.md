@@ -8,7 +8,7 @@ sind Information, keine Abweichung.
 
 | Plugin | User-Scope |
 | --- | --- |
-| `cc-dev`, `cc-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
+| `cc-dev`, `cc-setup`, `cc-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
 | `cc-ui` | nicht gesetzt; an per Projekt (setup-repo) |
 | superpowers (`@synced` oder `@<marketplace>`, wie gefunden) | `false`, erst wenn die Abschaltbedingung erfüllt ist; vorher bleibt es, und der Plan sagt warum |
 | engineering (erkannt am Plugin-Namen `engineering`, nie ein Plugin `cc-*`) | `false`, Annahme |
