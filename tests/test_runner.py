@@ -358,3 +358,39 @@ def test_main_with_skill_exits_zero_for_the_same_green_eval(tmp_path, capsys):
     args = ["--evals-dir", str(_evals_dir(tmp_path)), "--skills-dir", str(tmp_path / "skills"), "--cli", cli]
     assert main(args) == 0
     assert "[PASS] x" in capsys.readouterr().out
+
+
+def test_permissions_reach_agent_and_judge(tmp_path):
+    """--permissions gilt für den Eval-Agenten und den Judge; beide laufen über run_agent."""
+    body = (
+        'echo "$@" >> "' + str(tmp_path / "argv.log") + '"\n'
+        'case "$PWD" in\n'
+        "  *judge*) echo '" + _init_line([]) + "'; echo '" + _verdict_line("A") + "' ;;\n"
+        "  *) echo '" + _init_line(["s"]) + "'; echo neu > new.txt ;;\n"
+        "esac\nexit 0\n"
+    )
+    cli = make_fake_cli(tmp_path, body)
+    ev = Eval(id="e", eval_class="behavior", prompt="p", must=(Assertion(type="judge", claim="A"),))
+    skill_dir = make_minimal_skill(tmp_path, "s")
+    result = run_one(ev, skill_dir=skill_dir, fixtures_dir=tmp_path / "fixtures", cli=cli, timeout=10,
+                     keep=False, permissions="allowed-tools")
+    assert result.passed, result.failures
+    calls = [c for c in (tmp_path / "argv.log").read_text(encoding="utf-8").splitlines() if c.startswith("-p ")]
+    assert len(calls) == 2 and all("--allowedTools" in c and "bypassPermissions" not in c for c in calls)
+
+
+def test_root_refusal_is_loud_not_a_silent_skip(tmp_path, capsys):
+    """Verweigert die CLI den Rechte-Modus, nennt der Runner Ursache und Abhilfe."""
+    cli = make_fake_cli(tmp_path, 'echo "--dangerously-skip-permissions cannot be used with root/sudo '
+                                  'privileges for security reasons" >&2\nexit 1\n')
+    result = _run(tmp_path, cli, _file_eval())
+    assert not result.passed
+    assert "Rechte-Modus" in result.note and "--permissions allowed-tools" in " ".join(result.failures)
+    assert "--permissions allowed-tools" in capsys.readouterr().err
+
+
+def test_main_accepts_permissions_flag(tmp_path):
+    make_minimal_skill(tmp_path)
+    cli = make_stream_cli(tmp_path, ["s"])
+    args = ["--evals-dir", str(_evals_dir(tmp_path)), "--skills-dir", str(tmp_path / "skills"), "--cli", cli]
+    assert main(args + ["--permissions", "allowed-tools"]) == 0
