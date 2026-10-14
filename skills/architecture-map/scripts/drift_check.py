@@ -99,10 +99,30 @@ def diff_graph(
     }
 
 
+OWN_SCRIPTS = ("extract_py.py", "extract_ts.py", "analyze_graph.py")
+
+
+def resolve_script(command: str) -> list[str]:
+    """Das Kommando als Argumentliste, mit dem Skript aus diesem Skill-Ordner.
+
+    Die Erzeuger schreiben `python scripts/<datei> …` (Spec 25); ältere Footer tragen
+    `skills/architecture-map/scripts/…`, `.claude/skills/…/scripts/…` oder einen absoluten
+    Pfad einer anderen Maschine. Jeder Pfad, der `scripts/<datei>` ist oder auf
+    `/scripts/<datei>` endet, läuft mit dem Skript neben dieser Datei und dem
+    Interpreter, der drift_check ausführt. Andere Kommandos bleiben, wie sie sind."""
+    parts = shlex.split(command)
+    if len(parts) >= 2:
+        script = parts[1].replace("\\", "/")
+        name = script.rsplit("/", 1)[-1]
+        if name in OWN_SCRIPTS and (script == f"scripts/{name}" or script.endswith(f"/scripts/{name}")):
+            parts = [sys.executable, str(Path(__file__).resolve().parent / name), *parts[2:]]
+    return parts
+
+
 def regenerate_graph(command: str, cwd: Path) -> dict:
     """Das im Footer gespeicherte Extraktionskommando erneut ausführen und das
     resultierende Graph-JSON von seinem `--out`-Pfad einlesen."""
-    parts = shlex.split(command)
+    parts = resolve_script(command)
     if "--out" not in parts:
         raise DriftCheckError(f"Kommando ohne '--out', Ergebnis nicht lesbar: {command}")
     out_arg = Path(parts[parts.index("--out") + 1])
