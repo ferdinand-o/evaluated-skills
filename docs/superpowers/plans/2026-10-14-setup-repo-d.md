@@ -90,6 +90,7 @@ tests/test_setup_repo_review.py, evals/setup-repo/evals.json, evals/fixtures/sr-
 **Files:**
 - Modify: `skills/setup-repo/scripts/plan_repo.py`
 - Modify: `skills/setup-repo/assets/rules/goals.md`
+- Modify: `skills/setup-repo/references/plan-format.md`
 - Modify: `tests/test_setup_repo_review.py`
 - Modify: `evals/fixtures/sr-aligned/`
 - Modify: `evals/fixtures/sr-planned/`
