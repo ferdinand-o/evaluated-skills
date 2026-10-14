@@ -29,3 +29,24 @@ def test_checkpoints_have_sources():
     text, lines = checkpoints("delphi")
     assert lines == []
     assert "vom Nutzer" in text
+
+
+AGENT = REPO_ROOT / "skills" / "setup-repo" / "assets" / "agents" / "reviewer.md"
+HEADER_RE = re.compile(r"^<!-- skill: setup-repo \| schema: 1 \| generated: [^>]+ -->$")
+
+
+def test_reviewer_asset_shape():
+    """Frontmatter für Claude Code in Zeile 1, Kopfzeile in der ersten Zeile danach
+    (Ausnahme in docs/artifact-header.md), ein Platzhalter für die Prüfpunkte."""
+    text = AGENT.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    assert lines[0] == "---"
+    end = lines.index("---", 1)
+    front = dict(line.split(": ", 1) for line in lines[1:end])
+    assert front["name"] == "reviewer"
+    assert front["description"] and "/code-review" in front["description"]
+    assert {t.strip() for t in front["tools"].split(",")} == {"Read", "Grep", "Glob", "Bash"}
+    assert HEADER_RE.match(lines[end + 1])
+    assert text.count("{{checkpoints}}") == 1
+    assert "Failure-Szenario" in text and "ungeprüft" in text
+    assert "skills/setup-repo/assets/agents/reviewer.md" in (REPO_ROOT / "docs" / "artifact-header.md").read_text(encoding="utf-8")
