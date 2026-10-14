@@ -163,7 +163,7 @@
           "pattern": "(?i)line.?length|100 Zeichen"
         }
       ],
-      "notes": "apply setzt den versionierten Plan treu um und committet nicht. Diskriminator: apply.md schreibt nur apply_repo.py; gemessen wird die Treue zum Plan, nicht die Klassifikation (die messen Eval 2 und 3). Das Budget 125 ist 150 minus die 25 Zeilen der Zielregel aus Abschnitt C; goal_scope im Settings-Patch zeigt, dass der vorausgewählte Bereichs-Hook mitkommt. Abschnitt D: Der Plan legt .claude/agents/reviewer.md mit den Python-Prüfpunkten an; die ID py-test-for-public steht nur im Plan und in references/review/python.md, nicht in der Ansicht — ein Agent, der ohne apply_repo.py nachbaut, trifft sie nicht."
+      "notes": "apply setzt den versionierten Plan treu um und committet nicht. Diskriminator: apply.md schreibt nur apply_repo.py; gemessen wird die Treue zum Plan, nicht die Klassifikation (die messen Eval 2 und 3). Das Budget 125 ist 150 minus die 25 Zeilen der Zielregel aus Abschnitt C; goal_scope im Settings-Patch zeigt, dass der vorausgewählte Bereichs-Hook mitkommt. Abschnitt D: Die Assertion auf .claude/agents/reviewer.md prüft, dass die Python-Prüfpunkte im Zielrepo ankommen — sie diskriminiert nicht. Gemessen 2026-10-14: Ein Agent ohne Skill baute den Block aus plan.md mit einem eigenen Skript nach, reviewer.md byte-gleich; den Lauf trennt weiter nur apply.md."
     },
     {
       "id": "apply-refuses-tampered-plan",

@@ -119,8 +119,9 @@ def test_replayed_eval_passes_its_own_assertions(eval_id, tmp_path):
 
 
 def test_apply_eval_binds_to_the_reviewer():
-    """Abschnitt D: Eval 4 prüft den Ziel-Reviewer an einer Prüfpunkt-ID, die nur im Block
-    des Plans steht, nicht in seiner Ansicht."""
+    """Abschnitt D: Eval 4 prüft den Ziel-Reviewer an einer Prüfpunkt-ID aus dem Block des
+    Plans. Das prüft Inhalt, nicht Herkunft — ein Agent ohne Skill kann den Block nachbauen
+    (gemessen 2026-10-14); diskriminiert wird über apply.md."""
     ev = next(e for e in load_evals(EVALS) if e.id == "apply-executes-plan-faithfully")
     reviewer = [a for a in ev.must if a.path == ".claude/agents/reviewer.md"]
     assert reviewer and reviewer[0].pattern == "py-test-for-public"
