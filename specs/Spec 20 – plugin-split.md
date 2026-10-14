@@ -153,7 +153,9 @@ Das Manifest bekommt `renames: {"cc-skills": null}`.
 
 Diese Tabelle ist der Stand beim Schreiben. Nach dem Bau von Spec 21 ist
 `skills/setup-user/references/superpowers-gaps.json` die Quelle; Spec 23 und 24 ändern
-den Status dort, nicht hier.
+den Status dort, nicht hier. Seit dem Bau von Spec 21 Abschnitt B (2026-10-14) gilt die Datei;
+dort stehen writing-plans (work-plan, Spec 23) und test-driven-development (test-first,
+Spec 24) auf „vorhanden", und keine Zeile heißt mehr „Lücke".
 
 ### Skill-Struktur
 
