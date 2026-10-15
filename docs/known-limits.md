@@ -2103,6 +2103,14 @@ prüft die Web-Plugins mit diesen Regeln.
   `disable-model-invocation` zu entfernen.
 - **Der Validator ist eine Näherung.** Gegen den echten Import ist er nicht abgeglichen;
   eine Regel, die claude.ai zusätzlich prüft, findet der Test nicht.
+- **Nachtrag 2026-10-15: verschachtelte `plugin.json`.** Nach dem Merge lehnte claude.ai
+  alle vier Plugins ab: „plugin.json must be at .claude-plugin/plugin.json at the plugin
+  root, found nested: evals/fixtures/su-plugins/…/superpowers/4.3.1/.claude-plugin/plugin.json".
+  Der Import durchsucht bei `source: "./"` also das ganze Repo, nicht nur `skills/`. Die
+  Datei ist aus der Fixture entfernt (der Bericht von `route_check.py` bleibt gleich),
+  `test_no_nested_plugin_json_anywhere_in_the_repo` hält das. Verschachtelte
+  `marketplace.json` in den Fixtures von skill-forge und su-plugins meldete der Import
+  nicht; ob er sie still übergeht, ist ungemessen.
 - **Wer cc-dev schon per CLI hat, bekommt die Setup-Skills erst mit
   `/plugin install cc-setup@cc-skills`**; ein Update von cc-dev nimmt sie heraus.
 

@@ -197,6 +197,18 @@ def test_web_plugins_pass_claude_ai_upload_rules():
     assert not findings, findings
 
 
+def test_no_nested_plugin_json_anywhere_in_the_repo():
+    """claude.ai (Web) durchsucht bei `source: "./"` das ganze Repo und lehnt jedes Plugin
+    ab, sobald irgendwo eine `.claude-plugin/plugin.json` liegt, die nicht an der Wurzel
+    steht (gemeldet am 2026-10-15: „found nested: evals/fixtures/su-plugins/…/plugin.json").
+    Fixtures, die einen Plugin-Cache nachbilden, kommen ohne diese Datei aus."""
+    import subprocess
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True,
+                             check=True).stdout.split("\0")
+    nested = [p for p in tracked if p.endswith(".claude-plugin/plugin.json") and p != ".claude-plugin/plugin.json"]
+    assert not nested, f"verschachtelte plugin.json, claude.ai lehnt alle Plugins ab: {nested}"
+
+
 def test_no_skill_folder_carries_a_second_skill_md():
     """Gilt für jeden Ordner unter skills/, nicht nur für gelistete: Der Web-Loader las am
     2026-09-23 alle Ordner, unabhängig von der `skills`-Liste (known-limits, Marketplace)."""
