@@ -1,4 +1,4 @@
 {
   "git": false,
-  "description": "Wie su-aligned, dazu cfg/plugins/ im Layout einer CLI-Installation (installed_plugins.json Version 2): superpowers mit SessionStart-Hook und cc-dev aus einem lokalen Marketplace, beide in enabledPlugins auf true. Die installPath-Werte stammen von einem anderen Rechner und zeigen ins Leere; route_check.py findet die Plugins über den Cache-Fallback."
+  "description": "Wie su-aligned, dazu cfg/plugins/ im Layout einer CLI-Installation (installed_plugins.json Version 2): superpowers mit SessionStart-Hook und cc-dev aus einem lokalen Marketplace, beide in enabledPlugins auf true. Die installPath-Werte stammen von einem anderen Rechner und zeigen ins Leere; route_check.py findet die Plugins über den Cache-Fallback. superpowers liegt ohne .claude-plugin/plugin.json im Cache: route_check.py liest daraus nur name und version, und eine verschachtelte plugin.json macht das Repo in claude.ai (Web) unimportierbar."
 }
