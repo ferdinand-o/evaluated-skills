@@ -32,7 +32,8 @@ Register lintet, sobald jemand `pytest` fährt (G2).
    unter `skills/<name>/` (nie unter `.claude/skills/`, das ist der Installationsort). Vorher
    `references/checklist.md`, nur den Abschnitt der Phase — nicht die ganze
    Pitfalls-Datei. Für Doktrin-Text: `references/form-selection.md` (welche Form gegen
-   welches Versagen). Gerüste: `assets/skill-template/`.
+   welches Versagen). Gerüste: `assets/skill-template/` (`SKILL.md.tmpl` wird zur
+   `SKILL.md` der neuen Skill; eine zweite `SKILL.md` im Ordner lehnt claude.ai ab).
 4. **Lint, vor dem Commit:**
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/lint_skill.py" skills/<name> --base HEAD --out .skills/cache/skill-forge/lint.json

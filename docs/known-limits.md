@@ -1715,7 +1715,7 @@ behoben zu werden:
 - **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
   Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
 
-## Marketplace — drei Plugins (Spec 20, 2026-10-08)
+## Marketplace — drei Plugins (Spec 20, 2026-10-08; seit 2026-10-14 vier, Abschnitt cc-setup)
 
 Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensraum
 `cc-skills:` und den Punkt zu `version`. Was ungemessen bleibt und wo es beißt:
@@ -2086,6 +2086,25 @@ wörtlich. Was ungemessen bleibt und wo es beißt:
 - **Kopfzeilen nennen weiter `python skills/<name>/scripts/…`** — Herkunft, kein Aufruf;
   nur architecture-map schreibt `python scripts/<datei>`, weil `drift_check.py` das
   Kommando wieder ausführt.
+
+## cc-setup (2026-10-14)
+
+cc-dev ließ sich in claude.ai (Web) nicht mehr hinzufügen. Ursache nach dem Validator von
+skill-creator (`quick_validate.py`, nach eigener Angabe die Regeln des Uploads von
+claude.ai): setup-repo und setup-user tragen `disable-model-invocation`, erlaubt sind nur
+`name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility`; skill-forge
+hatte eine zweite `SKILL.md` unter `assets/skill-template/`. Die beiden Setup-Skills liegen
+jetzt im Plugin `cc-setup`, das Gerüst heißt `SKILL.md.tmpl`; `tests/test_marketplace.py`
+prüft die Web-Plugins mit diesen Regeln.
+
+- **Nicht im Web gemessen.** Ob der Import jetzt durchgeht, prüft der Nutzer. Liest der
+  Web-Loader die `skills`-Liste weiter nicht (Abschnitt Marketplace, 2026-09-23), lädt
+  jedes Plugin auch setup-repo und setup-user, und der Split hilft nicht; dann bleibt,
+  `disable-model-invocation` zu entfernen.
+- **Der Validator ist eine Näherung.** Gegen den echten Import ist er nicht abgeglichen;
+  eine Regel, die claude.ai zusätzlich prüft, findet der Test nicht.
+- **Wer cc-dev schon per CLI hat, bekommt die Setup-Skills erst mit
+  `/plugin install cc-setup@cc-skills`**; ein Update von cc-dev nimmt sie heraus.
 
 ## Verweise
 

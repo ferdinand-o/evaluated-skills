@@ -17,7 +17,7 @@ Persönliche Claude-Skills und ihre Spezifikationen.
 
 ## Als Plugins installieren
 
-Das Repo ist ein Claude-Code-Marketplace (`.claude-plugin/marketplace.json`) mit drei
+Das Repo ist ein Claude-Code-Marketplace (`.claude-plugin/marketplace.json`) mit vier
 Plugins. Alle nehmen die Repo-Wurzel als Quelle und laden nur die Skills ihrer
 `skills`-Liste; installiert heißen sie mit dem Plugin als Namensraum, etwa
 `cc-dev:handoff`. Ab Claude Code 2.1.275 installiert je Plugin eine Zeile Marketplace
@@ -25,9 +25,12 @@ und Plugin zusammen:
 
 - `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
   architecture-map, debug-ledger, dev-report, feature-spec, handoff,
-  rest-api-architect, review-context, setup-repo, setup-user, sql-schema-architect,
-  subagent-dev, test-first, testing-strategy, work-plan. setup-user und setup-repo laufen nur als
-  `/cc-dev:setup-user` und `/cc-dev:setup-repo`.
+  rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
+  testing-strategy, work-plan.
+- `/plugin install cc-setup --marketplace ferdinand-o/cc-skills` — Einrichtung von
+  Claude Code, **nur CLI**: setup-repo und setup-user, nur als `/cc-setup:setup-repo`
+  und `/cc-setup:setup-user`. Beide tragen `disable-model-invocation`, das claude.ai
+  (Web) nicht kennt; dort fügst du nur `cc-dev`, `cc-ui` und `cc-knowledge` hinzu.
 - `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
   aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
   ui-architect. Je
@@ -50,6 +53,7 @@ Danach die neuen Plugins installieren:
 ```
 /plugin marketplace update cc-skills
 /plugin install cc-dev@cc-skills
+/plugin install cc-setup@cc-skills
 /plugin install cc-ui@cc-skills
 /plugin install cc-knowledge@cc-skills
 ```
@@ -72,7 +76,9 @@ nicht doppelt erscheinen.
 `tests/test_marketplace.py` hält Manifest, `excluded.json` und Kopien mit `skills/`
 synchron: Eine neue Skill steht in genau einer `skills`-Liste oder mit Grund in
 `.claude-plugin/excluded.json`, sonst ist der Test rot; dieselbe Zuordnung prüft die
-Lint-Regel `plugin-membership` von skill-forge.
+Lint-Regel `plugin-membership` von skill-forge. Derselbe Test prüft die Skills der
+Web-Plugins mit den Upload-Regeln von claude.ai (Frontmatter-Schlüssel, `<`/`>` und Länge
+der Description, genau eine `SKILL.md` je Ordner).
 
 ## Evals laufen lassen
 

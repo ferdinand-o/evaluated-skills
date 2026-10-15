@@ -1,4 +1,4 @@
-"""Repo-Test für .claude-plugin/marketplace.json (Spec 20, plugin-split): drei Plugins mit
+"""Repo-Test für .claude-plugin/marketplace.json (Spec 20, plugin-split): vier Plugins mit
 Root-Quelle und `skills`-Liste, die je Eintrag die vollständige Menge ist (Claude-Code-Doku,
 plugins/manifest-reference: „only those subdirectories load"). Jede Skill unter skills/
 steht in genau einer Liste oder mit Grund in .claude-plugin/excluded.json — eine neue
@@ -18,7 +18,11 @@ EXCLUDED_JSON = REPO_ROOT / ".claude-plugin" / "excluded.json"
 SKILLS = REPO_ROOT / "skills"
 
 # Zuschnitt aus Spec 20: Name -> defaultEnabled.
-PLUGINS = {"cc-dev": True, "cc-ui": False, "cc-knowledge": True}
+PLUGINS = {"cc-dev": True, "cc-setup": True, "cc-ui": False, "cc-knowledge": True}
+
+# Plugins nur für Claude Code: ihre Skills dürfen Frontmatter tragen, das claude.ai (Web)
+# nicht kennt. Alle anderen müssen sich dort hinzufügen lassen.
+CLAUDE_CODE_ONLY_PLUGINS = {"cc-setup"}
 
 
 def _manifest() -> dict:
@@ -148,6 +152,66 @@ def test_descriptions_carry_no_angle_bracket_tags():
         if re.search(r"<[A-Za-z][^>]*>", desc):
             offenders.append(skill_md.parent.name)
     assert not offenders, f"<…> in der Description, claude.ai lädt die Skill nicht: {offenders}"
+
+
+# Regeln des Skill-Uploads von claude.ai, wie sie quick_validate.py von skill-creator prüft.
+CLAUDE_AI_KEYS = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+
+
+def _claude_ai_findings(skill_dir: Path) -> list[str]:
+    import yaml
+    text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    match = re.match(r"^---\n(.*?)\n---", text, re.DOTALL)
+    if not match:
+        return ["kein Frontmatter"]
+    data = yaml.safe_load(match.group(1))
+    findings = []
+    if set(data) - CLAUDE_AI_KEYS:
+        findings.append(f"Schlüssel {sorted(set(data) - CLAUDE_AI_KEYS)}")
+    name, desc = str(data.get("name", "")), str(data.get("description", ""))
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", name) or "anthropic" in name or "claude" in name:
+        findings.append(f"name {name!r}")
+    if "<" in desc or ">" in desc:
+        findings.append("< oder > in der Description")
+    if not desc or len(desc) > 1024:
+        findings.append(f"Description {len(desc)} Zeichen")
+    nested = [p for p in skill_dir.rglob("SKILL.md") if p != skill_dir / "SKILL.md"
+              and "__pycache__" not in p.parts and p.relative_to(skill_dir).parts[0] != "evals"]
+    if nested:
+        findings.append(f"weitere SKILL.md {[str(p.relative_to(skill_dir)) for p in nested]}")
+    return findings
+
+
+def test_web_plugins_pass_claude_ai_upload_rules():
+    """claude.ai (Web) lehnt ein Plugin ab, wenn eine seiner Skills die Upload-Regeln
+    verletzt. Am 2026-10-14 war cc-dev deshalb nicht hinzufügbar: setup-repo und setup-user
+    tragen `disable-model-invocation`, das nur Claude Code kennt. Seitdem liegen sie in
+    cc-setup, und dieser Test hält die übrigen Plugins importierbar."""
+    findings = []
+    for name, entry in _entries().items():
+        if name in CLAUDE_CODE_ONLY_PLUGINS:
+            continue
+        for path in entry["skills"]:
+            for f in _claude_ai_findings(REPO_ROOT / path):
+                findings.append(f"{name}/{Path(path).name}: {f}")
+    assert not findings, findings
+
+
+def test_no_skill_folder_carries_a_second_skill_md():
+    """Gilt für jeden Ordner unter skills/, nicht nur für gelistete: Der Web-Loader las am
+    2026-09-23 alle Ordner, unabhängig von der `skills`-Liste (known-limits, Marketplace)."""
+    nested = [str(p.relative_to(REPO_ROOT)) for p in sorted(SKILLS.glob("*/**/SKILL.md"))
+              if p.parent.parent != SKILLS and "__pycache__" not in p.parts]
+    assert not nested, f"claude.ai nimmt je Skill genau eine SKILL.md an: {nested}"
+
+
+def test_claude_code_only_skills_live_in_claude_code_only_plugins():
+    lint = load_script("skills/skill-forge/scripts/lint_skill.py")
+    listed = _listed()
+    for skill in lint.CLAUDE_CODE_ONLY:
+        assert set(listed.get(skill, [])) <= CLAUDE_CODE_ONLY_PLUGINS, (skill, listed.get(skill))
+    for plugin in CLAUDE_CODE_ONLY_PLUGINS:
+        assert "claude.ai" in _entries()[plugin]["description"], "Description sagt, dass es nicht ins Web geht"
 
 
 # --- scripts/sync_skills.py (Spec 20) ---------------------------------------------

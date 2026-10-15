@@ -4,7 +4,7 @@
   "owner": {
     "name": "ferdinand-o"
   },
-  "description": "Skill-Sammlung nach Spec 00 in drei Plugins (Spec 20): Entwicklung, UI, Wissen. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
+  "description": "Skill-Sammlung nach Spec 00 in vier Plugins (Spec 20): Entwicklung, UI, Wissen und die Einrichtung von Claude Code. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
   "renames": {
     "cc-skills": null
   },
@@ -28,13 +28,27 @@
         "./skills/handoff",
         "./skills/rest-api-architect",
         "./skills/review-context",
-        "./skills/setup-repo",
-        "./skills/setup-user",
         "./skills/sql-schema-architect",
         "./skills/subagent-dev",
         "./skills/test-first",
         "./skills/testing-strategy",
         "./skills/work-plan"
+      ]
+    },
+    {
+      "name": "cc-setup",
+      "source": "./",
+      "description": "Einrichtung von Claude Code: User-Konfiguration und Repo-Setup, nur als Slash-Befehl. Nur für Claude Code — claude.ai (Web) importiert dieses Plugin nicht, weil die Skills disable-model-invocation tragen.",
+      "repository": "https://github.com/ferdinand-o/cc-skills",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "skills": [
+        "./skills/setup-repo",
+        "./skills/setup-user"
       ]
     },
     {
