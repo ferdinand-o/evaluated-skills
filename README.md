@@ -1,4 +1,4 @@
-# cc-skills
+# evaluated-skills
 
 A collection of Claude skills, shipped as four Claude Code plugins. Every skill comes
 with a written specification and an eval suite, and has to prove in a baseline run
@@ -29,26 +29,30 @@ plugins. All use the repo root as source and load only the skills in their `skil
 list; once installed, skills are namespaced by plugin, e.g. `cc-dev:handoff`. From
 Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
-- `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — development, always
+- `/plugin install cc-dev --marketplace ferdinand-o/evaluated-skills` — development, always
   on: architecture-map, debug-ledger, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
   testing-strategy, work-plan.
-- `/plugin install cc-setup --marketplace ferdinand-o/cc-skills` — Claude Code setup,
+- `/plugin install cc-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
   **CLI only**: setup-repo and setup-user, available only as `/cc-setup:setup-repo`
   and `/cc-setup:setup-user`. Both carry `disable-model-invocation`, which claude.ai
   (web) does not know; on the web, add only `cc-dev`, `cc-ui` and `cc-knowledge`.
-- `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **off by default**
+- `/plugin install cc-ui --marketplace ferdinand-o/evaluated-skills` — UI, **off by default**
   (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
   ui-architect. Enable it per frontend repo in that repo's `.claude/settings.json` with
   `"enabledPlugins": {"cc-ui@cc-skills": true}`; the project setting wins over the
   `false` that the installation writes to the user settings.
-- `/plugin install cc-knowledge --marketplace ferdinand-o/cc-skills` — knowledge,
+- `/plugin install cc-knowledge --marketplace ferdinand-o/evaluated-skills` — knowledge,
   always on: exercise-forge, explain, human-prose, learning-coach, verified-research,
   visual-summary.
 
-With older versions, first run `/plugin marketplace add ferdinand-o/cc-skills`, then
+With older versions, first run `/plugin marketplace add ferdinand-o/evaluated-skills`, then
 `/plugin install cc-dev@cc-skills` and so on. New commits arrive with
 `/plugin marketplace update cc-skills`, followed by `/reload-plugins`.
+
+The repository is called `evaluated-skills`, but the marketplace inside it keeps the
+name `cc-skills` (the `name` in `.claude-plugin/marketplace.json`). That name is part of
+every installed plugin id (`cc-dev@cc-skills`) and of the settings that refer to it.
 
 **Migrating from the old `cc-skills` plugin.** Until Spec 20 the whole collection was
 one plugin, `cc-skills@cc-skills`. The manifest lists it under `renames` as removed
