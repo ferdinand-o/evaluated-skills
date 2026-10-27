@@ -31,7 +31,7 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 
 # Das Preset liegt neben dem Skript, nicht im aufrufenden Projekt: ein repo-relativer
-# Pfad fand es nur im cc-skills-Repo selbst und brach überall sonst ab
+# Pfad fand es nur im evaluated-skills-Repo selbst und brach überall sonst ab
 # (Testlauf-Befund an lint_schema.py:29).
 SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = SKILL_DIR / "assets" / "audit-config.json"

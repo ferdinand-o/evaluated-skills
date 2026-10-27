@@ -1,16 +1,13 @@
 {
   "$schema": "https://code.claude.com/schemas/marketplace.json",
-  "name": "cc-skills",
+  "name": "evaluated-skills",
   "owner": {
     "name": "ferdinand-o"
   },
   "description": "Skill-Sammlung nach Spec 00 in vier Plugins (Spec 20): Entwicklung, UI, Wissen und die Einrichtung von Claude Code. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
-  "renames": {
-    "cc-skills": null
-  },
   "plugins": [
     {
-      "name": "cc-dev",
+      "name": "evaluated-dev",
       "source": "./",
       "description": "Entwicklungs-Skills: Spec, Debugging, Tests, Review-Kontext, Architektur, Reports, Übergabe, Subagent-Dispatch, API- und Schema-Entwurf. Immer an.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",
@@ -37,7 +34,7 @@
       ]
     },
     {
-      "name": "cc-setup",
+      "name": "evaluated-setup",
       "source": "./",
       "description": "Einrichtung von Claude Code: User-Konfiguration und Repo-Setup, nur als Slash-Befehl. Nur für Claude Code — claude.ai (Web) importiert dieses Plugin nicht, weil die Skills disable-model-invocation tragen.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",
@@ -54,7 +51,7 @@
       ]
     },
     {
-      "name": "cc-ui",
+      "name": "evaluated-ui",
       "source": "./",
       "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung, Mobil-Prüfung. Standardmäßig aus, je Frontend-Repo einschalten.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",
@@ -74,7 +71,7 @@
       ]
     },
     {
-      "name": "cc-knowledge",
+      "name": "evaluated-knowledge",
       "source": "./",
       "description": "Wissens-Skills: erklären, lernen, üben, recherchieren, zusammenfassen, menschlich schreiben. Immer an.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",

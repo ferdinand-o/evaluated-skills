@@ -282,13 +282,13 @@ def test_profile_keeps_explicit_user_values(tmp_path, assets):
     from test_setup_user_route import make_config, skill
     sp, eng = "superpowers@claude-plugins-official", "engineering@knowledge-work"
 
-    # Bedingung nicht erfüllt (cc-dev verweist auf superpowers:) → superpowers bleibt, mit Grund
+    # Bedingung nicht erfüllt (evaluated-dev verweist auf superpowers:) → superpowers bleibt, mit Grund
     cfg = make_config(tmp_path / "a")
     block = inspect.build_plan(cfg, {}, "python3")
     profile = _profile(block)
     assert profile[sp]["action"] == "keep" and "(b)" in profile[sp]["reason"]
     assert profile[eng]["action"] == "set" and _settings_patch(block)["enabledPlugins"] == {eng: False}
-    assert "cc-dev@cc-skills" not in profile
+    assert "evaluated-dev@evaluated-skills" not in profile
     assert str(tmp_path) not in json.dumps(block["plugins"])
 
     # Bedingung erfüllt, superpowers gesetzt (wie nach `claude plugin install`) → Konflikt
@@ -307,10 +307,10 @@ def test_profile_keeps_explicit_user_values(tmp_path, assets):
     assert _settings_patch(block)["enabledPlugins"] == {sp: False, eng: False}
     apply.apply_plan(out, cfg)
     settings = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
-    assert settings["enabledPlugins"] == {sp: False, "cc-dev@cc-skills": True, eng: False}
+    assert settings["enabledPlugins"] == {sp: False, "evaluated-dev@evaluated-skills": True, eng: False}
 
     # ungesetzt und Bedingung erfüllt → false ohne Rückfrage; schon false → nichts
-    cfg = make_config(tmp_path / "c", enabled={"cc-dev@cc-skills": True, eng: False})
+    cfg = make_config(tmp_path / "c", enabled={"evaluated-dev@evaluated-skills": True, eng: False})
     skill(tmp_path / "c" / "mkt", "feature-spec", "Use for specs.")
     block = inspect.build_plan(cfg, {}, "python3")
     assert _profile(block)[sp]["action"] == "set" and _profile(block)[eng]["action"] == "none"
@@ -319,7 +319,7 @@ def test_profile_keeps_explicit_user_values(tmp_path, assets):
 
 def test_profile_counts_rules_planned_in_the_same_plan(tmp_path, assets):
     from test_setup_user_route import make_config, skill
-    cfg = make_config(tmp_path, rules=(), enabled={"cc-dev@cc-skills": True})
+    cfg = make_config(tmp_path, rules=(), enabled={"evaluated-dev@evaluated-skills": True})
     skill(tmp_path / "mkt", "feature-spec", "Use for specs.")
     block = inspect.build_plan(cfg, {}, "python3")
     assert any(op["path"] == "rules/verification.md" for op in block["operations"])

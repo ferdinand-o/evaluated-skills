@@ -65,7 +65,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cc-skills-evals"
+name = "evaluated-skills-evals"
 version = "0.1.0"
 description = "Geteilter Eval-Harness für die Skill-Sammlung (Spec 00 §2)"
 requires-python = ">=3.13"
@@ -2026,7 +2026,7 @@ weiter und sagt, was ihr dadurch fehlt.
 `README.md` vollständig ersetzen:
 
 ```markdown
-# cc-skills
+# evaluated-skills
 
 Persönliche Claude-Skills und ihre Spezifikationen.
 

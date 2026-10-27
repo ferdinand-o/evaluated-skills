@@ -162,9 +162,9 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
       debug-ledger Abgrenzung (Regressionstest nach der Diagnose über test-first);
       Code-Task in `task-patterns.md` nennt test-first. `sync_skills.py`, `--check`,
       `lint_skill.py --base HEAD` je Skill ohne neuen Befund, `evals_due` notieren.
-- [x] **Step 3: Plugin, Routing, README** — `./skills/test-first` in `cc-dev`; Spec 00
+- [x] **Step 3: Plugin, Routing, README** — `./skills/test-first` in `evaluated-dev`; Spec 00
       und README: test-driven-development → test-first in der Zeile testing-strategy,
-      eigene Zeile test-first; README-Liste von `cc-dev`. `pytest
+      eigene Zeile test-first; README-Liste von `evaluated-dev`. `pytest
       tests/test_marketplace.py`; `lint_skill.py skills/test-first` meldet `routing`,
       `neighbors`, `plugin-membership` grün. Commit.
 
@@ -179,7 +179,7 @@ tests/test_test_first_log.py, tests/test_test_first_fixtures.py
 
 - [x] **Step 1: Abschnitt** — `## test-first`: Rot heißt Exit ≠ 0 (fehlendes
       Runner-Modul zählt als Rot); Einschränkung auf einen Test nur für pytest geprüft;
-      Windows-Shell `cmd.exe`; Auslösen ohne Plan und Listing in `cc-dev` ungemessen;
+      Windows-Shell `cmd.exe`; Auslösen ohne Plan und Listing in `evaluated-dev` ungemessen;
       Log nicht committet und nicht regenerierbar; keine Projekt-Kopie. Commit.
 
 ### Task 7: Report

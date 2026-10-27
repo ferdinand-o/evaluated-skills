@@ -9,7 +9,7 @@ den Wegwerf-Marketplace.
 ## Schritt 1: Vorher messen
 
 Vom Nutzer am 2026-10-08 aus einer lokalen Session mit installiertem Plugin
-`cc-skills` gemeldet, Skills-Eintrag aus `/context`:
+`evaluated-skills` gemeldet, Skills-Eintrag aus `/context`:
 
 | Skill | Tokens |
 | --- | --- |

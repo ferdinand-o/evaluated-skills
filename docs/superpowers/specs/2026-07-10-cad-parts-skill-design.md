@@ -3,7 +3,7 @@
 - **Datum:** 2026-07-10
 - **Status:** Entwurf (zur Review)
 - **Autor:** ferdinand-o + Claude (brainstorming)
-- **Repo:** `cc-skills`
+- **Repo:** `evaluated-skills`
 - **Abhängigkeit:** MCP-Server `stl-cad-server-http` (Repo `stl-mcp-server`, dort Teilprojekt 1)
 
 ---

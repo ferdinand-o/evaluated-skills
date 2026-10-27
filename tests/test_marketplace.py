@@ -18,11 +18,11 @@ EXCLUDED_JSON = REPO_ROOT / ".claude-plugin" / "excluded.json"
 SKILLS = REPO_ROOT / "skills"
 
 # Zuschnitt aus Spec 20: Name -> defaultEnabled.
-PLUGINS = {"cc-dev": True, "cc-setup": True, "cc-ui": False, "cc-knowledge": True}
+PLUGINS = {"evaluated-dev": True, "evaluated-setup": True, "evaluated-ui": False, "evaluated-knowledge": True}
 
 # Plugins nur für Claude Code: ihre Skills dürfen Frontmatter tragen, das claude.ai (Web)
 # nicht kennt. Alle anderen müssen sich dort hinzufügen lassen.
-CLAUDE_CODE_ONLY_PLUGINS = {"cc-setup"}
+CLAUDE_CODE_ONLY_PLUGINS = {"evaluated-setup"}
 
 
 def _manifest() -> dict:
@@ -50,8 +50,7 @@ def _listed() -> dict[str, list[str]]:
 
 def test_manifest_has_required_fields():
     m = _manifest()
-    assert m["name"] == "cc-skills" and m["owner"]["name"]
-    assert m.get("renames") == {"cc-skills": None}, "das alte Ein-Plugin cc-skills wird bei Updates entfernt"
+    assert m["name"] == "evaluated-skills" and m["owner"]["name"]
 
 
 def test_plugin_entries_are_fixed():
@@ -128,7 +127,7 @@ def test_project_copies_match_originals():
 
 def test_repo_disables_cc_dev_for_project_copies():
     settings = json.loads((REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert settings["enabledPlugins"]["cc-dev@cc-skills"] is False
+    assert settings["enabledPlugins"]["evaluated-dev@evaluated-skills"] is False
 
 
 def test_no_plugin_json_that_would_conflict_with_strict_false():
@@ -184,9 +183,9 @@ def _claude_ai_findings(skill_dir: Path) -> list[str]:
 
 def test_web_plugins_pass_claude_ai_upload_rules():
     """claude.ai (Web) lehnt ein Plugin ab, wenn eine seiner Skills die Upload-Regeln
-    verletzt. Am 2026-10-14 war cc-dev deshalb nicht hinzufügbar: setup-repo und setup-user
+    verletzt. Am 2026-10-14 war evaluated-dev deshalb nicht hinzufügbar: setup-repo und setup-user
     tragen `disable-model-invocation`, das nur Claude Code kennt. Seitdem liegen sie in
-    cc-setup, und dieser Test hält die übrigen Plugins importierbar."""
+    evaluated-setup, und dieser Test hält die übrigen Plugins importierbar."""
     findings = []
     for name, entry in _entries().items():
         if name in CLAUDE_CODE_ONLY_PLUGINS:

@@ -74,7 +74,7 @@ Session; danach lässt er es zu und meldet „rot nach drei Versuchen". Fehlt da
 meldet er „ungeprüft — … fehlt". Jede Meldung geht über `systemMessage`.
 
 **Plugins je Repo:** `enabledPlugins` kommt in `.claude/settings.local.json`, nie in die
-committete Datei. `cc-ui` an, wenn ein Frontend erkannt ist; ein Plugin, dessen Skills als
+committete Datei. `evaluated-ui` an, wenn ein Frontend erkannt ist; ein Plugin, dessen Skills als
 Projekt-Kopie unter `.claude/skills/` liegen, aus. Ohne gefundene ID: „ungeprüft —
 Plugin-ID nicht gefunden".
 

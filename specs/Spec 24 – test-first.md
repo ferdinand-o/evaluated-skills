@@ -26,7 +26,7 @@ Portables Frontmatter. Tier 1: ein Skript `scripts/tdd_log.py`, nur Stdlib, spra
 runnerunabhängig — es führt den Testbefehl aus, den der Agent übergibt, aufgerufen als
 `python "${CLAUDE_SKILL_DIR}/scripts/tdd_log.py"`. Gate-Grade: Rot vor Grün verlangt die
 SKILL.md (G1); dass ein Grün ein vorheriges Rot desselben Tests hat und ein sofort grüner
-Test als solcher im Log steht, meldet das Skript (G2). Kein Hook. Plugin: `cc-dev`.
+Test als solcher im Log steht, meldet das Skript (G2). Kein Hook. Plugin: `evaluated-dev`.
 
 Der Beleg liegt unter `.skills/cache/test-first/log.md` an der Repo-Wurzel
 (`git rev-parse --show-toplevel`, sonst das Arbeitsverzeichnis), mit Kopfzeile in Zeile 1
@@ -57,7 +57,7 @@ skills/test-first/
 skills/testing-strategy/SKILL.md     Description und Abgrenzung: test-first statt test-driven-development; Projekt-Kopie über sync_skills.py
 skills/debug-ledger/SKILL.md         Abgrenzung: der Regressionstest nach der Diagnose läuft über test-first; Projekt-Kopie über sync_skills.py
 skills/work-plan/references/task-patterns.md   Code-Task nennt test-first (sobald Spec 23 gebaut ist)
-.claude-plugin/marketplace.json      test-first in der skills-Liste von cc-dev
+.claude-plugin/marketplace.json      test-first in der skills-Liste von evaluated-dev
 specs/Spec 00 – skill-foundation.md, README.md   Routing: test-driven-development → test-first; neue Zeile test-first
 docs/known-limits.md                 Abschnitt test-first
 docs/superpowers/reports/test-first-report.md   Report mit „Was nicht gemessen wurde"
@@ -225,7 +225,7 @@ Die Description von testing-strategy ändert sich; dort hat eine Klausel zu
 solange superpowers installiert ist, gegen `superpowers:test-driven-development` ab.
 
 Ungemessen bleibt, ob die Skill ohne Plan überhaupt auslöst, wenn der Nutzer nur „füge X
-hinzu" schreibt, und ob sie im Listing von `cc-dev` sichtbar bleibt: Spec 20 hat gemessen,
+hinzu" schreibt, und ob sie im Listing von `evaluated-dev` sichtbar bleibt: Spec 20 hat gemessen,
 dass dort neun Skills ohne Description gelistet wurden; test-first kommt als weitere
 dazu. Evals installieren die Skill allein und zeigen weder Konkurrenz noch Listing.
 

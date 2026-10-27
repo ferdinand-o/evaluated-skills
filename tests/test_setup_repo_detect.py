@@ -77,24 +77,24 @@ def test_detect_plugin_ids(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     cfg = tmp_path / "cfg"
-    install = cfg / "plugins" / "cache" / "cc-skills" / "abc"
+    install = cfg / "plugins" / "cache" / "evaluated-skills" / "abc"
     write(install, ".claude-plugin/marketplace.json", json.dumps({"plugins": [
-        {"name": "cc-dev", "source": "./", "skills": ["./skills/handoff", "./skills/debug-ledger"]},
-        {"name": "cc-ui", "source": "./", "skills": ["./skills/enterprise-ui"]}]}))
+        {"name": "evaluated-dev", "source": "./", "skills": ["./skills/handoff", "./skills/debug-ledger"]},
+        {"name": "evaluated-ui", "source": "./", "skills": ["./skills/enterprise-ui"]}]}))
     other = cfg / "plugins" / "cache" / "market" / "tool"
     write(other, "skills/lint-help/SKILL.md", "---\nname: lint-help\n---\n")
     write(cfg, "plugins/installed_plugins.json", json.dumps({"version": 2, "plugins": {
-        "cc-dev@cc-skills": [{"scope": "user", "installPath": str(install)}],
-        "cc-ui@cc-skills": [{"scope": "user", "installPath": str(install)}],
+        "evaluated-dev@evaluated-skills": [{"scope": "user", "installPath": str(install)}],
+        "evaluated-ui@evaluated-skills": [{"scope": "user", "installPath": str(install)}],
         "tool@market": [{"scope": "user", "installPath": str(other)}]}}))
     write(cfg, "plugins/synced/notes/.claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     write(cfg, "plugins/synced/notes/skills/note-tag/SKILL.md", "---\nname: note-tag\n---\n")
     write(cfg, "plugins/synced/loose-skill/SKILL.md", "---\nname: loose-skill\n---\n")
 
     plugins = {p["id"]: p for p in detect_mod.detect(repo, cfg)["plugins"]}
-    assert set(plugins) == {"cc-dev@cc-skills", "cc-ui@cc-skills", "tool@market", "notes@synced"}
-    assert plugins["cc-dev@cc-skills"]["skills"] == ["debug-ledger", "handoff"]
-    assert plugins["cc-ui@cc-skills"]["skills"] == ["enterprise-ui"]
+    assert set(plugins) == {"evaluated-dev@evaluated-skills", "evaluated-ui@evaluated-skills", "tool@market", "notes@synced"}
+    assert plugins["evaluated-dev@evaluated-skills"]["skills"] == ["debug-ledger", "handoff"]
+    assert plugins["evaluated-ui@evaluated-skills"]["skills"] == ["enterprise-ui"]
     assert plugins["tool@market"]["skills"] == ["lint-help"]
     assert plugins["notes@synced"] == {"id": "notes@synced", "name": "notes", "marketplace": "synced",
                                        "skills": ["note-tag"]}
@@ -119,7 +119,7 @@ def test_detect_main_writes_detect_json_with_meta(tmp_path):
 
 
 def test_detect_skips_fixture_folders(tmp_path):
-    """Fixtures sind Testdaten, nicht der Stack des Repos: Auf cc-skills meldete
+    """Fixtures sind Testdaten, nicht der Stack des Repos: Auf evaluated-skills meldete
     detect_repo.py TypeScript, weil Eval-Fixtures .ts-Dateien tragen."""
     repo = tmp_path / "repo"
     write(repo, "src/app.py", "x = 1\n")

@@ -107,9 +107,9 @@ def test_apply_refuses_changed_state(tmp_path):
 def test_apply_backs_up_local_settings_and_ignores_them(tmp_path):
     cfg = tmp_path / "cfg"
     install = cfg / "plugins" / "cache" / "m" / "x"
-    write(install, ".claude-plugin/marketplace.json", json.dumps({"plugins": [{"name": "cc-ui", "skills": ["./skills/ui"]}]}))
+    write(install, ".claude-plugin/marketplace.json", json.dumps({"plugins": [{"name": "evaluated-ui", "skills": ["./skills/ui"]}]}))
     write(cfg, "plugins/installed_plugins.json",
-          json.dumps({"plugins": {"cc-ui@cc-skills": [{"installPath": str(install)}]}}))
+          json.dumps({"plugins": {"evaluated-ui@evaluated-skills": [{"installPath": str(install)}]}}))
     repo = committed_repo(tmp_path, {"package.json": json.dumps({"dependencies": {"react": "18"}}),
                                      ".gitignore": "node_modules/\n"})
     old = '{\n  "enabledPlugins": {"a@b": true},\n  "x": 1\n}\n'
@@ -118,7 +118,7 @@ def test_apply_backs_up_local_settings_and_ignores_them(tmp_path):
     result = apply_mod.apply_plan(repo, plan)
     assert result["ok"] is True, report(repo)
     merged = json.loads((repo / ".claude/settings.local.json").read_text(encoding="utf-8"))
-    assert merged == {"enabledPlugins": {"a@b": True, "cc-ui@cc-skills": True}, "x": 1}
+    assert merged == {"enabledPlugins": {"a@b": True, "evaluated-ui@evaluated-skills": True}, "x": 1}
     (backup,) = (repo / CACHE / "backups").glob("*/.claude/settings.local.json")
     assert backup.read_text(encoding="utf-8") == old
     assert (repo / ".gitignore").read_text(encoding="utf-8") == \
@@ -230,11 +230,11 @@ def test_check_without_plan_is_unverified(tmp_path):
 
 
 def test_check_keeps_cc_skills_switch(tmp_path):
-    settings = {"enabledPlugins": {"cc-dev@cc-skills": False}}
+    settings = {"enabledPlugins": {"evaluated-dev@evaluated-skills": False}}
     repo = applied_repo(tmp_path, {"Makefile": "check:\n\ttrue\n",
                                    ".claude/settings.json": json.dumps(settings, indent=2) + "\n"})
     data = json.loads((repo / ".claude/settings.json").read_text(encoding="utf-8"))
-    assert data["enabledPlugins"] == {"cc-dev@cc-skills": False}
+    assert data["enabledPlugins"] == {"evaluated-dev@evaluated-skills": False}
     assert apply_mod.check_repo(repo)["ok"] is True
     assert "keine Abweichung" in check_text(repo)
 

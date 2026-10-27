@@ -126,7 +126,7 @@ def _role(name):
         return "superpowers"
     if name == "engineering":
         return "engineering"
-    return "cc" if name.startswith("cc-") else "other"
+    return "cc" if name.startswith("evaluated-") else "other"
 
 
 def _installed(config_dir):

@@ -21,7 +21,7 @@ abgenommen.
   `tests/test_test_first_fixtures.py` spielt das erwartete Verhalten mit dem echten
   Skript in Eval-Workspaces nach und bewertet es mit `evalkit`.
 - Nachbarn: testing-strategy (Description und Abgrenzung), debug-ledger (Abgrenzung) und
-  der Code-Task in work-plan verweisen auf test-first; `cc-dev` listet die Skill;
+  der Code-Task in work-plan verweisen auf test-first; `evaluated-dev` listet die Skill;
   Routing-Zeile in README und Spec 00. `test_no_superpowers_routing_targets` sucht jetzt
   auch `test-driven-development`; `sync_skills.py --report` bleibt bei 0.
 
@@ -35,7 +35,7 @@ abgenommen.
   Aufruf weiter. Der Test mit 0,5 s Zeitgrenze läuft so in unter einer Sekunde.
 - **Die Description von test-first nennt superpowers ohne Präfix.** Mit
   `superpowers:test-driven-development` darin zählte `--report` wieder 1, sobald
-  test-first in `cc-dev` steht.
+  test-first in `evaluated-dev` steht.
 
 ## Was gemessen wurde
 

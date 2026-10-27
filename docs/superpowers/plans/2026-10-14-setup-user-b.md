@@ -17,8 +17,8 @@ der Plan bekommt das Profil, `check.md` einen Abschnitt `## Plugins`, der inform
 keine Abweichung zählt. `apply_config.py` mischt `enabledPlugins`.
 
 **Gemessen vor dem Plan** (CLI 2.1.296, Wegwerf-Config-Verzeichnis):
-`claude plugin install cc-dev@cc-skills` schreibt `"enabledPlugins":
-{"cc-dev@cc-skills": true}` in die User-Settings; `installPath` zeigt auf
+`claude plugin install evaluated-dev@evaluated-skills` schreibt `"enabledPlugins":
+{"evaluated-dev@evaluated-skills": true}` in die User-Settings; `installPath` zeigt auf
 `plugins/cache/<marketplace>/<plugin>/<sha12>` mit der ganzen Repo-Kopie. Jedes per CLI
 installierte Plugin hat also einen gesetzten Wert. Die Regel der Spec („ausdrücklich
 gesetzte Werte dreht das Profil nie um") bleibt; der Plan führt sie als Konflikt, und
@@ -94,7 +94,7 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
       in Cache (`installPath` gültig und veraltet mit Cache-Fallback, auch über
       `CLAUDE_CODE_PLUGIN_CACHE_DIR`), lokalem Marketplace mit `skills`-Liste und
       `defaultEnabled`, und `synced/`; gemeldet werden SessionStart-Hook mit Matcher,
-      `superpowers:`-Verweis, Kollision, alle drei Teile der Abschaltbedingung; `cc-dev`
+      `superpowers:`-Verweis, Kollision, alle drei Teile der Abschaltbedingung; `evaluated-dev`
       nie als engineering; ohne `plugins/` „ungeprüft"; abgeschaltete Plugins zählen nicht.
 - [x] **Step 2: Rot sehen.**
 - [x] **Step 3: Implementieren** — `route_report` liefert ein JSON-fähiges Dict ohne
@@ -193,7 +193,7 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
 
 - [x] **Step 1: Fixture** — `su-plugins` wie `su-aligned`, dazu `cfg/plugins/` mit
       `installed_plugins.json` (veralteter `installPath`, Cache-Fallback), superpowers
-      mit SessionStart-Hook und einer Skill, ein `cc-*`-Plugin.
+      mit SessionStart-Hook und einer Skill, ein `evaluated-*`-Plugin.
 - [x] **Step 2: Eval** — `superpowers-sessionstart-is-reported`, Prompt
       „/setup-user check --config-dir ./cfg", Assertion `file_matches`
       `cfg/setup-user/check.md` auf `superpowers · SessionStart-Hook`, Diskriminator in
@@ -215,7 +215,7 @@ tests/test_setup_user_route.py, tests/test_setup_user_fixtures.py, tests/test_se
       setzt `true`, deshalb Konflikt und `plugins_off`.
 - [x] **Step 2: Spec 20** — die Lückentabelle verweist auf `superpowers-gaps.json` als
       Quelle; Status writing-plans und test-driven-development dort, nicht hier.
-- [x] **Step 3: Prüfen** — Plugin-Zuordnung unverändert (setup-user in `cc-dev`), keine
+- [x] **Step 3: Prüfen** — Plugin-Zuordnung unverändert (setup-user in `evaluated-dev`), keine
       neuen Rückverweise, Routing unverändert; `pytest tests/test_marketplace.py`. Commit.
 
 ### Task 9: known-limits

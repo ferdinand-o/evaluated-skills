@@ -17,6 +17,6 @@
   },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
-    "cc-dev@cc-skills": true
+    "evaluated-dev@evaluated-skills": true
   }
 }

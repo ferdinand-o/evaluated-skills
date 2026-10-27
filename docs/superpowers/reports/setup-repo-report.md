@@ -29,7 +29,7 @@ wurde" beschreiben B; Abschnitt C folgt danach.
   Fixture-Test, der jeden Eval mit den installierten Skripten nachspielt.
 - Nachbarn:
   - Rückverweise in testing-strategy, review-context und feature-spec.
-  - `cc-dev` listet die Skill.
+  - `evaluated-dev` listet die Skill.
   - Routing-Zeilen in Spec 00 und README.
   - Kopfzeilen-Ausnahme für Rules mit `paths` in `docs/artifact-header.md`.
 
@@ -63,7 +63,7 @@ Ende-zu-Ende auf einer Kopie dieses Repos, mit leerem Config-Verzeichnis:
   von 150.
 - **apply:** „angewendet und geprüft". Geschrieben wurden `CLAUDE.md`, eine fehlende
   `.gitignore`-Zeile und `permissions.allow`. Der committete Schalter
-  `enabledPlugins: {"cc-dev@cc-skills": false}` blieb erhalten.
+  `enabledPlugins: {"evaluated-dev@evaluated-skills": false}` blieb erhalten.
 - **check:** „keine Abweichung", HEAD unverändert.
 
 Eval-Läufe außerhalb des Harness: Workspace über `evalkit.workspace.prepare()`, je ein

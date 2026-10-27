@@ -26,46 +26,29 @@ that it adds something over the bare model.
 
 The repo is a Claude Code marketplace (`.claude-plugin/marketplace.json`) with four
 plugins. All use the repo root as source and load only the skills in their `skills`
-list; once installed, skills are namespaced by plugin, e.g. `cc-dev:handoff`. From
+list; once installed, skills are namespaced by plugin, e.g. `evaluated-dev:handoff`. From
 Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
-- `/plugin install cc-dev --marketplace ferdinand-o/evaluated-skills` — development, always
+- `/plugin install evaluated-dev --marketplace ferdinand-o/evaluated-skills` — development, always
   on: architecture-map, debug-ledger, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
   testing-strategy, work-plan.
-- `/plugin install cc-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
-  **CLI only**: setup-repo and setup-user, available only as `/cc-setup:setup-repo`
-  and `/cc-setup:setup-user`. Both carry `disable-model-invocation`, which claude.ai
-  (web) does not know; on the web, add only `cc-dev`, `cc-ui` and `cc-knowledge`.
-- `/plugin install cc-ui --marketplace ferdinand-o/evaluated-skills` — UI, **off by default**
+- `/plugin install evaluated-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
+  **CLI only**: setup-repo and setup-user, available only as `/evaluated-setup:setup-repo`
+  and `/evaluated-setup:setup-user`. Both carry `disable-model-invocation`, which claude.ai
+  (web) does not know; on the web, add only `evaluated-dev`, `evaluated-ui` and `evaluated-knowledge`.
+- `/plugin install evaluated-ui --marketplace ferdinand-o/evaluated-skills` — UI, **off by default**
   (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
   ui-architect. Enable it per frontend repo in that repo's `.claude/settings.json` with
-  `"enabledPlugins": {"cc-ui@cc-skills": true}`; the project setting wins over the
+  `"enabledPlugins": {"evaluated-ui@evaluated-skills": true}`; the project setting wins over the
   `false` that the installation writes to the user settings.
-- `/plugin install cc-knowledge --marketplace ferdinand-o/evaluated-skills` — knowledge,
+- `/plugin install evaluated-knowledge --marketplace ferdinand-o/evaluated-skills` — knowledge,
   always on: exercise-forge, explain, human-prose, learning-coach, verified-research,
   visual-summary.
 
 With older versions, first run `/plugin marketplace add ferdinand-o/evaluated-skills`, then
-`/plugin install cc-dev@cc-skills` and so on. New commits arrive with
-`/plugin marketplace update cc-skills`, followed by `/reload-plugins`.
-
-The repository is called `evaluated-skills`, but the marketplace inside it keeps the
-name `cc-skills` (the `name` in `.claude-plugin/marketplace.json`). That name is part of
-every installed plugin id (`cc-dev@cc-skills`) and of the settings that refer to it.
-
-**Migrating from the old `cc-skills` plugin.** Until Spec 20 the whole collection was
-one plugin, `cc-skills@cc-skills`. The manifest lists it under `renames` as removed
-(`"cc-skills": null`), so `/plugin marketplace update cc-skills` drops it. Then install
-the new plugins:
-
-```
-/plugin marketplace update cc-skills
-/plugin install cc-dev@cc-skills
-/plugin install cc-setup@cc-skills
-/plugin install cc-ui@cc-skills
-/plugin install cc-knowledge@cc-skills
-```
+`/plugin install evaluated-dev@evaluated-skills` and so on. New commits arrive with
+`/plugin marketplace update evaluated-skills`, followed by `/reload-plugins`.
 
 **In no plugin** are three skills, each with its reason in `.claude-plugin/excluded.json`:
 
@@ -75,11 +58,11 @@ the new plugins:
 - cad-parts is excluded because it needs an `stl-cad-server` MCP server.
 
 **Project copies.** `.claude/skills/` holds ten skills for working on this repo:
-impl-plan, skill-forge and eight from `cc-dev` (all except rest-api-architect and
+impl-plan, skill-forge and eight from `evaluated-dev` (all except rest-api-architect and
 sql-schema-architect). The original is always `skills/<name>/`;
 `scripts/sync_skills.py` mirrors the skills in its `PROJECT_SKILLS` table, and
 `python3 scripts/sync_skills.py --check` reports every copy that has drifted. The
-committed `.claude/settings.json` turns `cc-dev@cc-skills` off inside this repo so the
+committed `.claude/settings.json` turns `evaluated-dev@evaluated-skills` off inside this repo so the
 eight skills do not appear twice.
 
 `tests/test_marketplace.py` keeps manifest, `excluded.json` and copies in sync with

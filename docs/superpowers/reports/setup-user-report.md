@@ -23,7 +23,7 @@ Gebaut nach `specs/Spec 21 – setup-user.md` und
 - Vier Evals mit vier Fixtures und ein Fixture-Test, der jeden Eval mit den Skripten
   nachspielt und an seinen eigenen Assertionen misst.
 - Nachbarn: handoff nennt setup-user, die Routing-Matrix in Spec 00 und README hat eine
-  Zeile, Spec 00 §5 die Ausnahme für Claude-Code-spezifische Skills, `cc-dev` listet die
+  Zeile, Spec 00 §5 die Ausnahme für Claude-Code-spezifische Skills, `evaluated-dev` listet die
   Skill.
 
 ## Die Entscheidungen, die den Bau geprägt haben
@@ -117,10 +117,10 @@ abgenommen; nach Spec 23 (work-plan) und Spec 24 (test-first).
 ### Entscheidungen
 
 - **Erst gemessen, dann geplant.** In einem Wegwerf-Config-Verzeichnis lief `claude
-  plugin marketplace add` mit diesem Repo und `claude plugin install cc-dev@cc-skills`.
+  plugin marketplace add` mit diesem Repo und `claude plugin install evaluated-dev@evaluated-skills`.
   Ergebnis: `installed_plugins.json` in Version 2, `installPath` unter
-  `plugins/cache/cc-skills/cc-dev/<sha12>` mit der ganzen Repo-Kopie — und
-  `"enabledPlugins": {"cc-dev@cc-skills": true}` in den User-Settings.
+  `plugins/cache/evaluated-skills/evaluated-dev/<sha12>` mit der ganzen Repo-Kopie — und
+  `"enabledPlugins": {"evaluated-dev@evaluated-skills": true}` in den User-Settings.
 - **Gesetzte Werte bleiben, auch die der CLI.** Weil die Installation `true` schreibt,
   wäre jedes Plugin „ausdrücklich gesetzt". Die Regel der Spec blieb trotzdem: Der Plan
   führt den Wert als Konflikt, und nur die Antwort `plugins_off` macht daraus einen Patch.
@@ -137,7 +137,7 @@ abgenommen; nach Spec 23 (work-plan) und Spec 24 (test-first).
 Suite: 1 534 grün, 3 übersprungen, 1 rot (`test_rest_api_architect_gate`, Spectral fehlt
 in der Umgebung). `lint_skill.py skills/setup-user` ohne Befund.
 
-`route_check.py` gegen die echte CLI-Installation: `cc-dev@cc-skills` aktiv über
+`route_check.py` gegen die echte CLI-Installation: `evaluated-dev@evaluated-skills` aktiv über
 `enabledPlugins`, 14 Skills aus der `skills`-Liste erkannt, Abschaltbedingung am
 installierten Bestand erfüllt (keine Lücke, kein `superpowers:`-Verweis im Cache von
 heute, Regel installiert).

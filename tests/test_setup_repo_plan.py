@@ -167,17 +167,17 @@ def test_plan_verify_hook_option(tmp_path):
 
 def test_plan_enables_plugins_per_repo(tmp_path):
     cfg = tmp_path / "cfg"
-    install = cfg / "plugins" / "cache" / "cc-skills" / "abc"
+    install = cfg / "plugins" / "cache" / "evaluated-skills" / "abc"
     write(install, ".claude-plugin/marketplace.json", json.dumps({"plugins": [
-        {"name": "cc-dev", "skills": ["./skills/handoff"]}, {"name": "cc-ui", "skills": ["./skills/enterprise-ui"]},
-        {"name": "cc-knowledge", "skills": ["./skills/explain"]}]}))
+        {"name": "evaluated-dev", "skills": ["./skills/handoff"]}, {"name": "evaluated-ui", "skills": ["./skills/enterprise-ui"]},
+        {"name": "evaluated-knowledge", "skills": ["./skills/explain"]}]}))
     write(cfg, "plugins/installed_plugins.json", json.dumps({"version": 2, "plugins": {
-        f"{n}@cc-skills": [{"installPath": str(install)}] for n in ("cc-dev", "cc-ui", "cc-knowledge")}}))
+        f"{n}@evaluated-skills": [{"installPath": str(install)}] for n in ("evaluated-dev", "evaluated-ui", "evaluated-knowledge")}}))
     repo = tmp_path / "web"
     write(repo, "package.json", json.dumps({"dependencies": {"react": "18"}}))
     write(repo, ".claude/skills/handoff/SKILL.md", "---\nname: handoff\n---\n")
     block = plan_for(repo, cfg)
-    assert block["plugins"] == {"cc-dev@cc-skills": False, "cc-ui@cc-skills": True}
+    assert block["plugins"] == {"evaluated-dev@evaluated-skills": False, "evaluated-ui@evaluated-skills": True}
     assert ops(block)[".claude/settings.local.json"]["patch"] == {"enabledPlugins": block["plugins"]}
 
     plain = tmp_path / "plain"

@@ -1698,7 +1698,7 @@ behoben zu werden:
   den Grund je Ausschluss. Gemessen: `claude plugin validate .` grün, lokale
   Installation lädt 21 Skills.
 - **17 Skills liegen auch im Nutzerprofil unter gleichem Namen.** Der Namensraum
-  `cc-skills:` verhindert die Kollision im Aufruf, nicht die doppelte Sichtbarkeit; die
+  `evaluated-skills:` verhindert die Kollision im Aufruf, nicht die doppelte Sichtbarkeit; die
   Routing-Evals messen nur die Projekt-Installation unter `.claude/skills/`, nie das
   Plugin.
 - **Der Web-Loader von claude.ai liest das Manifest anders als die CLI.** Zwei
@@ -1715,12 +1715,12 @@ behoben zu werden:
 - **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
   Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
 
-## Marketplace — drei Plugins (Spec 20, 2026-10-08; seit 2026-10-14 vier, Abschnitt cc-setup)
+## Marketplace — drei Plugins (Spec 20, 2026-10-08; seit 2026-10-14 vier, Abschnitt evaluated-setup)
 
-Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensraum
-`cc-skills:` und den Punkt zu `version`. Was ungemessen bleibt und wo es beißt:
+Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `evaluated-skills`), den Namensraum
+`evaluated-skills:` und den Punkt zu `version`. Was ungemessen bleibt und wo es beißt:
 
-- **Nur der CLI-Weg ist abgedeckt.** `cc-dev`, `cc-ui` und `cc-knowledge` haben je
+- **Nur der CLI-Weg ist abgedeckt.** `evaluated-dev`, `evaluated-ui` und `evaluated-knowledge` haben je
   `source: "./"` und eine `skills`-Liste; die CLI lädt nur die gelisteten Ordner
   (gemessen: 10, 3, 6 Skills, `claude plugin validate .` grün). Der Web-Loader von
   claude.ai ignoriert die Liste (Abschnitt davor) und lüde je Plugin alle Ordner. Der
@@ -1728,18 +1728,18 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `cc-skills`), den Namensrau
   Cloud-Sessions laden Plugins gar nicht (gemeldeter Bug); dort helfen nur die
   Projekt-Kopien unter `.claude/skills/`.
 - **Skriptpfade in fremden Repos — behoben am 2026-10-14 (Spec 25).** Vorher liefen dort
-  die Skripte von 9 der 14 Skills in `cc-dev`, 2 der 4 in `cc-ui` und 4 der 6 in
-  `cc-knowledge` nicht. Was bleibt, steht im Abschnitt skill-dir.
+  die Skripte von 9 der 14 Skills in `evaluated-dev`, 2 der 4 in `evaluated-ui` und 4 der 6 in
+  `evaluated-knowledge` nicht. Was bleibt, steht im Abschnitt skill-dir.
 - **Projekt-Kopien driften nur bis zum Sync-Check.** `scripts/sync_skills.py --check`
   steht in skill-forge Schritt 4 (G1) und in `tests/test_marketplace.py` (G2). Wer ein
   Original außerhalb von skill-forge ändert und nicht `pytest` fährt, committet eine
   veraltete Kopie; einen Hook gibt es bewusst nicht.
-- **`cc-dev` ist in diesem Repo aus.** Die committete `.claude/settings.json` setzt
-  `cc-dev@cc-skills` auf `false`, damit die acht Projekt-Kopien nicht doppelt
+- **`evaluated-dev` ist in diesem Repo aus.** Die committete `.claude/settings.json` setzt
+  `evaluated-dev@evaluated-skills` auf `false`, damit die acht Projekt-Kopien nicht doppelt
   erscheinen. rest-api-architect und sql-schema-architect fehlen damit hier; eine
-  synchronisierte ID `cc-dev@synced` ist nicht abgedeckt.
+  synchronisierte ID `evaluated-dev@synced` ist nicht abgedeckt.
 - **Kein `version`-Feld.** Updates kommen mit jedem Commit nach
-  `/plugin marketplace update cc-skills`; eine Release-Nummer gibt es nicht.
+  `/plugin marketplace update evaluated-skills`; eine Release-Nummer gibt es nicht.
 - **Das Listing-Budget ist nur vorher gemessen.** `/context` zeigte am 2026-10-08 mit dem
   alten Ein-Plugin neun Skills mit weniger als 20 Tokens, also ohne Description
   (`docs/superpowers/validation/2026-10-08-plugin-split-sync.md`). Ob die Aufteilung
@@ -2028,12 +2028,12 @@ wo es beißt:
 - **Coverage nur gegen feature-spec-Kriterien.** Zeigt `**Spec:**` auf eine Datei ohne
   Kopfzeile `skill: feature-spec`, bleibt die Coverage `unchecked`; ein Auftrag hat
   keine. Die `- Annahme:`-Zeilen prüft kein Lint.
-- **`cc-dev` listet eine Skill mehr.** work-plan lädt mit jeder `cc-dev`-Installation und
+- **`evaluated-dev` listet eine Skill mehr.** work-plan lädt mit jeder `evaluated-dev`-Installation und
   konkurriert im Routing mit impl-plan und dem eingebauten Plan-Modus; die Descriptions
   grenzen ab, gemessen ist die Kollision nicht.
 - **Keine Projekt-Kopie in diesem Repo.** Hier gilt impl-plan; work-plan steht nicht in
   `PROJECT_SKILLS` von `scripts/sync_skills.py` und lädt in diesem Repo nur, wenn
-  jemand `cc-dev` einschaltet.
+  jemand `evaluated-dev` einschaltet.
 
 ## test-first
 
@@ -2058,11 +2058,11 @@ schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es bei�
   es verloren, fehlt der Beleg dieser Arbeit. Subagenten von subagent-dev schreiben es in
   ihren Worktree, `verify` liest es nicht (Spec 24, Out of scope).
 - **Auslösen ungemessen.** Die Evals installieren test-first allein. Ob die Skill bei
-  „füge X hinzu" ohne Plan auslöst und ob sie im Listing von `cc-dev` sichtbar bleibt,
+  „füge X hinzu" ohne Plan auslöst und ob sie im Listing von `evaluated-dev` sichtbar bleibt,
   zeigt kein Lauf (Spec 20 hat neun Skills ohne Description im Listing gemessen).
   Der Druckfall (`pressure-still-red-first`) misst nur einen Prompt.
 - **Keine Projekt-Kopie.** test-first steht nicht in `PROJECT_SKILLS`; in diesem Repo
-  lädt es nur über `cc-dev`, das hier ausgeschaltet ist.
+  lädt es nur über `evaluated-dev`, das hier ausgeschaltet ist.
 
 ## skill-dir
 
@@ -2087,14 +2087,14 @@ wörtlich. Was ungemessen bleibt und wo es beißt:
   nur architecture-map schreibt `python scripts/<datei>`, weil `drift_check.py` das
   Kommando wieder ausführt.
 
-## cc-setup (2026-10-14)
+## evaluated-setup (2026-10-14)
 
-cc-dev ließ sich in claude.ai (Web) nicht mehr hinzufügen. Ursache nach dem Validator von
+evaluated-dev ließ sich in claude.ai (Web) nicht mehr hinzufügen. Ursache nach dem Validator von
 skill-creator (`quick_validate.py`, nach eigener Angabe die Regeln des Uploads von
 claude.ai): setup-repo und setup-user tragen `disable-model-invocation`, erlaubt sind nur
 `name`, `description`, `license`, `allowed-tools`, `metadata`, `compatibility`; skill-forge
 hatte eine zweite `SKILL.md` unter `assets/skill-template/`. Die beiden Setup-Skills liegen
-jetzt im Plugin `cc-setup`, das Gerüst heißt `SKILL.md.tmpl`; `tests/test_marketplace.py`
+jetzt im Plugin `evaluated-setup`, das Gerüst heißt `SKILL.md.tmpl`; `tests/test_marketplace.py`
 prüft die Web-Plugins mit diesen Regeln.
 
 - **Nicht im Web gemessen.** Ob der Import jetzt durchgeht, prüft der Nutzer. Liest der
@@ -2111,8 +2111,8 @@ prüft die Web-Plugins mit diesen Regeln.
   `test_no_nested_plugin_json_anywhere_in_the_repo` hält das. Verschachtelte
   `marketplace.json` in den Fixtures von skill-forge und su-plugins meldete der Import
   nicht; ob er sie still übergeht, ist ungemessen.
-- **Wer cc-dev schon per CLI hat, bekommt die Setup-Skills erst mit
-  `/plugin install cc-setup@cc-skills`**; ein Update von cc-dev nimmt sie heraus.
+- **Wer evaluated-dev schon per CLI hat, bekommt die Setup-Skills erst mit
+  `/plugin install evaluated-setup@evaluated-skills`**; ein Update von evaluated-dev nimmt sie heraus.
 
 ## Verweise
 

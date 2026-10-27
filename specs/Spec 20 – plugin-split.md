@@ -2,10 +2,12 @@
 
 Skill-Spezifikation · Zyklus 20 · Entscheidung: Zuschnitt nach dem einzigen Hebel, den Claude Code für Plugin-Skills bietet (`enabledPlugins` je Scope, `defaultEnabled` je Eintrag); drei Marketplace-Einträge mit Root-Quelle und `skills`-Liste, weil der Nutzer Plugins nur über die CLI anbindet; die Projekt-Installation unter `.claude/skills/` kommt aus einer Tabelle; superpowers wird erst abgeschaltet, wenn die Abschaltbedingung erfüllt ist · Abgeglichen mit Spec 00 · Überarbeitet nach unabhängigem Review (zweite Runde 2026-10-08; dritte Fassung nach der Sync-Messung vom 2026-10-08: CLI-Weg statt Plugin-Kopien)
 
+> **Nachtrag (Umbenennung vor der Veröffentlichung).** Der Marketplace heißt jetzt `evaluated-skills`, die Plugins heißen `evaluated-dev`, `evaluated-setup`, `evaluated-ui` und `evaluated-knowledge`; diese Spec ist durchgehend auf die neuen Namen umgestellt. Das `renames`-Konstrukt und der Umstieg vom alten Ein-Plugin sind wieder entfernt: Es gab vor der Veröffentlichung keine Nutzer des alten Plugins.
+
 ## Problem
 
 Die Sammlung ist ein einziges Plugin (`.claude-plugin/marketplace.json`, ein Eintrag
-`cc-skills` mit 21 Skills). Abschalten lässt sich nur alles oder nichts: Laut
+`evaluated-skills` mit 21 Skills). Abschalten lässt sich nur alles oder nichts: Laut
 Claude-Code-Doku (skills, „Override skill visibility from settings") gilt „Plugin
 skills are not affected by `skillOverrides`. Manage those through `/plugin`
 instead."; `enabledPlugins` wirkt je Plugin.
@@ -35,7 +37,7 @@ Descriptions superpowers-Skills ohne Namensraum (`feature-spec` und `debug-ledge
 
 Die Aufteilung spart im User-Scope 2 864 von 13 467 Zeichen eigener Descriptions (es
 bleiben 10 603, 78,7 %; Rohstring samt `\"`-Escapes, geparst 13 447 und 10 591). Mit
-`cc-ui` je Repo und impl-plan und skill-forge nur im Repo selbst fallen drei bis fünf
+`evaluated-ui` je Repo und impl-plan und skill-forge nur im Repo selbst fallen drei bis fünf
 Skills aus dem Listing; ob das reicht, damit die neun übrigen wieder ihre Description
 zeigen, misst der Bau in `/context`. Die superpowers-Injektion fällt erst mit der
 Abschaltung weg.
@@ -52,11 +54,11 @@ Eintrag.
 **Seit PR #16 gibt es eine Projekt-Installation.** `.claude/skills/` enthält zehn Skills
 für die Arbeit an diesem Repo, weil Cloud-Sessions Projekt-Skills laden, Plugins aber
 nicht (Spec 22, Problem). Die Liste steht als `REPO_DEV_SKILLS` in
-`tests/test_project_skills_copy.py`: impl-plan, skill-forge und acht Skills von `cc-dev`
+`tests/test_project_skills_copy.py`: impl-plan, skill-forge und acht Skills von `evaluated-dev`
 ohne rest-api-architect und sql-schema-architect. Ein eigenes Plugin für impl-plan und
 skill-forge zeigte diese beiden im Repo doppelt an und hätte keinen Einsatzort, weil
 beide laut ihrer Description nur für diese Sammlung gelten. Ebenso erschienen die acht
-`cc-dev`-Skills doppelt, solange `cc-dev` im User-Scope an ist.
+`evaluated-dev`-Skills doppelt, solange `evaluated-dev` im User-Scope an ist.
 
 Der Nutzer hat am 2026-10-07 entschieden: superpowers wird durch die eigene Sammlung
 ersetzt, und die Aufteilung ist eine eigene Vorstufe vor den Setup-Skills (Spec 21,
@@ -72,8 +74,8 @@ Kopie; sie schreibt `scripts/sync_skills.py` (Tier 1, Repo-Werkzeug) aus einer T
 die `REPO_DEV_SKILLS` ersetzt.
 
 Die neue Lint-Regel `plugin-membership` ist Tier 1 und G2, ebenso die Tests; einen
-Hook gibt es nicht. Plugin-Namen kollidieren nicht mit dem geplanten Repo
-`ferdinand-o/cc-frontend`, deshalb heißt das UI-Plugin hier `cc-ui`. Descriptions
+Hook gibt es nicht. Alle Plugin-Namen tragen das Präfix `evaluated-`; das
+UI-Plugin heißt `evaluated-ui`. Descriptions
 bleiben frei von `<…>`. Kein Plugin-Eintrag trägt ein `version`-Feld: Laut Doku
 (plugins/loading) bleiben Nutzer bei gesetzter Version auf der Cache-Kopie, bis sich der
 String ändert; ohne Feld gilt der Commit.
@@ -103,21 +105,21 @@ Anführungszeichen, gemessen wie im Problem).
 
 | Plugin | Skills | Zeichen | `defaultEnabled` |
 | --- | --- | --- | --- |
-| `cc-dev` | architecture-map, debug-ledger, dev-report, feature-spec, handoff, rest-api-architect, review-context, sql-schema-architect, subagent-dev, testing-strategy | 6 318 | true |
-| `cc-ui` | enterprise-ui, mobile-audit, motion-landing, ui-architect | 2 461 | false — an je Frontend-Repo |
-| `cc-knowledge` | explain, exercise-forge, human-prose, learning-coach, verified-research, visual-summary | 4 285 | true |
+| `evaluated-dev` | architecture-map, debug-ledger, dev-report, feature-spec, handoff, rest-api-architect, review-context, sql-schema-architect, subagent-dev, testing-strategy | 6 318 | true |
+| `evaluated-ui` | enterprise-ui, mobile-audit, motion-landing, ui-architect | 2 461 | false — an je Frontend-Repo |
+| `evaluated-knowledge` | explain, exercise-forge, human-prose, learning-coach, verified-research, visual-summary | 4 285 | true |
 | kein Plugin | impl-plan, skill-forge (1 179 Zeichen) — nur für Specs dieser Sammlung, Projekt-Kopie; cad-parts — braucht einen stl-cad-server | — | — |
 
 mobile-audit kam mit PR #17 nach dieser Spec auf main und beim Merge am 2026-10-09 nach
-`cc-ui`: Sie prüft Webseiten mobil, teilt `references/mobile.md` mit den drei UI-Skills
+`evaluated-ui`: Sie prüft Webseiten mobil, teilt `references/mobile.md` mit den drei UI-Skills
 und wird mit ihnen je Frontend-Repo an- und abgeschaltet. Die Zeichen im Problem sind der
-Stand vor dem Merge; danach hat `cc-dev` 6 305 Zeichen, weil zwei Descriptions kürzer
+Stand vor dem Merge; danach hat `evaluated-dev` 6 305 Zeichen, weil zwei Descriptions kürzer
 wurden.
 
 Jeder Eintrag hat `source: "./"`, `strict: false`, eine sortierte `skills`-Liste mit
 `./skills/<name>`, kein `version` und keine `dependencies`. Laut Doku überschreibt eine
 Projekt-Einstellung die User-Einstellung („the project setting overrides the user
-setting", plugins/install); `cc-ui` wird deshalb je Repo eingeschaltet. Eine Installation
+setting", plugins/install); `evaluated-ui` wird deshalb je Repo eingeschaltet. Eine Installation
 per `claude plugin install` schreibt für ein Plugin mit `defaultEnabled: false`
 ausdrücklich `false` in die User-Settings (am 2026-10-08 mit CLI 2.1.294 nachgemessen);
 das Projekt-`true` gewinnt trotzdem.
@@ -126,12 +128,12 @@ das Projekt-`true` gewinnt trotzdem.
 `.claude-plugin/excluded.json`; die Datei ersetzt das Dict `EXCLUDED` in
 `tests/test_marketplace.py`, damit Test und Lint dieselbe Quelle lesen. Die Tabelle in
 `sync_skills.py` führt die zehn Skills der heutigen `REPO_DEV_SKILLS`. Im Repo
-`cc-skills` schaltet eine neue, committete `.claude/settings.json` `cc-dev@cc-skills` aus
+`evaluated-skills` schaltet eine neue, committete `.claude/settings.json` `evaluated-dev@evaluated-skills` aus
 (heute gibt es dort keine), damit die acht Projekt-Kopien nicht doppelt erscheinen.
 rest-api-architect und sql-schema-architect fehlen damit in diesem Repo; das entspricht
 der Auswahl aus PR #16.
 
-Das Manifest bekommt `renames: {"cc-skills": null}`.
+Das Manifest bekommt `renames: {"evaluated-skills": null}`.
 
 ### Lückentabelle superpowers → Haus
 
@@ -168,7 +170,7 @@ skills/skill-forge/
 
 scripts/sync_skills.py               Tier 1, Repo-Werkzeug — Tabelle PROJECT_SKILLS; spiegelt skills/<name>/ nach .claude/skills/<name>/; --check meldet fehlende, überzählige und abweichende Dateien; --report zählt superpowers:-Verweise in Descriptions von Plugins mit defaultEnabled true
 .claude/skills/…                     generierte Kopien, Inhalt wie nach PR #16
-.claude/settings.json                enabledPlugins: cc-dev@cc-skills auf false
+.claude/settings.json                enabledPlugins: evaluated-dev@evaluated-skills auf false
 .claude-plugin/marketplace.json      drei Einträge mit source ./ und skills-Liste; renames; defaultEnabled; kein version
 .claude-plugin/excluded.json         cad-parts, impl-plan, skill-forge je mit Grund
 tests/test_marketplace.py            bestehende Tests umgestellt, neue siehe Tests (Repo)
@@ -184,7 +186,7 @@ evals/fixtures/sf-plugin-orphan/     specs/ als Repo-Marker, Manifest mit einer 
 skills/feature-spec/SKILL.md         Description „use systematic-debugging" → „use debug-ledger"; Abgrenzung **systematic-debugging** → **debug-ledger**
 skills/debug-ledger/SKILL.md         Description ohne `systematic-debugging`; Abgrenzung behält superpowers:systematic-debugging als Herkunft
 specs/Spec 00 – skill-foundation.md  §5: Zeile „Bug, Testfehler" → debug-ledger (01); Out of scope ohne Packaging; keine Plugin-Spalte
-README.md                            Aufbau: .claude/skills/ und scripts/; Installation je Plugin als Liste (keine Tabelle) samt Zuordnung; Umstieg von cc-skills
+README.md                            Aufbau: .claude/skills/ und scripts/; Installation je Plugin als Liste (keine Tabelle) samt Zuordnung; Umstieg von evaluated-skills
 docs/known-limits.md                 Marketplace: Root-Quelle mit skills-Liste, nur CLI-Weg, Namensraum, Skriptpfade; skill-forge: vierzehn Regeln, sechs Evals
 docs/superpowers/reports/skill-forge-report.md   Abschnitt zu dieser Runde
 ```
@@ -235,12 +237,12 @@ mit.
   `tests/test_marketplace.py` und `plugin-membership` (beide G2, beide lesen
   `excluded.json`), dazu `sync_skills.py --check` in skill-forge Schritt 4 und im Test.
 - **Abschaltbedingung für superpowers:** (a) die Lückentabelle hat keine Zeile „Lücke";
-  (b) keine Description eines Plugins mit `defaultEnabled: true` (`cc-dev`,
-  `cc-knowledge`) enthält `superpowers:`; (c) jede Zeile mit Status „Regel" ist als
+  (b) keine Description eines Plugins mit `defaultEnabled: true` (`evaluated-dev`,
+  `evaluated-knowledge`) enthält `superpowers:`; (c) jede Zeile mit Status „Regel" ist als
   Regeldatei im Config-Verzeichnis installiert. Skills ohne Plugin zählen für (b) nicht;
   der Verweis aus `skill-forge` auf `superpowers:writing-skills` bleibt deshalb stehen.
   (a) liegt als Daten in `skills/setup-user/references/superpowers-gaps.json` (Spec 21);
-  (b) zählt `sync_skills.py --report` an der Quelle, heute 6 Fundstellen in `cc-dev`
+  (b) zählt `sync_skills.py --report` an der Quelle, heute 6 Fundstellen in `evaluated-dev`
   (architecture-map, feature-spec, rest-api-architect, subagent-dev dreimal); (a) bis
   (c) zusammen prüft `route_check.py` (Spec 21) am installierten Bestand. Nackte Namen
   wie `systematic-debugging` zählen nicht als Verweis; die drei bekannten Fälle
@@ -277,12 +279,12 @@ vergisst.
 | `test_every_skill_in_exactly_one_plugin` | `tests/test_marketplace.py` | je Skill unter `skills/` genau eine `skills`-Liste oder ein Eintrag in `excluded.json`, nie beides |
 | `test_project_copies_match_originals` | dito | `sync_skills.py --check` ohne Befund; ersetzt `tests/test_project_skills_copy.py` |
 | `test_sync_mirrors_and_ignores_pycache` | dito | in einem Temp-Repo: gelöschte Datei verschwindet aus der Kopie, `__pycache__/` wird nicht kopiert, `--check` meldet überzählige Datei |
-| `test_plugin_entries_are_fixed` | dito | genau `cc-dev`, `cc-ui`, `cc-knowledge`; `source` `./`; sortierte `skills`-Liste mit existierenden Ordnern; kein `version`, keine `dependencies`; `defaultEnabled` wie in der Tabelle; `renames` erlaubt |
+| `test_plugin_entries_are_fixed` | dito | genau `evaluated-dev`, `evaluated-ui`, `evaluated-knowledge`; `source` `./`; sortierte `skills`-Liste mit existierenden Ordnern; kein `version`, keine `dependencies`; `defaultEnabled` wie in der Tabelle; `renames` erlaubt |
 | `test_no_plugin_json_that_would_conflict_with_strict_false` | dito | unverändert behalten |
 | `test_excluded_json_names_existing_skills_with_reason` | dito | jede Zeile ohne `_` am Anfang nennt einen Ordner unter `skills/` und einen nicht leeren Grund |
 | `test_no_file_refs_across_plugins` | dito | kein `skills/<andere>/` in den Dateien einer Plugin-Skill, wenn die andere in einem anderen Plugin liegt oder ausgeschlossen ist |
 | `test_superpowers_report_counts_descriptions` | dito | `--report` in einem Temp-Repo: Fundstelle in einem Plugin mit `defaultEnabled: true` zählt, in einem mit `false` und in einer ausgeschlossenen Skill nicht |
-| `test_repo_disables_cc_dev_for_project_copies` | dito | `.claude/settings.json` setzt `cc-dev@cc-skills` auf `false` |
+| `test_repo_disables_cc_dev_for_project_copies` | dito | `.claude/settings.json` setzt `evaluated-dev@evaluated-skills` auf `false` |
 | `test_descriptions_carry_no_angle_bracket_tags` | dito | unverändert behalten |
 | `test_plugin_membership_rule` | `tests/test_skill_forge_lint.py` | pass bei genau einer Liste und bei Ausschluss; finding bei null, zwei, und bei ausgeschlossen plus gelistet; unchecked ohne Manifest, bei Eintrag ohne Liste und bei kaputtem `excluded.json` |
 
@@ -318,7 +320,7 @@ claude.ai synchronisiert werden sollen.
 **Ein viertes Plugin `cc-meta` für impl-plan und skill-forge.** So stand es in der ersten
 Fassung. Verworfen, weil beide nur in diesem Repo gelten und dort seit PR #16 als
 Projekt-Kopie liegen; das Plugin hätte sie doppelt angezeigt und `dependencies` auf
-`cc-dev` gebraucht. Gewinnt, wenn die beiden in einem zweiten Repo gebraucht werden.
+`evaluated-dev` gebraucht. Gewinnt, wenn die beiden in einem zweiten Repo gebraucht werden.
 
 **Die Skills physisch nach `plugins/<plugin>/skills/` verschieben.** Keine Listen, keine
 Kopien. Verworfen, weil jeder `skills/<name>`-Pfad in Tests, Evals, Plänen und
@@ -337,7 +339,7 @@ gleichnamig im Nutzerprofil liegen (known-limits, Marketplace).
 **`forceRemoveDeletedPlugins: true`.** Würde die alte Installation zuverlässig
 deinstallieren, ist aber eine dauerhafte Richtlinie für alle künftigen Entfernungen.
 Verworfen zugunsten von `renames` und dem Umstieg im README; im ersten Review gemessen:
-nach `marketplace update` ist `cc-skills@cc-skills` ausgeschaltet.
+nach `marketplace update` ist `evaluated-skills@evaluated-skills` ausgeschaltet.
 
 **superpowers behalten und die Hausmatrix in CLAUDE.md schreiben.** Anweisung gegen eine
 Injektion bei jedem Start und jedem `/clear`. Der Nutzer hat sich für Ablösung
@@ -346,7 +348,7 @@ entschieden.
 **superpowers sofort abschalten.** Die Verweise auf `superpowers:writing-plans` liefen
 ins Leere. Deshalb die Abschaltbedingung.
 
-**superpowers im Repo `cc-skills` anlassen, für writing-skills.** Dort liefe die
+**superpowers im Repo `evaluated-skills` anlassen, für writing-skills.** Dort liefe die
 SessionStart-Injektion weiter, wo impl-plan und skill-forge arbeiten (known-limits,
 impl-plan). Verworfen; writing-skills wird bei Bedarf von Hand eingeschaltet.
 
@@ -357,26 +359,26 @@ Die Ersatz-Skills (Spec 23 für Pläne in fremden Repos samt Umschreiben der
 von `enabledPlugins` außerhalb dieses Repos (Spec 21 und 22). Die Skriptpfade der 16
 Skills mit `skills/<name>/scripts/…` auf `${CLAUDE_SKILL_DIR}` umstellen. Die Pfade sind
 relativ zum Arbeitsverzeichnis; in fremden Repos laufen deshalb schon heute die Skripte
-von 9 der 10 Skills in `cc-dev` und 4 der 6 in `cc-knowledge` nicht. Die Plugins liefern
+von 9 der 10 Skills in `evaluated-dev` und 4 der 6 in `evaluated-knowledge` nicht. Die Plugins liefern
 dort Doktrin ohne lauffähige Skripte; `known-limits` sagt das mit diesen Zahlen, und eine
 eigene Folgespec stellt um. Der Hook-Pfad in
 `debug-ledger/assets/hooks/check-ledger.json`, der in fremden Repos jeden `git commit`
 anhält (gemessen am 2026-10-07: Exit 2). Ein Umbenennen von `docs/superpowers/`. Der
-Gesamt-Frontend-Skill, der `cc-ui` später ersetzt. Der Sync-Weg über claude.ai.
+Gesamt-Frontend-Skill, der `evaluated-ui` später ersetzt. Der Sync-Weg über claude.ai.
 
 ## Open questions
 
 *Annahme:* Zuschnitt, Namen und `defaultEnabled` wie in der Tabelle — widersprich, falls
 nein.
 
-*Annahme:* rest-api-architect und sql-schema-architect bleiben im immer aktiven `cc-dev`,
+*Annahme:* rest-api-architect und sql-schema-architect bleiben im immer aktiven `evaluated-dev`,
 weil API- und Schemafragen in fast jedem Backend-Repo auftauchen und beide zusammen nur
-1 280 Zeichen kosten — widersprich, falls sie wie `cc-ui` je Repo an sollen.
+1 280 Zeichen kosten — widersprich, falls sie wie `evaluated-ui` je Repo an sollen.
 
-*Annahme:* `cc-ui` ist eine Übergangslösung bis zum Gesamt-Frontend-Skill und wird
+*Annahme:* `evaluated-ui` ist eine Übergangslösung bis zum Gesamt-Frontend-Skill und wird
 danach entfernt.
 
-Das alte Plugin `cc-skills` verschwindet bei CLI-Installationen über `renames` nach
+Das alte Plugin `evaluated-skills` verschwindet bei CLI-Installationen über `renames` nach
 `/plugin marketplace update`; der Umstieg im README nennt die drei neuen
 `/plugin install`-Befehle.
 

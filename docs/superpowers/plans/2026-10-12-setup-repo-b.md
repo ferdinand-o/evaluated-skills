@@ -221,7 +221,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `test_agents_md_is_imported`, `test_choose_verification` (`make check` vor
       zusammengesetztem `make lint && make test`; Delphi abgeleitet und nicht in
       `permissions.allow`; nichts → „keine — ungeprüft" mit Verweis auf
-      testing-strategy), `test_plan_enables_plugins_per_repo` (Frontend → `cc-ui` an;
+      testing-strategy), `test_plan_enables_plugins_per_repo` (Frontend → `evaluated-ui` an;
       Plugin mit Projekt-Kopie unter `.claude/skills/` → aus; keine ID → keine Operation
       und „ungeprüft — Plugin-ID nicht gefunden"), `test_plan_writes_only_cache`; in
       `tests/test_setup_repo_harvest.py` den zweiten Teil von
@@ -278,7 +278,7 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       `test_check_reports_drift` (geänderte CLAUDE.md, fehlendes Hook-Skript, Budget
       überschritten → je eine Abweichung), `test_check_without_plan_is_unverified`
       (klassenabhängige Punkte „ungeprüft — kein Plan"), `test_check_keeps_cc_skills_switch`
-      (`cc-dev` in der committeten Datei ist keine Abweichung).
+      (`evaluated-dev` in der committeten Datei ist keine Abweichung).
 - [x] **Step 2: Rot sehen** — `pytest tests/test_setup_repo_apply.py -k check`.
 - [x] **Step 3: Implementieren** — `--check`: Hash des letzten Plans prüfen, jede
       Operation trocken gegen den Bestand anwenden, Budget, Hook-Probe; schreibt nur
@@ -363,10 +363,10 @@ docs/artifact-header.md, .claude-plugin/marketplace.json
       (`docs/goals.md`). `python scripts/sync_skills.py` und `--check`; `lint_skill.py
       --base HEAD` je Skill ohne neuen Befund.
 - [x] **Step 2: Plugin-Zuordnung** — `./skills/setup-repo` in die `skills`-Liste von
-      `cc-dev`; die Tabelle in `scripts/sync_skills.py` bleibt unverändert;
+      `evaluated-dev`; die Tabelle in `scripts/sync_skills.py` bleibt unverändert;
       `pytest tests/test_marketplace.py`.
 - [x] **Step 3: Matrix und Kopfzeile** — Spec 00 §5 und README je eine Zeile setup-repo,
-      README setup-repo in der Liste von `cc-dev`; in `docs/artifact-header.md` die
+      README setup-repo in der Liste von `evaluated-dev`; in `docs/artifact-header.md` die
       Begründete Ausnahme „Kopfzeile nach dem Frontmatter" für Rules mit `paths` aus
       `skills/setup-repo/scripts/plan_repo.py` und den Satz über die Zahl der Ausnahmen
       nachziehen. `lint_skill.py skills/setup-repo` meldet `routing`, `neighbors` und

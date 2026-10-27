@@ -6,7 +6,7 @@ Skill-Spezifikation · Zyklus 23 · Entscheidung: eine eigene Plan-Skill für Re
 
 Spec 20 macht das Abschalten von superpowers an drei Bedingungen fest; eine davon ist,
 dass keine Description eines immer aktiven Plugins `superpowers:` enthält.
-`sync_skills.py --report` zählt am 2026-10-13 sechs Fundstellen, alle in `cc-dev`:
+`sync_skills.py --report` zählt am 2026-10-13 sechs Fundstellen, alle in `evaluated-dev`:
 architecture-map, feature-spec, rest-api-architect und dreimal subagent-dev — vier zeigen
 auf `superpowers:writing-plans`, zwei auf `superpowers:subagent-driven-development`. Die
 Description von impl-plan nennt `superpowers:writing-plans` ebenfalls; der Bericht zählt
@@ -30,8 +30,8 @@ als Befund, obwohl die Description „or a superpowers:writing-plans plan" anbie
 Portables Frontmatter (`name`, `description`). Tier 1 ohne eigenes Skript: Der Lint gehört
 `subagent-dev` (Contract von impl-plan), work-plan ruft ihn auf über
 `${CLAUDE_SKILL_DIR}/../subagent-dev/scripts/plan_to_tasks.py`. Beide Skills liegen in
-`cc-dev`, der Verweis überschreitet keine Plugin-Grenze (Spec 20). Im Review nachgemessen:
-Nach `claude plugin marketplace add` mit lokalem Pfad und `install cc-dev@cc-skills`
+`evaluated-dev`, der Verweis überschreitet keine Plugin-Grenze (Spec 20). Im Review nachgemessen:
+Nach `claude plugin marketplace add` mit lokalem Pfad und `install evaluated-dev@evaluated-skills`
 (CLI 2.1.296) liegt im Plugin-Cache die ganze Repo-Kopie, das Nachbarverzeichnis
 `skills/subagent-dev/scripts/` also daneben. Fehlt das Skript (nur work-plan installiert,
 claude.ai), heißt die Übergabe „ungeprüft — Lint nicht verfügbar", nie „fertig".
@@ -48,7 +48,7 @@ Ablage im Zielrepo: `docs/plans/<JJJJ-MM-TT>-<slug>.md` mit Kopfzeile
 dass der erste Lauf die Anlage ankündigt; *Annahme:* Die Bitte um einen Plan ist die
 Einwilligung, und die Antwort nennt den Pfad. Das Planformat (`### Task N:`,
 `**Files:**`, `**Interfaces:**`, Checkbox-Steps, Präfixe `fn:`, `token:`, `file:`) ist
-dasselbe wie bei impl-plan; Eigentümer bleibt `subagent-dev`. Plugin: `cc-dev`.
+dasselbe wie bei impl-plan; Eigentümer bleibt `subagent-dev`. Plugin: `evaluated-dev`.
 
 ## Approach
 
@@ -67,8 +67,8 @@ skills/subagent-dev/scripts/plan_to_tasks.py   Kopfzeile impl-plan oder work-pla
 skills/subagent-dev/SKILL.md         Description und Abgrenzung ohne superpowers; „Plan vorhanden?" nennt impl-plan und work-plan
 skills/feature-spec/SKILL.md, skills/architecture-map/SKILL.md, skills/rest-api-architect/SKILL.md, skills/impl-plan/SKILL.md   Verweise auf work-plan statt superpowers:writing-plans; Projekt-Kopien über sync_skills.py
 skills/setup-repo/assets/runtime/goal_scope.py, skills/setup-repo/references/goals.md   docs/plans/ als Hausartefakt ausgenommen
-.claude-plugin/marketplace.json      work-plan in der skills-Liste von cc-dev
-specs/Spec 00 – skill-foundation.md, README.md   Routing: writing-plans → work-plan an fünf Stellen, neue Zeile work-plan; README-Liste von cc-dev
+.claude-plugin/marketplace.json      work-plan in der skills-Liste von evaluated-dev
+specs/Spec 00 – skill-foundation.md, README.md   Routing: writing-plans → work-plan an fünf Stellen, neue Zeile work-plan; README-Liste von evaluated-dev
 docs/known-limits.md                 Abschnitt work-plan
 docs/superpowers/reports/work-plan-report.md   Report mit „Was nicht gemessen wurde"
 evals/work-plan/evals.json           vier Evals, siehe unten
@@ -128,7 +128,7 @@ Kopfzeile bleibt sie `unchecked`. `generate` und `verify` ändern sich nicht.
 | architecture-map, Description und Abgrenzung | Refactoring-Plan über writing-plans | über work-plan |
 | rest-api-architect, Description und Rumpf (2) | Brownfield-Befund über writing-plans | über work-plan |
 | `plan_to_tasks.py`, Docstrings und Hilfetext | „superpowers:writing-plans-Plan" | „impl-plan- oder work-plan-Plan" |
-| README und Spec 00 | writing-plans in den Routing-Zeilen zu feature-spec und impl-plan (je zweimal) und in der Annahme zu `to-tickets` (Spec 00 §5) | work-plan; eigene Routing-Zeile für work-plan; README-Liste von cc-dev |
+| README und Spec 00 | writing-plans in den Routing-Zeilen zu feature-spec und impl-plan (je zweimal) und in der Annahme zu `to-tickets` (Spec 00 §5) | work-plan; eigene Routing-Zeile für work-plan; README-Liste von evaluated-dev |
 
 Bewusst bleiben: die Herkunftszeile in `impl-plan/references/reviewer-prompt.md` („Aus
 `superpowers:writing-plans` übersetzt"), die Abgrenzungen gegen `superpowers:brainstorming`
@@ -233,7 +233,7 @@ kein Routing-Ziel in diesem Repo.
 
 Ungemessen bleibt, ob `${CLAUDE_SKILL_DIR}` im Plugin-Cache auf den Ordner der Skill
 auflöst und ob ein Marketplace von GitHub dieselbe Repo-Kopie anlegt wie der lokale Pfad.
-Ungemessen ist auch das Listing: Spec 20 hat in `cc-dev` neun Skills ohne Description
+Ungemessen ist auch das Listing: Spec 20 hat in `evaluated-dev` neun Skills ohne Description
 gezählt, und work-plan kommt dazu; Trigger-Evals installieren die Skill allein und sehen
 das nicht.
 

@@ -388,10 +388,10 @@ Checkliste den Punkt 20, die Evals 1 und 5 je zwei Assertionen mehr und Eval 6 i
 
 **Was gemessen wurde.** 1 266 Tests grün nach dem letzten Merge, ein vorbestehender
 Fehlschlag außerhalb (`rest-api-architect`, Spectral). `claude plugin validate .` grün;
-mit einem Wegwerf-Config-Verzeichnis lädt die CLI 10, 3 und 6 Skills, `cc-ui` ist nach
-der Installation aus, und im Repo selbst ist `cc-dev` durch die committete
+mit einem Wegwerf-Config-Verzeichnis lädt die CLI 10, 3 und 6 Skills, `evaluated-ui` ist nach
+der Installation aus, und im Repo selbst ist `evaluated-dev` durch die committete
 `.claude/settings.json` aus. Geschätzte Kosten je Session laut `claude plugin details`:
-`cc-dev` rund 2 360 Tokens, `cc-knowledge` rund 1 513, `cc-ui` rund 647. Vorher zeigte
+`evaluated-dev` rund 2 360 Tokens, `evaluated-knowledge` rund 1 513, `evaluated-ui` rund 647. Vorher zeigte
 `/context` mit dem Ein-Plugin neun Skills mit weniger als 20 Tokens.
 `sync_skills.py --report` zählt 6 `superpowers:`-Verweise in Descriptions aktiver
 Plugins, vorher 8. Eine Zeichenzählung je Plugin liegt in Spec 20.

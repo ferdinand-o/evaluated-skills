@@ -305,7 +305,7 @@ def render_plugins(plugins):
                  f"(c) {'ok' if cond['c']['ok'] else 'Regel fehlt'}.")
     lines.append("")
     if not plugins["profile"]:
-        lines.append("- Profil: nichts zu ändern; `cc-*`-Plugins bleiben ungesetzt.")
+        lines.append("- Profil: nichts zu ändern; `evaluated-*`-Plugins bleiben ungesetzt.")
     for entry in plugins["profile"]:
         lines.append(f"- `{entry['id']}`: {ACTION_TEXT[entry['action']]} — {entry['reason']}")
     if any(e["action"] == "conflict" for e in plugins["profile"]):

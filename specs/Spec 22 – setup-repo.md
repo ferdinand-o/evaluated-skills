@@ -82,7 +82,7 @@ Verifikations-Hook ist G3. Die Skill committet nie.
 Dateien mit Frontmatter in Zeile 1 (Rules mit `paths`, `.claude/agents/reviewer.md`)
 tragen die Kopfzeile als erste Zeile nach dem Frontmatter; dafür kommt eine „Begründete
 Ausnahme" mit den wörtlichen Asset-Pfaden in `docs/artifact-header.md`, und der Satz
-über die Zahl der Ausnahmen dort wird nachgezogen. Plugin: `cc-dev` (Spec 20). Die
+über die Zahl der Ausnahmen dort wird nachgezogen. Plugin: `evaluated-dev` (Spec 20). Die
 Erkennung ist eigen (`detect_repo.py`), weil `detect_stack.py` aus testing-strategy zwar
 Test-Runner und Frontend-SPAs kennt, aber weder Delphi noch Makefile oder Agent-Dateien.
 
@@ -130,7 +130,7 @@ evalkit/assertions.py, evalkit/workspace.py   (A) EXCLUDED_PREFIXES (".git/", ".
 tests/test_assertions.py, tests/test_workspace.py   (A) .claude/settings.json beobachtet, .claude/skills/ und .claude/worktrees/ nicht
 docs/artifact-header.md              Begründete Ausnahme: Kopfzeile nach dem Frontmatter, wörtlich mit skills/setup-repo/assets/agents/reviewer.md; Satz „Die drei dokumentierten Ausnahmen" nachgezogen
 skills/handoff/SKILL.md, skills/testing-strategy/SKILL.md, skills/review-context/SKILL.md, skills/feature-spec/SKILL.md   Rückverweis, der setup-repo wörtlich nennt; Projekt-Kopien über sync_skills.py
-.claude-plugin/marketplace.json      setup-repo in der skills-Liste von cc-dev (Spec 20)
+.claude-plugin/marketplace.json      setup-repo in der skills-Liste von evaluated-dev (Spec 20)
 specs/Spec 00 – skill-foundation.md, README.md   Matrixzeile setup-repo; README „Aufbau" nennt evals-templates/
 docs/known-limits.md                 Abschnitt setup-repo
 docs/superpowers/reports/setup-repo-report.md   Report mit „Was nicht gemessen wurde"
@@ -200,14 +200,14 @@ Unterprozesse nicht erfasst; gesetzt wird es nur nach Bestätigung.
 
 **Plugins je Repo.** `enabledPlugins` nach Spec 20 kommt in `.claude/settings.local.json`,
 nicht in die committete Datei — die Plugins stammen aus der persönlichen Sammlung des
-Nutzers und laden in der Cloud ohnehin nicht. `cc-ui` an, wenn `detect_repo.py` ein
+Nutzers und laden in der Cloud ohnehin nicht. `evaluated-ui` an, wenn `detect_repo.py` ein
 Frontend erkennt. Ein Plugin, dessen Skills im Repo als Projekt-Kopie unter
 `.claude/skills/` liegen, geht aus, damit nichts doppelt erscheint. Die Plugin-ID
 (`<name>@<marketplace>` oder `<name>@synced`) liest `detect_repo.py` aus
 `installed_plugins.json` und `plugins/synced/` des Config-Verzeichnisses, ohne Code aus
 setup-user zu importieren. Findet es keine ID, schreibt `apply` nichts und der Bericht
-sagt „ungeprüft — Plugin-ID nicht gefunden". Im Repo `cc-skills` regelt Spec 20 den
-Schalter für `cc-dev` bereits in der committeten Datei; `check` meldet das nicht als
+sagt „ungeprüft — Plugin-ID nicht gefunden". Im Repo `evaluated-skills` regelt Spec 20 den
+Schalter für `evaluated-dev` bereits in der committeten Datei; `check` meldet das nicht als
 Abweichung.
 
 **Verifikations-Hook (opt-in).** `verify_stop.py` hält das Turn-Ende an, solange der

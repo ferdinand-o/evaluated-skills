@@ -1,8 +1,8 @@
 {
-  "name": "cc-skills",
+  "name": "evaluated-skills",
   "plugins": [
     {
-      "name": "cc-dev",
+      "name": "evaluated-dev",
       "source": "./",
       "defaultEnabled": true,
       "skills": [

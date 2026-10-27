@@ -41,27 +41,27 @@ def make_config(tmp_path, *, enabled=None, rules=("verification.md",), cache_env
                                         "hooks": [{"type": "command", "command": "x"}]}]})
     # lokaler Marketplace: ganze Repo-Kopie, Skills über die skills-Liste
     mkt = tmp_path / "mkt"
-    write(mkt / ".claude-plugin" / "marketplace.json", json.dumps({"name": "cc-skills", "plugins": [
-        {"name": "cc-dev", "source": "./", "defaultEnabled": True,
+    write(mkt / ".claude-plugin" / "marketplace.json", json.dumps({"name": "evaluated-skills", "plugins": [
+        {"name": "evaluated-dev", "source": "./", "defaultEnabled": True,
          "skills": ["./skills/feature-spec", "./skills/subagent-dev"]},
-        {"name": "cc-ui", "source": "./", "defaultEnabled": False, "skills": ["./skills/ui-architect"]},
+        {"name": "evaluated-ui", "source": "./", "defaultEnabled": False, "skills": ["./skills/ui-architect"]},
     ]}))
     skill(mkt, "feature-spec", "Use for specs. Not for plans (use superpowers:writing-plans).")
     skill(mkt, "subagent-dev", "Use to dispatch a plan.")
     skill(mkt, "ui-architect", "Use for UI tokens.")
-    # engineering aus einem anderen Marketplace, mit einer Skill gleichen Namens wie cc-dev
+    # engineering aus einem anderen Marketplace, mit einer Skill gleichen Namens wie evaluated-dev
     plugin_dir(cache / "knowledge-work" / "engineering" / "1.2.0", "engineering",
                {"feature-spec": "Use for engineering specs.", "standup": "Use for standups."})
     write(cfg / "plugins" / "installed_plugins.json", json.dumps({"version": 2, "plugins": {
         "superpowers@claude-plugins-official": [{"scope": "user", "installPath": "/nirgends/superpowers/5.0.0"}],
-        "cc-dev@cc-skills": [{"scope": "user", "installPath": str(mkt)}],
-        "cc-ui@cc-skills": [{"scope": "user", "installPath": str(mkt)}],
+        "evaluated-dev@evaluated-skills": [{"scope": "user", "installPath": str(mkt)}],
+        "evaluated-ui@evaluated-skills": [{"scope": "user", "installPath": str(mkt)}],
         "engineering@knowledge-work": [{"scope": "user", "installPath": "/nirgends/engineering"}],
     }}))
     # ein synchronisiertes Plugin mit einer Skill, die superpowers auch hat
     plugin_dir(cfg / "plugins" / "synced" / "abc", "notes", {"brainstorming": "Use for notes."})
     settings = {"enabledPlugins": enabled if enabled is not None else {
-        "superpowers@claude-plugins-official": True, "cc-dev@cc-skills": True}}
+        "superpowers@claude-plugins-official": True, "evaluated-dev@evaluated-skills": True}}
     write(cfg / "settings.json", json.dumps(settings))
     for rule in rules:
         write(cfg / "rules" / rule, "<!-- skill: setup-user | schema: 1 | generated: x -->\n")
@@ -77,31 +77,31 @@ def test_route_check_layouts_and_condition(tmp_path):
     report = route.route_report(cfg)
     plugins = by_id(report)
     assert report["checked"] is True
-    assert set(plugins) == {"superpowers@claude-plugins-official", "cc-dev@cc-skills", "cc-ui@cc-skills",
+    assert set(plugins) == {"superpowers@claude-plugins-official", "evaluated-dev@evaluated-skills", "evaluated-ui@evaluated-skills",
                             "engineering@knowledge-work", "notes@synced"}
     # aktiv: enabledPlugins, sonst defaultEnabled, sonst an
-    assert plugins["cc-dev@cc-skills"]["active"] and plugins["cc-dev@cc-skills"]["explicit"] is True
-    assert not plugins["cc-ui@cc-skills"]["active"] and plugins["cc-ui@cc-skills"]["explicit"] is None
+    assert plugins["evaluated-dev@evaluated-skills"]["active"] and plugins["evaluated-dev@evaluated-skills"]["explicit"] is True
+    assert not plugins["evaluated-ui@evaluated-skills"]["active"] and plugins["evaluated-ui@evaluated-skills"]["explicit"] is None
     assert plugins["engineering@knowledge-work"]["active"]
     # Layouts: Cache-Fallback, lokaler Marketplace mit skills-Liste, synced
     assert plugins["superpowers@claude-plugins-official"]["skills"] == ["brainstorming", "writing-plans"]
-    assert plugins["cc-dev@cc-skills"]["skills"] == ["feature-spec", "subagent-dev"]
+    assert plugins["evaluated-dev@evaluated-skills"]["skills"] == ["feature-spec", "subagent-dev"]
     assert plugins["notes@synced"]["skills"] == ["brainstorming"]
-    # Rollen: engineering nur am Namen, nie ein cc-*
+    # Rollen: engineering nur am Namen, nie ein evaluated-*
     assert plugins["engineering@knowledge-work"]["role"] == "engineering"
-    assert plugins["cc-dev@cc-skills"]["role"] == "cc"
+    assert plugins["evaluated-dev@evaluated-skills"]["role"] == "cc"
     assert plugins["superpowers@claude-plugins-official"]["role"] == "superpowers"
     # Befunde
     assert plugins["superpowers@claude-plugins-official"]["session_start"] == ["startup|clear|compact"]
-    assert plugins["cc-dev@cc-skills"]["superpowers_refs"] == ["feature-spec"]
+    assert plugins["evaluated-dev@evaluated-skills"]["superpowers_refs"] == ["feature-spec"]
     collisions = {c["skill"]: c["plugins"] for c in report["collisions"]}
     assert collisions["brainstorming"] == ["notes@synced", "superpowers@claude-plugins-official"]
-    assert collisions["feature-spec"] == ["cc-dev@cc-skills", "engineering@knowledge-work"]
-    assert "ui-architect" not in collisions          # cc-ui ist aus
+    assert collisions["feature-spec"] == ["engineering@knowledge-work", "evaluated-dev@evaluated-skills"]
+    assert "ui-architect" not in collisions          # evaluated-ui ist aus
     # Abschaltbedingung: (a) ok aus der Lückentabelle, (b) ein Verweis, (c) Regel liegt
     cond = report["condition"]
     assert cond["a"]["ok"] and cond["a"]["gaps"] == []
-    assert not cond["b"]["ok"] and cond["b"]["refs"] == ["cc-dev@cc-skills/feature-spec"]
+    assert not cond["b"]["ok"] and cond["b"]["refs"] == ["evaluated-dev@evaluated-skills/feature-spec"]
     assert cond["c"]["ok"]
     assert cond["met"] is False
 
@@ -125,7 +125,7 @@ def test_condition_parts_a_and_c(tmp_path, monkeypatch):
 
 def test_condition_met_when_superpowers_refs_are_gone(tmp_path):
     cfg = make_config(tmp_path, enabled={"superpowers@claude-plugins-official": True,
-                                         "cc-dev@cc-skills": True, "engineering@knowledge-work": False})
+                                         "evaluated-dev@evaluated-skills": True, "engineering@knowledge-work": False})
     mkt = tmp_path / "mkt"
     skill(mkt, "feature-spec", "Use for specs. Not for plans (use work-plan).")
     report = route.route_report(cfg)

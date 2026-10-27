@@ -128,12 +128,12 @@ dieser Plan überarbeitet.
 
 **Interfaces:**
 - Consumes: `fn:sync(repo_root, check)`
-- Produces: `token:cc-knowledge`, `token:cc-dev@cc-skills`
+- Produces: `token:evaluated-knowledge`, `token:evaluated-dev@evaluated-skills`
 
 - [x] **Step 1: Tests umschreiben** — `test_every_skill_in_exactly_one_plugin` (liest die
       `skills`-Listen), `test_project_copies_match_originals` (ruft
       `sync(repo_root, check=True)` und ersetzt `tests/test_project_skills_copy.py`),
-      `test_plugin_entries_are_fixed` (genau `cc-dev`, `cc-ui`, `cc-knowledge`; `source`
+      `test_plugin_entries_are_fixed` (genau `evaluated-dev`, `evaluated-ui`, `evaluated-knowledge`; `source`
       `./`; sortierte `skills`-Liste mit existierenden Ordnern; kein `version`, keine
       `dependencies`; `defaultEnabled` true, false, true; `renames` erlaubt),
       `test_excluded_json_names_existing_skills_with_reason` (liest `excluded.json`
@@ -143,14 +143,14 @@ dieser Plan überarbeitet.
 - [x] **Step 2: Rot sehen** — `pytest tests/test_marketplace.py`.
 - [x] **Step 3: Umbauen** — Manifest mit drei Einträgen nach der Zuschnitt-Tabelle der
       Spec, je `source: "./"`, `strict: false`, `skills`-Liste mit `./skills/<name>`, und
-      `renames: {"cc-skills": null}`; `excluded.json` mit `cad-parts`, `impl-plan`,
+      `renames: {"evaluated-skills": null}`; `excluded.json` mit `cad-parts`, `impl-plan`,
       `skill-forge` und je dem Grund aus der Spec; `.claude/settings.json` mit
-      `enabledPlugins` `cc-dev@cc-skills` auf `false`; `tests/test_project_skills_copy.py`
+      `enabledPlugins` `evaluated-dev@evaluated-skills` auf `false`; `tests/test_project_skills_copy.py`
       löschen.
 - [x] **Step 4: Grün sehen**, volle Suite; `claude plugin validate .` grün; mit einem
       Wegwerf-`CLAUDE_CONFIG_DIR` Marketplace aus dem Arbeitsverzeichnis hinzufügen,
-      alle drei Plugins installieren, `claude plugin list` zeigt `cc-ui` deaktiviert;
-      `python scripts/sync_skills.py --report` meldet 6 Fundstellen in `cc-dev`.
+      alle drei Plugins installieren, `claude plugin list` zeigt `evaluated-ui` deaktiviert;
+      `python scripts/sync_skills.py --report` meldet 6 Fundstellen in `evaluated-dev`.
 - [x] **Step 5: Commit.**
 
 ### Task 4: Lint-Regel plugin-membership
@@ -167,7 +167,7 @@ und Task 9 rot.
 - Test: `tests/test_skill_forge_lint.py`
 
 **Interfaces:**
-- Consumes: `token:cc-knowledge`
+- Consumes: `token:evaluated-knowledge`
 - Produces: `fn:rule_plugin_membership(skill_dir, repo_root)`
 
 - [x] **Step 1: Tests schreiben** — `test_plugin_membership_rule`: `make_repo` legt ein
@@ -197,7 +197,7 @@ und Task 9 rot.
 - Modify: `tests/test_marketplace.py`
 
 **Interfaces:**
-- Consumes: `token:cc-knowledge`
+- Consumes: `token:evaluated-knowledge`
 - Produces: `fn:test_no_file_refs_across_plugins()`
 
 - [x] **Step 1: Test schreiben** — `test_no_file_refs_across_plugins`: für jede Skill in
@@ -323,7 +323,7 @@ und Task 9 rot.
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: `token:cc-knowledge`
+- Consumes: `token:evaluated-knowledge`
 - Produces: `token:Plugin-Zuordnung`
 
 - [x] **Step 1: impl-plan** — die Pflicht-Task „Nachbarn" nennt die Plugin-Zuordnung;
@@ -331,7 +331,7 @@ und Task 9 rot.
 - [x] **Step 2: Spec 00** — §5 Zeile „Bug, Testfehler" → debug-ledger (01); Out of scope
       ohne „Plugin-/Marketplace-Packaging"; keine Plugin-Spalte.
 - [x] **Step 3: README** — „Aufbau" nennt `.claude/skills/` und `scripts/`; Installation
-      je Plugin als Liste mit Skills, keine Tabelle; Umstieg von `cc-skills` über
+      je Plugin als Liste mit Skills, keine Tabelle; Umstieg von `evaluated-skills` über
       `renames` nach `/plugin marketplace update` und die drei `/plugin install`-Befehle.
       `pytest tests/test_skills_lint.py`; Commit.
 
@@ -346,8 +346,8 @@ und Task 9 rot.
 
 - [x] **Step 1: Abschnitt** — Marketplace: drei Einträge mit Root-Quelle und
       `skills`-Liste, nur der CLI-Weg ist abgedeckt, Plugins laden in Cloud-Sessions
-      nicht, Namensraum `cc-dev:`; in fremden Repos laufen die Skripte von 9 der 10
-      Skills in `cc-dev` und 4 der 6 in `cc-knowledge` nicht, weil die Pfade relativ zum
+      nicht, Namensraum `evaluated-dev:`; in fremden Repos laufen die Skripte von 9 der 10
+      Skills in `evaluated-dev` und 4 der 6 in `evaluated-knowledge` nicht, weil die Pfade relativ zum
       Arbeitsverzeichnis sind; skill-forge: vierzehn Regeln, sechs Evals, der Sync-Check
       ist G1 und fängt keine Änderung außerhalb von skill-forge. Commit.
 

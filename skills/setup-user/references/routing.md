@@ -8,17 +8,17 @@ sind Information, keine Abweichung.
 
 | Plugin | User-Scope |
 | --- | --- |
-| `cc-dev`, `cc-setup`, `cc-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
-| `cc-ui` | nicht gesetzt; an per Projekt (setup-repo) |
+| `evaluated-dev`, `evaluated-setup`, `evaluated-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
+| `evaluated-ui` | nicht gesetzt; an per Projekt (setup-repo) |
 | superpowers (`@synced` oder `@<marketplace>`, wie gefunden) | `false`, erst wenn die Abschaltbedingung erfüllt ist; vorher bleibt es, und der Plan sagt warum |
-| engineering (erkannt am Plugin-Namen `engineering`, nie ein Plugin `cc-*`) | `false`, Annahme |
+| engineering (erkannt am Plugin-Namen `engineering`, nie ein Plugin `evaluated-*`) | `false`, Annahme |
 
 **Gesetzte Werte dreht das Profil nie um.** Steht ein Plugin schon in `enabledPlugins`,
 führt der Plan es als Konflikt. Erst die Antwort `plugins_off` (Liste von Plugin-IDs, an
 `inspect_config.py --answers`) macht daraus einen Patch.
 
 Gemessen am 2026-10-14 (CLI 2.1.296, Wegwerf-Config-Verzeichnis): `claude plugin install
-cc-dev@cc-skills` schreibt `"enabledPlugins": {"cc-dev@cc-skills": true}` selbst. Jedes
+evaluated-dev@evaluated-skills` schreibt `"enabledPlugins": {"evaluated-dev@evaluated-skills": true}` selbst. Jedes
 per CLI installierte Plugin hat also einen gesetzten Wert — superpowers wird deshalb in
 der Regel ein Konflikt sein, und der Nutzer entscheidet einmal ausdrücklich.
 
@@ -30,7 +30,7 @@ Je Plugin-ID gilt, in dieser Reihenfolge:
 2. `defaultEnabled` des Marketplace-Eintrags.
 3. sonst an — installiert heißt geladen.
 
-Projekt-Settings bewertet `route_check.py` nicht; ein Projekt kann `cc-ui` einschalten,
+Projekt-Settings bewertet `route_check.py` nicht; ein Projekt kann `evaluated-ui` einschalten,
 ohne dass der User-Scope davon weiß.
 
 ## Layout auf der Platte
@@ -70,5 +70,5 @@ noch Verweise tragen, die das Repo heute nicht mehr hat. Dann hilft
 ## Kollisionen
 
 Eine Skill gleichen Namens in zwei aktiven Plugins oder in einem Plugin und unter
-`<config-dir>/skills/`. Plugin-Skills tragen zwar ihren Namensraum (`cc-dev:feature-spec`),
+`<config-dir>/skills/`. Plugin-Skills tragen zwar ihren Namensraum (`evaluated-dev:feature-spec`),
 aber beim Routing entscheidet die Description — zwei gleich benannte Skills konkurrieren.

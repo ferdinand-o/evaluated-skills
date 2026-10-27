@@ -8,10 +8,10 @@
         "version": "4.3.1"
       }
     ],
-    "cc-dev@cc-skills": [
+    "evaluated-dev@evaluated-skills": [
       {
         "scope": "user",
-        "installPath": "/home/nutzer/.claude/plugins/cache/cc-skills/cc-dev/7f3a9c1e2b4d",
+        "installPath": "/home/nutzer/.claude/plugins/cache/evaluated-skills/evaluated-dev/7f3a9c1e2b4d",
         "version": "7f3a9c1e2b4d"
       }
     ]

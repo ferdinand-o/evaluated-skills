@@ -69,7 +69,7 @@ erst, wenn `runtime/` kopiert und per Hash geprüft ist. Das Hook-Fragment liegt
 `assets/settings/`, nicht unter `assets/hooks/`, weil dieser Ordner `gate-language` im
 Lint pauschal auf `pass` setzt und der Hook kein G3 ist. SKILL.md ≤ 150 Zeilen. Skripte
 referenziert über `${CLAUDE_SKILL_DIR}`. Nachbarskripte werden nicht importiert. Plugin:
-`cc-dev` (Spec 20); als Plugin-Skill heißt der Aufruf `/cc-dev:setup-user`, als
+`evaluated-dev` (Spec 20); als Plugin-Skill heißt der Aufruf `/evaluated-dev:setup-user`, als
 Projekt-Installation in den Evals `/setup-user`.
 
 Gebaut wird in zwei Abschnitten. **Abschnitt A:** Statusline, Kontext-Hinweis,
@@ -113,7 +113,7 @@ skills/setup-user/
 skills/skill-forge/scripts/lint_skill.py   CLAUDE_CODE_ONLY; disable-model-invocation nur dort erlaubt
 tests/test_skill_forge_lint.py             Fälle für CLAUDE_CODE_ONLY
 skills/handoff/SKILL.md                    Abgrenzung: [setup-user]-Hinweise raten zu handoff (Rückverweis, nennt setup-user); Projekt-Kopie über sync_skills.py
-.claude-plugin/marketplace.json            setup-user in der skills-Liste von cc-dev (Spec 20)
+.claude-plugin/marketplace.json            setup-user in der skills-Liste von evaluated-dev (Spec 20)
 specs/Spec 00 – skill-foundation.md        §5: Satz zur Ausnahme für Claude-Code-spezifische Skills; Matrixzeile setup-user
 README.md                                  Matrixzeile setup-user
 docs/known-limits.md                       Abschnitt setup-user
@@ -272,10 +272,10 @@ Patch (`references/routing.md`). Das Profil im Plan:
 
 | Plugin | User-Scope |
 | --- | --- |
-| `cc-dev`, `cc-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
-| `cc-ui` | nicht gesetzt; an per Projekt (Spec 22) |
+| `evaluated-dev`, `evaluated-knowledge` | nicht gesetzt; `defaultEnabled: true` genügt |
+| `evaluated-ui` | nicht gesetzt; an per Projekt (Spec 22) |
 | superpowers (`@synced` oder `@<marketplace>`, wie gefunden) | `false`, erst wenn die Abschaltbedingung erfüllt ist; vorher bleibt es und der Plan sagt warum |
-| engineering (erkannt am Plugin-Namen `engineering`, nie ein Plugin `cc-*`) | `false`, Annahme |
+| engineering (erkannt am Plugin-Namen `engineering`, nie ein Plugin `evaluated-*`) | `false`, Annahme |
 
 ### Contract
 
@@ -343,7 +343,7 @@ Rückverweis in `skills/handoff/SKILL.md` erreicht die Projekt-Kopie unter
 | `test_verify_flags_silent_hook_nonzero_exit_and_empty_statusline` | dito | alle drei Fälle sind Befunde |
 | `test_fixture_plans_are_current` | `tests/test_setup_user_fixtures.py` | Block in `plan.md` von `su-planned` und `su-own-statusline` gleicht einem neu erzeugten; Laufzeitdateien in `su-aligned` gleichen den Assets |
 | `test_disable_model_invocation_only_for_claude_code_only` | `tests/test_skill_forge_lint.py` | Schlüssel bei setup-user → pass, bei einer anderen Skill → finding |
-| `test_route_check_layouts_and_condition` (B) | `tests/test_setup_user_route.py` | Fake-Plugins in Cache, lokalem Marketplace und `synced/`; SessionStart-Hook, `superpowers:`-Verweis und alle drei Teile der Abschaltbedingung gemeldet; `cc-dev` nie als engineering erkannt |
+| `test_route_check_layouts_and_condition` (B) | `tests/test_setup_user_route.py` | Fake-Plugins in Cache, lokalem Marketplace und `synced/`; SessionStart-Hook, `superpowers:`-Verweis und alle drei Teile der Abschaltbedingung gemeldet; `evaluated-dev` nie als engineering erkannt |
 | `test_profile_keeps_explicit_user_values` (B) | dito | ausdrücklicher Nutzerwert in `enabledPlugins` bleibt und steht als Konflikt im Plan |
 | `test_gaps_json_names_match_spec_20` (B) | `tests/test_setup_user_fixtures.py` | jede Zeile in `superpowers-gaps.json` nennt Skills aus der Lückentabelle in Spec 20; Status prüft der Test nicht, weil er sich mit Spec 23 und 24 ändert |
 

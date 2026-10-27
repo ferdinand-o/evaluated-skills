@@ -27,7 +27,7 @@ ARTIFACT_HEADER_RE = re.compile(
     r"\s*generated:\s*(?P<cmd>.+?)\s*(?:-->)?\s*$"
 )
 # Das mitgelieferte Preset liegt neben dem Skript, nicht im aufrufenden Projekt: ein
-# repo-relativer Pfad gegen --repo fand es nur im cc-skills-Repo selbst und brach in
+# repo-relativer Pfad gegen --repo fand es nur im evaluated-skills-Repo selbst und brach in
 # jedem anderen Projekt — und in jeder installierten Skill — mit exit 1 ab.
 SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONVENTIONS_PATH = SKILL_DIR / "assets" / "conventions.json"

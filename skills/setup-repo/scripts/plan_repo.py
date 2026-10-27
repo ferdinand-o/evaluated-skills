@@ -218,7 +218,7 @@ def _plugins(detect: dict) -> dict[str, bool]:
     for p in detect.get("plugins") or []:
         if project & set(p.get("skills") or []):
             result[p["id"]] = False
-        elif p.get("name") == "cc-ui" and detect.get("frontend"):
+        elif p.get("name") == "evaluated-ui" and detect.get("frontend"):
             result[p["id"]] = True
     return dict(sorted(result.items()))
 

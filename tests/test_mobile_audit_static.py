@@ -27,7 +27,7 @@ def names(findings):
 # --- Preset-Auflösung ------------------------------------------------------------
 #
 # Der Fehler aus lint_schema.py:29 (repo-relativer Default-Pfad, der nur im
-# cc-skills-Repo selbst existiert) wird hier nicht wiederholt: Das Preset liegt
+# evaluated-skills-Repo selbst existiert) wird hier nicht wiederholt: Das Preset liegt
 # neben dem Skript und muss aus jedem beliebigen Projektverzeichnis laden.
 
 

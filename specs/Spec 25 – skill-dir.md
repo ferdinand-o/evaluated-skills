@@ -6,8 +6,8 @@ Skill-Spezifikation · Zyklus 25 · Entscheidung: jeder Skript-Aufruf steht in d
 
 Skills rufen ihre Skripte in der SKILL.md repo-relativ auf, etwa
 `python skills/architecture-map/scripts/extract_py.py`. Der Pfad stimmt nur im Checkout
-dieser Sammlung. Gemessen am 2026-10-14 an den SKILL.md-Dateien: In `cc-dev` rufen 9 von 14
-Skills ihre Skripte so auf, in `cc-ui` 2 von 4, in `cc-knowledge` 4 von 6 — in einem
+dieser Sammlung. Gemessen am 2026-10-14 an den SKILL.md-Dateien: In `evaluated-dev` rufen 9 von 14
+Skills ihre Skripte so auf, in `evaluated-ui` 2 von 4, in `evaluated-knowledge` 4 von 6 — in einem
 fremden Repo liefert das Plugin dort Doktrin ohne lauffähige Skripte. Dasselbe gilt im
 Eval-Workspace: Dort liegt die Skill unter `.claude/skills/<name>/` (`evalkit/workspace.py`),
 nicht unter `skills/<name>/`.
@@ -41,7 +41,7 @@ Aufruf beginnt deshalb immer mit `python`.
 Nachbar-Skripte über `${CLAUDE_SKILL_DIR}/../<andere>/scripts/` nur, wenn beide Skills im
 selben Plugin liegen oder beide in `PROJECT_SKILLS` (`scripts/sync_skills.py`) stehen
 (Spec 20, „Kein Dateiverweis über eine Plugin-Grenze"). Heute: work-plan → subagent-dev
-(beide `cc-dev`), impl-plan und skill-forge → subagent-dev (alle drei Projekt-Kopien).
+(beide `evaluated-dev`), impl-plan und skill-forge → subagent-dev (alle drei Projekt-Kopien).
 
 Tier unverändert je Skill. Gate-Grade: die Lint-Regel `script-paths` ist G2; die
 Hook-Vorlagen bleiben G3 (Spec 00 §4). Die Kopfzeilen erzeugter Artefakte und die

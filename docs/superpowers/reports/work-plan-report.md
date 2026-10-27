@@ -28,7 +28,7 @@ in einem sauberen Worktree abgenommen.
     `superpowers:subagent-driven-development`.
   - `sync_skills.py --report`: superpowers-Verweise in Descriptions aktiver Plugins
     **6 → 0**; `test_no_superpowers_routing_targets` hält das.
-  - `cc-dev` listet work-plan; eigene Routing-Zeile in README und Spec 00.
+  - `evaluated-dev` listet work-plan; eigene Routing-Zeile in README und Spec 00.
 
 ## Die Entscheidungen, die den Bau geprägt haben
 
