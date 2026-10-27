@@ -1711,7 +1711,9 @@ behoben zu werden:
   umformuliert, `tests/test_marketplace.py` meldet den nächsten Fall. Gemessen danach: vier
   Routing-Läufe mit je drei Konkurrenz-Skills im Workspace, alle vier wählten die richtige
   Skill, zwei davon mit der geänderten Phrase als Begründung. Der Ausschluss von
-  `cad-parts` gilt bis zum Fix des Issues nur für die CLI.
+  `cad-parts` gilt bis zum Fix des Issues nur für die CLI. **Überholt am 2026-10-15:** Das
+  Web zeigt je Plugin nur die gelisteten Skills (Abschnitt evaluated-setup); die
+  `skills`-Liste wirkt also auch dort.
 - **Kein Release-Prozess.** `version` im Manifest ist von Hand gesetzt; Spec 00 führt
   Versionierung unter Out of scope, und nichts prüft, ob die Zahl zum Stand passt.
 
@@ -1723,7 +1725,8 @@ Ersetzt im Abschnitt davor den Zuschnitt (ein Plugin `evaluated-skills`), den Na
 - **Nur der CLI-Weg ist abgedeckt.** `evaluated-dev`, `evaluated-ui` und `evaluated-knowledge` haben je
   `source: "./"` und eine `skills`-Liste; die CLI lädt nur die gelisteten Ordner
   (gemessen: 10, 3, 6 Skills, `claude plugin validate .` grün). Der Web-Loader von
-  claude.ai ignoriert die Liste (Abschnitt davor) und lüde je Plugin alle Ordner. Der
+  claude.ai ignorierte die Liste am 2026-09-23 (Abschnitt davor); seit 2026-10-15 ist
+  bestätigt, dass er sie liest (Abschnitt evaluated-setup). Der
   Nutzer bindet Plugins nur per CLI an, `plugins/synced/` enthält keine Plugins, und
   Cloud-Sessions laden Plugins gar nicht (gemeldeter Bug); dort helfen nur die
   Projekt-Kopien unter `.claude/skills/`.
@@ -2097,10 +2100,12 @@ hatte eine zweite `SKILL.md` unter `assets/skill-template/`. Die beiden Setup-Sk
 jetzt im Plugin `evaluated-setup`, das Gerüst heißt `SKILL.md.tmpl`; `tests/test_marketplace.py`
 prüft die Web-Plugins mit diesen Regeln.
 
-- **Nicht im Web gemessen.** Ob der Import jetzt durchgeht, prüft der Nutzer. Liest der
-  Web-Loader die `skills`-Liste weiter nicht (Abschnitt Marketplace, 2026-09-23), lädt
-  jedes Plugin auch setup-repo und setup-user, und der Split hilft nicht; dann bleibt,
-  `disable-model-invocation` zu entfernen.
+- **Im Web bestätigt (2026-10-15).** Der Nutzer hat geprüft: Der Marketplace zeigt
+  die einzelnen `evaluated-`-Plugins, jedes enthält genau die Skills seiner `skills`-Liste, und
+  sie sind aufrufbar, sobald das Plugin aktiv ist. Auch in Claude Code läuft alles wie
+  vorgesehen. Welche der drei Ursachen (Schlüssel, zweite `SKILL.md`, verschachtelte
+  `plugin.json`) der Import einzeln abgelehnt hätte, ist nicht getrennt gemessen; alle
+  drei hält `tests/test_marketplace.py` fern.
 - **Der Validator ist eine Näherung.** Gegen den echten Import ist er nicht abgeglichen;
   eine Regel, die claude.ai zusätzlich prüft, findet der Test nicht.
 - **Nachtrag 2026-10-15: verschachtelte `plugin.json`.** Nach dem Merge lehnte claude.ai
