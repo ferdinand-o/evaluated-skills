@@ -1678,6 +1678,17 @@ behoben zu werden:
   „Betrieb"); Nachweis ist ein Lauf mit Subagenten außerhalb des Harness, siehe
   Report. `--without-skill` (Spec 18) steht aus; bei Eval 1 entscheidet dann die
   Register-Zeile, ob er etwas misst.
+- **Die Beispiele in `rules.md` widersprechen R5.2, wenn man sie als Vorlage liest.**
+  Das „Nachher" von Beispiel 1 trägt Zahlen (400 auf 60 Millisekunden, zwei Drittel,
+  TTL eine Stunde), die im „Vorher" fehlen; der Entwurf setzt voraus, dass der Autor
+  sie hatte. Zwei Subagenten im zweiten Lauf erkannten die Fixture als dieses Vorher,
+  verwarfen das Nachher wegen R5.2 und ließen die Stelle allgemein. `rules.md` sagt
+  das seit dem zweiten Lauf in einem Satz vor Abschnitt 9.
+- **Bei Eval 2 trennen nur die Artefakt-Assertions.** In der Baseline ohne Skill
+  entfernte das Basismodell dieselben drei Phrasen und das Partizip; die
+  `must_not`-Muster auf `text.md` waren ohne Skill genauso erfüllt. Rot wurde der Eval
+  allein durch `measure.json`. Das Skript maß trotzdem einen Unterschied (3 Befunde
+  ohne Skill gegen 1 mit), den keine Assertion abbildet.
 - **`explain`s Rückverweis nennt die Tokens nicht wörtlich.** Eine Zeile mit `Next:`
   in dessen Abgrenzung hätte `evals_due: true` ausgelöst, ohne dass sich sein Contract
   ändert; der Satz sagt „die drei wörtlichen Tokens" und meint dieselben.

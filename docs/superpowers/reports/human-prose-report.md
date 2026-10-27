@@ -120,10 +120,52 @@ und kein Agent hat eine Zahl erfunden; alle drei fragten am Ende. Die Register-W
 passte in allen fünf Läufen (`kurz` für die Mail, sonst `fach`). Eval 5 ist keine
 Routing-Messung, weil im Workspace nur diese Skill lag; das misst erst der Harness.
 
+### Zweiter Lauf, Baseline ohne Skill, Routing mit Konkurrenz (2026-09-15)
+
+Elf Subagenten in drei Reihen, derselbe Aufbau, bewertet mit `grade()` und der
+Agent-Antwort.
+
+| Reihe | Aufbau | Ergebnis |
+| --- | --- | --- |
+| Zweiter Lauf mit Skill | fünf frische Workspaces, `human-prose` installiert | 5 von 5 PASS |
+| Baseline ohne Skill (das, was `--without-skill` im Harness tut) | dieselben Prompts, nichts unter `.claude/skills/` | 5 von 5 FAIL, kein Eval grün ohne Skill |
+| Routing mit Konkurrenz | Eval 5 mit `human-prose`, `visual-summary`, `explain`, `dev-report` installiert | PASS, der Agent wählte `human-prose` und nannte die Description als Grund |
+
+Was die Baseline zeigt, je Eval:
+
+- **Eval 1:** Ohne Skill kommt die Mail mit Anrede, Gruß, „Meldet euch" und einem
+  Geviertstrich; die Register-Zeile fehlt. Beide Abwesenheiten trennen hier, das Token
+  ohnehin.
+- **Eval 2:** Ohne Skill entfernte das Basismodell dieselben drei Phrasen, das Partizip
+  und den Rahmen. **Die `must_not`-Muster auf `text.md` trennen nicht**, nur
+  `measure.json` trennt. Der Text ohne Skill hatte danach ein Semikolon, keinen kurzen
+  Satz und kein konkretes Element, nachgemessen mit dem Skript: 3 Befunde gegen 1 mit
+  Skill. Das Skript misst also einen Unterschied, den die Assertions nicht abbilden.
+- **Eval 3:** Ohne Skill erfand das Basismodell ebenfalls keine Zahl, ließ aber
+  `text.md` unangetastet und stellte fünf Fragen mit drei Alternativen. Die Skill
+  unterscheidet sich nicht in der Ehrlichkeit, sondern darin, dass sie trotzdem
+  umschreibt und die Rückfrage in eine Zeile bringt.
+- **Eval 4:** Beide Texte ohne erfundene Zahl. Der Text ohne Skill: 36,7 Wörter auf
+  -ung je 1000, in drei Fenstern kein Satz unter sieben Wörtern, ein Absatz ohne
+  Konkretion (3 Befunde). Der Text mit Skill: 13 pass. Das ist der schärfste Vergleich
+  der Reihe.
+- **Eval 5:** Ohne Skill schrieb das Basismodell drei Cache-Strategien und einen
+  TTL-Hinweis in den Text, die im Original nicht standen, und markierte das als
+  Annahme. R5.2 verbietet genau das; alle acht Skill-Läufe der beiden Reihen ließen die
+  Stelle allgemein.
+
+Was der zweite Lauf zeigt: Zwei Agenten stellten fest, dass `text.md` wortgleich das
+„Vorher" aus Beispiel 1 in `rules.md` ist, und verwarfen das dortige „Nachher", weil es
+Zahlen trägt (400 auf 60 Millisekunden, zwei Drittel, TTL eine Stunde), die im Original
+fehlen. Der Contract hat gegen die Vorlage gewonnen; `rules.md` trägt seit diesem Lauf
+einen Satz dazu. Die Routing-Reihe misst mit vier Skills, was der Harness mit 19
+fremden misst: eine Stichprobe, kein Beweis, aber die erste mit Konkurrenz.
+
 ## Offen für die nächste Runde
 
 - Fünf bis zehn eigene Texte des Nutzers als Fixture, dann Schwellen messen statt
   schätzen (Spec 19, Open questions).
 - R2.1 für Register `kurz` entscheiden: gilt „ein Satz mit zwanzig Wörtern" in einer
   Vier-Satz-Mail? Der Entwurf sagt ja, das Beispiel sagt nein.
-- `--without-skill` über die fünf Evals, sobald der Harness beim Nutzer läuft.
+- `--without-skill` im Harness selbst; die Baseline mit Subagenten war rot für alle
+  fünf, aber bei Eval 2 tragen nur die Artefakt-Assertions, nicht die Phrasen-Muster.

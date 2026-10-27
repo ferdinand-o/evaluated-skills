@@ -260,6 +260,11 @@ Menschlicher Text wird nicht durch eingebaute Tippfehler menschlicher. Rechtschr
 
 ## 9. Beispiele
 
+Die Zahlen und Zeiten in den Nachher-Texten hatte der Autor der Beispiele. Wer einen
+Vorher-Text ohne solche Angaben überarbeitet, lässt die Stelle allgemein und fragt
+(R5.2); das Nachher ist Vorbild für Form und Rhythmus, nicht Vorlage für Konkretion.
+
+
 ### Beispiel 1, Fachtext Deutsch
 
 Vorher:
