@@ -14,6 +14,7 @@
       "source": "./",
       "description": "Entwicklungs-Skills: Spec, Debugging, Tests, Review-Kontext, Architektur, Reports, Übergabe, Subagent-Dispatch, API- und Schema-Entwurf. Immer an.",
       "repository": "https://github.com/ferdinand-o/cc-skills",
+      "license": "MIT",
       "keywords": [
         "skills",
         "evals",
@@ -40,6 +41,7 @@
       "source": "./",
       "description": "Einrichtung von Claude Code: User-Konfiguration und Repo-Setup, nur als Slash-Befehl. Nur für Claude Code — claude.ai (Web) importiert dieses Plugin nicht, weil die Skills disable-model-invocation tragen.",
       "repository": "https://github.com/ferdinand-o/cc-skills",
+      "license": "MIT",
       "keywords": [
         "skills",
         "evals",
@@ -56,6 +58,7 @@
       "source": "./",
       "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung, Mobil-Prüfung. Standardmäßig aus, je Frontend-Repo einschalten.",
       "repository": "https://github.com/ferdinand-o/cc-skills",
+      "license": "MIT",
       "keywords": [
         "skills",
         "evals",
@@ -75,6 +78,7 @@
       "source": "./",
       "description": "Wissens-Skills: erklären, lernen, üben, recherchieren, zusammenfassen, menschlich schreiben. Immer an.",
       "repository": "https://github.com/ferdinand-o/cc-skills",
+      "license": "MIT",
       "keywords": [
         "skills",
         "evals",

@@ -5,7 +5,7 @@ description: Use for research where source provenance must survive scrutiny — 
 
 # verified-research — Register vor Suche, Tier vor Claim, Delta vor Wiederholung
 
-Fork/Adaption von [samber/deep-research](https://github.com/samber/deep-research)
+Fork/Adaption von [samber/cc-skills](https://github.com/samber/cc-skills), Skill `deep-research`
 (MIT-Lizenz): Prozessgerüst, Recherche-Typen (`references/research-types.md`),
 Konfidenz-Tracking und Prose-first-Doktrin bleiben. Neu: Quellenregister, Tiers,
 Truth-Bewertung, Verifikations-Pass und Delta-Modus.

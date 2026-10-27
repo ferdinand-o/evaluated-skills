@@ -1,7 +1,7 @@
 # Recherche-Typen
 
 Adaptiert (nicht wörtlich übernommen) aus dem Prozessgerüst von
-[samber/deep-research](https://github.com/samber/deep-research) (MIT-Lizenz),
+[samber/cc-skills](https://github.com/samber/cc-skills), Skill `deep-research` (MIT-Lizenz),
 gekürzt auf die Typ-Unterscheidung. Der Typ bestimmt Tiefe und Parallelisierung, nicht
 die Register-/Tier-Pflicht — die gilt für alle vier Typen gleichermaßen.
 

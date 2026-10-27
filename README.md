@@ -1,54 +1,59 @@
 # cc-skills
 
-Persönliche Claude-Skills und ihre Spezifikationen.
+A collection of Claude skills, shipped as four Claude Code plugins. Every skill comes
+with a written specification and an eval suite, and has to prove in a baseline run
+that it adds something over the bare model.
 
-## Aufbau
+> **Language.** The skills, specs and docs are written in German, and skill
+> descriptions trigger on German phrases ("neues Feature", "Bug", "Übergabe", …). The
+> README, `CONTRIBUTING.md` and the notices are in English. Issues in English or German
+> are both fine.
 
-| Ordner | Inhalt |
+## Repository layout
+
+| Folder | Contents |
 | --- | --- |
-| `skills/` | die gebauten Skills (je ein Ordner mit `SKILL.md`) |
-| `specs/` | Spezifikationen, Spec 00 ist die gemeinsame Grundlage |
-| `evals/` | Eval-Definitionen und Fixtures |
-| `evals-templates/` | Vorlagen-Messungen außerhalb des Eval-Vertrags (laufen mit `--evals-dir evals-templates`) |
-| `evalkit/` | der geteilte Eval-Harness |
-| `docs/` | Konventionen und Pläne |
-| `.claude/skills/` | generierte Projekt-Kopien für die Arbeit an diesem Repo, nie von Hand ändern |
-| `scripts/` | Repo-Werkzeuge, darunter `sync_skills.py` für die Projekt-Kopien |
+| `skills/` | the skills (one folder each, with a `SKILL.md`) |
+| `specs/` | specifications; Spec 00 is the shared foundation |
+| `evals/` | eval definitions and fixtures |
+| `evals-templates/` | template measurements outside the eval contract (run with `--evals-dir evals-templates`) |
+| `evalkit/` | the shared eval harness |
+| `docs/` | conventions, plans, reports (see [`docs/README.md`](docs/README.md)) |
+| `.claude/skills/` | generated project copies for working on this repo, never edit by hand |
+| `scripts/` | repo tooling, including `sync_skills.py` for the project copies |
 
-## Als Plugins installieren
+## Install as plugins
 
-Das Repo ist ein Claude-Code-Marketplace (`.claude-plugin/marketplace.json`) mit vier
-Plugins. Alle nehmen die Repo-Wurzel als Quelle und laden nur die Skills ihrer
-`skills`-Liste; installiert heißen sie mit dem Plugin als Namensraum, etwa
-`cc-dev:handoff`. Ab Claude Code 2.1.275 installiert je Plugin eine Zeile Marketplace
-und Plugin zusammen:
+The repo is a Claude Code marketplace (`.claude-plugin/marketplace.json`) with four
+plugins. All use the repo root as source and load only the skills in their `skills`
+list; once installed, skills are namespaced by plugin, e.g. `cc-dev:handoff`. From
+Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
-- `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — Entwicklung, immer an:
-  architecture-map, debug-ledger, dev-report, feature-spec, handoff,
+- `/plugin install cc-dev --marketplace ferdinand-o/cc-skills` — development, always
+  on: architecture-map, debug-ledger, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
   testing-strategy, work-plan.
-- `/plugin install cc-setup --marketplace ferdinand-o/cc-skills` — Einrichtung von
-  Claude Code, **nur CLI**: setup-repo und setup-user, nur als `/cc-setup:setup-repo`
-  und `/cc-setup:setup-user`. Beide tragen `disable-model-invocation`, das claude.ai
-  (Web) nicht kennt; dort fügst du nur `cc-dev`, `cc-ui` und `cc-knowledge` hinzu.
-- `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **standardmäßig
-  aus** (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
-  ui-architect. Je
-  Frontend-Repo in dessen `.claude/settings.json` einschalten, mit
-  `"enabledPlugins": {"cc-ui@cc-skills": true}`; die Projekt-Einstellung gewinnt
-  gegen das `false`, das die Installation in die User-Settings schreibt.
-- `/plugin install cc-knowledge --marketplace ferdinand-o/cc-skills` — Wissen, immer
-  an: exercise-forge, explain, human-prose, learning-coach, verified-research,
+- `/plugin install cc-setup --marketplace ferdinand-o/cc-skills` — Claude Code setup,
+  **CLI only**: setup-repo and setup-user, available only as `/cc-setup:setup-repo`
+  and `/cc-setup:setup-user`. Both carry `disable-model-invocation`, which claude.ai
+  (web) does not know; on the web, add only `cc-dev`, `cc-ui` and `cc-knowledge`.
+- `/plugin install cc-ui --marketplace ferdinand-o/cc-skills` — UI, **off by default**
+  (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
+  ui-architect. Enable it per frontend repo in that repo's `.claude/settings.json` with
+  `"enabledPlugins": {"cc-ui@cc-skills": true}`; the project setting wins over the
+  `false` that the installation writes to the user settings.
+- `/plugin install cc-knowledge --marketplace ferdinand-o/cc-skills` — knowledge,
+  always on: exercise-forge, explain, human-prose, learning-coach, verified-research,
   visual-summary.
 
-Mit älteren Versionen erst `/plugin marketplace add ferdinand-o/cc-skills`, dann
-`/plugin install cc-dev@cc-skills` und so weiter. Neue Commits holt
-`/plugin marketplace update cc-skills`, danach `/reload-plugins`.
+With older versions, first run `/plugin marketplace add ferdinand-o/cc-skills`, then
+`/plugin install cc-dev@cc-skills` and so on. New commits arrive with
+`/plugin marketplace update cc-skills`, followed by `/reload-plugins`.
 
-**Umstieg vom alten Plugin `cc-skills`.** Bis Spec 20 war die ganze Sammlung ein Plugin
-`cc-skills@cc-skills`. Das Manifest führt es unter `renames` als entfernt
-(`"cc-skills": null`); `/plugin marketplace update cc-skills` nimmt es deshalb heraus.
-Danach die neuen Plugins installieren:
+**Migrating from the old `cc-skills` plugin.** Until Spec 20 the whole collection was
+one plugin, `cc-skills@cc-skills`. The manifest lists it under `renames` as removed
+(`"cc-skills": null`), so `/plugin marketplace update cc-skills` drops it. Then install
+the new plugins:
 
 ```
 /plugin marketplace update cc-skills
@@ -58,74 +63,79 @@ Danach die neuen Plugins installieren:
 /plugin install cc-knowledge@cc-skills
 ```
 
-**In keinem Plugin** stehen drei Skills, je mit Grund in `.claude-plugin/excluded.json`:
+**In no plugin** are three skills, each with its reason in `.claude-plugin/excluded.json`:
 
-- impl-plan und skill-forge gelten nur für Specs und Skills dieser Sammlung. Sie liegen
-  nur als Projekt-Kopie unter `.claude/skills/` und laden, wenn Claude Code in diesem
-  Repo läuft.
-- cad-parts ist ausgeschlossen, weil es einen stl-cad-server als MCP-Server braucht.
+- impl-plan and skill-forge apply only to specs and skills of this collection. They
+  exist only as project copies under `.claude/skills/` and load when Claude Code runs
+  in this repo.
+- cad-parts is excluded because it needs an `stl-cad-server` MCP server.
 
-**Projekt-Kopien.** `.claude/skills/` hält zehn Skills für die Arbeit an diesem Repo:
-impl-plan, skill-forge und acht aus `cc-dev` ohne rest-api-architect und
-sql-schema-architect. Original ist immer `skills/<name>/`; `scripts/sync_skills.py`
-spiegelt die Skills seiner Tabelle `PROJECT_SKILLS` dorthin, und
-`python3 scripts/sync_skills.py --check` meldet jede abweichende Kopie. Die committete
-`.claude/settings.json` schaltet `cc-dev@cc-skills` in diesem Repo aus, damit die acht
-nicht doppelt erscheinen.
+**Project copies.** `.claude/skills/` holds ten skills for working on this repo:
+impl-plan, skill-forge and eight from `cc-dev` (all except rest-api-architect and
+sql-schema-architect). The original is always `skills/<name>/`;
+`scripts/sync_skills.py` mirrors the skills in its `PROJECT_SKILLS` table, and
+`python3 scripts/sync_skills.py --check` reports every copy that has drifted. The
+committed `.claude/settings.json` turns `cc-dev@cc-skills` off inside this repo so the
+eight skills do not appear twice.
 
-`tests/test_marketplace.py` hält Manifest, `excluded.json` und Kopien mit `skills/`
-synchron: Eine neue Skill steht in genau einer `skills`-Liste oder mit Grund in
-`.claude-plugin/excluded.json`, sonst ist der Test rot; dieselbe Zuordnung prüft die
-Lint-Regel `plugin-membership` von skill-forge. Derselbe Test prüft die Skills der
-Web-Plugins mit den Upload-Regeln von claude.ai (Frontmatter-Schlüssel, `<`/`>` und Länge
-der Description, genau eine `SKILL.md` je Ordner).
+`tests/test_marketplace.py` keeps manifest, `excluded.json` and copies in sync with
+`skills/`: a new skill is listed in exactly one `skills` list or, with a reason, in
+`.claude-plugin/excluded.json`, otherwise the test fails; skill-forge's lint rule
+`plugin-membership` checks the same mapping. The test also checks the skills of the web
+plugins against claude.ai's upload rules (frontmatter keys, `<`/`>` and length of the
+description, exactly one `SKILL.md` per folder).
 
-## Evals laufen lassen
+## Running the evals
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                                  # Harness-Unit-Tests
-.venv/bin/python run_evals.py --class contract    # billige Contract-Evals
-.venv/bin/python run_evals.py --skill handoff     # alles für eine Skill
-.venv/bin/python run_evals.py --skill handoff --without-skill   # Baseline: dieselben Evals, nichts installiert
+.venv/bin/pytest                                  # harness unit tests
+.venv/bin/python run_evals.py --class contract    # cheap contract evals
+.venv/bin/python run_evals.py --skill handoff     # everything for one skill
+.venv/bin/python run_evals.py --skill handoff --without-skill   # baseline: same evals, nothing installed
 ```
 
-Exit-Codes: `0` alles grün, `1` mindestens ein Eval gefallen, `2` Harness-Fehler.
-Mit `--without-skill` umgekehrt: `1`, sobald ein Eval ohne Skill grün ist (er misst
-nichts, was die Skill beiträgt), `0`, wenn alle rot sind. Ein Lauf, in dem der Agent
-die Skill nicht sah (mit Skill) oder trotzdem sah (ohne Skill), ist `2`, kein Ergebnis.
+Exit codes: `0` all green, `1` at least one eval failed, `2` harness error. With
+`--without-skill` it is the other way round: `1` as soon as one eval passes without the
+skill (it measures nothing the skill contributes), `0` if all fail. A run in which the
+agent did not see the skill (with skill) or saw it anyway (without skill) is `2`, not
+a result.
 
 ## Routing
 
-Welche Skill für welchen Anlass — die zentrale Matrix aus Spec 00 §5. Jede
-Description trägt zusätzlich eine Abgrenzungsklausel gegen ihre zwei stärksten
-Konkurrenten. Mit `(geplant)` markierte Skills sind spezifiziert, aber noch
-nicht gebaut — die Matrix beschreibt den Zielzustand.
+Which skill for which occasion — the central matrix from Spec 00 §5. Every description
+also carries a delimitation clause against its two strongest competitors.
 
-| Anlass | zuständig | nicht |
+| Occasion | Responsible | Not |
 | --- | --- | --- |
-| neues Feature, Codebase existiert | feature-spec | brainstorming — die eigene Profil-Skill, nicht superpowers (kein Codebase-Bezug), work-plan (das *Wie* danach) |
-| Bug, Testfehler | debug-ledger | feature-spec |
-| Testplan, Repo-Typ-Frage | testing-strategy | test-first (Zyklus *während* der Implementierung), feature-spec *(geplant)* (erzeugt die Test-Stubs, testing-strategy implementiert sie aus) |
-| neues Verhalten implementieren, Regressionstest nach der Diagnose | test-first | testing-strategy (welche Tests fehlen), debug-ledger (Diagnose davor), superpowers:test-driven-development (Doktrin ohne Beleg) |
-| Diff prüfen | `/code-review` (mitgeliefert) | eigene Review-Skill — siehe Spec 04, Zuschnitt offen |
-| Sicherheit | `/security-review`, trailofbits | alle eigenen Skills |
-| UI: Stil und Tokens | ui-architect | enterprise-ui (Produktoberfläche), motion-landing (Bewegung) |
-| UI: Produktoberfläche, Tabellen, Formulare | enterprise-ui | ui-architect (Marketing/Brand) |
-| Landing-Page-Bewegung | motion-landing *(geplant)* | ui-architect (Stil/Tokens), enterprise-ui |
-| mobil kaputt, „geht das auf dem Handy?" | mobile-audit | enterprise-ui/ui-architect/motion-landing — die *bauen* mobil mit `references/mobile.md`, mobile-audit prueft nur |
-| ad-hoc „fass zusammen" | visual-summary | dev-report (periodisch), handoff (Sitzungsende) |
-| Konzept/Thema erklären (kein Code) | explain | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
-| Implementierungsplan zu einer Spec | impl-plan | work-plan (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
-| Plan für Arbeit in einem beliebigen Repo (Spec, Befund, Auftrag) | work-plan | impl-plan (Specs dieser Sammlung), eingebauter Plan-Modus (Plan nur im Gespräch), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
-| Skill bauen oder ändern | skill-forge | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
-| Text schreiben oder überarbeiten, der nicht nach Modell klingen soll | human-prose | setup-writing-style (baut das Stimmprofil, im Nutzerprofil), visual-summary (verdichtet, ändert keinen Stil), explain (erklärt mit eigenem Antwortvertrag) |
-| Sitzungsende, Übergabe | handoff | visual-summary, dev-report |
-| eigenen Claude-Code-User-Scope einrichten oder prüfen | setup-user | `/statusline` (Statusline nach Wunsch), setup-repo (Repo, Cloud, CI), handoff (sichert den Stand) |
-| ein Repo für Claude Code einrichten oder prüfen | setup-repo | setup-user (persönlicher User-Scope), testing-strategy (welche Tests fehlen), `/init` (CLAUDE.md ohne Beleg) |
+| new feature, codebase exists | feature-spec | brainstorming (your own profile skill, not superpowers: no codebase link), work-plan (the *how* afterwards) |
+| bug, failing test | debug-ledger | feature-spec |
+| test plan, repo-type question | testing-strategy | test-first (the cycle *during* implementation), feature-spec (produces the test stubs, testing-strategy implements from them) |
+| implement new behaviour, regression test after diagnosis | test-first | testing-strategy (which tests are missing), debug-ledger (diagnosis first), superpowers:test-driven-development (doctrine without evidence) |
+| review a diff | `/code-review` (built in) | a dedicated review skill — see Spec 04, scope left open |
+| security | `/security-review`, trailofbits | all skills of this collection |
+| UI: style and tokens | ui-architect | enterprise-ui (product UI), motion-landing (motion) |
+| UI: product surfaces, tables, forms | enterprise-ui | ui-architect (marketing/brand) |
+| landing-page motion | motion-landing | ui-architect (style/tokens), enterprise-ui |
+| broken on mobile, "does it work on a phone?" | mobile-audit | enterprise-ui / ui-architect / motion-landing — they *build* mobile with `references/mobile.md`, mobile-audit only checks |
+| ad-hoc "summarise this" | visual-summary | dev-report (periodic), handoff (end of session) |
+| explain a concept or topic (no code) | explain | learning-coach (session with retrieval), visual-summary (condenses what exists), architecture-map (codebase) |
+| implementation plan for a spec | impl-plan | work-plan (other repos), brainstorming (your own profile skill, not superpowers: the spec comes first), subagent-dev (splits and dispatches the finished plan) |
+| plan for work in any repo (spec, finding, task) | work-plan | impl-plan (specs of this collection), built-in plan mode (plan only in the conversation), subagent-dev (splits and dispatches the finished plan) |
+| build or change a skill | skill-forge | skill-creator (outside this collection, its own eval schema), superpowers:writing-skills (discipline skills with pressure scenarios), impl-plan (the plan only) |
+| write or rework a text that must not sound like a model | human-prose | setup-writing-style (builds the voice profile, in the user profile), visual-summary (condenses, does not change style), explain (explains, with its own answer contract) |
+| end of session, handover | handoff | visual-summary, dev-report |
+| set up or check your own Claude Code user scope | setup-user | `/statusline` (status line on request), setup-repo (repo, cloud, CI), handoff (saves the state) |
+| set up or check a repo for Claude Code | setup-repo | setup-user (personal user scope), testing-strategy (which tests are missing), `/init` (CLAUDE.md without evidence) |
 
-## Konventionen
+## Conventions
 
-- [Artefakt-Kopfzeile und Konsumenten-Regel](docs/artifact-header.md)
-- [Spec 00 — Artefakt-Vertrag, Evals, Tiers und Routing](specs/Spec%2000%20%E2%80%93%20skill-foundation.md)
-- [Bekannte Grenzen des Eval-Harness](docs/known-limits.md)
+- [Artifact header and consumer rule](docs/artifact-header.md)
+- [Spec 00 — artifact contract, evals, tiers and routing](specs/Spec%2000%20%E2%80%93%20skill-foundation.md)
+- [Known limits of the eval harness](docs/known-limits.md)
+
+## License and contributions
+
+[MIT](LICENSE). Parts are adapted from other MIT-licensed projects; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Issues are welcome, pull requests are
+not accepted — see [CONTRIBUTING.md](CONTRIBUTING.md).
