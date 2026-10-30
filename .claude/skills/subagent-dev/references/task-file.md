@@ -5,7 +5,7 @@ Konversationshistorie oder des ganzen Plans. `plan_to_tasks.py generate`
 schreibt sie nach `.skills/cache/tasks/task-<id>-<slug>.md` (Ephemera, Spec 00
 §1: jederzeit aus dem Plan neu erzeugbar, deshalb gitignored).
 
-## Sechs Sektionen, immer in dieser Reihenfolge
+## Sieben Sektionen, immer in dieser Reihenfolge
 
 1. **Ziel** — der Task-Titel aus dem Plan.
 2. **Datei-Allowlist** — aus dem `Files:`-Block des Tasks (`Create`/`Modify`/
@@ -13,18 +13,27 @@ schreibt sie nach `.skills/cache/tasks/task-<id>-<slug>.md` (Ephemera, Spec 00
    schreibt der Agent nicht; `verify` prüft das mechanisch.
 3. **Interfaces** — `Consumes:`/`Produces:` wörtlich aus dem Plan. So kennt
    der Agent seine Nachbarn (Namen, Signaturen), ohne ihre Tasks zu sehen.
-4. **Akzeptanzkriterien** — die `- [ ] **Step N: ...**`-Zeilen des Plans, als
-   Liste.
-5. **Global Constraints** — der komplette `## Global Constraints`-Abschnitt
+4. **Modell und Abnehmer** — das Modell für den Dispatch (`opus`/`sonnet`) mit
+   Grund nach M0–M3 (Spec 27) und die Abnehmer: spätere Tasks, deren `Consumes`
+   ein `Produces`-Symbol dieser Task nennt, je mit den Symbolen (`name(arity)`,
+   wenn der Abnehmer eine Arity erwartet). Beides rechnet `generate` über den
+   ganzen Plan, auch mit `--tasks` — dieselbe Task bekommt bei jedem Aufruf
+   dasselbe Modell. Pflicht-Tasks (Verifikation, Evals, Nachbarn, known-limits,
+   Report) sind keine Abnehmer.
+5. **Akzeptanzkriterien** — die `- [ ] **Step N: ...**`-Zeilen des Plans, als
+   Liste: je Step der Titel und darunter eingerückt der Text bis zum nächsten
+   Step (auch über mehrere eingerückte Zeilen). Ein Step ohne Text bleibt eine
+   Zeile. Der Titel allein sagt nicht, was zu bauen ist — der Text ist es.
+6. **Global Constraints** — der komplette `## Global Constraints`-Abschnitt
    des Plans, wörtlich kopiert (ohne die eigene Überschrift, die die Task-Datei
    schon hat). Jeder Task-Vertrag schließt sie implizit ein.
-6. **Nicht-Ziele** — alles außerhalb der Allowlist, plus die Titel der übrigen
+7. **Nicht-Ziele** — alles außerhalb der Allowlist, plus die Titel der übrigen
    Tasks dieses Plans (damit ein Agent weiß, wessen Arbeit er nicht mit
    erledigen soll).
 
 Danach folgt ein eingebetteter ` ```json `-Block — die maschinenlesbare
 Fassung, die `verify` zurückliest (`task_id`, `plan`, `allowlist`, `produces`
-mit `name`/`arity`). Menschen lesen die Prosa oben, `verify` liest nur den
+mit `kind`/`name`/`arity`, `model`, `consumers` als Liste von `task`/`symbols`). Menschen lesen die Prosa oben, `verify` liest nur den
 JSON-Block; beide stammen aus demselben Render-Schritt und können nicht
 auseinanderlaufen.
 
@@ -63,9 +72,15 @@ Außerhalb dieser Dateien wird nicht geschrieben:
 - Produces:
   - `parse(line: str) -> dict`
 
+## Modell und Abnehmer
+
+- Modell: `sonnet` — Standard
+- Abnehmer: Task 2 (`parse(1)`)
+
 ## Akzeptanzkriterien
 
 - Step 1: Write the failing test
+  `test_parse` prüft eine gültige und eine leere Zeile.
 - Step 2: Implement
 
 ## Global Constraints
@@ -84,7 +99,9 @@ nicht hierher:
   "task_id": 1,
   "plan": "docs/superpowers/plans/x.md",
   "allowlist": ["src/parser.py", "tests/test_parser.py"],
-  "produces": [{"name": "parse", "arity": 1}]
+  "produces": [{"kind": "fn", "name": "parse", "arity": 1}],
+  "model": "sonnet",
+  "consumers": [{"task": 2, "symbols": ["fn:parse(1)"]}]
 }
 ```
 ```

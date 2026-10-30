@@ -1320,6 +1320,49 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   (`Zyklus NN`) und in Eval-IDs (`<fall>`) gemeldet; ein `<zusage>` in Prosa nicht.
 - **Der Review-Vermerk ist ein String, kein Nachweis.** Specs ohne Nummer im
   Dateinamen gelten als neu (Exit 1 bei Befund).
+## subagent-dev — Prüfpunkte und Modellwahl (Spec 27, 2026-10-30)
+
+- **Regeln gesetzt, nicht gemessen.** Risikowörter (M2), die Breite von fünf Dateien (M3),
+  zwei Abnehmer für Opus (M1), die Titel der Pflicht-Tasks und der Größen-Trigger von 400
+  Zeilen stammen aus der Spec, nicht aus einer Messung. Das runlog
+  (`.skills/subagent-dev/runlog.jsonl`) soll sie über mehrere Pläne kalibrieren.
+- **M1 trifft auch Doktrin-Tasks.** Eine Reference, deren Tokens zwei spätere Tasks
+  konsumieren, gilt als Vorleistung und bekommt Opus. Im Plan zu Spec 27 betraf das
+  Task 11 und 12 (`checkpoints.md`, `contract-check.md`). Gegenmittel: `**Modell:** sonnet`
+  im Plan.
+- **`interfaces_unknown` hat keine Abnehmer.** Solche Tasks bekommen weder M1 noch C1; für
+  sie greift nur der Größen-Trigger. Im Plan zu cad-parts sind das 11 von 12 Tasks.
+- **Abnehmer-Check nur für Python.** Liegt keine Python-Datei in der Allowlist (Delphi,
+  TS), steht `unchecked`, und `verify` meldet höchstens `unverified`. Bei `*args` bleibt
+  die Untergrenze der Pflichtparameter bestehen; die Spec sagt wörtlich „passt", ein
+  Aufruf mit zu wenigen Argumenten scheitert aber auch dann.
+- **M0 gilt für eine Zeile `**Modell:**` irgendwo zwischen Titel und `**Files:**`**, nicht
+  nur direkt unter dem Titel (Spec: „direkt unter").
+- **C3 hängt an der höchsten ID der Gruppe**, wie die Spec es sagt. In einem Plan, dessen
+  IDs nicht aufsteigen, kann der Gruppen-Prüfpunkt vor dem letzten Gruppenmitglied
+  fällig werden. Ein Prüfpunkt hinter `final` wird mit `final` zusammengelegt.
+- **Review am Prüfpunkt ohne Abdeckungsnachweis.** Solange deep-review (Spec 26) pausiert
+  ist, läuft `/code-review`; der finale Prüfpunkt reviewt `base..HEAD` dann vollständig
+  neu, weil `/code-review` kein `--since` kennt.
+- **Tokens aus `modelUsage`.** Bei `/code-review` über `claude -p` ist der `usage`-Block 0
+  (`local_command`, `num_turns: 0`); Kosten und Tokens stehen nur in `modelUsage`. Ob das
+  Agent-Werkzeug überall `model` annimmt und Tokens zurückgibt, ist nur in Claude Code
+  beobachtet; fehlen sie, schreibt `log` `null`.
+- **Hinweise lesen das test-first-Log mit eigener Logik.** `_log_hints` parst
+  `log.md` selbst statt über `tdd_log.py` (ein Import über Skill-Grenzen wäre
+  zerbrechlicher). Ändert test-first sein Tabellenformat, driftet der Hinweis still.
+- **Vertragsprüfung durchgefallen heißt: ein Step `fehlt`.** Änderungen ohne Bezug und
+  Hinweise gehen in die Übergabe, lösen allein keine Fix-Runde aus (Festlegung beim Bau).
+- **Zwei Fix-Runden sind G1.** Das Skript zählt Fix-Runden nicht; die Grenze verlangt
+  die SKILL.md.
+- **Prüfpunkte finden weniger als ein Review je Task.** Gemessen an zwei Plänen: 61
+  statt 145 Funde, davon fehlen 31 „mittel" und 76 „niedrig", kein „hoch" (Report,
+  „Schwere der Funde"). `--max-findings all` am Prüfpunkt holt nur einen Teil zurück.
+  Wer jeden mittleren Fund will, nimmt das Review je Task in Kauf.
+- **Basislinie aus zwei Plänen und ohne Fix-Kreislauf.** Gemessen wurden Reviews über die
+  gemergten Commits von test-first und skill-dir (17 Tasks), nicht der Kreislauf aus
+  Review, Fix und erneutem Review; ein dritter Plan entfiel auf Wunsch des Nutzers.
+
 ## architecture-map
 
 Nach der ersten Review-Runde (3 Defekte, 3 Lücken, 2 Anmerkungen behoben — siehe

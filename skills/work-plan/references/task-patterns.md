@@ -81,6 +81,30 @@ Immer der letzte Task, Titel wörtlich `Verifikation`.
 Fehlt ein Befehl, sagt der Step „Verifikation: keine — ungeprüft" und nennt, was der
 Nutzer stattdessen prüfen kann.
 
+## Modell und Abnehmer
+
+Welches Modell eine Task baut und wo reviewt wird, entscheidet subagent-dev aus dem
+ganzen Plan: Opus für Vorleistungen mit mindestens zwei Abnehmern, Risikopfade
+(`auth`, `migration`, `.sql` …) und breite Tasks ab fünf Dateien, sonst Sonnet. Der Plan
+kann das für eine Task festlegen — eine optionale Zeile direkt unter dem Task-Titel, vor
+`**Files:**`:
+
+```markdown
+### Task 4: Preisberechnung
+
+**Modell:** opus
+
+**Files:**
+```
+
+Nur `opus` oder `sonnet`; anderes meldet der Lint, und die Regeln greifen. Gedacht für
+das, was das Skript nicht sieht: Nebenläufigkeit, Algorithmen mit Sonderfällen.
+
+**Abnehmer-Task beginnt mit einem Test gegen die Vorleistung.** Konsumiert eine Task ein
+`Produces`-Symbol einer früheren, ist ihr erster Step ein Test, der dieses Symbol so
+aufruft, wie die Task es braucht. subagent-dev prüft vorher nur Name und Arity; ob die
+Vorleistung das Richtige tut, zeigt erst dieser Test.
+
 ## Zuschnittsregel
 
 Aus impl-plan übernommen, weil sie richtig ist:

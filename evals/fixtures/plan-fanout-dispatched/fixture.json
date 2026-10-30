@@ -1,0 +1,21 @@
+{
+  "git": true,
+  "description": "Plan wie plan-fanout mit Tag base; der zweite Commit ist Task 1 mit parse_order(line, strict) ohne Default.",
+  "commits": [
+    {
+      "message": "docs: Plan Bestellimport",
+      "tag": "base",
+      "touch": {
+        ".gitignore": ".skills/cache/\n.claude/\n",
+        "docs/plans/fanout.md": "<!-- skill: work-plan | schema: 1 | generated: work-plan für \"Bestellimport\" -->\n# Bestellimport Plan\n\n**Auftrag:** Bestellungen aus Textzeilen einlesen, importieren und exportieren.\n\n**Goal:** Ein Parser, den Import und Export gemeinsam nutzen, plus ein unabhängiges Log-Format.\n\n## Global Constraints\n\n- Python 3.11, nur Stdlib.\n\n---\n\n### Task 1: Parser\n\n**Files:**\n- Create: `src/parser.py`\n- Test: `tests/test_parser.py`\n\n**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: `fn:parse_order`\n\n- [ ] **Step 1: Test schreiben** — `test_parse_order`: eine Zeile `A-1;3` ergibt eine Bestellung.\n- [ ] **Step 2: Implementieren**\n\n### Task 2: Log-Format\n\n**Files:**\n- Create: `src/log_format.py`\n- Test: `tests/test_log_format.py`\n\n**Interfaces:**\n- Consumes: (nichts Neues)\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: Test schreiben**\n- [ ] **Step 2: Implementieren**\n\n### Task 3: Import\n\n**Files:**\n- Create: `src/importer.py`\n- Test: `tests/test_importer.py`\n\n**Interfaces:**\n- Consumes: `fn:parse_order(line)`\n- Produces: `fn:import_orders(path)`\n\n- [ ] **Step 1: Test schreiben**\n- [ ] **Step 2: Implementieren**\n\n### Task 4: Export\n\n**Files:**\n- Create: `src/export.py`\n- Test: `tests/test_export.py`\n\n**Interfaces:**\n- Consumes: `fn:parse_order(line)`\n- Produces: `fn:export_orders(rows, path)`\n\n- [ ] **Step 1: Test schreiben**\n- [ ] **Step 2: Implementieren**\n\n### Task 5: Verifikation\n\n**Files:**\n- Test: `tests/`\n\n**Interfaces:**\n- Consumes: `fn:parse_order(line)`, `fn:import_orders(path)`, `fn:export_orders(rows, path)`\n- Produces: (nichts Neues)\n\n- [ ] **Step 1: Gesamttests** — `python -m pytest -q` ist grün.\n",
+        "CLAUDE.md": "# Bestellimport\n\n- Python 3.11, nur Stdlib; Tests mit `python -m pytest -q`.\n- Pläne liegen unter `docs/plans/`, Code unter `src/`.\n"
+      }
+    },
+    {
+      "message": "Task 1: Parser",
+      "touch": {
+        "src/parser.py": "\"\"\"Bestellzeilen lesen.\"\"\"\n\n\ndef parse_order(line, strict):\n    sku, qty = line.strip().split(\";\")\n    if strict and not sku:\n        raise ValueError(\"leere SKU\")\n    return {\"sku\": sku, \"qty\": int(qty)}\n"
+      }
+    }
+  ]
+}
