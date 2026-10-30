@@ -61,6 +61,9 @@ PREFIXED_SYMBOL_RE = re.compile(r"`(fn|token|file):([^`]+)`")
 PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*(impl-plan|work-plan)\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
 # Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
 GLOB_CHARS = frozenset("*?[")
+# Pflicht-Titel (E8): solche Tasks konsumieren laut Plan alle Produces und zählen
+# nicht als Abnehmer.
+MANDATORY_TITLES = ("Verifikation", "Evals", "Nachbarn", "known-limits", "Report")
 
 
 class PlanParseError(ValueError):
@@ -442,14 +445,52 @@ def _symbol_pattern(name: str) -> str:
     return rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])"
 
 
-def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
-    """Name des Symbols, falls `consumer` etwas konsumiert, das `producer` produziert."""
+def _dependency_symbols(producer: PlanTask, consumer: PlanTask) -> list[str]:
+    """Namen aller Symbole, die `consumer` konsumiert und `producer` produziert."""
+    names: list[str] = []
     for kind, name, _ in extract_symbols(producer.produces):
         if kind == "file":
             continue  # Pfad-Überlappung, siehe build_overlap_graph
         if re.search(_symbol_pattern(name), consumer.consumes):
-            return name
-    return None
+            names.append(name)
+    return names
+
+
+def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
+    """Name des Symbols, falls `consumer` etwas konsumiert, das `producer` produziert."""
+    names = _dependency_symbols(producer, consumer)
+    return names[0] if names else None
+
+
+def is_mandatory_title(title: str) -> bool:
+    """Ist das eine Pflicht-Task (genau der Titel oder `<Titel> — …`)? Sie konsumiert
+    laut Plan alle `Produces` und zählt deshalb nicht als Abnehmer."""
+    return any(title == word or title.startswith(word + " —") for word in MANDATORY_TITLES)
+
+
+def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
+    """Task-ID -> Abnehmer: spätere Tasks, deren Consumes ein Produces-Symbol nennt.
+
+    Je Abnehmer `{"task": id, "symbols": [...]}`; ein Symbol steht als `name`, mit
+    erwarteter Arity aus dem Consumes des Abnehmers als `name(arity)`. Pflicht-Tasks
+    sind keine Abnehmer; eine Task mit `interfaces_unknown` hat keine erkennbaren.
+    """
+    result: dict[int, list[dict]] = {t.id: [] for t in tasks}
+    for i, producer in enumerate(tasks):
+        if producer.interfaces_unknown:
+            continue
+        for consumer in tasks[i + 1:]:
+            if is_mandatory_title(consumer.title):
+                continue
+            names = _dependency_symbols(producer, consumer)
+            if not names:
+                continue
+            arity = {n: a for k, n, a in extract_symbols(consumer.consumes) if k == "fn"}
+            result[producer.id].append({
+                "task": consumer.id,
+                "symbols": [n if arity.get(n) is None else f"{n}({arity[n]})" for n in names],
+            })
+    return result
 
 
 def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
