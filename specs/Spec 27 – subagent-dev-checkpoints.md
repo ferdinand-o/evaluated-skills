@@ -1,6 +1,6 @@
 # Spec 27: subagent-dev-checkpoints — Reviews dort, wo ein Fehler wandern kann, und das Modell je Task aus dem Plan
 
-Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags)
+Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags; Abgleich mit Spec 26: `runs` statt `last_run`, finaler Prüfpunkt mit `--since` über alle Läufe, Wiederverwendungsschlüssel statt Paket, `offen` am finalen Prüfpunkt, Profil als `--profile`/`--depth`)
 
 ## Problem
 
@@ -42,7 +42,7 @@ Ablage (Spec 00 §1):
 | --- | --- | --- |
 | `.skills/cache/tasks/gate.json` | Ephemera | wie bisher, je Task zusätzlich `model`, `model_reason`, `consumers`; dazu `checkpoints` |
 | `.skills/cache/tasks/task-<N>-<slug>.md` | Ephemera | wie bisher, dazu Abschnitt Modell und Abnehmer; Maschinenblock mit `model` und `consumers` |
-| `.skills/cache/tasks/review-state.json` | Ephemera | `_meta`, `plan`, `base`, `last_reviewed`, `last_run`, `reviewed_tasks` |
+| `.skills/cache/tasks/review-state.json` | Ephemera | `_meta`, `plan`, `base`, `last_reviewed`, `runs` (Lauf-IDs von deep-review seit `base`, älteste zuerst), `reviewed_tasks` |
 | `.skills/cache/tasks/checkpoint.json` | Ephemera | `_meta`, Ergebnis von `checkpoint status` |
 | `.skills/cache/tasks/contract-task-<N>.md` | Ephemera | Kopfzeile, Ergebnis der Vertragsprüfung |
 | `.skills/subagent-dev/runlog.jsonl` | Konfiguration, committet | erste Zeile `_meta`, dann je Runde und je Prüfpunkt eine Zeile |
@@ -51,7 +51,8 @@ Die Schlüssel in `gate.json` bleiben abwärtskompatibel; neue kommen dazu, alte
 nicht, Schema bleibt 1. Je Task stehen die Schlüssel in der Reihenfolge `id`, `title`,
 `files`, `files_unknown`, `interfaces_unknown`, `model`, `model_reason`, `consumers`.
 
-Das Review am Prüfpunkt ruft deep-review (Spec 26) im Hauptkontext auf. Fehlt deep-review,
+Das Review am Prüfpunkt ruft deep-review (Spec 26) im Hauptkontext auf: Profil `checkpoint`
+als `--profile checkpoint`, Profil `standard` als `--depth standard`. Fehlt deep-review,
 läuft `/code-review` über denselben Bereich, und die Übergabe sagt „Review ohne
 Abdeckungsnachweis". In diesem Repo lädt deep-review über die Projekt-Kopie (Spec 26).
 
@@ -135,19 +136,22 @@ gelten hier unabhängig von M0.
 
 Fallen zwei Prüfpunkte zwischen dieselben Tasks, bleibt einer mit allen Gründen und dem
 höheren Profil. Jeder Prüfpunkt reviewt den Bereich `last_reviewed..HEAD`. Der finale
-Prüfpunkt reviewt `base..HEAD`, übernimmt aber mit deep-review `--since <last_run>` die
-Urteile aller Einheiten, deren Paket sich seit dem letzten Prüfpunkt nicht geändert hat;
-neu geprüft werden nur der Rest und die Aufrufer über Task-Grenzen.
+Prüfpunkt reviewt `base..HEAD`, übernimmt aber mit deep-review `--since` über alle Läufe aus
+`runs` die Urteile aller Einheiten, deren Wiederverwendungsschlüssel (Code und Signaturen der
+Aufgerufenen, ohne Soll; Spec 26) sich seither nicht geändert hat — ein einzelner Lauf reichte
+nicht, weil jeder Prüfpunkt nur seinen eigenen Abschnitt kennt. Neu geprüft werden nur der
+Rest und die Aufrufer über Task-Grenzen.
 
 ### `checkpoint`
 
 - `checkpoint init --base <ref>` nach `generate`: schreibt `review-state.json` mit `base` und
-  `last_reviewed` = aufgelöster SHA von `<ref>`, `last_run: null`. `status` und `mark` nehmen
+  `last_reviewed` = aufgelöster SHA von `<ref>`, `runs: []`. `status` und `mark` nehmen
   in `review-state.json` und als Argument jede Git-Ref und lösen sie mit `git rev-parse` auf.
 - `checkpoint status --after-task <N> [--tests-red]` nach jedem Merge: liest `gate.json` und
   `review-state.json`, zählt mit `git diff --numstat <last_reviewed>..HEAD` hinzugefügte plus
   gelöschte Zeilen (Binärdateien zählen 0 und stehen in `binary_files`) und schreibt
-  `checkpoint.json` mit `due`, `reasons`, `range`, `changed_lines`, `profile` und `since_run`.
+  `checkpoint.json` mit `due`, `reasons`, `range`, `changed_lines`, `profile` und `since_runs`
+  (beim finalen Prüfpunkt alle Läufe aus `runs`, sonst leer).
   Fällig ist es an einem geplanten Prüfpunkt nach Task N oder vor Task N+1 (bei `group`, wenn N
   die höchste ID der Gruppe ist; gemergt wird nach dem Merge-Protokoll in Plan-Reihenfolge), ab
   400 Zeilen und mit `--tests-red`. `changed_lines` zählt `.skills/` nicht mit, damit das
@@ -155,7 +159,8 @@ neu geprüft werden nur der Rest und die Aufrufer über Task-Grenzen.
   fehlt — Basis unbekannt" und ohne Bereich.
 - `checkpoint mark --commit <ref> --run <lauf> --tasks <liste>` nach einem Review, dessen
   Funde behoben und mit `--since` nachgeprüft sind: setzt `last_reviewed` auf den Commit nach
-  dem Fix und `last_run` auf die Lauf-ID von deep-review.
+  dem Fix und hängt die Lauf-ID der Nachprüfung an `runs` an (deep-review nennt sie in der
+  Übergabe, Spec 26); `--run none` hängt nichts an.
 
 ### Fix-Pfad nach einem Prüfpunkt
 
@@ -166,8 +171,9 @@ frischen Worktree vom integrierten Stand ab, mit dem höchsten Modell der betrof
 Danach `verify`, Merge, Gesamttests, deep-review `--since <lauf>` im selben Profil, dann
 `checkpoint mark`. Höchstens zwei Fix-Runden je Prüfpunkt, dann Eskalation an den Nutzer.
 Die Allowlist umfasst `path` und `related` jedes Funds. Kandidaten, die im Profil `checkpoint`
-wegen der Grenze von 15 Verifikationen `offen` blieben, stehen im Bericht und gehen an den
-nächsten Prüfpunkt mit Profil `standard` (spätestens den finalen).
+wegen der Grenze von 15 Verifikationen `offen` blieben, stehen im Bericht; der finale
+Prüfpunkt übernimmt sie über `--since` und verifiziert sie erneut (Spec 26). Ein Prüfpunkt C2
+mit Profil `standard` reviewt nur seinen Abschnitt und erreicht sie nicht.
 
 **Soll am Prüfpunkt:** subagent-dev schreibt die Task-Dateien des Bereichs in eine Datei unter
 `.skills/cache/tasks/` und übergibt sie deep-review als `--soll-file` (Spec 26).
@@ -260,7 +266,7 @@ schon nach Spec 26.
 | `test_checkpoint_placement` | dito | C1 vor dem ersten Abnehmer; C2 nach Risikotask; C3 nur bei `parallel`; C4 vor der Verifikations-Task oder am Ende; Zusammenfallen mit allen Gründen und höherem Profil |
 | `test_verify_consumer_check` | dito | present, missing, arity_mismatch, ambiguous; Default-Parameter, posonly und `*args` passen; kwonly ohne Default passt nicht; Nicht-Python → unchecked und Verdikt höchstens unverified; alte Task-Datei ohne `consumers` → unchecked; `Produces`-Check nutzt dieselbe Regel und das bestehende Eval zur Signaturabweichung bleibt `fail` |
 | `test_verify_hints` | dito | Platzhalter und Debug-Ausgaben nur in hinzugefügten Zeilen; `sofort-grün` und fehlendes Log aus test-first; Verdikt unverändert |
-| `test_checkpoint_command` | dito | init löst Tags auf; status nimmt Refs aus review-state; fällig an geplantem Prüfpunkt, bei `group` nach der höchsten ID, ab 400 Zeilen, mit `--tests-red`, sonst nicht; Binärdateien zählen 0; `.skills/` zählt nicht; ohne review-state fällig ohne Bereich; mark setzt Commit und Lauf, auch `--run none` |
+| `test_checkpoint_command` | dito | init löst Tags auf; status nimmt Refs aus review-state; fällig an geplantem Prüfpunkt, bei `group` nach der höchsten ID, ab 400 Zeilen, mit `--tests-red`, sonst nicht; Binärdateien zählen 0; `.skills/` zählt nicht; ohne review-state fällig ohne Bereich; mark setzt Commit und hängt den Lauf an `runs` an, `--run none` hängt nichts an; am finalen Prüfpunkt stehen alle Läufe in `since_runs` |
 | `test_log_line` | dito | `log` schreibt `_meta` in Zeile 1 und je Aufruf eine Zeile mit festen Schlüsseln; fehlende `subagent_tokens` als `null` |
 | `test_fix_task_from_verdicts` | dito | Allowlist aus `path` und `related` der Funde mit `bestätigt`/`plausibel`; `widerlegt` und `offen` nicht |
 | `test_gate_json_keys_backward_compatible` | dito | alle bisherigen Schlüssel mit unveränderten Werten an den bestehenden Fixtures; neue Schlüssel in der festgelegten Reihenfolge |
