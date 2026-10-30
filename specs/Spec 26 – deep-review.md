@@ -1,6 +1,6 @@
 # Spec 26: deep-review — ein Review, das nachweist, was es geprüft hat
 
-Skill-Spezifikation · Zyklus 26 · Entscheidung: Abdeckung kommt aus einem Inventar, das ein Tier-1-Skript baut, und aus Ergebnissen, die das Skript gegen eine Nonce je Paket abgleicht — nicht aus der Aufmerksamkeit des Modells; lesende Suchagenten suchen je Einheit und Linse breit, eine getrennte, gestufte Verifikation belegt oder widerlegt jeden Kandidaten, und ein Audit meldet jede Einheit ohne Urteil · Abgeglichen mit Spec 00 und Spec 25 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Ergebnisse und Urteile schreibt das Skript mit Nonce-Abgleich, JSON-Lines statt geratener Schlüsselreihenfolge, Globs statt `latest/`, Tiefe `quick` zählt nur geänderte Einheiten, gelöschter Code als Einheit, Projekt-Kopie und Rückverweise im Strukturblock, Profil `checkpoint` für Spec 27, gestufte Verifikation, Kommentar-Regel `restates-code` dem Modell überlassen, Fakten zu architecture-map und Spec 00 korrigiert; Nachreview Opus: Lauf-ID mit Zufallssuffix, Fix im Profil `checkpoint` bei subagent-dev, `quality` unabhängig von der Tiefe, Prüf-Worktree `--detach`, Wiederverwendung ohne Soll, Form von `audit.json`, Routing-Spalte)
+Skill-Spezifikation · Zyklus 26 · Entscheidung: Abdeckung kommt aus einem Inventar, das ein Tier-1-Skript baut, und aus Ergebnissen, die das Skript gegen eine Nonce je Paket abgleicht — nicht aus der Aufmerksamkeit des Modells; lesende Suchagenten suchen je Einheit und Linse breit, eine getrennte, gestufte Verifikation belegt oder widerlegt jeden Kandidaten, und ein Audit meldet jede Einheit ohne Urteil · Abgeglichen mit Spec 00, Spec 25 und Spec 27 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Ergebnisse und Urteile schreibt das Skript mit Nonce-Abgleich, JSON-Lines statt geratener Schlüsselreihenfolge, Globs statt `latest/`, Tiefe `quick` zählt nur geänderte Einheiten, gelöschter Code als Einheit, Projekt-Kopie und Rückverweise im Strukturblock, Profil `checkpoint` für Spec 27, gestufte Verifikation, Kommentar-Regel `restates-code` dem Modell überlassen, Fakten zu architecture-map und Spec 00 korrigiert; Nachreview Opus: Lauf-ID mit Zufallssuffix, Fix im Profil `checkpoint` bei subagent-dev, `quality` unabhängig von der Tiefe, Prüf-Worktree `--detach`, Wiederverwendung ohne Soll, Form von `audit.json`, Routing-Spalte; Abgleich mit Spec 27: `--since` über mehrere Läufe, `offen` im Folgelauf erneut verifiziert, `--depth` und `--profile`, Lauf-ID in der Übergabe)
 
 ## Problem
 
@@ -125,6 +125,8 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    Commit), `path` (Einstiegspunkt `datei:funktion`), `repo` (Verzeichnis). Zuschaltbar:
    `quality`, unabhängig von der Tiefe. Profil `checkpoint` für Aufrufe aus subagent-dev
    (siehe unten); dort kann der Aufrufer mit `--soll-file <datei>` das Soll mitgeben.
+   `inventory --depth quick|standard|deep` überschreibt die Tiefe, `--profile checkpoint`
+   setzt das Profil; `inventory.json` trägt `depth` und `profile` (sonst `null`).
 2. **Inventar:** `review_kit.py inventory`; Pfade unter `.skills/` zählen nie. Im Modus `diff` sind Einheiten die geänderten
    Funktionen, die direkten Aufrufer geänderter Funktionen (Linse Vertrag) und gelöschter
    Code als Vorher-Einheit (Linse Vertrag: hing etwas daran?). Im Modus `path` die Glieder
@@ -166,7 +168,7 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    ab vier Läufen eine Jackknife-Schätzung als unkalibrierte Untergrenze, darunter
    `ungeprüft`.
 9. **Bericht und Audit:** Bericht nach `assets/report-template.md`, dann
-   `review_kit.py audit <lauf>`. Übergabe: Pfad des Berichts, Funde je Status, Abdeckung
+   `review_kit.py audit <lauf>`. Übergabe: Lauf-ID, Pfad des Berichts, Funde je Status, Abdeckung
    `<angenommen>/<zugewiesen>`, „Nicht geprüft". Meldet das Audit eine Lücke, sagt die
    Übergabe „unvollständig" mit der Liste, nie „fertig". Im Profil `checkpoint` endet
    deep-review hier; die Funde mit Status `bestätigt` oder `plausibel` behebt subagent-dev
@@ -181,13 +183,18 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
 | `quick` | Modus `diff`, höchstens eine geänderte Einheit (Aufrufer nicht mitgezählt) mit höchstens 20 geänderten Zeilen, kein Risikomerkmal | Korrektheit (mit `quality` zusätzlich Wartbarkeit und Kommentare); Aufrufer nur als Kontext im Paket | keine | Sonnet |
 | `standard` | Normalfall, auch Modus `path` und `repo` | alle Fehlerlinsen der Einheit | keine | gestuft |
 | `deep` | nur auf ausdrücklichen Wunsch („Audit", „so gründlich wie möglich") | alle Fehlerlinsen | Sättigung wie in Schritt 8 | gestuft |
-| Profil `checkpoint` | Aufruf aus subagent-dev (Spec 27) | Korrektheit und Vertrag | keine | gestuft, höchstens 15 Verifikationen; der Rest bleibt `offen`, steht im Bericht und wird am finalen Prüfpunkt erneut verifiziert |
+| Profil `checkpoint` | Aufruf aus subagent-dev (Spec 27) | Korrektheit und Vertrag | keine | gestuft, höchstens 15 Verifikationen; der Rest bleibt `offen`, steht im Bericht und wird im nächsten Folgelauf ohne dieses Profil erneut verifiziert, in subagent-dev am finalen Prüfpunkt |
 
-**Folgeläufe** (`--since <lauf>`) übernehmen die Urteile der Suchagenten und die Kandidaten
-samt Status von Einheiten, deren Wiederverwendungsschlüssel gleich geblieben ist — ein Hash
-über den Code der Einheit und die Signaturen der Aufgerufenen, ohne das Soll, das sich mit
-jedem Bereich ändert. Geänderte Einheiten und deren direkte Aufrufer prüfen sie neu; Linsen,
-die der frühere Lauf nicht hatte, laufen auf allen Einheiten.
+**Folgeläufe** (`--since <lauf>[,<lauf>…]`) übernehmen die Urteile der Suchagenten und die
+Kandidaten samt Status von Einheiten, deren Wiederverwendungsschlüssel gleich geblieben ist —
+ein Hash über den Code der Einheit und die Signaturen der Aufgerufenen, ohne das Soll, das
+sich mit jedem Bereich ändert. Mehrere Läufe sind nötig, wenn ein Folgelauf einen größeren
+Bereich prüft als jeder frühere (finaler Prüfpunkt in Spec 27, der die Bereiche aller
+früheren Prüfpunkte umfasst); steht eine Einheit in mehreren, gilt der jüngste Lauf.
+Geänderte Einheiten und deren direkte Aufrufer prüfen sie neu; Linsen, die die früheren
+Läufe nicht hatten, laufen auf allen Einheiten. Übernommene Kandidaten mit Status `offen`
+gehen außerhalb des Profils `checkpoint` erneut in die Verifikation; im Profil `checkpoint`
+bleiben sie `offen` und zählen nicht gegen die Grenze von 15.
 
 ### Wartbarkeit und Kommentare (`quality`)
 
@@ -258,7 +265,7 @@ debug-ledger, test-first (alle im Strukturblock oben). Das Register der Lint-Bef
 | `test_inventory_path_chain` | dito | Aufrufkette ab Einstiegspunkt transitiv bis Tiefe 4; Pfad-Paket enthält jedes Glied |
 | `test_inventory_ts` | dito | Funktionsdeklaration, Pfeilfunktion an `const`, Klassenmethode; Änderung im Rumpf erkannt |
 | `test_inventory_delphi_and_chunks` | dito | Methode mit lokaler Prozedur endet am eigenen `end;`; `case`, `try`, `record`, `asm` gezählt; varianter `record … case X of … end` schließt mit einem `end`; `forward;`- und `external`-Köpfe ohne Rumpf sind keine Einheit; `end` in String und Kommentar ignoriert; Deklaration im `interface`-Teil keine Einheit; unvollständiger `{$IFDEF}` → `chunk` mit Grund |
-| `test_depth_and_profiles` | dito | quick zählt keine Aufrufer; Risikomerkmal → standard; path → standard; deep nur mit Schalter; Profil checkpoint setzt Linsen und Grenze 15 |
+| `test_depth_and_profiles` | dito | quick zählt keine Aufrufer; Risikomerkmal → standard; path → standard; deep nur mit Schalter; `--depth` überschreibt die gesetzte Tiefe; `--profile checkpoint` setzt Linsen und Grenze 15 |
 | `test_packets_and_nonce` | dito | Einheiten-Paket über 8.000 Zeichen wird geteilt; Pfad-Paket bis 16.000; Paket-Hash deckt Signaturen und Soll; review-context-Paket mit fremdem Bereich wird nicht gelesen |
 | `test_record_rejects_wrong_nonce` | dito | falsche Nonce oder alter Hash → abgewiesen, nichts in `results.jsonl` |
 | `test_merge_without_voting` | dito | gleiche Stelle und Klasse → ein Kandidat mit allen Quellen; andere Klasse → zwei; kein Kandidat fällt weg |
@@ -267,7 +274,7 @@ debug-ledger, test-first (alle im Strukturblock oben). Das Register der Lint-Bef
 | `test_estimate` | dito | Jackknife erster Ordnung an bekannten Zahlen; unter vier Läufen `ungeprüft` |
 | `test_comment_rules` | dito | jede Regel der Tabelle trifft ihr Beispiel, nicht einen Warum-Kommentar; `comments` legt jeden neuen Kommentar mit Folgezeile vor |
 | `test_metrics_against_median` | dito | Länge, Verschachtelung, Verzweigungen je Funktion und Median des Repos |
-| `test_since_reuses_unchanged_verdicts` | dito | gleicher Schlüssel → Urteile und Kandidaten übernommen, auch bei anderem Soll; geänderte Signatur eines Aufgerufenen → neu geprüft; neue Linse → auf allen Einheiten |
+| `test_since_reuses_unchanged_verdicts` | dito | gleicher Schlüssel → Urteile und Kandidaten übernommen, auch bei anderem Soll; geänderte Signatur eines Aufgerufenen → neu geprüft; neue Linse → auf allen Einheiten; zwei Läufe mit disjunkten Bereichen in `--since` → Urteile aus beiden, bei derselben Einheit der jüngere; übernommener `offen`-Kandidat → in Tiefe `standard` erneut verifiziert, im Profil `checkpoint` unverändert |
 | `test_run_ids_do_not_collide` | dito | zwei Läufe in derselben Sekunde mit gleichem Commit → verschiedene Lauf-IDs dank Zufallssuffix |
 
 ### Evals
