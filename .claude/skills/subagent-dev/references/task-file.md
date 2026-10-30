@@ -101,7 +101,7 @@ nicht hierher:
   "allowlist": ["src/parser.py", "tests/test_parser.py"],
   "produces": [{"kind": "fn", "name": "parse", "arity": 1}],
   "model": "sonnet",
-  "consumers": [{"task": 2, "symbols": ["parse(1)"]}]
+  "consumers": [{"task": 2, "symbols": ["fn:parse(1)"]}]
 }
 ```
 ```
