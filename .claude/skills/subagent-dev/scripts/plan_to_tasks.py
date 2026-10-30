@@ -27,6 +27,7 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -280,21 +281,28 @@ def _parse_steps(block: str) -> list[str]:
 def parse_step_texts(block: str) -> list[tuple[str, str]]:
     """Je Step `(Titel, Text)`: der Text ist der Rest der Step-Zeile plus alle
     eingerückten Folgezeilen bis zum nächsten Step (Leerzeilen zählen mit, wenn
-    danach wieder eingerückt weitergeht). Ein Step ohne Text liefert `""`.
+    danach wieder eingerückt weitergeht). Ein Step ohne Text liefert `""`. Die gemeinsame
+    Einrückung der Folgezeilen entfällt, relative Einrückung und innere Leerzeilen
+    bleiben. Die Step-Grenzen stehen am maskierten Block (ein Zaun im Step verdeckt
+    keine Grenze), der Text kommt aus dem unmaskierten.
     """
-    steps: list[tuple[str, list[str]]] = []
+    steps: list[tuple[str, str, list[str]]] = []
     open_step = False
-    for line in block.split("\n"):
-        match = STEP_LINE_RE.match(line)
+    for line, masked in zip(block.split("\n"), _mask_fenced_blocks(block).split("\n")):
+        match = STEP_LINE_RE.match(masked)
         if match:
             # Trenner zwischen Titel und Text („ — “, „, “) gehört nicht zum Text.
-            steps.append((match.group(1).strip(), [match.group(2).lstrip(" \t—–,:")]))
+            steps.append((match.group(1).strip(), match.group(2).lstrip(" \t—–,:").strip(), []))
             open_step = True
-        elif open_step and (not line.strip() or line[0] in " \t"):
-            steps[-1][1].append(line.strip())
+        elif open_step and (not masked.strip() or masked[0] in " \t"):
+            steps[-1][2].append(line)
         else:
             open_step = False
-    return [(title, "\n".join(l for l in lines if l).strip()) for title, lines in steps]
+    result = []
+    for title, first, rest in steps:
+        body = textwrap.dedent("\n".join(rest)).rstrip()
+        result.append((title, f"{first}\n{body}" if first and body else first or body.lstrip("\n")))
+    return result
 
 
 MODEL_LINE_RE = re.compile(r"^\*\*Modell:\*\*[ \t]*(.*?)[ \t]*$", re.MULTILINE)
@@ -318,7 +326,7 @@ def parse_plan(text: str) -> PlanDoc:
     Zitierte Beispiel-Pläne in ```-Codeblöcken (wie in diesem Plan selbst)
     werden vor jeder Struktur-Erkennung ausmaskiert — siehe `_mask_fenced_blocks`.
     """
-    text = _mask_fenced_blocks(text)
+    raw, text = text, _mask_fenced_blocks(text)
     headers = list(TASK_HEADER_RE.finditer(text))
     if not headers:
         raise PlanParseError(
@@ -349,7 +357,7 @@ def parse_plan(text: str) -> PlanDoc:
         files, files_unknown = _parse_files(block)
         consumes, produces, interfaces_unknown = _parse_interfaces(block)
         steps = _parse_steps(block)
-        step_texts = parse_step_texts(block)
+        step_texts = parse_step_texts(raw[block_start:block_end])
         consumed_files = [name for kind, name, _ in extract_symbols(consumes) if kind == "file"]
         tasks.append(PlanTask(
             id=task_id, title=title, files=files, files_unknown=files_unknown,
@@ -487,10 +495,15 @@ def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
     return names[0] if names else None
 
 
+def title_is(title: str, word: str) -> bool:
+    """Heißt die Task genau `word` oder `word — …`?"""
+    return title == word or title.startswith(word + " —")
+
+
 def is_mandatory_title(title: str) -> bool:
     """Ist das eine Pflicht-Task (genau der Titel oder `<Titel> — …`)? Sie konsumiert
     laut Plan alle `Produces` und zählt deshalb nicht als Abnehmer."""
-    return any(title == word or title.startswith(word + " —") for word in MANDATORY_TITLES)
+    return any(title_is(title, word) for word in MANDATORY_TITLES)
 
 
 def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
@@ -519,9 +532,9 @@ def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
 
 
 def risk_words(path: str) -> list[str]:
-    """Risikowörter (M2) im Pfad: zerlegt an `/`, `_`, `-`, `.` und Großbuchstaben,
+    """Risikowörter (M2) im Pfad: zerlegt an `/`, `_`, `-`, `.` und vor jedem Großbuchstaben,
     ohne Groß-/Kleinschreibung verglichen; `.sql` am Ende zählt als eigener Treffer."""
-    parts = re.split(r"[/_\-.]", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", path))
+    parts = re.split(r"[/_\-.]", re.sub(r"(?=[A-Z])", "_", path))
     found = [w.lower() for w in parts if w.lower() in RISK_WORDS]
     return found + [".sql"] if path.lower().endswith(".sql") else found
 
@@ -562,7 +575,10 @@ def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], g
         users, risky = consumers.get(t.id, []), _risk_path(t)
         if users and (len(users) >= CONSUMERS_FOR_OPUS or risky):
             first = users[0]["task"]
-            why = f"{len(users)} Abnehmer" if len(users) >= CONSUMERS_FOR_OPUS else f"Risikopfad {risky}"
+            why = ", ".join(
+                ([f"{len(users)} Abnehmer"] if len(users) >= CONSUMERS_FOR_OPUS else [])
+                + ([f"Risikopfad {risky}"] if risky else [])
+            )
             raw.append((pos[first] - 1, "before", first, "checkpoint",
                         f"C1: Task {t.id} ({why}) vor dem ersten Abnehmer Task {first}"))
         if risky:
@@ -571,7 +587,7 @@ def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], g
         last = max(gate.parallel_group)
         raw.append((pos[last], "group", last, "checkpoint",
                     "C3: nach dem Merge der Parallel-Gruppe " + ", ".join(map(str, sorted(gate.parallel_group)))))
-    work = [t for t in tasks if not (t.title == "Verifikation" or t.title.startswith("Verifikation —"))]
+    work = [t for t in tasks if not title_is(t.title, "Verifikation")]
     raw.append((pos[(work or tasks)[-1].id], "final", None, "standard", "C4: finaler Prüfpunkt"))
 
     merged: dict[int, dict] = {}
@@ -728,12 +744,11 @@ def _header(command: str) -> str:
     return f"<!-- skill: subagent-dev | schema: {SCHEMA_VERSION} | generated: {command} -->"
 
 
-def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str, consumers: list[dict] | None = None) -> str:
-    """`consumers`: Abnehmer dieser Task aus dem ganzen Plan (`write_tasks`); ohne
-    Angabe aus `doc` gerechnet."""
-    if consumers is None:
-        consumers = consumers_of(doc.tasks)[task.id]
-    model, model_reason = choose_model(task, consumers)
+def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str,
+                     consumers: list[dict], model: tuple[str, str]) -> str:
+    """`consumers`: Abnehmer dieser Task, `model`: `(model, model_reason)` — beides aus
+    dem ganzen Plan (`write_tasks`); `doc` kann gefiltert sein und taugt dafür nicht."""
+    model, model_reason = model
     allowlist = [f.path for f in task.files]
     produces = [s for s in extract_symbols(task.produces) if s[0] != "file"]
     others = [f"Task {t.id} – {t.title}" for t in doc.tasks if t.id != task.id]
@@ -743,7 +758,7 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str, consumers: li
     )
     # Titel als Listenpunkt, der Text eingerückt darunter — ein Step ohne Text bleibt eine Zeile.
     steps_md = "\n".join(
-        f"- {title}" + "".join(f"\n  {l}" for l in text.split("\n") if l)
+        f"- {title}" + "".join(f"\n  {l}" if l else "\n" for l in text.split("\n") if text)
         for title, text in task.step_texts
     ) if task.step_texts else "- (keine Steps im Plan gefunden)"
     others_md = "\n".join(f"- {o}" for o in others) if others else "- (keine weiteren Tasks in diesem Plan)"
@@ -799,12 +814,13 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | No
 
     consumers = consumers_of(doc.tasks)
     models = {t.id: choose_model(t, consumers[t.id]) for t in doc.tasks}
-    checkpoints = place_checkpoints(doc.tasks, consumers, gate_verdict(doc.tasks, build_overlap_graph(doc.tasks)))
-    if only is not None:
-        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in only])
-
     overlap = build_overlap_graph(doc.tasks)
     gate = gate_verdict(doc.tasks, overlap)
+    checkpoints = place_checkpoints(doc.tasks, consumers, gate)
+    if only is not None:
+        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in only])
+        overlap = build_overlap_graph(doc.tasks)
+        gate = gate_verdict(doc.tasks, overlap)
 
     gate_payload = {
         "_meta": {
@@ -832,7 +848,7 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | No
 
     task_files: dict[int, Path] = {}
     for task in doc.tasks:
-        rendered = render_task_file(task, doc, plan_path, consumers[task.id])
+        rendered = render_task_file(task, doc, plan_path, consumers[task.id], models[task.id])
         target = out_dir / f"task-{task.id}-{_slug(task.title)}.md"
         target.write_text(rendered, encoding="utf-8")
         task_files[task.id] = target
