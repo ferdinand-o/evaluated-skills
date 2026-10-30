@@ -1062,6 +1062,66 @@ def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] 
     return results
 
 
+HUNK_RE = re.compile(r"^@@ -\S+ \+(\d+)")
+DEBUG_RE = re.compile(r"\b(?:print|console\.log|(?i:writeln)|(?i:outputdebugstring))\(")
+TDD_LOG_PATH = Path(".skills") / "cache" / "test-first" / "log.md"
+
+
+def _added_lines(diff: str) -> list[tuple[str, int, str]]:
+    """(Pfad, Zeilennummer, Text) der hinzugefügten Zeilen eines `git diff -U0`."""
+    added: list[tuple[str, int, str]] = []
+    path, line = None, 0
+    for raw in diff.splitlines():
+        if raw.startswith("+++ "):
+            path = raw[4:].removeprefix("b/") if raw != "+++ /dev/null" else None
+        elif (hunk := HUNK_RE.match(raw)):
+            line = int(hunk.group(1))
+        elif raw.startswith("+") and path:
+            added.append((path, line, raw[1:]))
+            line += 1
+    return added
+
+
+def _log_hints(worktree: Path) -> list[dict]:
+    """Hinweise aus dem Log von test-first (letzter Abschnitt): Tests, die sofort grün liefen."""
+    log = worktree / TDD_LOG_PATH
+    where = TDD_LOG_PATH.as_posix()
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [{"kind": "log-fehlt", "path": where, "line": None,
+                 "text": "kein test-first-Log im Worktree — Test-Zyklus ungeprüft"}]
+    phases: dict[str, list[str]] = {}
+    for row in text.rsplit("\n## Abschnitt ", 1)[-1].splitlines():
+        cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        if row.startswith("| ") and len(cells) >= 2 and cells[0] != "Test" and not row.startswith("| ---"):
+            phases.setdefault(cells[0], []).append(cells[1])
+    # Ein späteres `red` desselben Tests heißt: geschärft — dann meldet er nichts mehr.
+    return [{"kind": "sofort-grün", "path": where, "line": None, "text": test}
+            for test, seq in phases.items() if "sofort-grün" in seq[max(i for i, ph in enumerate(seq) if ph == "red") + 1 if "red" in seq else 0:]]
+
+
+def collect_hints(worktree: Path, base: str | None) -> list[dict]:
+    """Hinweise (Spec 27), je `{kind, path, line, text}` — sie ändern das Verdikt nie.
+
+    In den hinzugefügten Zeilen seit `base` (und uncommittet): Platzhalter (`PLACEHOLDER_RE`
+    des Plan-Lints) und Debug-Ausgaben. Ohne `base` gibt es keinen Diff — das meldet ein
+    Hinweis `diff-ungeprüft`, kein stiller Erfolg. Dazu das test-first-Log im Worktree.
+    """
+    hints: list[dict] = []
+    if not base:
+        hints.append({"kind": "diff-ungeprüft", "path": None, "line": None,
+                      "text": "--base fehlt — Platzhalter und Debug-Ausgaben im Diff ungeprüft"})
+    else:
+        diff = _git(worktree, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", f"{base}...HEAD")
+        diff += _git(worktree, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "HEAD")
+        for path, line, text in _added_lines(diff):
+            for kind, pattern in (("platzhalter", PLACEHOLDER_RE), ("debug-ausgabe", DEBUG_RE)):
+                if pattern.search(text):
+                    hints.append({"kind": kind, "path": path, "line": line, "text": text.strip()[:200]})
+    return hints + _log_hints(worktree)
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -1134,6 +1194,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     consumer_results = check_consumers(worktree, allowlist, consumers)
     consumers_broken = any(r["status"] in CONSUMER_BROKEN for r in consumer_results)
     consumers_unchecked = any(r["status"] == "unchecked" for r in consumer_results)
+    hints = collect_hints(worktree, args.base)
 
     if violations or not produces_ok or consumers_broken:
         verdict = "fail"
@@ -1154,6 +1215,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     for r in consumer_results:
         print(f"  Abnehmer Task {r['task'] if r['task'] is not None else '?'}, "
               f"{r['name'] or '-'}: {r['status']} — {r['detail']}")
+    for h in hints:
+        print(f"  Hinweis {h['kind']}: {h['path'] or '-'}{':' + str(h['line']) if h['line'] else ''} — {h['text']}")
     print(f"Verdikt: {verdict.upper()}")
 
     if args.out:
@@ -1175,6 +1238,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "allowlist_violations": violations,
             "produces": produce_results,
             "consumer_check": consumer_results,
+            "hints": hints,
             "verdict": verdict,
             "ok": ok,
         }
