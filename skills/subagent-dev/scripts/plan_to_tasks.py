@@ -1457,6 +1457,39 @@ def _cmd_fix_task(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# log — je Runde und je Prüfpunkt eine Zeile (Spec 27, runlog)
+# --------------------------------------------------------------------------
+
+RUNLOG_PATH = Path(".skills") / "subagent-dev" / "runlog.jsonl"
+RUNLOG_KEYS = ("plan", "task", "checkpoint", "model", "reason", "verdicts",
+               "subagent_tokens", "findings", "finding_task")
+
+
+def append_log(path: Path | str, entry: dict) -> None:
+    """Hängt eine Zeile mit festen Schlüsseln an; fehlende Felder sind `null`. `_meta`
+    steht nur in Zeile 1, also nur, wenn die Datei neu ist."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    if not path.exists() or path.stat().st_size == 0:
+        cmd = "python skills/subagent-dev/scripts/plan_to_tasks.py log"
+        lines.append(json.dumps({"_meta": {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}},
+                                ensure_ascii=False))
+    lines.append(json.dumps({k: entry.get(k) for k in RUNLOG_KEYS}, ensure_ascii=False))
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _cmd_log(args: argparse.Namespace) -> int:
+    append_log(args.repo / RUNLOG_PATH, {
+        "plan": args.plan, "task": args.task, "checkpoint": args.checkpoint, "model": args.model,
+        "reason": args.reason, "verdicts": args.verdict, "subagent_tokens": args.subagent_tokens,
+        "findings": args.findings, "finding_task": args.finding_task})
+    print(f"runlog: Zeile angehängt -> {args.repo / RUNLOG_PATH}")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # Lint — sagt, *warum* das Gate eine Task für unsicher hält (G2: meldet, blockiert nicht)
 # --------------------------------------------------------------------------
 
@@ -2270,6 +2303,20 @@ def main(argv: list[str] | None = None) -> int:
     fix.add_argument("--verdicts", required=True, help="verdicts.jsonl (Spec 26) oder JSON-Liste von /code-review-Funden")
     fix.add_argument("--out-dir", default=str(TASKS_DIR))
     fix.set_defaults(func=_cmd_fix_task)
+
+    log = sub.add_parser("log", help="Eine Zeile je Runde oder Prüfpunkt an .skills/subagent-dev/runlog.jsonl anhängen")
+    log.add_argument("--repo", type=Path, default=Path("."), help="Repo-Wurzel; Ablage unter .skills/subagent-dev/")
+    log.add_argument("--plan", required=True)
+    target = log.add_mutually_exclusive_group(required=True)
+    target.add_argument("--task", type=int, help="Task der Runde")
+    target.add_argument("--checkpoint", help="Prüfpunkt (before, after, group, final)")
+    log.add_argument("--model", required=True)
+    log.add_argument("--reason", required=True)
+    log.add_argument("--verdict", action="append", default=[], help="Verdikt; mehrfach angebbar")
+    log.add_argument("--subagent-tokens", type=int, default=None, help="aus der Rückmeldung des Agent-Werkzeugs; fehlt -> null")
+    log.add_argument("--findings", type=int, default=None, help="Funde des Prüfpunkts")
+    log.add_argument("--finding-task", type=int, default=None, help="Task, deren Dateien die Funde betreffen")
+    log.set_defaults(func=_cmd_log)
 
     args = parser.parse_args(argv)
     return args.func(args)
