@@ -483,15 +483,20 @@ def _symbol_pattern(name: str) -> str:
     return rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])"
 
 
-def _dependency_symbols(producer: PlanTask, consumer: PlanTask) -> list[str]:
-    """Namen aller Symbole, die `consumer` konsumiert und `producer` produziert."""
-    names: list[str] = []
+def _dependency_kinds(producer: PlanTask, consumer: PlanTask) -> list[tuple[str, str]]:
+    """(kind, Name) aller Symbole, die `consumer` konsumiert und `producer` produziert."""
+    found: list[tuple[str, str]] = []
     for kind, name, _ in extract_symbols(producer.produces):
         if kind == "file":
             continue  # Pfad-Überlappung, siehe build_overlap_graph
         if re.search(_symbol_pattern(name), consumer.consumes):
-            names.append(name)
-    return names
+            found.append((kind, name))
+    return found
+
+
+def _dependency_symbols(producer: PlanTask, consumer: PlanTask) -> list[str]:
+    """Namen aller Symbole, die `consumer` konsumiert und `producer` produziert."""
+    return [name for _, name in _dependency_kinds(producer, consumer)]
 
 
 def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
@@ -514,8 +519,9 @@ def is_mandatory_title(title: str) -> bool:
 def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
     """Task-ID -> Abnehmer: spätere Tasks, deren Consumes ein Produces-Symbol nennt.
 
-    Je Abnehmer `{"task": id, "symbols": [...]}`; ein Symbol steht als `name`, mit
-    erwarteter Arity aus dem Consumes des Abnehmers als `name(arity)`. Pflicht-Tasks
+    Je Abnehmer `{"task": id, "symbols": [...]}`; ein Symbol trägt seine Art als Präfix wie
+    im Plan: `fn:name(arity)` (Arity aus dem Consumes des Abnehmers), `token:Name`; ein
+    Symbol ohne Arity steht nackt als `name`. Pflicht-Tasks
     sind keine Abnehmer; eine Task mit `interfaces_unknown` hat keine erkennbaren.
     """
     result: dict[int, list[dict]] = {t.id: [] for t in tasks}
@@ -525,13 +531,16 @@ def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
         for consumer in tasks[i + 1:]:
             if is_mandatory_title(consumer.title):
                 continue
-            names = _dependency_symbols(producer, consumer)
-            if not names:
+            found = _dependency_kinds(producer, consumer)
+            if not found:
                 continue
             arity = {n: a for k, n, a in extract_symbols(consumer.consumes) if k == "fn"}
             result[producer.id].append({
                 "task": consumer.id,
-                "symbols": [n if arity.get(n) is None else f"{n}({arity[n]})" for n in names],
+                "symbols": [
+                    f"token:{n}" if k == "token" else n if arity.get(n) is None else f"fn:{n}({arity[n]})"
+                    for k, n in found
+                ],
             })
     return result
 
@@ -572,7 +581,8 @@ def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], g
     Je Prüfpunkt `kind`, `task`, `profile`, `reasons`. Die Bedingungen von M1/M2 gelten
     unabhängig von M0. Ein Prüfpunkt sitzt hinter einer Task (`before N` hinter der
     Task vor N); fallen zwei auf dieselbe Stelle, bleibt einer mit allen Gründen, dem
-    höheren Profil und der Art, die in CHECKPOINT_KINDS weiter hinten steht.
+    höheren Profil und der Art, die in CHECKPOINT_KINDS weiter hinten steht. Läge ein
+    Prüfpunkt hinter `final` (Parallel-Gruppe mit der Verifikation), wird er dort eingelegt.
     """
     pos = {t.id: i for i, t in enumerate(tasks)}
     raw: list[tuple[int, str, int | None, str, str]] = []  # (Stelle, kind, task, profile, Grund)
@@ -593,10 +603,12 @@ def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], g
         raw.append((pos[last], "group", last, "checkpoint",
                     "C3: nach dem Merge der Parallel-Gruppe " + ", ".join(map(str, sorted(gate.parallel_group)))))
     work = [t for t in tasks if not title_is(t.title, "Verifikation")]
-    raw.append((pos[(work or tasks)[-1].id], "final", None, "standard", "C4: finaler Prüfpunkt"))
+    final_slot = pos[(work or tasks)[-1].id]
+    raw.append((final_slot, "final", None, "standard", "C4: finaler Prüfpunkt"))
 
     merged: dict[int, dict] = {}
     for slot, kind, task_id, profile, reason in raw:
+        slot = min(slot, final_slot)  # hinter `final` gibt es nichts mehr zu prüfen: dort zusammenlegen
         cp = merged.setdefault(slot, {"kind": kind, "task": task_id, "profile": profile, "reasons": []})
         if CHECKPOINT_KINDS.index(kind) > CHECKPOINT_KINDS.index(cp["kind"]):
             cp["kind"], cp["task"] = kind, task_id
@@ -1035,7 +1047,8 @@ CONSUMER_BROKEN = ("missing", "arity_mismatch", "ambiguous")
 
 def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] | None) -> list[dict]:
     """Abnehmer-Check (Spec 27): die Symbole, die spätere Tasks laut Maschinenblock
-    erwarten (`name` oder `name(arity)`, optional mit `token:`), mit derselben Regel wie
+    erwarten (`name`, `fn:name(arity)` oder `token:Name`; ohne Präfix gilt `fn`, ein
+    Nicht-Bezeichner ein Token — so lesen sich auch Task-Dateien von früher), mit derselben Regel wie
     `check_produces` — je Symbol `task`, `name`, `status`, `detail`.
 
     `consumers` ist None für eine Task-Datei von vor Spec 27: dann `unchecked`, nie
@@ -1063,23 +1076,39 @@ def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] 
     return results
 
 
-HUNK_RE = re.compile(r"^@@ -\S+ \+(\d+)")
+HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+DIFF_ARGS = ("-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff",
+             "--src-prefix=a/", "--dst-prefix=b/")  # fest, unabhängig von diff.mnemonicPrefix
 DEBUG_RE = re.compile(r"\b(?:print|console\.log|(?i:writeln)|(?i:outputdebugstring))\(")
 TDD_LOG_PATH = Path(".skills") / "cache" / "test-first" / "log.md"
 
 
 def _added_lines(diff: str) -> list[tuple[str, int, str]]:
-    """(Pfad, Zeilennummer, Text) der hinzugefügten Zeilen eines `git diff -U0`."""
+    """(Pfad, Zeilennummer, Text) der hinzugefügten Zeilen eines `git diff -U0`.
+
+    Ein `+++ `-Kopf gilt nur direkt nach einer `--- `-Zeile und außerhalb eines Hunks; die
+    Zeilenzahlen im `@@`-Kopf sagen, wo der Hunk endet (eine hinzugefügte Zeile `++ x`
+    sieht sonst wie ein Kopf aus). Git hängt bei Pfaden mit Leerzeichen einen Tab an.
+    """
     added: list[tuple[str, int, str]] = []
-    path, line = None, 0
+    path, line, old_left, new_left, after_old_header = None, 0, 0, 0, False
     for raw in diff.splitlines():
-        if raw.startswith("+++ "):
-            path = raw[4:].removeprefix("b/") if raw != "+++ /dev/null" else None
+        if old_left or new_left:
+            if raw.startswith("+"):
+                new_left -= 1
+                if path:
+                    added.append((path, line, raw[1:]))
+                line += 1
+            elif raw.startswith("-"):
+                old_left -= 1
+            continue
+        if raw.startswith("+++ ") and after_old_header:
+            path = raw[4:].rstrip("\t").removeprefix("b/") if raw.rstrip("\t") != "+++ /dev/null" else None
         elif (hunk := HUNK_RE.match(raw)):
-            line = int(hunk.group(1))
-        elif raw.startswith("+") and path:
-            added.append((path, line, raw[1:]))
-            line += 1
+            old_count, line, new_count = hunk.group(1), int(hunk.group(2)), hunk.group(3)
+            old_left = 1 if old_count is None else int(old_count)
+            new_left = 1 if new_count is None else int(new_count)
+        after_old_header = raw.startswith("--- ")
     return added
 
 
@@ -1114,9 +1143,15 @@ def collect_hints(worktree: Path, base: str | None) -> list[dict]:
         hints.append({"kind": "diff-ungeprüft", "path": None, "line": None,
                       "text": "--base fehlt — Platzhalter und Debug-Ausgaben im Diff ungeprüft"})
     else:
-        diff = _git(worktree, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", f"{base}...HEAD")
-        diff += _git(worktree, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "HEAD")
-        for path, line, text in _added_lines(diff):
+        diff = _git(worktree, *DIFF_ARGS, f"{base}...HEAD") + _git(worktree, *DIFF_ARGS, "HEAD")
+        added = _added_lines(diff)
+        # Untracked Dateien stehen in keinem Diff: sie zählen ganz als hinzugefügt (ohne `.skills/`).
+        for rel in filter(None, _git(worktree, "-c", "core.quotepath=off", "ls-files", "-z", "--others",
+                                     "--exclude-standard").split("\0")):
+            if PurePosixPath(rel).parts[0] != ".skills" and (worktree / rel).is_file():
+                body = (worktree / rel).read_text(encoding="utf-8", errors="replace").splitlines()
+                added += [(rel, n, text) for n, text in enumerate(body, 1)]
+        for path, line, text in added:
             for kind, pattern in (("platzhalter", PLACEHOLDER_RE), ("debug-ausgabe", DEBUG_RE)):
                 if pattern.search(text):
                     hints.append({"kind": kind, "path": path, "line": line, "text": text.strip()[:200]})
@@ -1186,13 +1221,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     violations = check_allowlist(worktree, args.base, allowlist) if allowlist_checked else []
     produce_results = check_produces(worktree, allowlist, produces)
     produces_ok = all(r["status"] == "present" for r in produce_results)
-    # Abnehmer-Check (Spec 27): Tokens tragen im Maschinenblock kein Präfix — aus `produces` ergänzen.
-    tokens = {name for kind, name, _ in produces if kind == "token"}
-    consumers = block.get("consumers")
-    if consumers is not None:
-        consumers = [{"task": c["task"], "symbols": [f"token:{s}" if s in tokens else s for s in c["symbols"]]}
-                     for c in consumers]
-    consumer_results = check_consumers(worktree, allowlist, consumers)
+    consumer_results = check_consumers(worktree, allowlist, block.get("consumers"))
     consumers_broken = any(r["status"] in CONSUMER_BROKEN for r in consumer_results)
     consumers_unchecked = any(r["status"] == "unchecked" for r in consumer_results)
     hints = collect_hints(worktree, args.base)
@@ -1329,7 +1358,11 @@ def checkpoint_status(repo: Path, after_task: int, tests_red: bool) -> dict:
     if gate is None:
         raise PlanParseError(f"{TASKS_DIR / 'gate.json'} fehlt — erst generate")
     state = _read_json(repo / TASKS_DIR / "review-state.json")
-    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, gate.get("plan_order") or gate["tasks"]) == after_task]
+    order = gate.get("plan_order") or gate["tasks"]
+    if after_task not in [t["id"] for t in order]:
+        raise PlanParseError(f"Task {after_task} steht nicht im Plan von gate.json "
+                             f"(bekannt: {', '.join(str(t['id']) for t in order)})")
+    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, order) == after_task]
     reasons = [r for cp in planned for r in cp["reasons"]]
     profiles = [cp["profile"] for cp in planned]
     final = any(cp["kind"] == "final" for cp in planned)
@@ -1392,8 +1425,9 @@ def _cmd_checkpoint(args: argparse.Namespace) -> int:
             tasks = [int(x) for x in args.tasks.split(",") if x.strip()]
             state = checkpoint_mark(args.repo, args.commit, args.run, tasks)
             print(f"last_reviewed = {state['last_reviewed']}; Läufe: {len(state['runs'])}")
-    except (PlanParseError, json.JSONDecodeError) as exc:
-        print(f"checkpoint {args.action}: {exc}", file=sys.stderr)
+    except (PlanParseError, ValueError, KeyError) as exc:  # ValueError: auch int() und JSON
+        reason = f"Schlüssel {exc} fehlt in gate.json/review-state.json" if isinstance(exc, KeyError) else exc
+        print(f"checkpoint {args.action}: {reason}", file=sys.stderr)
         return 1
     return 0
 
@@ -1429,7 +1463,8 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
         raise PlanParseError(f"{verdicts_path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
     paths = list(dict.fromkeys(p for f in findings for p in [f["path"], *f.get("related", [])]))
     gate = _read_json(out_dir / "gate.json") or {}
-    hit = [t["model"] for t in gate.get("tasks", []) if t.get("model") in MODELS and set(t.get("files", [])) & set(paths)]
+    hit = [t["model"] for t in gate.get("tasks", [])
+           if t.get("model") in MODELS and any(_paths_overlap(f, p) for f in t.get("files", []) for p in paths)]
     # MODELS steht stärkstes Modell zuerst — min ist das höchste.
     model = (min(hit, key=MODELS.index), "höchstes Modell der betroffenen Tasks") if hit else ("opus", "keine betroffene Task in gate.json")
     task = PlanTask(

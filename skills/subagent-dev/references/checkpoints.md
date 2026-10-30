@@ -10,7 +10,9 @@ bekommt bei jedem Aufruf dasselbe Modell, C3 nimmt das Gate-Urteil des ganzen Pl
 
 Abnehmer einer Task sind die **späteren** Tasks (Plan-Reihenfolge), deren `Consumes` ein
 `Produces`-Symbol dieser Task nennt (`consumers_of`). Je Abnehmer `{"task", "symbols"}`;
-erwartet der Abnehmer eine Arity, steht das Symbol als `name(arity)`.
+ein Symbol trägt seine Art als Präfix: `fn:name(arity)`, wenn der Abnehmer eine Arity
+erwartet, `token:Name`; ein Symbol ohne Arity steht nackt als `name`. `verify` liest die Art
+aus dem Präfix; ein nackter Name ohne Arity (auch aus einer alten Task-Datei) prüft es als `fn`.
 
 | Fall | Abnehmer? |
 | --- | --- |
@@ -61,7 +63,9 @@ unabhängig von M0.
 
 Fallen zwei Prüfpunkte auf dieselbe Stelle, bleibt einer mit allen Gründen, dem höheren
 Profil (`standard` über `checkpoint`, Reihenfolge in `PROFILES`) und der Art nach `CHECKPOINT_KINDS`:
-`final` > `group` > `after` > `before` (mit deren `task`). Die Spec nennt nur Gründe und
+`final` > `group` > `after` > `before` (mit deren `task`). Liegt die Stelle eines
+Prüfpunkts hinter der von `final` (C3 mit einer Gruppe, die die Verifikation enthält), wird er
+mit `final` zusammengelegt. Die Spec nennt nur Gründe und
 Profil; die Art legt das Skript fest. Anti-Zeremonie-Fall: zwei Tasks ohne Vorleistung
 und ohne Risikopfad bekommen `sonnet` und nur den finalen Prüfpunkt.
 
