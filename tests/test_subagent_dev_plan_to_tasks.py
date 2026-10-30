@@ -1957,7 +1957,7 @@ CONSUMER_PLAN = """### Task 1: Parser
 """
 
 
-def _consumer_check_verify(tmp_path, parser_src, *, drop_consumers=False, allow=None):
+def _consumer_check_verify(tmp_path, parser_src, *, drop_consumers=False, allow=None, log=None, no_base=False):
     tmp_path.mkdir(parents=True, exist_ok=True)
     plan = tmp_path / "plan.md"
     plan.write_text(CONSUMER_PLAN if allow is None else CONSUMER_PLAN.replace("src/parser.py", allow), encoding="utf-8")
@@ -1982,9 +1982,13 @@ def _consumer_check_verify(tmp_path, parser_src, *, drop_consumers=False, allow=
     target.write_text(parser_src, encoding="utf-8")
     git(wt, "add", "-A")
     git(wt, "commit", "--quiet", "-m", "Task 1")
+    if log is not None:  # das Log liegt wie im Betrieb unversioniert in .skills/cache/
+        (wt / ".git" / "info" / "exclude").write_text(".skills/\n", encoding="utf-8")
+        (wt / ".skills" / "cache" / "test-first").mkdir(parents=True)
+        (wt / ".skills" / "cache" / "test-first" / "log.md").write_text(log, encoding="utf-8")
     result_file = tmp_path / "verify.json"
-    code = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(wt), "--base", base,
-                     "--out", str(result_file)])
+    code = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(wt),
+                     *([] if no_base else ["--base", base]), "--out", str(result_file)])
     return code, json.loads(result_file.read_text(encoding="utf-8"))
 
 
@@ -2011,3 +2015,38 @@ def test_verify_consumer_check_unchecked_is_at_most_unverified(tmp_path):
     code, result = _consumer_check_verify(tmp_path / "pas", "procedure ParseOrder;\n", allow="src/Parser.pas")
     assert [r["status"] for r in result["consumer_check"]] == ["unchecked"]
     assert result["verdict"] in ("unverified", "fail") and result["verdict"] != "pass"
+
+
+TDD_LOG = """<!-- skill: test-first | schema: 1 | generated: scripts/tdd_log.py -->
+# test-first — Beleg
+
+## Abschnitt 2026-10-30T10:00:00
+
+| Test | Phase | Befehl | Exit | Zeit | Ausgabe |
+| --- | --- | --- | --- | --- | --- |
+| test_alt | red | pytest | 1 | 1 | x |
+| test_alt | green | pytest | 0 | 1 | x |
+| test_neu | sofort-grün | pytest | 0 | 1 | x |
+
+Vollständige Zyklen: 1
+"""
+
+
+def test_verify_hints(tmp_path):
+    src = "def parse_order(line, strict=False):\n    # TODO später\n    print(line)\n    return 1\n"
+    clean_code, clean = _consumer_check_verify(tmp_path / "clean", "def parse_order(line, strict=False):\n    return 1\n",
+                                               log=TDD_LOG.replace("test_neu | sofort-grün", "test_neu | green"))
+    assert (clean_code, clean["verdict"], clean["hints"]) == (0, "pass", [])
+    code, result = _consumer_check_verify(tmp_path / "dirty", src, log=TDD_LOG)
+    hints = {(h["kind"], h["path"], h["line"]): h["text"] for h in result["hints"]}
+    assert hints[("platzhalter", "src/parser.py", 2)] == "# TODO später"
+    assert hints[("debug-ausgabe", "src/parser.py", 3)] == "print(line)"
+    assert hints[("sofort-grün", ".skills/cache/test-first/log.md", None)] == "test_neu"
+    assert len(hints) == 3  # test_alt (rot, dann grün) und die nicht hinzugefügten Zeilen melden nichts
+    assert (code, result["verdict"]) == (0, "pass")  # Hinweise ändern das Verdikt nie
+    _, nolog = _consumer_check_verify(tmp_path / "nolog", "def parse_order(line, strict=False):\n    return 1\n")
+    assert [h["kind"] for h in nolog["hints"]] == ["log-fehlt"]
+    code, nobase = _consumer_check_verify(tmp_path / "nobase", src, log=TDD_LOG, no_base=True)
+    assert [h["kind"] for h in nobase["hints"]] == ["diff-ungeprüft", "sofort-grün"]  # kein stiller Erfolg
+    assert (code, nobase["verdict"]) == (1, "unverified")
+    assert [h["kind"] for h in ptt.collect_hints(tmp_path / "dirty" / "wt", None)] == ["diff-ungeprüft", "sofort-grün"]
