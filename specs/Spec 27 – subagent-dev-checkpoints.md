@@ -373,6 +373,13 @@ Ob `/code-review` als Ersatz einen Commit-Bereich annimmt, ist ungemessen.
 
 ## Next steps
 
+**Stand 2026-10-30: gebaut, abgenommen mit Vorbehalt.** Plan
+`docs/superpowers/plans/2026-10-30-subagent-dev-checkpoints.md`, alle 18 Tasks. Die
+Prüfpunkte sparen 55 % bzw. 42 % der Review-Tokens gegenüber dem Review je Task und verlieren
+keinen Fund der Schwere „hoch", aber 31 „mittel" und 76 „niedrig"
+(`docs/superpowers/reports/subagent-dev-report.md`, „Abnahme Spec 27"). Am Prüfpunkt läuft
+`/code-review --max-findings all`, solange Spec 26 pausiert ist.
+
 Vor dem Bau: Basislinie als Wiederholung auf gemergter Historie, nicht mit drei neu
 gebauten Plänen (Entscheidung des Nutzers 2026-10-30: Limit sparen). Drei fertige Pläne unter
 `docs/superpowers/plans/`, deren Tasks als eigene Commits `<skill> Task N: …` in der
