@@ -822,6 +822,8 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | No
     overlap = build_overlap_graph(doc.tasks)
     gate = gate_verdict(doc.tasks, overlap)
     checkpoints = place_checkpoints(doc.tasks, consumers, gate)
+    # Reihenfolge des ganzen Plans für `checkpoint status` — auch wenn `tasks` gefiltert ist.
+    plan_order = [{"id": t.id, "title": t.title} for t in doc.tasks]
     if only is not None:
         doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in only])
         overlap = build_overlap_graph(doc.tasks)
@@ -848,6 +850,7 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | No
         "reasoning": gate.reasoning,
         "components": gate.components,
         "checkpoints": checkpoints,
+        "plan_order": plan_order,
     }
     (out_dir / "gate.json").write_text(json.dumps(gate_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -1187,7 +1190,7 @@ def checkpoint_status(repo: Path, after_task: int, tests_red: bool) -> dict:
     if gate is None:
         raise PlanParseError(f"{TASKS_DIR / 'gate.json'} fehlt — erst generate")
     state = _read_json(repo / TASKS_DIR / "review-state.json")
-    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, gate["tasks"]) == after_task]
+    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, gate.get("plan_order") or gate["tasks"]) == after_task]
     reasons = [r for cp in planned for r in cp["reasons"]]
     profiles = [cp["profile"] for cp in planned]
     final = any(cp["kind"] == "final" for cp in planned)

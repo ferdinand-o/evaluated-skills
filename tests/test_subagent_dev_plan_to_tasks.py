@@ -1586,7 +1586,7 @@ def test_gate_json_keys_backward_compatible(tmp_path):
         ptt.write_tasks(doc, plan_path, tmp_path / name)
         gate = json.loads((tmp_path / name / "gate.json").read_text(encoding="utf-8"))
         assert list(gate) == ["_meta", "plan", "tasks", "overlap", "verdict", "parallel_group",
-                              "reasoning", "components", "checkpoints"]
+                              "reasoning", "components", "checkpoints", "plan_order"]
         assert gate["_meta"]["schema"] == 1 and gate["plan"] == plan_path
         for task, (tid, title, files) in zip(gate["tasks"], want["tasks"], strict=True):
             assert list(task) == ["id", "title", "files", "files_unknown", "interfaces_unknown",
@@ -1853,3 +1853,17 @@ def test_checkpoint_command_follows_plan_order_with_id_gaps(tmp_path):
     assert (final["since_runs"], final["range"]) == (["run-1", "run-2"], f"{base}..{head}")
     after = ptt.checkpoint_status(repo, 9, False)
     assert (after["since_runs"], after["range"]) == ([], f"{fix}..{head}")
+
+
+def test_checkpoint_status_uses_whole_plan_order_after_tasks_filter(tmp_path):
+    # `generate --tasks` (offene Tasks eines laufenden Plans) darf die Reihenfolge für
+    # `before`/`final` nicht auf die Teilmenge schrumpfen lassen.
+    repo = _cp_repo(tmp_path)
+    assert ptt.main(["generate", str(repo / "docs" / "plan.md"), "--tasks", "9,10,12",
+                     "--out-dir", str(repo / ".skills" / "cache" / "tasks")]) == 0
+    gate = json.loads((repo / ".skills" / "cache" / "tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert [t["id"] for t in gate["tasks"]] == [9, 10, 12]
+    assert [t["id"] for t in gate["plan_order"]] == [1, 3, 7, 9, 10, 12]
+    ptt.checkpoint_init(repo, "v1")
+    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 7, 9, 10, 12)}
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10, 12]
