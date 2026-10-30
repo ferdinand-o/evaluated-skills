@@ -1342,3 +1342,47 @@ def test_task_file_keeps_step_text():
     )
     block = ptt.parse_task_machine_block(rendered)
     assert set(block) == {"task_id", "plan", "allowlist", "produces"}
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 3: Abnehmer
+# --------------------------------------------------------------------------
+
+
+def _consumer_task(n, title, files, consumes, produces="nichts Neues"):
+    return (
+        f"### Task {n}: {title}\n\n**Files:**\n- Create: `{files}`\n\n**Interfaces:**\n"
+        f"- Consumes: {consumes}\n- Produces: {produces}\n\n- [ ] **Step 1: Bauen**\n"
+    )
+
+
+def test_consumers_exclude_mandatory_tasks():
+    plan = "\n".join([
+        _consumer_task(1, "Parser", "src/a.py", "nichts Neues", "`fn:parse_order(line)`, `Token`"),
+        _consumer_task(2, "CLI", "src/b.py", "`fn:parse_order(line)` aus Task 1"),
+        _consumer_task(3, "Zahlen", "src/c.py", "`Token` aus Task 1"),
+        _consumer_task(4, "Report und Runner-CLI", "src/d.py", "`fn:parse_order(line)`, `Token`"),
+        _consumer_task(5, "Evals", "e.json", "`fn:parse_order(line)`"),
+        _consumer_task(6, "Nachbarn", "n.md", "`fn:parse_order(line)`"),
+        _consumer_task(7, "known-limits", "k.md", "`fn:parse_order(line)`"),
+        _consumer_task(8, "Report", "r.md", "`fn:parse_order(line)`"),
+        _consumer_task(9, "Report — Basislinie", "r2.md", "`fn:parse_order(line)`"),
+        _consumer_task(10, "Verifikation", "v.md", "`fn:parse_order(line)`"),
+        _consumer_task(11, "Prosa", "src/p.py", "nichts Neues", "Parser mit Vorgabe"),
+        _consumer_task(12, "Späte Prosa", "src/q.py", "`fn:parse_order(line)`"),
+    ])
+    tasks = ptt.parse_plan(plan).tasks
+    assert tasks[10].interfaces_unknown
+    got = ptt.consumers_of(tasks)
+    assert [e["task"] for e in got[1]] == [2, 3, 4, 12]
+    assert got[1][0]["symbols"] == ["parse_order(1)"]
+    assert got[1][1]["symbols"] == ["Token"]
+    assert got[1][2]["symbols"] == ["parse_order(1)", "Token"]
+    assert set(got) == {t.id for t in tasks}
+    assert got[2] == [] and got[11] == []
+    # Nur spätere Tasks zählen, nie frühere.
+    assert all(e["task"] > tid for tid, es in got.items() for e in es)
+    assert [ptt.is_mandatory_title(t) for t in (
+        "Verifikation", "Evals", "Nachbarn", "known-limits", "Report", "Report — Basislinie",
+        "Report und Runner-CLI", "Reporting", "Verifikation der API")] == [
+        True, True, True, True, True, True, False, False, False]
