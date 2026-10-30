@@ -93,8 +93,10 @@ ihrer `task`; `final` nach der letzten Nicht-Verifikations-Task. Weitere Regeln:
 ## Review am Prüfpunkt
 
 **Heute (deep-review, Spec 26, pausiert):** Ist `due` wahr, läuft `/code-review` im
-Hauptkontext über `last_reviewed..HEAD` — auch am finalen Prüfpunkt, weil `/code-review`
-kein `--since` kennt und `base..HEAD` sonst alles noch einmal reviewte. Danach
+Hauptkontext über den `range` aus `checkpoint.json`: `last_reviewed..HEAD`, am finalen
+Prüfpunkt `base..HEAD`. Der finale Durchgang ist der einzige, der das Zusammenspiel aller
+Tasks sieht; ohne `--since` prüft er alles noch einmal, bleibt aber ein einzelnes Review
+statt eines je Task. Danach
 `checkpoint mark --run none`; die Übergabe sagt wörtlich:
 
 > Review ohne Abdeckungsnachweis
