@@ -14,6 +14,9 @@ statisch gelesen (Vorab-Entscheidung A3).
 als Abhängigkeit (Vorab-Entscheidung B2) — ein übersehener Konflikt zerstört
 Arbeitsstand, eine überflüssige Serialisierung kostet nur Zeit.
 
+`checkpoint` führt den Review-Stand zwischen den Merges (`review-state.json`) und
+sagt nach jedem Merge, ob ein Prüfpunkt fällig ist (`checkpoint.json`, Spec 27).
+
 `lint` prüft einen Plan auf das Format, das `generate` liest; `lint-spec` prüft
 die Skill-Spec davor (Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle,
 Skill-Struktur, Tier, Abgrenzung) mit demselben Parser — der Konsument des Formats
@@ -36,6 +39,8 @@ PARALLEL_THRESHOLD = 3
 # Modellwahl (E8, Spec 27 M1–M3): Grenzwerte und Risikowörter als Konstanten.
 BREADTH_MIN_FILES = 5
 CONSUMERS_FOR_OPUS = 2
+# C5 (Spec 27): ab so vielen geänderten Zeilen seit dem letzten Review ist ein Prüfpunkt fällig.
+SIZE_TRIGGER_LINES = 400
 MODELS = ("opus", "sonnet")
 RISK_WORDS = ("auth", "login", "session", "security", "crypto", "permission",
               "migration", "migrations", "payment", "billing")
@@ -1104,6 +1109,154 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# checkpoint — Review-Stand zwischen den Merges (Spec 27)
+# --------------------------------------------------------------------------
+
+TASKS_DIR = Path(".skills") / "cache" / "tasks"
+REVIEW_STATE_MISSING = "review-state fehlt — Basis unbekannt"
+
+
+def _checkpoint_meta(repo: Path, command: str) -> dict:
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py checkpoint {command}"
+    if str(repo) != ".":
+        cmd += f" --repo {shlex.quote(str(repo))}"
+    return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
+
+
+def _read_json(path: Path) -> dict | None:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _rev(repo: Path, ref: str) -> str:
+    """Jede Git-Ref als Commit-SHA — ein annotierter Tag zeigt auf seinen Commit."""
+    return _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+
+def changed_lines(repo: Path, since: str) -> tuple[int, list[str]]:
+    """Hinzugefügte plus gelöschte Zeilen in `since..HEAD` und die Binärdateien darin
+    (sie zählen 0). `.skills/` zählt nicht, damit das committete runlog keinen
+    Prüfpunkt auslöst."""
+    out = _git(repo, "diff", "--numstat", "-z", "--no-renames", f"{since}..HEAD", "--", ".", ":(exclude).skills")
+    total, binary = 0, []
+    for record in filter(None, out.split("\0")):
+        added, deleted, path = record.split("\t", 2)
+        if added == "-":
+            binary.append(path)
+        else:
+            total += int(added) + int(deleted)
+    return total, binary
+
+
+def _checkpoint_after(cp: dict, tasks: list[dict]) -> int | None:
+    """Die Task, nach deren Merge der Prüfpunkt fällig ist — aus der Plan-Reihenfolge in
+    `gate.json`, nie als ID + 1: IDs können Lücken haben, und ein zusammengelegter
+    Prüfpunkt heißt `after N` statt `before <nächste>`."""
+    ids = [t["id"] for t in tasks]
+    if cp["kind"] == "final":
+        work = [t["id"] for t in tasks if not title_is(t["title"], "Verifikation")]
+        return (work or ids or [None])[-1]
+    if cp["kind"] == "before":
+        i = ids.index(cp["task"]) if cp["task"] in ids else 0
+        return ids[i - 1] if i > 0 else None
+    return cp["task"]  # after; group: höchste ID der Gruppe
+
+
+def checkpoint_init(repo: Path, base: str) -> dict:
+    """Schreibt `review-state.json`: `base` und `last_reviewed` = aufgelöster SHA von `base`."""
+    repo = Path(repo)
+    sha = _rev(repo, base)
+    gate = _read_json(repo / TASKS_DIR / "gate.json") or {}
+    state = {
+        "_meta": _checkpoint_meta(repo, f"init --base {shlex.quote(base)}"),
+        "plan": gate.get("plan"), "base": sha, "last_reviewed": sha, "runs": [], "reviewed_tasks": [],
+    }
+    _write_json(repo / TASKS_DIR / "review-state.json", state)
+    return state
+
+
+def checkpoint_status(repo: Path, after_task: int, tests_red: bool) -> dict:
+    """Ist nach dem Merge von Task `after_task` ein Prüfpunkt fällig (C1–C5)? Schreibt
+    `checkpoint.json`. Ohne `review-state.json` ist er fällig, ohne Bereich (E7)."""
+    repo = Path(repo)
+    gate = _read_json(repo / TASKS_DIR / "gate.json")
+    if gate is None:
+        raise PlanParseError(f"{TASKS_DIR / 'gate.json'} fehlt — erst generate")
+    state = _read_json(repo / TASKS_DIR / "review-state.json")
+    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, gate["tasks"]) == after_task]
+    reasons = [r for cp in planned for r in cp["reasons"]]
+    profiles = [cp["profile"] for cp in planned]
+    final = any(cp["kind"] == "final" for cp in planned)
+    span, lines, binary, since_runs = None, None, [], []
+    if state is None:
+        reasons.append(REVIEW_STATE_MISSING)
+        profiles.append("checkpoint")
+    else:
+        last, head = _rev(repo, state["last_reviewed"]), _rev(repo, "HEAD")
+        lines, binary = changed_lines(repo, last)
+        if lines >= SIZE_TRIGGER_LINES:
+            reasons.append(f"C5: {lines} geänderte Zeilen seit {last[:12]} (ab {SIZE_TRIGGER_LINES})")
+            profiles.append("checkpoint")
+        span = f"{_rev(repo, state['base']) if final else last}..{head}"
+        since_runs = list(state["runs"]) if final else []
+    if tests_red:
+        reasons.append("C5: Gesamttests rot nach dem Merge")
+        profiles.append("checkpoint")
+    payload = {
+        "_meta": _checkpoint_meta(repo, f"status --after-task {after_task}" + (" --tests-red" if tests_red else "")),
+        "due": bool(reasons), "reasons": reasons, "range": span, "changed_lines": lines,
+        "binary_files": binary, "profile": max(profiles, key=PROFILES.index) if profiles else None,
+        "since_runs": since_runs,
+    }
+    _write_json(repo / TASKS_DIR / "checkpoint.json", payload)
+    return payload
+
+
+def checkpoint_mark(repo: Path, commit: str, run: str, tasks: list[int]) -> dict:
+    """Nach Review und Nachprüfung: `last_reviewed` = aufgelöster `commit`, Lauf-ID an
+    `runs` (`none` hängt nichts an), `tasks` an `reviewed_tasks`."""
+    repo = Path(repo)
+    path = repo / TASKS_DIR / "review-state.json"
+    state = _read_json(path)
+    if state is None:
+        raise PlanParseError(f"{path} fehlt — erst checkpoint init")
+    state["last_reviewed"] = _rev(repo, commit)
+    if run != "none":
+        state["runs"].append(run)
+    for tid in tasks:
+        if tid not in state["reviewed_tasks"]:
+            state["reviewed_tasks"].append(tid)
+    _write_json(path, state)
+    return state
+
+
+def _cmd_checkpoint(args: argparse.Namespace) -> int:
+    try:
+        if args.action == "init":
+            state = checkpoint_init(args.repo, args.base)
+            print(f"review-state.json: base = last_reviewed = {state['base']}")
+        elif args.action == "status":
+            cp = checkpoint_status(args.repo, args.after_task, args.tests_red)
+            print(f"Prüfpunkt nach Task {args.after_task}: {'FÄLLIG' if cp['due'] else 'nicht fällig'}"
+                  + (f" [{cp['profile']}]" if cp["due"] else ""))
+            for reason in cp["reasons"]:
+                print(f"  {reason}")
+            print(f"Bereich: {cp['range'] or '-'}; geänderte Zeilen: {cp['changed_lines']}")
+        else:
+            tasks = [int(x) for x in args.tasks.split(",") if x.strip()]
+            state = checkpoint_mark(args.repo, args.commit, args.run, tasks)
+            print(f"last_reviewed = {state['last_reviewed']}; Läufe: {len(state['runs'])}")
+    except (PlanParseError, json.JSONDecodeError) as exc:
+        print(f"checkpoint {args.action}: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------
 # Lint — sagt, *warum* das Gate eine Task für unsicher hält (G2: meldet, blockiert nicht)
 # --------------------------------------------------------------------------
 
@@ -1874,7 +2027,7 @@ def main(argv: list[str] | None = None) -> int:
     gen = sub.add_parser("generate", help="Plan parsen, Gate fällen, Task-Dateien schreiben")
     gen.add_argument("plan", help="Pfad zum impl-plan- oder work-plan-Plan")
     gen.add_argument("--tasks", help="Kommagetrennte Task-IDs, sonst alle")
-    gen.add_argument("--out-dir", default=str(Path(".skills") / "cache" / "tasks"))
+    gen.add_argument("--out-dir", default=str(TASKS_DIR))
     gen.set_defaults(func=_cmd_generate)
 
     lint = sub.add_parser("lint", help="Plan prüfen: warum ist eine Task unsicher, wo stehen Platzhalter, fehlt etwas im Kopf")
@@ -1897,6 +2050,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     ver.add_argument("--out", help="Verify-Ergebnis zusätzlich als JSON-Artefakt schreiben (z. B. .skills/cache/tasks/verify-task-1.json)")
     ver.set_defaults(func=_cmd_verify)
+
+    repo_arg = argparse.ArgumentParser(add_help=False)
+    repo_arg.add_argument("--repo", default=".", help="Repo-Wurzel; Ablage unter .skills/cache/tasks/")
+    cp = sub.add_parser("checkpoint", help="Review-Stand führen: init nach generate, status nach jedem Merge, mark nach einem Review")
+    cp_sub = cp.add_subparsers(dest="action", required=True)
+    cp_init = cp_sub.add_parser("init", parents=[repo_arg], help="review-state.json mit base = last_reviewed anlegen")
+    cp_init.add_argument("--base", required=True, help="Git-Ref vor der ersten Task")
+    cp_status = cp_sub.add_parser("status", parents=[repo_arg], help="checkpoint.json: ist ein Prüfpunkt fällig?")
+    cp_status.add_argument("--after-task", type=int, required=True, help="ID der zuletzt gemergten Task")
+    cp_status.add_argument("--tests-red", action="store_true", help="Gesamttests nach dem Merge rot")
+    cp_mark = cp_sub.add_parser("mark", parents=[repo_arg], help="last_reviewed setzen, Lauf an runs anhängen")
+    cp_mark.add_argument("--commit", required=True, help="Git-Ref nach dem Fix")
+    cp_mark.add_argument("--run", required=True, help="Lauf-ID der Nachprüfung; none hängt nichts an")
+    cp_mark.add_argument("--tasks", required=True, help="Kommagetrennte Task-IDs des Bereichs")
+    cp.set_defaults(func=_cmd_checkpoint)
 
     args = parser.parse_args(argv)
     return args.func(args)

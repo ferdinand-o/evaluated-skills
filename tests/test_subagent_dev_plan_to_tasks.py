@@ -1722,3 +1722,134 @@ def test_render_task_file_needs_consumers_and_model():
     assert "- Modell: `opus` — Plan" in rendered and "Task 9 (`parse(1)`)" in rendered
     block = ptt.parse_task_machine_block(rendered)
     assert block["model"] == "opus" and block["consumers"] == [{"task": 9, "symbols": ["parse(1)"]}]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 6: checkpoint init, status, mark
+# --------------------------------------------------------------------------
+
+# Task-IDs mit Lücken: C1 vor Task 3 sitzt hinter Task 1, C2 hinter Task 9, C4 hinter
+# Task 10 (vor der Verifikation), C3 hinter Task 12 (höchste ID der Gruppe 9, 10, 12).
+GAP_PLAN = "\n".join([
+    _consumer_task(1, "Parser", "src/parser.py", "nichts Neues", "`fn:parse(x)`"),
+    _consumer_task(3, "A", "src/a.py", "`fn:parse(x)`"),
+    _consumer_task(7, "B", "src/b.py", "`fn:parse(x)`"),
+    _consumer_task(9, "Sitzung", "src/session.py", "nichts Neues"),
+    _consumer_task(10, "D", "src/d.py", "nichts Neues"),
+    _consumer_task(12, "Verifikation", "tests/test_all.py", "nichts Neues"),
+])
+
+
+def _rev(repo, ref="HEAD"):
+    return subprocess.run(["git", "rev-parse", ref], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _commit(repo, files, msg):
+    for rel, content in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content) if isinstance(content, bytes) else path.write_text(content, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "-m", msg)
+
+
+def _cp_repo(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    _commit(tmp_path, {"src/a.py": "x = 1\n", "docs/plan.md": GAP_PLAN}, "base")
+    git(tmp_path, "tag", "-a", "v1", "-m", "Basis")  # annotiert: rev-parse allein gäbe das Tag-Objekt
+    assert ptt.main(["generate", str(tmp_path / "docs" / "plan.md"),
+                     "--out-dir", str(tmp_path / ".skills" / "cache" / "tasks")]) == 0
+    return tmp_path
+
+
+def _cp_state(repo):
+    return json.loads((repo / ".skills" / "cache" / "tasks" / "review-state.json").read_text(encoding="utf-8"))
+
+
+def _cp_status(repo, n, red=False):
+    argv = ["checkpoint", "status", "--after-task", str(n), "--repo", str(repo)] + (["--tests-red"] if red else [])
+    assert ptt.main(argv) == 0
+    return json.loads((repo / ".skills" / "cache" / "tasks" / "checkpoint.json").read_text(encoding="utf-8"))
+
+
+def test_checkpoint_command(tmp_path):
+    repo = _cp_repo(tmp_path)
+    base = _rev(repo)
+    # Ohne review-state.json: fällig, ohne Bereich.
+    cp = _cp_status(repo, 3)
+    assert (cp["due"], cp["reasons"], cp["range"]) == (True, ["review-state fehlt — Basis unbekannt"], None)
+    assert cp["_meta"]["skill"] == "subagent-dev"
+    # init löst den annotierten Tag zum Commit auf.
+    assert ptt.main(["checkpoint", "init", "--base", "v1", "--repo", str(repo)]) == 0
+    state = _cp_state(repo)
+    assert list(state) == ["_meta", "plan", "base", "last_reviewed", "runs", "reviewed_tasks"]
+    assert (state["base"], state["last_reviewed"], state["runs"]) == (base, base, [])
+    assert state["plan"].endswith("plan.md") and state["_meta"]["schema"] == ptt.SCHEMA_VERSION
+    # Kein geplanter Prüfpunkt, nichts geändert: nicht fällig.
+    cp = _cp_status(repo, 3)
+    assert list(cp) == ["_meta", "due", "reasons", "range", "changed_lines", "binary_files", "profile", "since_runs"]
+    assert (cp["due"], cp["reasons"], cp["range"], cp["changed_lines"]) == (False, [], f"{base}..{base}", 0)
+    # .skills/ zählt nicht, Binärdateien zählen 0 und stehen in binary_files.
+    _commit(repo, {
+        ".skills/subagent-dev/runlog.jsonl": "{}\n" * 500,
+        "src/blob.bin": b"\0\1\2" * 100,
+        "src/a.py": "".join(f"y{i} = {i}\n" for i in range(10)),
+    }, "Task 3")
+    cp = _cp_status(repo, 3)
+    assert (cp["due"], cp["changed_lines"], cp["binary_files"]) == (False, 11, ["src/blob.bin"])
+    # --tests-red macht fällig.
+    cp = _cp_status(repo, 3, red=True)
+    assert cp["due"] and cp["profile"] == "checkpoint" and [r[:2] for r in cp["reasons"]] == ["C5"]
+    # Ab SIZE_TRIGGER_LINES geänderten Zeilen fällig, darunter nicht.
+    assert ptt.SIZE_TRIGGER_LINES == 400
+    _commit(repo, {"src/big.py": "z = 0\n" * 388}, "groß")
+    assert _cp_status(repo, 3)["changed_lines"] == 399 and not _cp_status(repo, 3)["due"]
+    _commit(repo, {"src/big.py": "z = 0\n" * 389}, "größer")
+    cp = _cp_status(repo, 3)
+    assert cp["due"] and cp["changed_lines"] == 400 and "400" in cp["reasons"][0]
+    # mark setzt den aufgelösten Commit und hängt den Lauf an; --run none hängt nichts an.
+    head = _rev(repo)
+    state = ptt.checkpoint_mark(repo, "HEAD", "run-1", [1, 3])
+    assert (state["last_reviewed"], state["runs"], state["reviewed_tasks"]) == (head, ["run-1"], [1, 3])
+    assert _cp_status(repo, 3)["changed_lines"] == 0
+    assert ptt.main(["checkpoint", "mark", "--commit", "v1", "--run", "none", "--tasks", "3,7",
+                     "--repo", str(repo)]) == 0
+    state = _cp_state(repo)
+    assert (state["last_reviewed"], state["runs"], state["reviewed_tasks"]) == (base, ["run-1"], [1, 3, 7])
+    # status nimmt Refs aus review-state.json und löst sie auf.
+    state["last_reviewed"] = "v1"
+    (repo / ".skills" / "cache" / "tasks" / "review-state.json").write_text(json.dumps(state), encoding="utf-8")
+    cp = _cp_status(repo, 3)
+    assert cp["range"] == f"{base}..{head}" and cp["changed_lines"] == 400
+
+
+def test_checkpoint_command_follows_plan_order_with_id_gaps(tmp_path):
+    repo = _cp_repo(tmp_path)
+    base = _rev(repo)
+    ptt.checkpoint_init(repo, "v1")
+    gate = json.loads((repo / ".skills" / "cache" / "tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert _kinds(gate["checkpoints"]) == [
+        ("before", 3, "checkpoint", ["C1"]), ("after", 9, "standard", ["C2"]),
+        ("final", None, "standard", ["C4"]), ("group", 12, "checkpoint", ["C3"]),
+    ]
+    # Fällig nach der Task, hinter der der Prüfpunkt steht — nicht nach "ID + 1": Task 2
+    # gibt es nicht, `before 3` ist nach Task 1 fällig; `group` erst nach der höchsten ID.
+    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 2, 3, 7, 9, 10, 12)}
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10, 12]
+    assert [(got[n]["profile"], [r[:2] for r in got[n]["reasons"]]) for n in (1, 9, 10, 12)] == [
+        ("checkpoint", ["C1"]), ("standard", ["C2"]), ("standard", ["C4"]), ("checkpoint", ["C3"]),
+    ]
+    # Am finalen Prüfpunkt alle Läufe in since_runs und Bereich base..HEAD; sonst leer.
+    _commit(repo, {"src/d.py": "d = 1\n"}, "Task 9")
+    ptt.checkpoint_mark(repo, "HEAD", "run-1", [9])
+    _commit(repo, {"src/e.py": "e = 1\n"}, "Fix")
+    fix = _rev(repo)
+    ptt.checkpoint_mark(repo, "HEAD", "run-2", [9])
+    _commit(repo, {"src/f.py": "f = 1\n"}, "Task 10")
+    head = _rev(repo)
+    final = ptt.checkpoint_status(repo, 10, False)
+    assert (final["since_runs"], final["range"]) == (["run-1", "run-2"], f"{base}..{head}")
+    after = ptt.checkpoint_status(repo, 9, False)
+    assert (after["since_runs"], after["range"]) == ([], f"{fix}..{head}")
