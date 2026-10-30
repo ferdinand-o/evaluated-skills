@@ -1375,9 +1375,9 @@ def test_consumers_exclude_mandatory_tasks():
     assert tasks[10].interfaces_unknown
     got = ptt.consumers_of(tasks)
     assert [e["task"] for e in got[1]] == [2, 3, 4, 12]
-    assert got[1][0]["symbols"] == ["parse_order(1)"]
-    assert got[1][1]["symbols"] == ["Token"]
-    assert got[1][2]["symbols"] == ["parse_order(1)", "Token"]
+    assert got[1][0]["symbols"] == ["fn:parse_order(1)"]
+    assert got[1][1]["symbols"] == ["Token"]  # nackter Bezeichner bleibt nackt
+    assert got[1][2]["symbols"] == ["fn:parse_order(1)", "Token"]
     assert set(got) == {t.id for t in tasks}
     assert got[2] == [] and got[11] == []
     # Nur spätere Tasks zählen, nie frühere.
@@ -1832,14 +1832,14 @@ def test_checkpoint_command_follows_plan_order_with_id_gaps(tmp_path):
     gate = json.loads((repo / ".skills" / "cache" / "tasks" / "gate.json").read_text(encoding="utf-8"))
     assert _kinds(gate["checkpoints"]) == [
         ("before", 3, "checkpoint", ["C1"]), ("after", 9, "standard", ["C2"]),
-        ("final", None, "standard", ["C4"]), ("group", 12, "checkpoint", ["C3"]),
+        ("final", None, "standard", ["C3", "C4"]),  # C3 läge hinter der Verifikation (12): mit final zusammengelegt
     ]
     # Fällig nach der Task, hinter der der Prüfpunkt steht — nicht nach "ID + 1": Task 2
-    # gibt es nicht, `before 3` ist nach Task 1 fällig; `group` erst nach der höchsten ID.
-    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 2, 3, 7, 9, 10, 12)}
-    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10, 12]
-    assert [(got[n]["profile"], [r[:2] for r in got[n]["reasons"]]) for n in (1, 9, 10, 12)] == [
-        ("checkpoint", ["C1"]), ("standard", ["C2"]), ("standard", ["C4"]), ("checkpoint", ["C3"]),
+    # gibt es nicht, `before 3` ist nach Task 1 fällig; hinter der Verifikation (12) nichts mehr.
+    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 3, 7, 9, 10, 12)}
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10]
+    assert [(got[n]["profile"], [r[:2] for r in got[n]["reasons"]]) for n in (1, 9, 10)] == [
+        ("checkpoint", ["C1"]), ("standard", ["C2"]), ("standard", ["C3", "C4"]),
     ]
     # Am finalen Prüfpunkt alle Läufe in since_runs und Bereich base..HEAD; sonst leer.
     _commit(repo, {"src/d.py": "d = 1\n"}, "Task 9")
@@ -1866,7 +1866,7 @@ def test_checkpoint_status_uses_whole_plan_order_after_tasks_filter(tmp_path):
     assert [t["id"] for t in gate["plan_order"]] == [1, 3, 7, 9, 10, 12]
     ptt.checkpoint_init(repo, "v1")
     got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 7, 9, 10, 12)}
-    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10, 12]
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10]
 
 
 # --------------------------------------------------------------------------
@@ -1902,7 +1902,7 @@ def test_consumer_check_statuses(tmp_path):
         encoding="utf-8",
     )
     consumers = [
-        {"task": 3, "symbols": ["parse(1)", "load(1)", "load"]},
+        {"task": 3, "symbols": ["parse(1)", "fn:load(1)", "load"]},  # mit und ohne Präfix (alte Task-Datei)
         {"task": 5, "symbols": ["helper(1)", "gone(2)", "parse(2)", "parse"]},
     ]
     results = ptt.check_consumers(tmp_path, ["a.py"], consumers)
@@ -2152,3 +2152,139 @@ def test_log_keeps_umlauts(tmp_path):
     path = tmp_path / "runlog.jsonl"
     ptt.append_log(path, {"plan": "p.md", "reason": "größer als 400 Zeilen"})
     assert "größer" in path.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# Fix nach dem Review über Task 6 bis 10
+# --------------------------------------------------------------------------
+
+
+def test_checkpoint_status_rejects_unknown_task(tmp_path, capsys):
+    repo = _cp_repo(tmp_path)
+    ptt.checkpoint_init(repo, "v1")
+    for bad in (2, 99):  # 2: Lücke in den IDs
+        try:
+            ptt.checkpoint_status(repo, bad, False)
+        except ptt.PlanParseError as exc:
+            assert f"Task {bad}" in str(exc) and "gate.json" in str(exc)
+        else:
+            raise AssertionError("unbekannte Task darf nicht still 'nicht fällig' ergeben")
+    assert ptt.main(["checkpoint", "status", "--after-task", "2", "--repo", str(repo)]) == 1
+    assert "checkpoint status: " in capsys.readouterr().err
+
+
+def test_fix_task_model_matches_directory_and_glob_entries(tmp_path):
+    out = tmp_path / "tasks"
+    out.mkdir()
+    (out / "gate.json").write_text(json.dumps({"tasks": [
+        {"id": 1, "files": ["src/auth/"], "model": "sonnet"},
+        {"id": 2, "files": ["lib/*.py"], "model": "sonnet"},
+        {"id": 3, "files": ["src/other.py"], "model": "opus"}]}), encoding="utf-8")
+    verdicts = tmp_path / "v.jsonl"
+    for path in ("src/auth/token.py", "lib/x.py"):
+        verdicts.write_text(json.dumps(_verdict("F1", path, "bestätigt")) + "\n", encoding="utf-8")
+        block = ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))
+        assert block["model"] == "sonnet"  # Verzeichnis- und Glob-Eintrag treffen; Rückfall wäre opus
+    # Keine Task passt: Rückfall opus.
+    verdicts.write_text(json.dumps(_verdict("F1", "docs/x.md", "bestätigt")) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "opus"
+
+
+def test_group_checkpoint_containing_verification_merges_into_final():
+    # Die Gruppe 9, 10, 12 enthält die Verifikation (12): C3 läge hinter dem finalen Prüfpunkt.
+    tasks = ptt.parse_plan(GAP_PLAN).tasks
+    consumers = ptt.consumers_of(tasks)
+    gate = ptt.gate_verdict(tasks, ptt.build_overlap_graph(tasks))
+    assert gate.verdict == "parallel" and 12 in gate.parallel_group
+    got = ptt.place_checkpoints(tasks, consumers, gate)
+    assert _kinds(got)[-1] == ("final", None, "standard", ["C3", "C4"])
+    assert [c["kind"] for c in got].count("group") == 0
+
+
+def _hint_repo(tmp_path, name="wt"):
+    wt = tmp_path / name
+    wt.mkdir(parents=True)
+    git(wt, "init", "--quiet", "--initial-branch=main")
+    git(wt, "config", "user.email", "t@example.invalid")
+    git(wt, "config", "user.name", "Test")
+    git(wt, "commit", "--quiet", "--allow-empty", "-m", "base")
+    return wt, _rev(wt)
+
+
+def test_collect_hints_counts_untracked_files(tmp_path):
+    wt, base = _hint_repo(tmp_path)
+    (wt / "src").mkdir()
+    (wt / "src" / "neu.py").write_text("x = 1\n# TODO später\nprint(x)\n", encoding="utf-8")
+    (wt / ".skills" / "cache").mkdir(parents=True)
+    (wt / ".skills" / "cache" / "notiz.md").write_text("TODO hier\n", encoding="utf-8")
+    hints = {(h["kind"], h["path"], h["line"]) for h in ptt.collect_hints(wt, base)}
+    assert ("platzhalter", "src/neu.py", 2) in hints and ("debug-ausgabe", "src/neu.py", 3) in hints
+    assert not any(p and p.startswith(".skills/cache/notiz") for _, p, _ in hints)
+
+
+def test_collect_hints_path_with_space_and_mnemonic_prefix(tmp_path):
+    wt, base = _hint_repo(tmp_path)
+    git(wt, "config", "diff.mnemonicPrefix", "true")
+    (wt / "src").mkdir()
+    (wt / "src" / "mein modul.py").write_text("print(1)\n", encoding="utf-8")
+    git(wt, "add", "-A")
+    git(wt, "commit", "--quiet", "-m", "Task")
+    (wt / "src" / "mein modul.py").write_text("print(1)\nprint(2)\n", encoding="utf-8")  # uncommittet
+    hints = [(h["path"], h["line"]) for h in ptt.collect_hints(wt, base) if h["kind"] == "debug-ausgabe"]
+    assert hints == [("src/mein modul.py", 1), ("src/mein modul.py", 2)]
+
+
+def test_added_lines_strips_trailing_tab_from_header():
+    diff = "--- a/x y.py\n+++ b/x y.py\t\n@@ -0,0 +1 @@\n+print(1)\n"
+    assert ptt._added_lines(diff) == [("x y.py", 1, "print(1)")]
+
+
+def test_added_lines_plusplus_content_is_not_a_header():
+    diff = (
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,0 +2 @@\n+++ TODO\n"
+        "@@ -5 +6 @@\n--- Zeile\n+++ print(1)\n"
+        "@@ -9,0 +10,2 @@\n+a = 1\n+print(2)\n"
+    )
+    assert ptt._added_lines(diff) == [
+        ("x.py", 2, "++ TODO"), ("x.py", 6, "++ print(1)"), ("x.py", 10, "a = 1"), ("x.py", 11, "print(2)"),
+    ]
+
+
+def test_checkpoint_command_reports_broken_input_without_traceback(tmp_path, capsys):
+    repo = _cp_repo(tmp_path)
+    ptt.checkpoint_init(repo, "v1")
+    base = ["--repo", str(repo)]
+    assert ptt.main(["checkpoint", "mark", "--commit", "HEAD", "--run", "none", "--tasks", "1,x", *base]) == 1
+    assert "checkpoint mark: " in capsys.readouterr().err
+    state_file = repo / ".skills" / "cache" / "tasks" / "review-state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    del state["last_reviewed"]
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    assert ptt.main(["checkpoint", "status", "--after-task", "1", *base]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("checkpoint status: ") and "last_reviewed" in err
+    assert ptt.main(["checkpoint", "mark", "--commit", "HEAD", "--run", "none", "--tasks", "1", *base]) == 0
+
+
+def test_consumer_symbols_carry_the_kind_prefix_of_the_plan():
+    plan = "\n".join([
+        _consumer_task(1, "Doktrin", "src/a.py", "nichts Neues", "`token:Next`, `fn:parse(line)`, `Bare`"),
+        _consumer_task(2, "Nutzer", "src/b.py", "`token:Next`, `fn:parse(line)`, `Bare`"),
+    ])
+    got = ptt.consumers_of(ptt.parse_plan(plan).tasks)
+    assert got[1] == [{"task": 2, "symbols": ["token:Next", "fn:parse(1)", "Bare"]}]
+
+
+def test_verify_consumer_check_reads_kind_from_prefix(tmp_path):
+    plan = "\n".join([
+        _consumer_task(1, "Doktrin", "SKILL.md", "nichts Neues", "`token:Review ohne Abdeckungsnachweis`"),
+        _consumer_task(2, "Nutzer", "src/b.py", "`token:Review ohne Abdeckungsnachweis`"),
+    ])
+    out = tmp_path / "tasks"
+    (tmp_path / "plan.md").write_text(plan, encoding="utf-8")
+    assert ptt.main(["generate", str(tmp_path / "plan.md"), "--out-dir", str(out)]) == 0
+    block = ptt.parse_task_machine_block(next(out.glob("task-1-*.md")).read_text(encoding="utf-8"))
+    assert block["consumers"][0]["symbols"] == ["token:Review ohne Abdeckungsnachweis"]
+    (tmp_path / "SKILL.md").write_text("Review ohne Abdeckungsnachweis\n", encoding="utf-8")
+    assert [r["status"] for r in ptt.check_consumers(tmp_path, ["SKILL.md"], block["consumers"])] == ["present"]
