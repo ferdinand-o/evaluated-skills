@@ -570,6 +570,34 @@ Zahlen der Stichprobe: Prüfpunktseite 2 geprüft (1 trifft zu, 1 unklar), Basis
 
 **Spec-Bedingung „mindestens gleich viele nachgeprüfte Funde"**, nur auf dieser Stichprobe gewertet: nicht erfüllt. Die Prüfpunkte haben in der Stichprobe 1 bestätigten Fund, der in der Basislinie fehlt; die Basislinie hat 106 Funde ohne Gegenstück bei den Prüfpunkten (50 + 56), von denen 8 von 10 gezogenen bestätigt wurden. Selbst wenn man die Quote der Stichprobe mit großer Unsicherheit ansetzt, ergibt das deutlich mehr bestätigte Funde auf der Basislinienseite. Eine vollständige Nachprüfung aller Funde wurde nicht gefahren.
 
+### Nachmessung mit `--max-findings all` (2026-10-30)
+
+Vermutung nach der ersten Messung: `/code-review` meldet ohne Angabe höchstens zehn Funde
+je Lauf (alle 17 Basislinien-Läufe lagen bei 6 bis 10), ein Prüfpunkt über mehrere Tasks
+bekommt also dieselben zehn Plätze wie ein Review über eine Task. Nachgemessen mit
+denselben fünf Bereichen, Flags und Worktrees, nur mit `/code-review --max-findings all
+<bereich>`; ein Lauf je Bereich, 4,03 USD.
+
+| Plan | Basislinie | Prüfpunkte, Standard | Prüfpunkte, `--max-findings all` |
+| --- | --- | --- | --- |
+| test-first: Funde | 60 | 20 | 30 (12 + 18) |
+| test-first: Tokens, Ersparnis | 4,47 Mio. | 0,81 Mio., −81,9 % | 2,02 Mio., −54,8 % |
+| test-first: USD, Ersparnis | 3,60 | 0,96, −73,4 % | 1,59, −55,8 % |
+| skill-dir: Funde | 85 | 30 | 31 (14 + 6 + 11) |
+| skill-dir: Tokens, Ersparnis | 7,04 Mio. | 3,69 Mio., −47,6 % | 4,08 Mio., −42,1 % |
+| skill-dir: USD, Ersparnis | 5,04 | 2,36, −53,2 % | 2,44, −51,6 % |
+
+Basislinien-Funde mit Gegenstück (gleiche Datei, Zeilen höchstens 10 auseinander,
+mechanisch): test-first 10 → 13, skill-dir 20 → 25.
+
+**Ergebnis:** Die Obergrenze erklärt nur einen kleinen Teil der Lücke. Auch ohne sie
+melden die Prüfpunkte etwa die Hälfte (test-first) bzw. ein Drittel (skill-dir) der Funde
+der Basislinie, und die Stichprobe oben zeigt, dass die fehlenden überwiegend zutreffen.
+Mehrere kleine Reviews finden mehr als eines über denselben Code. Die Token-Ersparnis
+bleibt in beiden Plänen über 40 %, bei skill-dir mit 2,1 Punkten Abstand — innerhalb der
+Streuung von 17 %, die ein Wiederholungslauf zeigte. Die Abnahme nach Spec 27 bleibt
+**nicht erfüllt** (Funde); ob die fehlenden Funde schwer wiegen, ist nicht gemessen.
+
 ### Grenzwerte (E8)
 
 Gelesen aus `skills/subagent-dev/scripts/plan_to_tasks.py` am Stand dieses Branches:
