@@ -1,6 +1,6 @@
 # Spec 27: subagent-dev-checkpoints — Reviews dort, wo ein Fehler wandern kann, und das Modell je Task aus dem Plan
 
-Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags)
+Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags)
 
 ## Problem
 
@@ -15,9 +15,9 @@ als dokumentierter Sparmodus erwähnt". Diese Spec macht daraus den Standard.
 
 Seltener reviewen hat einen Preis: Ein Fehler in einer Task, auf der spätere aufbauen,
 wandert weiter. Welche Tasks das sind, steht im Plan in `Produces:` und `Consumes:`, die
-das Gate heute nur für die Überlappung liest. Im Review simuliert über die 13 jüngeren Pläne
-unter `docs/superpowers/plans/`: Prüfpunkte nach den Regeln unten ergeben 34 Prüfpunkte auf
-133 Tasks, also rund jede vierte statt jeder Task.
+das Gate heute nur für die Überlappung liest. Zwei unabhängige Nachrechnungen im Review über die
+13 jüngsten Pläne unter `docs/superpowers/plans/` (nach Dateidatum) ergaben mit den Regeln unten
+34 Prüfpunkte auf 133 bzw. 36 auf 135 Tasks, also etwa jede vierte statt jeder Task.
 
 Ob das das Limit-Problem löst, ist offen: Ein Review am Prüfpunkt deckt mehr Code ab und
 kostet mehr als eines je Task. Wie viel ein Review je Task heute kostet, hat niemand
@@ -89,14 +89,17 @@ docs/superpowers/reports/subagent-dev-report.md   neuer Abschnitt mit Basislinie
 
 Abnehmer einer Task sind die späteren Tasks, deren `Consumes` ein `Produces`-Symbol dieser
 Task nennt (Logik von `_interface_dependency`). Nicht als Abnehmer zählen Tasks, deren Titel
-mit `Verifikation`, `Evals`, `Nachbarn`, `known-limits` oder `Report` beginnt — sie
+genau `Verifikation`, `Evals`, `Nachbarn`, `known-limits` oder `Report` lautet oder mit einem
+dieser Wörter und ` —` beginnt (eine Code-Task „Report und Runner-CLI" zählt also) — sie
 konsumieren laut work-plan bzw. impl-plan alle `Produces` und würden jede Task zur
-Vorleistung machen (im Review gemessen: 56 statt 28 Treffer bei 198 Tasks). Tasks mit
+Vorleistung machen. Nachgerechnet mit `parse_plan` und `_interface_dependency` über 198 Tasks
+in 22 Plänen: 55 Tasks mit mindestens zwei Abnehmern, ohne diese Pflicht-Tasks 23. Tasks mit
 `interfaces_unknown` haben keine erkennbaren Abnehmer; das Gate nennt sie in `reasoning`, für
 sie greift nur der Größen-Trigger.
 
 Alle Regeln rechnen über den ganzen Plan, auch wenn `generate --tasks` nur eine Teilmenge
-ausgibt; so bekommt dieselbe Task bei jedem Aufruf dasselbe Modell.
+ausgibt; so bekommt dieselbe Task bei jedem Aufruf dasselbe Modell. C3 nimmt dafür das
+Gate-Urteil über den ganzen Plan, nicht das der Teilmenge.
 
 ### Modell je Task
 
@@ -117,8 +120,9 @@ die greift, gilt:
 
 ### Prüfpunkte
 
-`generate` schreibt `checkpoints`, eine Liste aus `kind`, `task` (die Task, vor oder nach der
-geprüft wird; bei `final` `null`), `profile` und `reasons`. Die Bedingungen von M1 und M2
+`generate` schreibt `checkpoints`, eine Liste von Objekten mit den Schlüsseln in dieser
+Reihenfolge: `kind`, `task` (die Task, vor oder nach der geprüft wird; bei `group` die höchste
+ID der Gruppe; bei `final` `null`), `profile`, `reasons`. Die Bedingungen von M1 und M2
 gelten hier unabhängig von M0.
 
 | # | Regel | Prüfpunkt | Profil |
@@ -138,14 +142,16 @@ neu geprüft werden nur der Rest und die Aufrufer über Task-Grenzen.
 ### `checkpoint`
 
 - `checkpoint init --base <ref>` nach `generate`: schreibt `review-state.json` mit `base` und
-  `last_reviewed` = aufgelöster SHA von `<ref>` (jede Git-Ref, aufgelöst mit
-  `git rev-parse`), `last_run: null`.
+  `last_reviewed` = aufgelöster SHA von `<ref>`, `last_run: null`. `status` und `mark` nehmen
+  in `review-state.json` und als Argument jede Git-Ref und lösen sie mit `git rev-parse` auf.
 - `checkpoint status --after-task <N> [--tests-red]` nach jedem Merge: liest `gate.json` und
   `review-state.json`, zählt mit `git diff --numstat <last_reviewed>..HEAD` hinzugefügte plus
   gelöschte Zeilen (Binärdateien zählen 0 und stehen in `binary_files`) und schreibt
   `checkpoint.json` mit `due`, `reasons`, `range`, `changed_lines`, `profile` und `since_run`.
-  Fällig ist es an einem geplanten Prüfpunkt nach Task N oder vor Task N+1, ab 400 Zeilen und
-  mit `--tests-red`. Fehlt `review-state.json`, ist es fällig mit dem Grund „review-state
+  Fällig ist es an einem geplanten Prüfpunkt nach Task N oder vor Task N+1 (bei `group`, wenn N
+  die höchste ID der Gruppe ist; gemergt wird nach dem Merge-Protokoll in Plan-Reihenfolge), ab
+  400 Zeilen und mit `--tests-red`. `changed_lines` zählt `.skills/` nicht mit, damit das
+  committete runlog keinen Prüfpunkt auslöst. Fehlt `review-state.json`, ist es fällig mit dem Grund „review-state
   fehlt — Basis unbekannt" und ohne Bereich.
 - `checkpoint mark --commit <ref> --run <lauf> --tasks <liste>` nach einem Review, dessen
   Funde behoben und mit `--since` nachgeprüft sind: setzt `last_reviewed` auf den Commit nach
@@ -159,23 +165,38 @@ Funde; Akzeptanz: je Fund behoben und mit Test belegt). Ein Agent arbeitet sie i
 frischen Worktree vom integrierten Stand ab, mit dem höchsten Modell der betroffenen Tasks.
 Danach `verify`, Merge, Gesamttests, deep-review `--since <lauf>` im selben Profil, dann
 `checkpoint mark`. Höchstens zwei Fix-Runden je Prüfpunkt, dann Eskalation an den Nutzer.
+Die Allowlist umfasst `path` und `related` jedes Funds. Kandidaten, die im Profil `checkpoint`
+wegen der Grenze von 15 Verifikationen `offen` blieben, stehen im Bericht und gehen an den
+nächsten Prüfpunkt mit Profil `standard` (spätestens den finalen).
+
+**Soll am Prüfpunkt:** subagent-dev schreibt die Task-Dateien des Bereichs in eine Datei unter
+`.skills/cache/tasks/` und übergibt sie deep-review als `--soll-file` (Spec 26).
+
+**Ersatz ohne deep-review:** `/code-review` über den Bereich; `mark` bekommt `--run none`, die
+Nachprüfung nach einem Fix reviewt nur den Bereich des Fix-Commits, und die Übergabe sagt
+„Review ohne Abdeckungsnachweis".
 
 ### Abnehmer-Check, Hinweise und Vertragsprüfung
 
 `generate` schreibt in den Maschinenblock jeder Task-Datei `consumers`: je Abnehmer dessen ID
 und die Symbole mit der Arity, die er im `Consumes` erwartet. `verify` prüft sie gegen die
-Allowlist-Dateien und schreibt `consumer_check` mit `present`, `missing`, `arity_mismatch`,
-`ambiguous` oder `unchecked`:
+Allowlist-Dateien und schreibt `consumer_check`, eine Liste von Objekten mit `task`, `name`,
+`status` und `detail` (dieselbe Form wie `produces`), `status` ist `present`, `missing`,
+`arity_mismatch`, `ambiguous` oder `unchecked`:
 
 - `fn:` in Python per `ast`: passend, wenn die erwartete Arity zwischen der Zahl der
-  Pflichtparameter und der Zahl aller Parameter liegt oder `*args` vorhanden ist; ohne Arity
-  im `Consumes` zählt nur die Präsenz.
+  positionalen Pflichtparameter und der Zahl aller positionalen Parameter (einschließlich
+  posonly) liegt oder `*args` vorhanden ist; ein kwonly-Parameter ohne Default macht jede
+  Arity unpassend; ohne Arity im `Consumes` zählt nur die Präsenz. Dieselbe Regel gilt ab
+  jetzt für den bestehenden `Produces`-Check, damit ein `verify` nicht zwei Regeln kennt.
 - `token:` per Textsuche wie heute.
 - Liegt keine Python-Datei in der Allowlist (Delphi, TS), steht `unchecked` mit Grund.
 - Eine Task-Datei ohne `consumers` (vor dieser Spec erzeugt) ergibt `unchecked`, nie
   `present`.
 
-`missing`, `arity_mismatch` und `ambiguous` machen das Verdikt `fail`.
+`missing`, `arity_mismatch` und `ambiguous` machen das Verdikt `fail`; `unchecked` macht es
+höchstens `unverified`, nie `pass` — wie ein fehlendes `--base`. Die Übergabe nennt dann den
+Abnehmer-Check „ungeprüft", und C1 steht vor dem Abnehmer wie geplant.
 
 `hints` meldet in den hinzugefügten Zeilen gegen `--base` Platzhalter (Muster des
 Plan-Lints) und Debug-Ausgaben (`print(`, `console.log(`, `Writeln(`, `OutputDebugString(`),
@@ -237,10 +258,11 @@ schon nach Spec 26.
 | `test_model_rules` | dito | M0 schlägt M1 bis M3; M0 nur direkt unter dem Titel; M1 ab zwei Abnehmern; M2 trifft `auth_service.py`, `LoginForm.pas`, `x.sql`, nicht `authors.py`; M3 ab fünf Pfaden ohne `Test`-Zeilen; ungültiger Wert → Lint-Befund und Rückfall |
 | `test_rules_use_whole_plan_with_tasks_filter` | dito | `--tasks 3,4` ändert weder Modell noch Abnehmer noch Prüfpunkte |
 | `test_checkpoint_placement` | dito | C1 vor dem ersten Abnehmer; C2 nach Risikotask; C3 nur bei `parallel`; C4 vor der Verifikations-Task oder am Ende; Zusammenfallen mit allen Gründen und höherem Profil |
-| `test_verify_consumer_check` | dito | present, missing, arity_mismatch, ambiguous; Default-Parameter und `*args` passen; Nicht-Python → unchecked; alte Task-Datei ohne `consumers` → unchecked |
+| `test_verify_consumer_check` | dito | present, missing, arity_mismatch, ambiguous; Default-Parameter, posonly und `*args` passen; kwonly ohne Default passt nicht; Nicht-Python → unchecked und Verdikt höchstens unverified; alte Task-Datei ohne `consumers` → unchecked; `Produces`-Check nutzt dieselbe Regel und das bestehende Eval zur Signaturabweichung bleibt `fail` |
 | `test_verify_hints` | dito | Platzhalter und Debug-Ausgaben nur in hinzugefügten Zeilen; `sofort-grün` und fehlendes Log aus test-first; Verdikt unverändert |
-| `test_checkpoint_command` | dito | init löst Tags auf; status fällig an geplantem Prüfpunkt, ab 400 Zeilen, mit `--tests-red`, sonst nicht; Binärdateien zählen 0; ohne review-state fällig ohne Bereich; mark setzt Commit und Lauf |
-| `test_fix_task_from_verdicts` | dito | Allowlist aus den Dateien `bestätigt`/`plausibel`; `widerlegt` und `offen` nicht |
+| `test_checkpoint_command` | dito | init löst Tags auf; status nimmt Refs aus review-state; fällig an geplantem Prüfpunkt, bei `group` nach der höchsten ID, ab 400 Zeilen, mit `--tests-red`, sonst nicht; Binärdateien zählen 0; `.skills/` zählt nicht; ohne review-state fällig ohne Bereich; mark setzt Commit und Lauf, auch `--run none` |
+| `test_log_line` | dito | `log` schreibt `_meta` in Zeile 1 und je Aufruf eine Zeile mit festen Schlüsseln; fehlende `subagent_tokens` als `null` |
+| `test_fix_task_from_verdicts` | dito | Allowlist aus `path` und `related` der Funde mit `bestätigt`/`plausibel`; `widerlegt` und `offen` nicht |
 | `test_gate_json_keys_backward_compatible` | dito | alle bisherigen Schlüssel mit unveränderten Werten an den bestehenden Fixtures; neue Schlüssel in der festgelegten Reihenfolge |
 
 ### Evals
@@ -256,13 +278,17 @@ schon nach Spec 26.
 In Eval 1 steht `\|` nur für die Tabelle; in `evals.json` ist es `|`. `[^{}]*` hält das
 Muster in Eval 2 und 3 innerhalb des Task-Objekts.
 
-**Fixtures:** Alle tragen eine `.gitignore` mit `.skills/cache/` und `.claude/`, sonst zählt
-`check_allowlist` die installierte Skill und die Task-Dateien als Verstöße. In
+**Fixtures:** Die vier neuen Fixtures tragen eine `.gitignore` mit `.skills/cache/` und
+`.claude/`, sonst zählt `check_allowlist` die installierte Skill und die Task-Dateien als
+Verstöße. Diese `.gitignore` und alle Dateien unter `.skills/cache/` stehen nicht als Dateien
+im Fixture-Ordner, sondern als `touch`-Einträge in `fixture.json` — im Sammlungs-Repo würde die
+Fixture-eigene `.gitignore` sie sonst still aus dem Commit nehmen. In
 `plan-fanout-dispatched` liegen Plan und `CLAUDE.md` im ersten `commits`-Eintrag mit Tag
 `base`, das Ergebnis von Task 1 in einem zweiten; `verify` läuft mit `--worktree .` und
-`--base base`. In `cp-size` trägt der erste `commits`-Eintrag den Tag `reviewed`, der zweite
-fügt genau 430 Zeilen hinzu; `review-state.json` und `gate.json` liegen als Dateien der
-Fixture unter `.skills/cache/tasks/` und nennen `reviewed` als `last_reviewed`.
+`--base base`. In `cp-size` legt der erste `commits`-Eintrag `docs/plans/fanout.md`, die Tasks 1 bis 3 und
+`review-state.json` sowie `gate.json` unter `.skills/cache/tasks/` an und trägt den Tag
+`reviewed`; `review-state.json` nennt `reviewed` als `last_reviewed`, `gate.json` hat keinen
+Prüfpunkt nach Task 3. Der zweite Eintrag fügt genau 430 Zeilen in `src/` hinzu.
 
 Prompts: 1 „Ich habe einen Plan unter docs/superpowers/plans/mini-two-tasks.md. Nutze
 subagent-dev: Gate, Modell je Task und Prüfpunkte.", 2 und 3 dasselbe für
@@ -329,6 +355,10 @@ gehört.
 Tasks mit `interfaces_unknown` bekommen weder M1 noch C1. Im Plan zu cad-parts sind das 11
 von 12 Tasks; dort trägt nur der Größen-Trigger. Ein konservativer Prüfpunkt nach jeder
 solchen Task hieße Review je Task — genau das Problem dieser Spec.
+
+Ohne Agent-Werkzeug (claude.ai) gibt es keinen Dispatch: Die Tasks laufen im Hauptkontext mit
+dem Modell der Sitzung, `model` steht nur als Empfehlung in `gate.json`, Prüfpunkte gelten
+unverändert.
 
 Ob das Agent-Werkzeug in jeder Umgebung `model` annimmt und `subagent_tokens` zurückgibt,
 ist nur in Claude Code beobachtet; ohne diese Angabe schreibt `log` die Tokens als `null`.
