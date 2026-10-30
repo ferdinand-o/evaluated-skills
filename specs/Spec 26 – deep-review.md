@@ -1,11 +1,10 @@
 # Spec 26: deep-review — ein Review, das nachweist, was es geprüft hat
 
-Skill-Spezifikation · Zyklus 26 · Entscheidung: Abdeckung kommt aus einem Inventar, das ein Tier-1-Skript baut, und aus Ergebnissen, die das Skript gegen eine Nonce je Paket abgleicht — nicht aus der Aufmerksamkeit des Modells; lesende Suchagenten suchen je Einheit und Linse breit, eine getrennte, gestufte Verifikation belegt oder widerlegt jeden Kandidaten, und ein Audit meldet jede Einheit ohne Urteil · Abgeglichen mit Spec 00 und Spec 25 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Ergebnisse und Urteile schreibt das Skript mit Nonce-Abgleich, JSON-Lines statt geratener Schlüsselreihenfolge, Globs statt `latest/`, Tiefe `quick` zählt nur geänderte Einheiten, gelöschter Code als Einheit, Projekt-Kopie und Rückverweise im Strukturblock, Profil `checkpoint` für Spec 27, gestufte Verifikation, Kommentar-Regel `restates-code` dem Modell überlassen, Fakten zu architecture-map und Spec 00 korrigiert)
+Skill-Spezifikation · Zyklus 26 · Entscheidung: Abdeckung kommt aus einem Inventar, das ein Tier-1-Skript baut, und aus Ergebnissen, die das Skript gegen eine Nonce je Paket abgleicht — nicht aus der Aufmerksamkeit des Modells; lesende Suchagenten suchen je Einheit und Linse breit, eine getrennte, gestufte Verifikation belegt oder widerlegt jeden Kandidaten, und ein Audit meldet jede Einheit ohne Urteil · Abgeglichen mit Spec 00 und Spec 25 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Ergebnisse und Urteile schreibt das Skript mit Nonce-Abgleich, JSON-Lines statt geratener Schlüsselreihenfolge, Globs statt `latest/`, Tiefe `quick` zählt nur geänderte Einheiten, gelöschter Code als Einheit, Projekt-Kopie und Rückverweise im Strukturblock, Profil `checkpoint` für Spec 27, gestufte Verifikation, Kommentar-Regel `restates-code` dem Modell überlassen, Fakten zu architecture-map und Spec 00 korrigiert; Nachreview Opus: Lauf-ID mit Zufallssuffix, Fix im Profil `checkpoint` bei subagent-dev, `quality` unabhängig von der Tiefe, Prüf-Worktree `--detach`, Wiederverwendung ohne Soll, Form von `audit.json`, Routing-Spalte)
 
 ## Problem
 
-Spec 00 §5 routet „Diff prüfen" an das mitgelieferte `/code-review` und hält in seinen
-Open questions fest: „*Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer
+Spec 00 §5 routet „Diff prüfen" an das mitgelieferte `/code-review` und hält dort fest: „*Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer
 für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst." Der
 Nutzer widerspricht am 2026-10-28: Bei den getesteten Review-Skills „gambled" man, ob das
 Modell die richtigen Stellen findet, und eine feste Grenze von drei Runden hält er nicht
@@ -57,8 +56,10 @@ meldet `review_kit.py audit` (G2); Suche, Verifikation und Bericht verlangt die 
 dieses Repo das Plugin abschaltet (`.claude/settings.json`, `tests/test_marketplace.py`) und
 Cloud-Sitzungen nur Projekt-Kopien laden (`scripts/sync_skills.py`).
 
-Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`, `<lauf>` =
-`<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>`:
+Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`. `<lauf>` ist die
+Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>`; wo diese Spec und Spec 27 einen
+Pfad meinen, steht `.skills/cache/deep-review/<lauf>/…` aus.
+
 
 | Datei | schreibt | Inhalt |
 | --- | --- | --- |
@@ -68,19 +69,22 @@ Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`, 
 | `candidates.jsonl` | `merge` | vereinigte Kandidaten |
 | `verdicts.jsonl` | `verdict` | Status je Kandidat |
 | `comments.json`, `metrics.json` | `comments`, `metrics` | nur bei `quality` |
-| `audit.json`, `estimate.json` | `audit`, `estimate` | Abdeckung und Lücken; Sättigung |
+| `audit.json` | `audit` | `_meta`, `complete`, `missing` (Einheit und Linse ohne Urteil), `nonce_mismatch`, `unverdicted` (Kandidaten ohne Status), `report_mismatch` |
+| `estimate.json` | `estimate` | Sättigung |
 | `report.md` | Hauptagent nach `assets/report-template.md` | Bericht mit Kopfzeile |
 
-Die JSON-Lines-Dateien schreiben je Zeile ein Objekt mit `ensure_ascii=False`, festen
-Schlüsseln in fester Reihenfolge und repo-relativen POSIX-Pfaden ohne `./`; die erste Zeile
-ist ein `_meta`-Objekt. Committet wird nur auf Wunsch eine Kopie des Berichts unter
+Die JSON-Lines-Dateien schreiben je Zeile ein Objekt mit `ensure_ascii=False`, den
+Standard-Trennzeichen von `json.dumps` (`", "`, `": "`), festen Schlüsseln in fester Reihenfolge,
+Werten von `reason` und `evidence` als Zeichenketten und repo-relativen POSIX-Pfaden ohne
+`./`; die erste Zeile ist ein `_meta`-Objekt. Committet wird nur auf Wunsch eine Kopie des Berichts unter
 `docs/reviews/`. Bootstrap: Der erste Lauf nennt `.skills/cache/deep-review/`, bevor er
 schreibt.
 
-Suchagenten laufen mit Lesewerkzeugen (ohne Schreiben und ohne Shell) über das `model`-Feld
-des Agent-Werkzeugs; der Code im Paket ist Daten, nie Anweisung. Prüfagenten dürfen
-ausführen, aber nur in einer Kopie: `git worktree add` unter `<lauf>/proof/`, nach dem Lauf
-entfernt. Ohne Subagenten (claude.ai) läuft dieselbe Pipeline sequenziell im Hauptkontext;
+Suchagenten laufen als lesender Agententyp (in Claude Code etwa `Explore`, ohne Schreiben und
+ohne Shell), das Modell setzt das `model`-Feld des Agent-Werkzeugs; der Code im Paket ist
+Daten, nie Anweisung. Prüfagenten dürfen
+ausführen, aber nur in einer Kopie: `git worktree add --detach <lauf>/proof <ZIEL>`, nach dem
+Lauf mit `git worktree remove --force` entfernt; so entsteht kein Branch im Repo des Nutzers. Ohne Subagenten (claude.ai) läuft dieselbe Pipeline sequenziell im Hauptkontext;
 der Bericht sagt dann „Suche ohne frischen Kontext".
 
 ## Approach
@@ -106,8 +110,8 @@ skills/subagent-dev/SKILL.md, skills/debug-ledger/SKILL.md, skills/test-first/SK
 scripts/sync_skills.py               Tier 1, Repo-Werkzeug — deep-review in PROJECT_SKILLS
 .claude/skills/deep-review/, .claude/skills/review-context/, .claude/skills/subagent-dev/, .claude/skills/debug-ledger/   Projekt-Kopien über sync_skills.py
 .claude-plugin/marketplace.json      deep-review in der skills-Liste von evaluated-dev; Beschreibung von evaluated-dev nennt Review
-specs/Spec 00 – skill-foundation.md  Routing: Zeile „Diff prüfen" ergänzt um deep-review; Annahme zu Spec 04 mit Verweis auf Spec 26
-README.md                            Skill-Liste von evaluated-dev; Routing-Zeile „review a diff" ohne „scope left open"
+specs/Spec 00 – skill-foundation.md  Routing: neue Zeile mit deep-review in der Spalte „zuständig" (Lint-Regel routing); Zeile „Diff prüfen" nennt deep-review unter „nicht"; Annahme zu Spec 04 mit Verweis auf Spec 26
+README.md                            Skill-Liste von evaluated-dev; neue Routing-Zeile mit deep-review in der Spalte „Responsible"; Zeile „review a diff" ohne „scope left open"
 docs/known-limits.md                 Abschnitt deep-review
 docs/superpowers/reports/deep-review-report.md   Report mit „Was nicht gemessen wurde" und der Messmenge
 evals/deep-review/evals.json         fünf Evals, siehe unten
@@ -119,8 +123,9 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
 
 1. **Umfang.** Modus aus dem Auftrag: `diff` (Bereich `BASIS..ZIEL`, Standard der letzte
    Commit), `path` (Einstiegspunkt `datei:funktion`), `repo` (Verzeichnis). Zuschaltbar:
-   `quality`. Profil `checkpoint` für Aufrufe aus subagent-dev (siehe unten).
-2. **Inventar:** `review_kit.py inventory`. Im Modus `diff` sind Einheiten die geänderten
+   `quality`, unabhängig von der Tiefe. Profil `checkpoint` für Aufrufe aus subagent-dev
+   (siehe unten); dort kann der Aufrufer mit `--soll-file <datei>` das Soll mitgeben.
+2. **Inventar:** `review_kit.py inventory`; Pfade unter `.skills/` zählen nie. Im Modus `diff` sind Einheiten die geänderten
    Funktionen, die direkten Aufrufer geänderter Funktionen (Linse Vertrag) und gelöschter
    Code als Vorher-Einheit (Linse Vertrag: hing etwas daran?). Im Modus `path` die Glieder
    der Aufrufkette ab dem Einstiegspunkt, transitiv bis zur Tiefe 4, plus ein Pfad-Paket über
@@ -135,6 +140,7 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    Code der Einheit, Signaturen der Aufgerufenen und Soll), Code als abgegrenztem
    Datenblock, Aufrufern und Soll. Das Soll holt das Skript im Modus `diff` mit
    `python "${CLAUDE_SKILL_DIR}/../review-context/scripts/collect_context.py" --range <bereich>`
+   (mit `--soll-file` zusätzlich `--pr-description-file <datei>`)
    und liest `.skills/cache/review-context.json` nur, wenn dessen `range.raw` dem eigenen
    Bereich entspricht; sonst „Soll ungeprüft". Ein Einheiten-Paket bleibt unter 8.000
    Zeichen Code und wird sonst geteilt; ein Pfad-Paket enthält je Glied Signatur und die
@@ -162,21 +168,26 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
 9. **Bericht und Audit:** Bericht nach `assets/report-template.md`, dann
    `review_kit.py audit <lauf>`. Übergabe: Pfad des Berichts, Funde je Status, Abdeckung
    `<angenommen>/<zugewiesen>`, „Nicht geprüft". Meldet das Audit eine Lücke, sagt die
-   Übergabe „unvollständig" mit der Liste, nie „fertig". Bestätigte Funde mit unklarer
-   Ursache gehen an debug-ledger; die übrigen behebt der Hauptagent direkt, der Beweistest
-   wird über test-first zum Regressionstest.
+   Übergabe „unvollständig" mit der Liste, nie „fertig". Im Profil `checkpoint` endet
+   deep-review hier; die Funde mit Status `bestätigt` oder `plausibel` behebt subagent-dev
+   über seinen Fix-Pfad (Spec 27). Sonst gehen bestätigte Funde mit unklarer Ursache an
+   debug-ledger, die übrigen behebt der Hauptagent, und der Beweistest wird über test-first
+   zum Regressionstest.
 
 **Tiefen und Profile**, vom Inventar gesetzt und vom Nutzer überschreibbar:
 
 | Tiefe/Profil | wann | Linsen | Wiederholungen | Verifikation |
 | --- | --- | --- | --- | --- |
-| `quick` | Modus `diff`, höchstens eine geänderte Einheit (Aufrufer nicht mitgezählt) mit höchstens 20 geänderten Zeilen, kein Risikomerkmal | Korrektheit; Aufrufer nur als Kontext im Paket | keine | Sonnet |
+| `quick` | Modus `diff`, höchstens eine geänderte Einheit (Aufrufer nicht mitgezählt) mit höchstens 20 geänderten Zeilen, kein Risikomerkmal | Korrektheit (mit `quality` zusätzlich Wartbarkeit und Kommentare); Aufrufer nur als Kontext im Paket | keine | Sonnet |
 | `standard` | Normalfall, auch Modus `path` und `repo` | alle Fehlerlinsen der Einheit | keine | gestuft |
 | `deep` | nur auf ausdrücklichen Wunsch („Audit", „so gründlich wie möglich") | alle Fehlerlinsen | Sättigung wie in Schritt 8 | gestuft |
-| Profil `checkpoint` | Aufruf aus subagent-dev (Spec 27) | Korrektheit und Vertrag | keine | gestuft, höchstens 15 Verifikationen; der Rest bleibt `offen` |
+| Profil `checkpoint` | Aufruf aus subagent-dev (Spec 27) | Korrektheit und Vertrag | keine | gestuft, höchstens 15 Verifikationen; der Rest bleibt `offen`, steht im Bericht und wird am finalen Prüfpunkt erneut verifiziert |
 
-**Folgeläufe** (`--since <lauf>`) übernehmen Urteile von Einheiten, deren Paket-Hash
-gleich geblieben ist, und prüfen geänderte Einheiten und deren direkte Aufrufer neu.
+**Folgeläufe** (`--since <lauf>`) übernehmen die Urteile der Suchagenten und die Kandidaten
+samt Status von Einheiten, deren Wiederverwendungsschlüssel gleich geblieben ist — ein Hash
+über den Code der Einheit und die Signaturen der Aufgerufenen, ohne das Soll, das sich mit
+jedem Bereich ändert. Geänderte Einheiten und deren direkte Aufrufer prüfen sie neu; Linsen,
+die der frühere Lauf nicht hatte, laufen auf allen Einheiten.
 
 ### Wartbarkeit und Kommentare (`quality`)
 
@@ -219,7 +230,7 @@ verifiziert wie ein Bug.
 - **Sättigung nur mit Zahl und Vorbehalt.** Eine Aussage über Restfehler steht nur mit
   `estimate.json`, der Zahl der Läufe und dem Wort „unkalibriert".
 - **Anti-Zeremonie-Fall:** Ein Diff mit einer geänderten Einheit und höchstens 20 Zeilen ohne
-  Risikomerkmal läuft in Tiefe `quick`: eine Linse, kein Opus, keine Wiederholung, ein
+  Risikomerkmal läuft in Tiefe `quick`: eine Fehlerlinse, kein Opus, keine Wiederholung, ein
   Bericht von höchstens 40 Zeilen.
 
 ### Abgrenzung
@@ -246,18 +257,18 @@ debug-ledger, test-first (alle im Strukturblock oben). Das Register der Lint-Bef
 | `test_inventory_python` | `tests/test_deep_review_kit.py` | Funktionen, Methoden, verschachtelte Funktionen; Hash ändert sich nur mit dem Inhalt; Modus diff: geänderte Einheiten, direkte Aufrufer, gelöschte Funktion als Vorher-Einheit |
 | `test_inventory_path_chain` | dito | Aufrufkette ab Einstiegspunkt transitiv bis Tiefe 4; Pfad-Paket enthält jedes Glied |
 | `test_inventory_ts` | dito | Funktionsdeklaration, Pfeilfunktion an `const`, Klassenmethode; Änderung im Rumpf erkannt |
-| `test_inventory_delphi_and_chunks` | dito | Methode mit lokaler Prozedur endet am eigenen `end;`; `case`, `try`, `record`, `asm` gezählt; `end` in String und Kommentar ignoriert; Deklaration im `interface`-Teil keine Einheit; unvollständiger `{$IFDEF}` → `chunk` mit Grund |
+| `test_inventory_delphi_and_chunks` | dito | Methode mit lokaler Prozedur endet am eigenen `end;`; `case`, `try`, `record`, `asm` gezählt; varianter `record … case X of … end` schließt mit einem `end`; `forward;`- und `external`-Köpfe ohne Rumpf sind keine Einheit; `end` in String und Kommentar ignoriert; Deklaration im `interface`-Teil keine Einheit; unvollständiger `{$IFDEF}` → `chunk` mit Grund |
 | `test_depth_and_profiles` | dito | quick zählt keine Aufrufer; Risikomerkmal → standard; path → standard; deep nur mit Schalter; Profil checkpoint setzt Linsen und Grenze 15 |
 | `test_packets_and_nonce` | dito | Einheiten-Paket über 8.000 Zeichen wird geteilt; Pfad-Paket bis 16.000; Paket-Hash deckt Signaturen und Soll; review-context-Paket mit fremdem Bereich wird nicht gelesen |
 | `test_record_rejects_wrong_nonce` | dito | falsche Nonce oder alter Hash → abgewiesen, nichts in `results.jsonl` |
 | `test_merge_without_voting` | dito | gleiche Stelle und Klasse → ein Kandidat mit allen Quellen; andere Klasse → zwei; kein Kandidat fällt weg |
-| `test_jsonl_format` | dito | `_meta` in Zeile 1, feste Schlüsselreihenfolge, `ensure_ascii=False`, Pfade ohne `./` |
-| `test_audit` | dito | fehlendes Urteil, Nonce-Abweichung, fehlender Status, Bericht „vollständig" trotz Lücke, abweichende Zahl → je ein Befund; sauberer Lauf → keiner |
+| `test_jsonl_format` | dito | `_meta` in Zeile 1, feste Schlüsselreihenfolge, `ensure_ascii=False`, Trennzeichen `", "` und `": "`, `reason` und `evidence` als Zeichenketten, Pfade ohne `./` |
+| `test_audit` | dito | fehlendes Urteil (`missing`), Nonce-Abweichung (`nonce_mismatch`), fehlender Status (`unverdicted`), Bericht „vollständig" trotz Lücke oder abweichende Zahl (`report_mismatch`) → je ein Eintrag und `complete: false`; sauberer Lauf → `complete: true` |
 | `test_estimate` | dito | Jackknife erster Ordnung an bekannten Zahlen; unter vier Läufen `ungeprüft` |
 | `test_comment_rules` | dito | jede Regel der Tabelle trifft ihr Beispiel, nicht einen Warum-Kommentar; `comments` legt jeden neuen Kommentar mit Folgezeile vor |
 | `test_metrics_against_median` | dito | Länge, Verschachtelung, Verzweigungen je Funktion und Median des Repos |
-| `test_since_reuses_unchanged_verdicts` | dito | gleicher Paket-Hash → Urteil übernommen; geänderte Signatur eines Aufgerufenen → neu geprüft |
-| `test_run_ids_do_not_collide` | dito | zwei Läufe in derselben Sekunde mit gleichem Commit → verschiedene Verzeichnisse |
+| `test_since_reuses_unchanged_verdicts` | dito | gleicher Schlüssel → Urteile und Kandidaten übernommen, auch bei anderem Soll; geänderte Signatur eines Aufgerufenen → neu geprüft; neue Linse → auf allen Einheiten |
+| `test_run_ids_do_not_collide` | dito | zwei Läufe in derselben Sekunde mit gleichem Commit → verschiedene Lauf-IDs dank Zufallssuffix |
 
 ### Evals
 
@@ -272,7 +283,8 @@ debug-ledger, test-first (alle im Strukturblock oben). Das Register der Lint-Bef
 Die Pfade nutzen Globs (`evalkit/assertions.py`, `resolve_target`). In Eval 3 steht `\|`
 nur für die Tabelle; in `evals.json` ist es `|`. Das Muster bindet an eine Zeile von
 `verdicts.jsonl` mit der Schlüsselfolge `id`, `path`, `lines`, `class`, `status`, `reason`,
-`evidence` und den Trennzeichen von `json.dumps` (`": "`).
+`evidence`, `related` (weitere betroffene Dateien eines Funds über Dateigrenzen) und den
+Trennzeichen von `json.dumps` (`": "`).
 
 Prompts: 1 „Review den letzten Commit mit deep-review.", 2 und 3 „Prüf mit deep-review den
 Pfad ab `app/cli.py:main`.", 4 „Review den letzten Commit mit deep-review, inklusive
@@ -348,7 +360,9 @@ gehört. Risikomerkmale wie Auth oder SQL steuern bis dahin nur die Tiefe.
 *Annahme:* Name `deep-review`; Ablage nur im Cache, Bericht nach `docs/reviews/` nur auf
 Wunsch — widersprich, falls er immer committet werden soll.
 
-*Annahme:* Grenzen `quick` bei einer geänderten Einheit und 20 Zeilen, Bericht höchstens 40
+*Annahme:* Risikomerkmal Länge ab 80 Zeilen, Änderungshäufigkeit ab fünf Commits im letzten
+Jahr; Sättigung mit Jackknife erst ab vier Läufen und Abbruch nach zwei fundlosen Läufen.
+Grenzen `quick` bei einer geänderten Einheit und 20 Zeilen, Bericht höchstens 40
 Zeilen, Paket unter 8.000 und Pfad-Paket unter 16.000 Zeichen, Kette bis Tiefe 4, Chunk 150
 Zeilen, obere Risikogruppe ab zwei Merkmalen, Sättigung bis sechs Läufe, Profil
 `checkpoint` mit 15 Verifikationen, `comment-ratio` beim Doppelten des Medians. Keine ist
@@ -377,8 +391,9 @@ misst sie mit `total_cost_usd` aus `claude -p`.
 Ob ein Subagent, der deep-review aufruft, selbst Subagenten starten kann, ist ungemessen;
 Spec 27 ruft deep-review deshalb aus dem Hauptkontext auf.
 
-evaluated-dev ist immer an und hat das längste Listing; Spec 20 hat gemessen, dass dort
-Descriptions wegfallen. deep-review kommt mit einer weiteren Description dazu.
+evaluated-dev ist immer an und hat das längste Listing; Spec 20 hat kurze Listings gemessen
+und vermutet, ohne es zu beweisen, dass dort Descriptions wegfallen. deep-review kommt mit
+einer weiteren Description dazu.
 
 ## Next steps
 
