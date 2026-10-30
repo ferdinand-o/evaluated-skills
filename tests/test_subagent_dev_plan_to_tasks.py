@@ -1867,3 +1867,147 @@ def test_checkpoint_status_uses_whole_plan_order_after_tasks_filter(tmp_path):
     ptt.checkpoint_init(repo, "v1")
     got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 7, 9, 10, 12)}
     assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10, 12]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 7: verify mit consumer_check — eine Arity-Regel für beide Checks
+# --------------------------------------------------------------------------
+
+
+def _fn(source):
+    import ast
+    return ast.parse(source).body[0]
+
+
+def test_consumer_check_arity_matches_rule():
+    assert ptt.arity_matches(_fn("def f(a, b=1): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, b=1): pass"), 2)
+    assert not ptt.arity_matches(_fn("def f(a, b=1): pass"), 0)
+    assert not ptt.arity_matches(_fn("def f(a, b=1): pass"), 3)
+    assert ptt.arity_matches(_fn("def f(a, /, b): pass"), 2)
+    assert not ptt.arity_matches(_fn("def f(a, /, b): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, *args): pass"), 4)
+    assert not ptt.arity_matches(_fn("def f(a, *args): pass"), 0)  # Pflichtparameter bleiben Pflicht
+    assert not ptt.arity_matches(_fn("def f(a, *, strict): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, *, strict=False): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(self, a): pass"), 1)  # Methode: self zählt nicht
+    assert ptt.arity_matches(_fn("def f(a, b, c): pass"), None)  # ohne Arity nur Präsenz
+    assert ptt.arity_matches(_fn("class F: pass"), 3)  # Klasse: nur Präsenz
+
+
+def test_consumer_check_statuses(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "def parse(line, strict):\n    return 1\n\n\ndef load(path, mode='r'):\n    return 1\n\n\n"
+        "class A:\n    def helper(self, x, y):\n        pass\n\n\nclass B:\n    def helper(self, x, y, z):\n        pass\n",
+        encoding="utf-8",
+    )
+    consumers = [
+        {"task": 3, "symbols": ["parse(1)", "load(1)", "load"]},
+        {"task": 5, "symbols": ["helper(1)", "gone(2)", "parse(2)", "parse"]},
+    ]
+    results = ptt.check_consumers(tmp_path, ["a.py"], consumers)
+    assert all(list(r) == ["task", "name", "status", "detail"] for r in results)
+    assert [(r["task"], r["name"], r["status"]) for r in results] == [
+        (3, "parse", "arity_mismatch"), (3, "load", "present"), (3, "load", "present"),
+        (5, "helper", "ambiguous"), (5, "gone", "missing"), (5, "parse", "present"), (5, "parse", "present"),
+    ]
+
+
+def test_consumer_check_unchecked_without_python_or_without_consumers(tmp_path):
+    (tmp_path / "Unit1.pas").write_text("function Parse(Line: string): Integer;\n", encoding="utf-8")
+    results = ptt.check_consumers(tmp_path, ["Unit1.pas"], [{"task": 2, "symbols": ["Parse(1)"]}])
+    assert [(r["task"], r["name"], r["status"]) for r in results] == [(2, "Parse", "unchecked")]
+    assert "Python" in results[0]["detail"]
+    old = ptt.check_consumers(tmp_path, ["Unit1.pas"], None)
+    assert [r["status"] for r in old] == ["unchecked"] and "consumers" in old[0]["detail"]
+    assert ptt.check_consumers(tmp_path, ["Unit1.pas"], []) == []
+
+
+def test_consumer_check_produces_uses_the_same_rule(tmp_path):
+    (tmp_path / "a.py").write_text("def parse(line, strict=False):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "present"
+    (tmp_path / "a.py").write_text("def parse(line, *, strict):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "arity_mismatch"
+    # Eval verify-catches-signature-drift-before-review: ein Parameter statt zwei bleibt ein Bruch.
+    (tmp_path / "batch.py").write_text("def batch_parse(items):\n    return {}\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["batch.py"], [("batch_parse", 2)])[0]["status"] == "arity_mismatch"
+
+
+CONSUMER_PLAN = """### Task 1: Parser
+
+**Files:**
+- Create: `src/parser.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `fn:parse_order`
+
+- [ ] **Step 1: x**
+
+### Task 2: Import
+
+**Files:**
+- Create: `src/importer.py`
+
+**Interfaces:**
+- Consumes: `fn:parse_order(line)`
+- Produces: (nichts Neues)
+
+- [ ] **Step 1: x**
+"""
+
+
+def _consumer_check_verify(tmp_path, parser_src, *, drop_consumers=False, allow=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    plan = tmp_path / "plan.md"
+    plan.write_text(CONSUMER_PLAN if allow is None else CONSUMER_PLAN.replace("src/parser.py", allow), encoding="utf-8")
+    out = tmp_path / "tasks"
+    assert ptt.main(["generate", str(plan), "--out-dir", str(out)]) == 0
+    task_file = next(out.glob("task-1-*.md"))
+    if drop_consumers:
+        text = task_file.read_text(encoding="utf-8")
+        block = ptt.parse_task_machine_block(text)
+        del block["consumers"]
+        task_file.write_text(text.split("```json")[0] + "```json\n" + json.dumps(block, indent=2) + "\n```\n",
+                             encoding="utf-8")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    git(wt, "init", "--quiet", "--initial-branch=main")
+    git(wt, "config", "user.email", "t@example.invalid")
+    git(wt, "config", "user.name", "Test")
+    git(wt, "commit", "--quiet", "--allow-empty", "-m", "base")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt, capture_output=True, text=True, check=True).stdout.strip()
+    target = wt / (allow or "src/parser.py")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(parser_src, encoding="utf-8")
+    git(wt, "add", "-A")
+    git(wt, "commit", "--quiet", "-m", "Task 1")
+    result_file = tmp_path / "verify.json"
+    code = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(wt), "--base", base,
+                     "--out", str(result_file)])
+    return code, json.loads(result_file.read_text(encoding="utf-8"))
+
+
+def test_verify_consumer_check_fails_on_arity_drift(tmp_path):
+    code, result = _consumer_check_verify(tmp_path, "def parse_order(line, strict):\n    return 1\n")
+    assert result["produces"][0]["status"] == "present"  # Produces ohne Arity: der alte Check sieht nichts
+    assert result["consumer_check"] == [{
+        "task": 2, "name": "parse_order", "status": "arity_mismatch", "detail": result["consumer_check"][0]["detail"],
+    }]
+    assert (code, result["verdict"], result["ok"]) == (1, "fail", False)
+
+
+def test_verify_consumer_check_passes_with_default_parameter(tmp_path):
+    code, result = _consumer_check_verify(tmp_path, "def parse_order(line, strict=False):\n    return 1\n")
+    assert [r["status"] for r in result["consumer_check"]] == ["present"]
+    assert (code, result["verdict"]) == (0, "pass")
+
+
+def test_verify_consumer_check_unchecked_is_at_most_unverified(tmp_path):
+    code, result = _consumer_check_verify(tmp_path / "old", "def parse_order(line):\n    return 1\n",
+                                          drop_consumers=True)
+    assert [r["status"] for r in result["consumer_check"]] == ["unchecked"]
+    assert (code, result["verdict"]) == (1, "unverified")
+    code, result = _consumer_check_verify(tmp_path / "pas", "procedure ParseOrder;\n", allow="src/Parser.pas")
+    assert [r["status"] for r in result["consumer_check"]] == ["unchecked"]
+    assert result["verdict"] in ("unverified", "fail") and result["verdict"] != "pass"

@@ -910,14 +910,46 @@ def check_allowlist(worktree: Path, base_ref: str, allowlist: list[str]) -> list
     return [path for path in changed if not any(_paths_overlap(path, allowed) for allowed in allowlist)]
 
 
+def _positional(node: ast.AST) -> list[ast.arg]:
+    args = [*node.args.posonlyargs, *node.args.args]
+    return args[1:] if args and args[0].arg in ("self", "cls") else args
+
+
+def arity_matches(node: ast.AST, expected: int | None) -> bool:
+    """Eine Arity-Regel für `Produces`- und Abnehmer-Check (Spec 27): passend, wenn
+    `expected` zwischen den positionalen Pflichtparametern und allen positionalen
+    Parametern (posonly eingeschlossen, `self`/`cls` nicht) liegt — mit `*args` ohne
+    Obergrenze. Ein kwonly-Parameter ohne Default macht jede Arity unpassend. Ohne
+    `expected` und bei einer Klasse zählt nur die Präsenz."""
+    if expected is None or isinstance(node, ast.ClassDef):
+        return True
+    if any(default is None for default in node.args.kw_defaults):
+        return False
+    positional = _positional(node)
+    required = max(0, len(positional) - len(node.args.defaults))
+    return required <= expected and (expected <= len(positional) or node.args.vararg is not None)
+
+
+def _arity_text(node: ast.AST) -> str:
+    """Lesbare Arity einer Definition für `detail`: `2`, `1–2`, `1+`, ggf. mit kwonly."""
+    if isinstance(node, ast.ClassDef):
+        return "Klasse"
+    positional = _positional(node)
+    required = max(0, len(positional) - len(node.args.defaults))
+    text = f"{required}+" if node.args.vararg else (
+        str(required) if required == len(positional) else f"{required}–{len(positional)}")
+    kwonly = [a.arg for a, d in zip(node.args.kwonlyargs, node.args.kw_defaults) if d is None]
+    return text + (f" (kwonly ohne Default: {', '.join(kwonly)})" if kwonly else "")
+
+
 def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) -> list[dict]:
     """Prüfe deklarierte Produces-Symbole gegen die Allowlist-Dateien, nach kind.
 
-    `fn` per `ast` (Name + Arity), `token` per Textsuche des Namens in den
-    Allowlist-Dateien — ein Doktrin-Token steht in einer SKILL.md, nicht in einem
-    Funktionskopf, und `ast` würde ihn für jeden Doktrin-Task als `missing`
-    melden (Spec-16-Review). Einträge dürfen (name, arity) oder (kind, name,
-    arity) sein; ohne kind gilt `fn`.
+    `fn` per `ast` (Name + Arity nach `arity_matches`), `token` per Textsuche des
+    Namens in den Allowlist-Dateien — ein Doktrin-Token steht in einer SKILL.md,
+    nicht in einem Funktionskopf, und `ast` würde ihn für jeden Doktrin-Task als
+    `missing` melden (Spec-16-Review). Einträge dürfen (name, arity) oder (kind,
+    name, arity) sein; ohne kind gilt `fn`.
 
     Nie ein Import — fremder Code aus einem gerade dispatchten Agenten wird
     ausschließlich statisch gelesen (Vorab-Entscheidung A3).
@@ -926,12 +958,12 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
     Definitionen (Top-Level-Funktion + verschachtelte Hilfsfunktion, oder
     gleichnamige Methoden zweier Klassen) sind über den ganzen Baum hinweg
     nicht unterscheidbar. Statt die zuletzt gefundene Definition stillschweigend
-    gewinnen zu lassen (L2), werden alle Arities gesammelt: Passt mindestens
-    eine zur erwarteten, gilt das Symbol als vorhanden; passt keine, aber es
+    gewinnen zu lassen (L2), werden alle Definitionen gesammelt: Passt mindestens
+    eine zur erwarteten Arity, gilt das Symbol als vorhanden; passt keine, aber es
     gibt mehrere unterschiedliche Definitionen, ist das Ergebnis `ambiguous`
     statt eines geratenen PASS oder FAIL.
     """
-    found: dict[str, list[int]] = {}
+    found: dict[str, list[ast.AST]] = {}
     for relpath in allowlist:
         path = worktree / relpath
         if not path.is_file():
@@ -941,13 +973,8 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
         except SyntaxError:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                args = node.args.args
-                if args and args[0].arg in ("self", "cls"):
-                    args = args[1:]
-                found.setdefault(node.name, []).append(len(args))
-            elif isinstance(node, ast.ClassDef):
-                found.setdefault(node.name, []).append(-1)  # -1: keine Arity, nur Präsenz
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.setdefault(node.name, []).append(node)
 
     normalized: list[tuple[str, str, int | None]] = [
         (entry[0], entry[1], entry[2]) if len(entry) == 3 else ("fn", entry[0], entry[1]) for entry in produces
@@ -974,22 +1001,22 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
         if name not in found:
             results.append({"name": name, "status": "missing", "detail": "in keiner Allowlist-Datei gefunden"})
             continue
-        arities = found[name]
-        distinct = sorted(set(arities))
-        if expected_arity is None or -1 in distinct:
+        nodes = found[name]
+        distinct = sorted({_arity_text(n) for n in nodes})
+        if expected_arity is None or any(isinstance(n, ast.ClassDef) for n in nodes):
             results.append({"name": name, "status": "present", "detail": "gefunden (Arity ungeprüft)"})
-        elif expected_arity in distinct:
+        elif any(arity_matches(n, expected_arity) for n in nodes):
             note = "" if len(distinct) == 1 else f"; weitere Definitionen mit Arities {distinct}"
             results.append({
                 "name": name, "status": "present",
-                "detail": f"gefunden mit {expected_arity} Parametern{note}",
+                "detail": f"gefunden, passt zu {expected_arity} Parametern{note}",
             })
         elif len(distinct) > 1:
             results.append({
                 "name": name, "status": "ambiguous",
                 "detail": (
                     f"{len(distinct)} unterschiedliche Definitionen mit den Arities {distinct} "
-                    f"gefunden, keine davon {expected_arity} — nicht eindeutig, welche maßgeblich "
+                    f"gefunden, keine passt zu {expected_arity} — nicht eindeutig, welche maßgeblich "
                     "ist (kein Scope-Abgleich ohne Import, Vorab-Entscheidung A3)"
                 ),
             })
@@ -998,6 +1025,40 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
                 "name": name, "status": "arity_mismatch",
                 "detail": f"erwartet {expected_arity} Parameter, gefunden {distinct[0]}",
             })
+    return results
+
+
+CONSUMER_SYMBOL_RE = re.compile(r"^(?:(fn|token):)?(.+?)(?:\((\d+)\))?$")
+CONSUMER_BROKEN = ("missing", "arity_mismatch", "ambiguous")
+
+
+def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] | None) -> list[dict]:
+    """Abnehmer-Check (Spec 27): die Symbole, die spätere Tasks laut Maschinenblock
+    erwarten (`name` oder `name(arity)`, optional mit `token:`), mit derselben Regel wie
+    `check_produces` — je Symbol `task`, `name`, `status`, `detail`.
+
+    `consumers` ist None für eine Task-Datei von vor Spec 27: dann `unchecked`, nie
+    `present`. Liegt keine Python-Datei in der Allowlist (Delphi, TS), bleibt jedes
+    `fn`-Symbol `unchecked` mit Grund; Tokens gehen per Textsuche wie im `Produces`-Check.
+    """
+    if consumers is None:
+        return [{"task": None, "name": None, "status": "unchecked",
+                 "detail": "Task-Datei ohne consumers (vor Spec 27 erzeugt) — Abnehmer ungeprüft"}]
+    python = any(PurePosixPath(p).suffix == ".py" for p in allowlist)
+    entries: list[tuple[int, str, str, int | None]] = []
+    for consumer in consumers:
+        for symbol in consumer["symbols"]:
+            prefix, name, arity = CONSUMER_SYMBOL_RE.match(symbol).groups()
+            kind = prefix or ("fn" if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", name) else "token")
+            entries.append((consumer["task"], kind, name, None if arity is None else int(arity)))
+    checked = iter(check_produces(worktree, allowlist, [(k, n, a) for _, k, n, a in entries if python or k == "token"]))
+    results: list[dict] = []
+    for task, kind, name, _ in entries:
+        if kind == "fn" and not python:
+            results.append({"task": task, "name": name, "status": "unchecked",
+                            "detail": "keine Python-Datei in der Allowlist — per ast nicht prüfbar"})
+        else:
+            results.append({"task": task, **next(checked)})
     return results
 
 
@@ -1064,10 +1125,19 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     violations = check_allowlist(worktree, args.base, allowlist) if allowlist_checked else []
     produce_results = check_produces(worktree, allowlist, produces)
     produces_ok = all(r["status"] == "present" for r in produce_results)
+    # Abnehmer-Check (Spec 27): Tokens tragen im Maschinenblock kein Präfix — aus `produces` ergänzen.
+    tokens = {name for kind, name, _ in produces if kind == "token"}
+    consumers = block.get("consumers")
+    if consumers is not None:
+        consumers = [{"task": c["task"], "symbols": [f"token:{s}" if s in tokens else s for s in c["symbols"]]}
+                     for c in consumers]
+    consumer_results = check_consumers(worktree, allowlist, consumers)
+    consumers_broken = any(r["status"] in CONSUMER_BROKEN for r in consumer_results)
+    consumers_unchecked = any(r["status"] == "unchecked" for r in consumer_results)
 
-    if violations or not produces_ok:
+    if violations or not produces_ok or consumers_broken:
         verdict = "fail"
-    elif not allowlist_checked:
+    elif not allowlist_checked or consumers_unchecked:
         verdict = "unverified"
     else:
         verdict = "pass"
@@ -1081,6 +1151,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("Allowlist-Prüfung: ÜBERSPRUNGEN (--base fehlt) — nicht geprüft, nicht bestanden")
     for r in produce_results:
         print(f"  {r['name']}: {r['status']} — {r['detail']}")
+    for r in consumer_results:
+        print(f"  Abnehmer Task {r['task'] if r['task'] is not None else '?'}, "
+              f"{r['name'] or '-'}: {r['status']} — {r['detail']}")
     print(f"Verdikt: {verdict.upper()}")
 
     if args.out:
@@ -1101,6 +1174,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "allowlist_checked": allowlist_checked,
             "allowlist_violations": violations,
             "produces": produce_results,
+            "consumer_check": consumer_results,
             "verdict": verdict,
             "ok": ok,
         }
