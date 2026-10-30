@@ -70,6 +70,10 @@ GLOB_CHARS = frozenset("*?[")
 # Pflicht-Titel (E8): solche Tasks konsumieren laut Plan alle Produces und zählen
 # nicht als Abnehmer.
 MANDATORY_TITLES = ("Verifikation", "Evals", "Nachbarn", "known-limits", "Report")
+# Prüfpunkte (Spec 27 C1–C4): Profile vom niedrigeren zum höheren; fallen zwei auf
+# dieselbe Stelle, bleibt die Art, die hier weiter hinten steht.
+PROFILES = ("checkpoint", "standard")
+CHECKPOINT_KINDS = ("before", "after", "group", "final")
 
 
 class PlanParseError(ValueError):
@@ -522,6 +526,11 @@ def risk_words(path: str) -> list[str]:
     return found + [".sql"] if path.lower().endswith(".sql") else found
 
 
+def _risk_path(task: PlanTask) -> str | None:
+    """Erster Pfad unter `Files:` mit Risikowort (Bedingung von M2), sonst None."""
+    return next((ref.path for ref in task.files if risk_words(ref.path)), None)
+
+
 def choose_model(task: PlanTask, consumers: list[dict]) -> tuple[str, str]:
     """(model, model_reason) nach M0–M3; die erste Regel, die greift. `consumers` ist
     die Abnehmer-Liste dieser Task aus `consumers_of`. Ein ungültiger M0-Wert gilt
@@ -530,13 +539,50 @@ def choose_model(task: PlanTask, consumers: list[dict]) -> tuple[str, str]:
         return task.model_line.lower(), "Plan"
     if len(consumers) >= CONSUMERS_FOR_OPUS:
         return "opus", "Vorleistung für Task " + ", ".join(str(c["task"]) for c in consumers)
-    for ref in task.files:
-        if risk_words(ref.path):
-            return "opus", f"Risikopfad {ref.path}"
+    risky = _risk_path(task)
+    if risky:
+        return "opus", f"Risikopfad {risky}"
     breadth = len({r.path for r in task.files if r.verb in ("Create", "Modify")})
     if breadth >= BREADTH_MIN_FILES:
         return "opus", f"Breite: {breadth} Dateien"
     return "sonnet", "Standard"
+
+
+def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], gate: GateResult) -> list[dict]:
+    """Prüfpunkte nach C1–C4 über den ganzen Plan, in Plan-Reihenfolge.
+
+    Je Prüfpunkt `kind`, `task`, `profile`, `reasons`. Die Bedingungen von M1/M2 gelten
+    unabhängig von M0. Ein Prüfpunkt sitzt hinter einer Task (`before N` hinter der
+    Task vor N); fallen zwei auf dieselbe Stelle, bleibt einer mit allen Gründen, dem
+    höheren Profil und der Art, die in CHECKPOINT_KINDS weiter hinten steht.
+    """
+    pos = {t.id: i for i, t in enumerate(tasks)}
+    raw: list[tuple[int, str, int | None, str, str]] = []  # (Stelle, kind, task, profile, Grund)
+    for t in tasks:
+        users, risky = consumers.get(t.id, []), _risk_path(t)
+        if users and (len(users) >= CONSUMERS_FOR_OPUS or risky):
+            first = users[0]["task"]
+            why = f"{len(users)} Abnehmer" if len(users) >= CONSUMERS_FOR_OPUS else f"Risikopfad {risky}"
+            raw.append((pos[first] - 1, "before", first, "checkpoint",
+                        f"C1: Task {t.id} ({why}) vor dem ersten Abnehmer Task {first}"))
+        if risky:
+            raw.append((pos[t.id], "after", t.id, "standard", f"C2: Task {t.id} mit Risikopfad {risky}"))
+    if gate.verdict == "parallel" and gate.parallel_group:
+        last = max(gate.parallel_group)
+        raw.append((pos[last], "group", last, "checkpoint",
+                    "C3: nach dem Merge der Parallel-Gruppe " + ", ".join(map(str, sorted(gate.parallel_group)))))
+    work = [t for t in tasks if not (t.title == "Verifikation" or t.title.startswith("Verifikation —"))]
+    raw.append((pos[(work or tasks)[-1].id], "final", None, "standard", "C4: finaler Prüfpunkt"))
+
+    merged: dict[int, dict] = {}
+    for slot, kind, task_id, profile, reason in raw:
+        cp = merged.setdefault(slot, {"kind": kind, "task": task_id, "profile": profile, "reasons": []})
+        if CHECKPOINT_KINDS.index(kind) > CHECKPOINT_KINDS.index(cp["kind"]):
+            cp["kind"], cp["task"] = kind, task_id
+        if PROFILES.index(profile) > PROFILES.index(cp["profile"]):
+            cp["profile"] = profile
+        cp["reasons"].append(reason)
+    return [merged[slot] for slot in sorted(merged)]
 
 
 def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
@@ -682,7 +728,12 @@ def _header(command: str) -> str:
     return f"<!-- skill: subagent-dev | schema: {SCHEMA_VERSION} | generated: {command} -->"
 
 
-def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
+def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str, consumers: list[dict] | None = None) -> str:
+    """`consumers`: Abnehmer dieser Task aus dem ganzen Plan (`write_tasks`); ohne
+    Angabe aus `doc` gerechnet."""
+    if consumers is None:
+        consumers = consumers_of(doc.tasks)[task.id]
+    model, model_reason = choose_model(task, consumers)
     allowlist = [f.path for f in task.files]
     produces = [s for s in extract_symbols(task.produces) if s[0] != "file"]
     others = [f"Task {t.id} – {t.title}" for t in doc.tasks if t.id != task.id]
@@ -696,12 +747,17 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
         for title, text in task.step_texts
     ) if task.step_texts else "- (keine Steps im Plan gefunden)"
     others_md = "\n".join(f"- {o}" for o in others) if others else "- (keine weiteren Tasks in diesem Plan)"
+    consumers_md = ", ".join(
+        f"Task {c['task']} (" + ", ".join(f"`{s}`" for s in c["symbols"]) + ")" for c in consumers
+    ) or "keine"
 
     machine_block = {
         "task_id": task.id,
         "plan": plan_path,
         "allowlist": allowlist,
         "produces": [{"kind": k, "name": n, "arity": a} for k, n, a in produces],
+        "model": model,
+        "consumers": consumers,
     }
 
     return (
@@ -713,6 +769,9 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
         f"## Interfaces\n\n"
         f"- Consumes: {task.consumes or '(nichts Neues)'}\n"
         f"- Produces: {task.produces or '(nichts Neues)'}\n\n"
+        f"## Modell und Abnehmer\n\n"
+        f"- Modell: `{model}` — {model_reason}\n"
+        f"- Abnehmer: {consumers_md}\n\n"
         f"## Akzeptanzkriterien\n\n{steps_md}\n\n"
         f"## Global Constraints\n\n{doc.global_constraints or '(keine im Plan gefunden)'}\n\n"
         f"## Nicht-Ziele\n\n"
@@ -729,11 +788,20 @@ def parse_task_machine_block(text: str) -> dict:
     return json.loads(match.group(1))
 
 
-def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
+def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | None = None) -> dict:
+    """Abnehmer, Modell und Prüfpunkte rechnen über den ganzen Plan (C3 mit dem Gate über
+    den ganzen Plan); erst danach filtert `only` (`--tasks`). Die bisherigen Gate-Schlüssel
+    gelten wie bisher für die gefilterte Menge."""
     out_dir = Path(out_dir)
     if not out_dir.exists():
         print(f"Lege {out_dir} an (erster Lauf)")
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    consumers = consumers_of(doc.tasks)
+    models = {t.id: choose_model(t, consumers[t.id]) for t in doc.tasks}
+    checkpoints = place_checkpoints(doc.tasks, consumers, gate_verdict(doc.tasks, build_overlap_graph(doc.tasks)))
+    if only is not None:
+        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in only])
 
     overlap = build_overlap_graph(doc.tasks)
     gate = gate_verdict(doc.tasks, overlap)
@@ -749,6 +817,7 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
             {
                 "id": t.id, "title": t.title, "files": [f.path for f in t.files],
                 "files_unknown": t.files_unknown, "interfaces_unknown": t.interfaces_unknown,
+                "model": models[t.id][0], "model_reason": models[t.id][1], "consumers": consumers[t.id],
             }
             for t in doc.tasks
         ],
@@ -757,17 +826,18 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
         "parallel_group": gate.parallel_group,
         "reasoning": gate.reasoning,
         "components": gate.components,
+        "checkpoints": checkpoints,
     }
     (out_dir / "gate.json").write_text(json.dumps(gate_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     task_files: dict[int, Path] = {}
     for task in doc.tasks:
-        rendered = render_task_file(task, doc, plan_path)
+        rendered = render_task_file(task, doc, plan_path, consumers[task.id])
         target = out_dir / f"task-{task.id}-{_slug(task.title)}.md"
         target.write_text(rendered, encoding="utf-8")
         task_files[task.id] = target
 
-    return {"gate": gate, "task_files": task_files}
+    return {"gate": gate, "task_files": task_files, "models": models, "checkpoints": checkpoints}
 
 
 # --------------------------------------------------------------------------
@@ -925,20 +995,25 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         print(f"Plan nicht parsbar: {exc}", file=sys.stderr)
         return 1
 
+    wanted = None
     if args.tasks:
         wanted = {int(x) for x in args.tasks.split(",")}
-        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in wanted])
-        if not doc.tasks:
+        if not any(t.id in wanted for t in doc.tasks):
             print("Keine der angegebenen Task-IDs im Plan gefunden.", file=sys.stderr)
             return 1
 
-    result = write_tasks(doc, str(plan_path), Path(args.out_dir))
+    result = write_tasks(doc, str(plan_path), Path(args.out_dir), wanted)
     gate: GateResult = result["gate"]
-    print(f"{len(doc.tasks)} Task(s) verarbeitet -> {args.out_dir}")
+    print(f"{len(result['task_files'])} Task(s) verarbeitet -> {args.out_dir}")
     print(f"Gate-Urteil: {gate.verdict}")
     print(gate.reasoning)
     if gate.parallel_group:
         print(f"Parallel-Gruppe: Tasks {gate.parallel_group}")
+    for tid in result["task_files"]:
+        print(f"Task {tid}: {result['models'][tid][0]} ({result['models'][tid][1]})")
+    for cp in result["checkpoints"]:
+        print(f"Prüfpunkt {cp['kind']} {cp['task'] if cp['task'] is not None else '-'} [{cp['profile']}]: "
+              + "; ".join(cp["reasons"]))
     return 0
 
 

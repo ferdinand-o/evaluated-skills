@@ -1341,7 +1341,7 @@ def test_task_file_keeps_step_text():
         "- Step 4: Commit."
     )
     block = ptt.parse_task_machine_block(rendered)
-    assert set(block) == {"task_id", "plan", "allowlist", "produces"}
+    assert set(block) == {"task_id", "plan", "allowlist", "produces", "model", "consumers"}
 
 
 # --------------------------------------------------------------------------
@@ -1456,3 +1456,147 @@ def _wp_bad_model(value="gpt"):
         "<!-- skill: impl-plan | schema: 1 | generated: x -->\n\n**Goal:** g\n\n**Spec:** `none.md`\n\n"
         + _model_task(1, "A", [("Create", "src/a.py")], modell=value)
     )
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 5: Prüfpunkte und gate.json
+# --------------------------------------------------------------------------
+
+
+CP_PLAN = "\n".join([
+    _consumer_task(1, "Parser", "src/parser.py", "nichts Neues", "`fn:parse_order(line)`"),
+    _consumer_task(2, "Anmeldung", "src/auth.py", "nichts Neues", "`Token`"),
+    _consumer_task(3, "Kern", "src/core.py", "`fn:parse_order(line)`, `Token`", "`fn:run(cfg)`"),
+    _consumer_task(4, "CLI", "src/cli.py", "`fn:parse_order(line)`"),
+    _consumer_task(5, "Export", "src/export.py", "`fn:run(cfg)`"),
+    _consumer_task(6, "Import", "src/importer.py", "`fn:run(cfg)`"),
+    _consumer_task(7, "Verifikation", "tests/test_all.py", "`fn:run(cfg)`"),
+])
+
+
+def _place(plan, gate=None):
+    tasks = ptt.parse_plan(plan).tasks
+    if gate is None:
+        gate = ptt.gate_verdict(tasks, ptt.build_overlap_graph(tasks))
+    return ptt.place_checkpoints(tasks, ptt.consumers_of(tasks), gate)
+
+
+def _kinds(checkpoints):
+    return [(c["kind"], c["task"], c["profile"], [r[:2] for r in c["reasons"]]) for c in checkpoints]
+
+
+def test_checkpoint_placement():
+    got = _place(CP_PLAN)
+    assert all(list(c) == ["kind", "task", "profile", "reasons"] for c in got)
+    # C1 (Task 1: zwei Abnehmer; Task 2: Risikopfad mit Abnehmer) vor Task 3 und C2 nach
+    # Task 2 fallen zwischen dieselben Tasks: einer, alle Gründe, höheres Profil.
+    # C1 (Task 3) vor Task 5; C4 vor der Verifikations-Task mit task: null; kein C3.
+    assert _kinds(got) == [
+        ("after", 2, "standard", ["C1", "C1", "C2"]),
+        ("before", 5, "checkpoint", ["C1"]),
+        ("final", None, "standard", ["C4"]),
+    ]
+    assert "Task 3" in got[0]["reasons"][0] and "src/auth.py" in got[0]["reasons"][2]
+    # C3 nur bei `parallel`, task = höchste ID der Gruppe; nach Task 4 fällt er mit C1 vor
+    # Task 5 zusammen (bleibt `group`), auf dem finalen Prüfpunkt bleibt `final`.
+    tasks = ptt.parse_plan(CP_PLAN).tasks
+    group = ptt.GateResult(verdict="parallel", parallel_group=[1, 4, 2], reasoning="r")
+    assert _kinds(_place(CP_PLAN, group))[1] == ("group", 4, "checkpoint", ["C1", "C3"])
+    late = ptt.GateResult(verdict="parallel", parallel_group=[4, 5, 6], reasoning="r")
+    assert _kinds(_place(CP_PLAN, late))[-1] == ("final", None, "standard", ["C3", "C4"])
+    for verdict in ("sequential", "no-delegate"):
+        other = ptt.GateResult(verdict=verdict, parallel_group=[], reasoning="r")
+        assert "group" not in [c["kind"] for c in ptt.place_checkpoints(tasks, ptt.consumers_of(tasks), other)]
+    # C4: vor der Verifikations-Task (auch `Verifikation — …`) oder am Ende.
+    risky = _consumer_task(1, "Sitzung", "src/session.py", "nichts Neues")
+    for last in ("Verifikation", "Verifikation — Gesamtlauf"):
+        plan = risky + _consumer_task(2, last, "tests/test_x.py", "nichts Neues")
+        assert _kinds(_place(plan)) == [("final", None, "standard", ["C2", "C4"])]
+    plan = risky + _consumer_task(2, "Verifikation der API", "src/api.py", "nichts Neues")
+    assert _kinds(_place(plan)) == [("after", 1, "standard", ["C2"]), ("final", None, "standard", ["C4"])]
+    # Bedingungen von M1/M2 gelten unabhängig von M0; ein Abnehmer allein löst kein C1 aus.
+    pinned = CP_PLAN.replace("### Task 1: Parser\n\n", "### Task 1: Parser\n\n**Modell:** sonnet\n\n")
+    assert _kinds(_place(pinned)) == _kinds(got)
+    single = "\n".join([
+        _consumer_task(1, "A", "src/a.py", "nichts Neues", "`fn:a(x)`"),
+        _consumer_task(2, "B", "src/b.py", "`fn:a(x)`"),
+    ])
+    assert _kinds(_place(single)) == [("final", None, "standard", ["C4"])]
+
+
+def test_rules_use_whole_plan_with_tasks_filter(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text(CP_PLAN, encoding="utf-8")
+    ptt.main(["generate", str(plan_path), "--out-dir", str(tmp_path / "all")])
+    ptt.main(["generate", str(plan_path), "--tasks", "3,4", "--out-dir", str(tmp_path / "some")])
+    full = json.loads((tmp_path / "all" / "gate.json").read_text(encoding="utf-8"))
+    part = json.loads((tmp_path / "some" / "gate.json").read_text(encoding="utf-8"))
+    assert [t["id"] for t in part["tasks"]] == [3, 4]
+    by_id = {t["id"]: t for t in full["tasks"]}
+    for t in part["tasks"]:
+        for key in ("model", "model_reason", "consumers"):
+            assert t[key] == by_id[t["id"]][key]
+    assert by_id[3]["model"] == "opus" and [c["task"] for c in by_id[3]["consumers"]] == [5, 6]
+    assert part["checkpoints"] == full["checkpoints"]
+    task3 = ptt.parse_task_machine_block(next((tmp_path / "some").glob("task-3-*.md")).read_text(encoding="utf-8"))
+    assert task3["model"] == "opus" and [c["task"] for c in task3["consumers"]] == [5, 6]
+    # C3 aus dem Gate über den ganzen Plan, nicht über die Teilmenge.
+    disjoint = "\n".join([
+        _consumer_task(1, "A", "src/a.py", "nichts Neues"),
+        _consumer_task(2, "B", "src/b.py", "nichts Neues"),
+        _consumer_task(3, "C", "src/c.py", "nichts Neues"),
+        _consumer_task(4, "D", "src/d.py", "nichts Neues"),
+        _consumer_task(5, "E", "src/a.py", "nichts Neues"),
+    ])
+    plan_path.write_text(disjoint, encoding="utf-8")
+    ptt.main(["generate", str(plan_path), "--tasks", "3,4", "--out-dir", str(tmp_path / "dis")])
+    gate = json.loads((tmp_path / "dis" / "gate.json").read_text(encoding="utf-8"))
+    assert gate["verdict"] == "no-delegate"  # bisheriger Schlüssel: Urteil über die Teilmenge
+    assert _kinds(gate["checkpoints"]) == [("group", 4, "checkpoint", ["C3"]), ("final", None, "standard", ["C4"])]
+
+
+GATE_FIXTURES = {
+    "plan-disjoint-batch": {
+        "tasks": [[1, "Batch-Parser", ["src/batch.py"]], [2, "Batch-Writer", ["src/writer.py"]],
+                  [3, "Batch-Validator", ["src/validator.py"]], [4, "Batch-CLI", ["src/cli.py"]]],
+        "overlap": {"1": [], "2": [], "3": [], "4": []}, "verdict": "parallel",
+        "parallel_group": [1, 2, 3, 4], "components": [[1], [2], [3], [4]],
+    },
+    "plan-hidden-overlap": {
+        "tasks": [[1, "Feature A", ["config/shared.yaml", "src/feature_a.py"]],
+                  [2, "Feature B", ["config/shared.yaml", "src/feature_b.py"]]],
+        "overlap": {"1": [2], "2": [1]}, "verdict": "sequential",
+        "parallel_group": [], "components": [[1, 2]],
+    },
+    "plan-mini-two-tasks": {
+        "tasks": [[1, "Logging-Helfer", ["src/logging_helper.py"]], [2, "Config-Loader", ["src/config_loader.py"]]],
+        "overlap": {"1": [], "2": []}, "verdict": "no-delegate",
+        "parallel_group": [], "components": [[1], [2]],
+    },
+}
+
+
+def test_gate_json_keys_backward_compatible(tmp_path):
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "evals" / "fixtures"
+    for name, want in GATE_FIXTURES.items():
+        touch = json.loads((root / name / "fixture.json").read_text(encoding="utf-8"))["commits"][0]["touch"]
+        plan_path, text = next((p, t) for p, t in touch.items() if p.startswith("docs/superpowers/plans/"))
+        doc = ptt.parse_plan(text)
+        ptt.write_tasks(doc, plan_path, tmp_path / name)
+        gate = json.loads((tmp_path / name / "gate.json").read_text(encoding="utf-8"))
+        assert list(gate) == ["_meta", "plan", "tasks", "overlap", "verdict", "parallel_group",
+                              "reasoning", "components", "checkpoints"]
+        assert gate["_meta"]["schema"] == 1 and gate["plan"] == plan_path
+        for task, (tid, title, files) in zip(gate["tasks"], want["tasks"], strict=True):
+            assert list(task) == ["id", "title", "files", "files_unknown", "interfaces_unknown",
+                                  "model", "model_reason", "consumers"]
+            assert [task["id"], task["title"], task["files"]] == [tid, title, files]
+            assert task["files_unknown"] is False and task["interfaces_unknown"] is False
+        for key in ("overlap", "verdict", "parallel_group", "components"):
+            assert gate[key] == want[key], (name, key)
+        assert gate["reasoning"] == ptt.gate_verdict(doc.tasks, ptt.build_overlap_graph(doc.tasks)).reasoning
+    # Anti-Zeremonie-Fall: zwei Tasks ohne Vorleistung und Risikopfad.
+    mini = json.loads((tmp_path / "plan-mini-two-tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert [(t["model"], t["consumers"]) for t in mini["tasks"]] == [("sonnet", []), ("sonnet", [])]
+    assert _kinds(mini["checkpoints"]) == [("final", None, "standard", ["C4"])]
