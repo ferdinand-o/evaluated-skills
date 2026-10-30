@@ -474,11 +474,151 @@ Je Fund `Datei:Zeile`, dann Kurzfassung (höchstens 80 Zeichen). Nicht nachgepr�
 - `docs/superpowers/reports/skill-dir-report.md:4` The header leaves out the template's required plan path and 'Tier …' line, an...
 - `docs/superpowers/reports/skill-dir-report.md:54` The table column 'ohne Skill' holds '0/7 grün' for skill-forge.
 
+## Abnahme Spec 27
+
+Gemessen am 2026-10-30 mit dem Stand des Branches `sdc/task-18` (Skript `plan_to_tasks.py` mit Prüfpunkten, Tasks 1 bis 17 gebaut). Nach Entscheidung des Nutzers nur (a) die Abnahme an den Prüfpunkten und (b) die fünf neuen Evals; (c) die Wiederholung älterer Evals wurde nicht gefahren (siehe „Was nicht gemessen wurde").
+
+**Ergebnis.** Das Tokenkriterium (mindestens 40 % weniger Review-Tokens je Plan) ist in beiden Plänen erfüllt: test-first 81.9 %, skill-dir 47.6 %. Das Fundekriterium (mindestens gleich viele nachgeprüfte Funde) ist auf der Stichprobe **nicht** erfüllt: Die Prüfpunkte melden 50 statt 145 Funde, fast alle haben in der Basislinie ein Gegenstück, und die Stichprobe der Funde, die nur die Basislinie hat, ergab 8 bestätigte, 2 unklare, 0 widerlegte. Die Abnahme nach der Spec gilt damit insgesamt als **nicht erreicht**; die Token-Ersparnis ist gemessen, der Verlust an Funden ebenfalls. Die Stichprobe ist klein (12 Funde) und der Abgleich ist meiner (siehe unten), das Urteil über das Fundekriterium ist deshalb ein Indiz, kein Beweis.
+
+### Prüfpunkte je Plan
+
+`generate` (aktuelles Skript, Ausgabe unter dem Scratchpad der Sitzung) liefert aus `checkpoints` und `plan_order`:
+
+- **test-first** (`2026-10-13-test-first.md`, 7 Tasks, Gate `sequential`): `before` Task 2 (Profil `checkpoint`, C1: Task 1 hat 2 Abnehmer) und `final` (C4). Prüfpunkt 1 ist demnach nach Task 1 fällig.
+- **skill-dir** (`2026-10-14-skill-dir.md`, 10 Tasks, Gate `sequential`): `after` Task 2 (Profil `standard`, C2: Risikopfad `skills/sql-schema-architect/assets/hooks/migration-gate.json`), `before` Task 6 (Profil `checkpoint`, C1: Task 2 vor dem ersten Abnehmer Task 6, also fällig nach Task 5) und `final` (C4).
+- Keine der Pläne enthält eine Task `Verifikation`; die letzte Nicht-Verifikations-Task ist jeweils `Report` (Task 7 bzw. Task 10).
+
+Bereiche: `base` ist der Elternteil des Commits von Task 1 (test-first `ec966e6`, skill-dir `45ef282`). Jeder Prüfpunkt reviewt vom letzten Prüfpunkt (anfangs `base`) bis zum Commit der Task, nach der er fällig ist; der finale Prüfpunkt reviewt `base..<Commit der letzten Task>` (wie `references/checkpoints.md`: `base..HEAD`), überdeckt also die früheren Bereiche ein zweites Mal.
+
+Befehl, wie in der Basislinie, je Bereich nacheinander (nie parallel) in einem frischen Worktree am Ende des Bereichs, danach entfernt:
+
+```
+timeout 600 claude -p "/code-review <bereich>" --output-format json --allowedTools "Bash(git:*)" Read Grep Glob
+```
+
+Alle fünf Läufe: Exit 0, `subtype: success`, `is_error: false`, Modell `claude-opus-5-5`, kein Timeout, keine Wiederholung. Rohantworten unter `<scratch>/t18/out/<name>.json`, nicht im Repo. Der Reviewer verweigerte in `tf-p1` und `tf-final` je 2, in `sd-p2` 6 Bash-Aufrufe (`permission_denials`), in `sd-p1` und `sd-final` keinen.
+
+| Plan | Prüfpunkt | Bereich | Commits | nach Task |
+|---|---|---|---:|---|
+| test-first | `tf-p1` | `9e65061^..9e65061` | 1 | 1 (`before` 2) |
+| test-first | `tf-final` | `9e65061^..036c153` | 11 | 7 (`final`) |
+| skill-dir | `sd-p1` | `677ddbd^..f6a9aea` | 3 (mit Plan-Commit `db383ae`) | 2 (`after` 2) |
+| skill-dir | `sd-p2` | `f6a9aea..1f7d83b` | 3 | 5 (`before` 6) |
+| skill-dir | `sd-final` | `677ddbd^..4861c42` | 11 | 10 (`final`) |
+
+Umfang laut `git diff --shortstat`: `tf-p1` 2 Dateien, `tf-final` 42 Dateien (+1236/−31), `sd-p1` 21 Dateien (+248/−60), `sd-p2` 29 Dateien (+59/−64), `sd-final` 69 Dateien (+727/−175).
+
+### Basislinie gegen Prüfpunkte
+
+Tokens aus `modelUsage` („Gesamt" = Input + Output + Cache-Read + Cache-Creation), Kosten aus `total_cost_usd`, wie in der Basislinie.
+
+**test-first**
+
+| Prüfpunkt | Bereich | Umfang | Kosten USD | Input | Output | Cache-Read | Cache-Creation | Gesamt | Funde |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `tf-p1` vor Task 2 | `9e65061^..9e65061` | Task 1 | 0.47 | 10 | 7,283 | 194,957 | 56,118 | 258,368 | 10 |
+| `tf-final` | `9e65061^..036c153` | Tasks 1–7 | 0.49 | 18 | 7,213 | 492,669 | 49,768 | 549,668 | 10 |
+| **Summe** | | | **0.96** | **28** | **14,496** | **687,626** | **105,886** | **808,036** | **20** |
+
+**skill-dir**
+
+| Prüfpunkt | Bereich | Umfang | Kosten USD | Input | Output | Cache-Read | Cache-Creation | Gesamt | Funde |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `sd-p1` nach Task 2 | `677ddbd^..f6a9aea` | Tasks 1–2 | 0.47 | 18 | 7,873 | 460,943 | 43,160 | 511,994 | 10 |
+| `sd-p2` vor Task 6 | `f6a9aea..1f7d83b` | Tasks 3–5 | 1.02 | 52 | 14,185 | 1,894,860 | 70,658 | 1,979,755 | 10 |
+| `sd-final` | `677ddbd^..4861c42` | Tasks 1–10 | 0.88 | 32 | 13,173 | 1,106,198 | 78,398 | 1,197,801 | 10 |
+| **Summe** | | | **2.36** | **102** | **35,231** | **3,462,001** | **192,216** | **3,689,550** | **30** |
+
+| Plan | Läufe Basislinie | Läufe Prüfpunkte | Tokens Basislinie | Tokens Prüfpunkte | Ersparnis Tokens | USD Basislinie | USD Prüfpunkte | Ersparnis USD | Funde Basislinie | Funde Prüfpunkte |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| test-first | 7 | 2 | 4,471,647 | 808,036 | **81.9 %** | 3.60 | 0.96 | 73.4 % | 60 | 20 |
+| skill-dir | 10 | 3 | 7,043,385 | 3,689,550 | **47.6 %** | 5.04 | 2.36 | 53.2 % | 85 | 30 |
+
+Abnahme Tokens (mindestens 40 % weniger je Plan): **erfüllt**, test-first mit großem Abstand, skill-dir mit 7,6 Punkten Reserve. Die Ersparnis in Output-Tokens liegt bei 75.4 % (test-first) und 54.6 % (skill-dir).
+
+Zur Einordnung der Streuung: `tf-p1` ist derselbe Bereich wie der Basislinienlauf `9e65061` (Task 1) mit denselben Flags. Er brauchte 258,368 statt 311,698 Tokens (−17 %) und 0.47 statt 0.45 USD und meldete 10 statt 9 Funde. Ein einzelner Lauf schwankt also in der Größenordnung von 15 bis 20 %; die Ersparnis von test-first liegt weit darüber, die von skill-dir mit gut 7 Punkten Reserve über der Schwelle, aber nicht außerhalb dessen, was zwei weitere Messungen verschieben könnten. Mehr Messungen je Plan gab es nicht (ein Lauf je Bereich).
+
+### Funde-Abgleich
+
+**Zuordnung.** Ein Fund der Prüfpunkte ist einem Basislinienfund zugeordnet, wenn beide dieselbe Datei nennen und die Zeilen höchstens 10 auseinanderliegen, oder wenn beide dasselbe aussagen. Die Zuordnung ist vielfach (ein Fund kann mehrere Gegenstücke haben); beide Seiten sind getrennt gezählt. „Gleiche Aussage" habe ich von Hand gesetzt, nur wo Zeilen weiter als 10 auseinanderliegen: test-first 1 Paar (`tdd_log.py:196` leere Log-Datei und Kopf, gegen `:180`), skill-dir 7 Paare (Kopfzeilen `generated:` der Skripte noch repo-relativ: `new_ledger.py:29`, `collect.py:321`, `measure.py:10`, `plan_to_tasks.py:879`, `delta-mode.md:21`; `known-limits.md` work-plan-Eintrag; `lint_skill.py:604` gegen `:625`). Das ist ein Urteil von mir, kein mechanischer Abgleich.
+
+| Plan | Prüfpunktfunde | davon mit Basislinien-Gegenstück | ohne Gegenstück | Basislinienfunde | von Prüfpunkten abgedeckt | ohne Gegenstück |
+|---|---:|---:|---:|---:|---:|---:|
+| test-first | 20 | 19 | 1 | 60 | 10 | 50 |
+| skill-dir | 30 | 29 | 1 | 85 | 29 | 56 |
+
+Beobachtungen: (1) Jeder Lauf liefert höchstens 10 Funde (Basislinie 6 bis 10, Prüfpunkte alle fünf genau 10), vermutlich die Standardobergrenze von `/code-review` (`--max-findings default`); ein größerer Bereich bringt deshalb nicht mehr Funde, sondern die zehn, die der Reviewer am höchsten einstuft. (2) Bei test-first konzentrieren sich beide Prüfpunkte auf `tdd_log.py`; die Funde der Basislinie zu `cycle.md`, `SKILL.md`, Evals, Nachbarn, known-limits und Report (49 von 60) kommen in den Prüfpunkten nicht vor. (3) Bei skill-dir decken `sd-p2` und `sd-final` die Querschnittsfunde (Kopfzeilen, bare Aufrufe) gut ab; Einzelfunde in Tests, known-limits und Report fehlen.
+
+**Stichprobe zur Nachprüfung.** Je Plan und Seite höchstens fünf nicht zugeordnete Funde, am Code des jeweiligen Commits gelesen (`git show <commit>:<datei>`), nichts ausgeführt. Auswahl ohne Ermessen: Prüfpunktseite alle nicht zugeordneten Funde (je Plan einer); Basislinienseite je Plan der erste nicht zugeordnete Fund der ersten fünf Läufe in Commit-Reihenfolge, die einen haben. Urteil: trifft zu / trifft nicht zu / unklar.
+
+| Plan | Seite | Commit | Fund | Urteil |
+|---|---|---|---|---|
+| test-first | Prüfpunkte | `036c153` | `tdd_log.py:274`: `ungeprüft`-Meldung nimmt `output.splitlines()[0]`, leer bei führender Leerzeile | trifft zu (`output` wird nirgends gestrippt, `strip()` prüft nur auf leer) |
+| skill-dir | Prüfpunkte | `1f7d83b` | `subagent-dev/SKILL.md:23`: `plan_to_tasks.py lint`/`lint-spec` ohne `${CLAUDE_SKILL_DIR}` | unklar (Wortlaut stimmt; die Zeilen beschreiben, ob sie auffordern, ist Auslegung) |
+| test-first | Basislinie | `45dd704` | `cycle.md:61`: Filter für go, cargo, jest ohne Treffer enden mit Exit 0, `green` ohne gelaufenen Test | trifft zu (Datei nennt nur die Form, keine Warnung; Exit-0-Verhalten der Runner aus Wissen, nicht ausgeführt) |
+| test-first | Basislinie | `c45519a` | `SKILL.md:24`: `T="${CLAUDE_SKILL_DIR}/…"` als Shell-Variable, Zustand fehlt im nächsten Bash-Aufruf | trifft zu (Bash-Aufrufe teilen keinen Shell-Zustand; der Text verlangt nicht, `T` je Aufruf zu setzen) |
+| test-first | Basislinie | `d1db44f` | `evals.json:107`: Eval 5 hat keine Assertion gegen einen doch geschriebenen Test | trifft zu (`must` prüft nur Wortlaut, fehlendes Log, `def slugify`; `must_not` leer) |
+| test-first | Basislinie | `3da3904` | `.claude/skills/testing-strategy/SKILL.md:3`: test-first fehlt in `PROJECT_SKILLS`, Verweis geht ins Leere | trifft zu (Liste in `sync_skills.py` ohne test-first; Task 6 hält es später in known-limits fest) |
+| test-first | Basislinie | `0040ddb` | `known-limits.md:2037`: Shell-Builtins (`cd`) werden von der `shutil.which`-Vorprüfung als fehlend gemeldet, nicht erwähnt | trifft zu (`missing_program` kennt keine Builtins, der Abschnitt nennt sie nicht; Wirkung je Plattform) |
+| skill-dir | Basislinie | `677ddbd` | `drift_check.py:136`: Skriptpfad wird vorher durch absoluten Pfad ersetzt, der Existenz-Guard prüft `cwd` nicht mehr | trifft zu (`parts[1]` ist nach `resolve_script` absolut, `is_file()` immer wahr) |
+| skill-dir | Basislinie | `f6a9aea` | `check-ledger.json:10`: `print(json.dumps(…, ensure_ascii=False))` mit `ü`/`—` ohne Kodierung | unklar (hängt an Locale und Codepage; unter UTF-8 kein Fehler) |
+| skill-dir | Basislinie | `3fc173c` | `rest-api-architect/SKILL.md:27`: `--ruleset`/`--conventions` bare Platzhalter, Assets relativ zur Skill | trifft zu (`gate.py` verlangt beide Flags, Pfade im Text sind nicht auf `${CLAUDE_SKILL_DIR}` umgestellt) |
+| skill-dir | Basislinie | `337fac8` | `exercise-forge/scripts/export.py:364`: Kopfzeile schreibt `python skills/exercise-forge/scripts/export.py` | trifft zu (Zeile im Code, SKILL.md ruft über `${CLAUDE_SKILL_DIR}`) |
+| skill-dir | Basislinie | `1f7d83b` | `skill-forge/SKILL.md:38`: Lint läuft über `${CLAUDE_SKILL_DIR}`, in diesem Repo die Projektkopie, `sync` erst danach | unklar (Mechanismus plausibel, welche Kopie die Sitzung lädt, steht nicht im Code) |
+
+Zahlen der Stichprobe: Prüfpunktseite 2 geprüft (1 trifft zu, 1 unklar), Basislinienseite 10 geprüft (8 trifft zu, 2 unklar), kein Fund widerlegt.
+
+**Spec-Bedingung „mindestens gleich viele nachgeprüfte Funde"**, nur auf dieser Stichprobe gewertet: nicht erfüllt. Die Prüfpunkte haben in der Stichprobe 1 bestätigten Fund, der in der Basislinie fehlt; die Basislinie hat 106 Funde ohne Gegenstück bei den Prüfpunkten (50 + 56), von denen 8 von 10 gezogenen bestätigt wurden. Selbst wenn man die Quote der Stichprobe mit großer Unsicherheit ansetzt, ergibt das deutlich mehr bestätigte Funde auf der Basislinienseite. Eine vollständige Nachprüfung aller Funde wurde nicht gefahren.
+
+### Grenzwerte (E8)
+
+Gelesen aus `skills/subagent-dev/scripts/plan_to_tasks.py` am Stand dieses Branches:
+
+| Grenzwert | Wert in Spec/Plan (E8) | Wert im Skript |
+|---|---|---|
+| `SIZE_TRIGGER_LINES` | 400 | 400 (C5) |
+| `BREADTH_MIN_FILES` | 5 | 5 (M2) |
+| `CONSUMERS_FOR_OPUS` | 2 | 2 (M1) |
+| `MAX_FIX_ROUNDS` | 2 | **keine Konstante im Skript**; die Grenze von zwei Fix-Runden je Prüfpunkt steht in `SKILL.md` und `references/checkpoints.md` (dort ausdrücklich als Abweichung von E8 vermerkt) |
+| `RISK_WORDS` | Tupel | `auth, login, session, security, crypto, permission, migration, migrations, payment, billing` |
+| `MANDATORY_TITLES` | Tupel | `Verifikation, Evals, Nachbarn, known-limits, Report` |
+
+Die Grenzwerte wurden in dieser Abnahme nicht variiert; gemessen ist, dass die Werte die oben genannten Prüfpunkte der beiden Pläne ergeben und dass `checkpoint-due-by-size` mit 430 Zeilen gegen die Schwelle 400 `due: true` liefert (Eval (b), mit Skill). Ob 400 Zeilen oder fünf Dateien die richtigen Schwellen sind, sagt diese Messung nicht.
+
+### Evals (b)
+
+Die fünf neuen Evals aus `evals/subagent-dev/evals.json`, je einmal mit Skill und einmal ohne (Spec 18). Workspace über `evalkit.workspace.prepare()` (ohne Skill `skill_dir=None`), `claude -p` über `evalkit.dispatch.run_agent` (`--permission-mode acceptEdits`, `--allowedTools`, `--setting-sources project`, `--output-format stream-json`; Prompt aus `evals.json`), Bewertung mit `evalkit.runner.grade()` (alle Assertions sind mechanisch, kein Judge). Sichtbarkeit der Skill laut `skills`-Feld im init-Ereignis: ohne Befund (kein Harness-Fehler). Je Eval ein Lauf je Seite.
+
+| Eval | mit Skill | ohne Skill | Kosten mit / ohne USD |
+|---|---|---|---|
+| `anti-ceremony-mini-plan-gets-only-final-checkpoint` | bestanden | nicht bestanden (`gate.json` fehlt) | 0.17 / 0.22 |
+| `fanout-producer-gets-opus-and-checkpoint` | bestanden | nicht bestanden (`gate.json` fehlt) | 0.18 / 0.77 |
+| `plan-model-line-overrides-rules` | bestanden | nicht bestanden (`gate.json` fehlt) | 0.24 / 0.12 |
+| `consumer-check-catches-arity-drift` | bestanden | nicht bestanden (`verify-task-1.json` ohne `consumer_check` und `arity_mismatch`-Status) | 0.19 / 0.18 |
+| `checkpoint-due-by-size` | bestanden | **bestanden, aber keine Baseline** (s. u.) | 0.13 / 0.26 |
+| Summe | 5/5 | 1/5 | 0.91 / 1.55 |
+
+Mit Skill rief der Agent die Skill in allen fünf Läufen auf. Ohne Skill entstand in vier Läufen kein Artefakt der Skill: In `fanout-producer-gets-opus-and-checkpoint` ordnete der Agent von sich aus Opus für den Parser und Sonnet für die übrigen zu, hielt einen Prüfpunkt vor den Abnehmern ein und baute alle fünf Tasks (0.77 USD), schrieb aber kein `gate.json`; in `consumer-check-catches-arity-drift` fand er den Arity-Fehler selbst und schrieb ein `verify-task-1.json` von Hand mit Verdikt `fail`, aber ohne die Schlüssel `consumer_check` und `status`. Die Evals diskriminieren damit über die Form des Artefakts, nicht über das Urteil.
+
+**`checkpoint-due-by-size` ohne Skill misst nichts.** Der Agent fand per `find / -name plan_to_tasks.py` das Repo-Skript unter `/home/user/evaluated-skills/skills/subagent-dev/` (und eine Plugin-Kopie) und rief dort `checkpoint status --after-task 3` auf, das `due: true` und 430 Zeilen schrieb. Der Workspace war ohne Skill; die Isolation hält Skripte außerhalb des Workspace nicht heraus (bekannte Grenze in `docs/known-limits.md`, Abschnitt Isolation). Die Sichtbarkeitsprüfung schlug nicht an, weil sie nur den Namen `subagent-dev` im `skills`-Feld prüft, nicht die Plugin-Skill `evaluated-dev:subagent-dev`. Gezählt wird der Lauf deshalb als „bestanden, Baseline unmöglich". In den anderen vier Läufen ohne Skill rief der Agent weder das Repo-Skript noch eine Plugin-Kopie auf (Transcripts nach Repo- und Plugin-Pfad durchsucht); er suchte in zwei Läufen per `grep -rl subagent-dev ~/.claude` danach und fand nichts Verwertbares.
+
+**Die Fixture-READMEs verraten den Diskriminator.** Alle fünf Fixtures tragen eine `README.md`, die den erwarteten Ausgang benennt (etwa: Task 1 als Vorleistung mit zwei Abnehmern bekommt opus, Prüfpunkt vor dem ersten Abnehmer, M1, C1, Spec 27). Der Agent liest sie ohne Skill genauso wie mit Skill; das erklärt, warum der Lauf ohne Skill in `fanout-producer` Opus und einen Prüfpunkt von sich aus wählte. Das macht die Läufe ohne Skill leichter, nicht schwerer: Ihr Durchfallen belegt die Bindung der Assertions an das Artefakt der Skill, nicht ein schlechteres Urteil des Agenten.
+
+Kosten (b): 2.45 USD (mit Skill 0.91, ohne Skill 1.55); kein Judge-Lauf.
+
+### Kosten
+
+(a) 3.32 USD für fünf Review-Läufe, (b) 2.45 USD für zehn Eval-Läufe, zusammen 5.77 USD; beide Deckel (je 10 USD) nicht erreicht.
+
 ## Was nicht gemessen wurde
 
-- **Fix-Kreislauf:** Die Basislinie misst nur die Kosten eines einzelnen `/code-review`-Laufs je Task-Commit. Die Schleife zwischen Autor und Reviewer (Fund beheben, erneut prüfen, höchstens `MAX_FIX_ROUNDS` Runden) wurde nicht nachgespielt; der Wert der Basislinie ist deshalb eine Untergrenze für die Review-Kosten je Task, nicht die Gesamtkosten des Verfahrens.
-- **Stufe von `/code-review` im Headless-Lauf:** Der Aufruf `claude -p "/code-review C^..C"` nennt keine Stufe (low bis max). Welche Stufe headless gilt, ist nicht festgestellt; laut Skill-Beschreibung gilt ohne Angabe die zuletzt getippte Stufe, ob und welche `-p` dafür vorfindet, wurde nicht geprüft. Das Modell war laut `modelUsage` `claude-opus-5-5`. Die Läufe der Task 18 müssen mit demselben Befehl und derselben Installation laufen, sonst ist der Vergleich nicht belastbar.
-- **Dritter Plan:** Spec 27 sieht drei Pläne und höchstens 30 Tasks vor; gemessen wurden auf Wunsch des Nutzers (Limit sparen) nur zwei Pläne mit 17 Tasks. Die Summen sind deshalb nicht mit einer Drei-Pläne-Messung vergleichbar.
-- **Nachprüfung der Funde:** Ob ein Fund am Code besteht, wurde nicht geprüft; „Funde" zählt Meldungen. Das Abnahmekriterium „mindestens gleich viele Funde, die eine Nachprüfung bestehen" kann erst Task 18 prüfen, mit einer Stichprobe der Funde dieses Anhangs.
-- **Schwankung zwischen Läufen:** Jeder Task-Commit wurde genau einmal gemessen; die Streuung eines wiederholten Laufs derselben Task ist unbekannt.
-- **Tokens im `usage`-Block:** siehe oben, dort durchgängig 0; gemessen wurde über `modelUsage`.
+- **(c) auf Wunsch des Nutzers nicht gefahren:** die vier bisherigen subagent-dev-Evals (`hidden-overlap-blocks-parallel`, `mini-plan-below-threshold-is-anti-ceremony`, `verify-catches-signature-drift-before-review`, `research-fanout-stays-distilled`) und die test-first-Evals, obwohl `lint_skill.py --base 4502ab9^` für beide `evals_due: True` meldet (subagent-dev: Frontmatter und Muster `arity_mismatch`/`"consumer_check"`; test-first: Muster `sofort.grün`). work-plan und impl-plan meldeten `evals_due: False`, ihre Evals waren ohnehin nicht fällig. Ob die älteren Evals nach den Änderungen noch bestehen, ist offen.
+- **Fix-Kreislauf:** Gemessen wurde je Bereich genau ein `/code-review`-Lauf. Die Schleife zwischen Autor und Reviewer (Fund beheben, am Fix-Bereich erneut prüfen, höchstens zwei Runden) wurde weder an der Basislinie noch an den Prüfpunkten nachgespielt; beide Werte sind Untergrenzen der Review-Kosten, nicht die Gesamtkosten des Verfahrens. Ebenfalls nicht gemessen: der Vertragsprüfer (Haiku) und der Mehraufwand durch Opus statt Sonnet beim Dispatch; die Ersparnis oben betrifft nur den Review.
+- **Funde nur als Stichprobe nachgeprüft:** Von 195 Meldungen (145 Basislinie, 50 Prüfpunkte) wurden 12 am Code gelesen, keine ausgeführt. Die Zuordnung zwischen Basislinie und Prüfpunkten (Datei und Zeile höchstens 10 auseinander, oder gleiche Aussage nach meinem Urteil) ist nicht mechanisch geprüft. Die Spec-Bedingung „mindestens gleich viele nachgeprüfte Funde" ist nur auf dieser Stichprobe gewertet. Dass jeder Lauf höchstens 10 Funde meldet, wurde nicht auf die Ursache geprüft (`--max-findings default` ist eine Vermutung); ein Lauf mit `--max-findings all` hätte die Gegenüberstellung verändern können.
+- **Finaler Prüfpunkt ohne Übernahme früherer Urteile:** `references/checkpoints.md` sieht für den finalen Prüfpunkt `--since` über die früheren Läufe vor; der Headless-Lauf von `/code-review` kennt das nicht, der finale Bereich `base..HEAD` wurde vollständig neu geprüft und überdeckt die früheren Bereiche ein zweites Mal. Das ist der teure Teil der Prüfpunkte; mit Übernahme der Urteile wären sie billiger.
+- **Stufe von `/code-review` im Headless-Lauf:** Der Aufruf nennt keine Stufe (low bis max). Welche Stufe `-p` ohne Angabe nimmt, ist nicht festgestellt. Basislinie und Prüfpunkte liefen mit demselben Befehl, derselben Installation und laut `modelUsage` demselben Modell (`claude-opus-5-5`); ob eine Stufe sich dazwischen geändert hat, wurde nicht geprüft.
+- **Dritter Plan:** Spec 27 sieht drei Pläne und höchstens 30 Tasks vor; gemessen wurden auf Wunsch des Nutzers nur zwei Pläne mit 17 Tasks. Die Summen sind nicht mit einer Drei-Pläne-Messung vergleichbar.
+- **Schwankung zwischen Läufen:** Jeder Bereich wurde einmal gemessen. Der einzige Wiederholungsfall (`tf-p1` gegen den Basislinienlauf `9e65061`, derselbe Bereich) wich um 17 % in den Tokens ab. Die Ersparnis von skill-dir (47,6 %) liegt 7,6 Punkte über der Schwelle und ist damit nicht gegen diese Schwankung abgesichert.
+- **Evals: ein Lauf je Seite, Fixtures verraten den Ausgang.** Je Eval ein Lauf mit und einer ohne Skill, keine Streuung gemessen. Die `README.md` jeder Fixture nennt den erwarteten Ausgang, und `checkpoint-due-by-size` ohne Skill fand das Repo-Skript außerhalb des Workspace und bestand damit ohne Baseline (Isolation, siehe `docs/known-limits.md`). Die Sichtbarkeitsprüfung des Runners erkennt die Plugin-Skill `evaluated-dev:subagent-dev` nicht als `subagent-dev`. Kein Judge-Lauf, alle Assertions mechanisch.
+- **Grenzwerte (E8) nicht variiert:** 400 Zeilen, fünf Dateien und zwei Abnehmer wurden nicht gegen andere Werte gemessen; `MAX_FIX_ROUNDS` ist keine Konstante im Skript.
+- **Tokens im `usage`-Block:** bei `/code-review` durchgängig 0; gemessen wurde über `modelUsage`.
