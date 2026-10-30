@@ -238,7 +238,7 @@ def test_gate_verdict_at_least_three_singletons_is_parallel():
 def test_render_task_file_contains_required_sections():
     doc = ptt.parse_plan(SAMPLE_PLAN)
     task1 = doc.tasks[0]
-    rendered = ptt.render_task_file(task1, doc, "docs/superpowers/plans/x.md")
+    rendered = _render(task1, doc)
     assert rendered.startswith("<!-- skill: subagent-dev | schema: 1 | generated:")
     for heading in ("## Ziel", "## Datei-Allowlist", "## Interfaces", "## Akzeptanzkriterien", "## Global Constraints", "## Nicht-Ziele"):
         assert heading in rendered
@@ -1322,19 +1322,19 @@ def test_task_file_keeps_step_text():
     doc = ptt.parse_plan(STEP_TEXT_PLAN)
     task = doc.tasks[0]
     assert ptt.parse_step_texts(STEP_TEXT_PLAN) == [
-        ("Step 1: Test schreiben", "`test_a`: erste Zeile\nzweite Zeile, eingerückt\ndritte Zeile, tiefer."),
+        ("Step 1: Test schreiben", "`test_a`: erste Zeile\nzweite Zeile, eingerückt\n  dritte Zeile, tiefer."),
         ("Step 2: Rot sehen", ""),
         ("Step 3: Grün sehen", "volle Suite."),
         ("Step 4: Commit.", ""),
     ]
     assert task.steps == ["Step 1: Test schreiben", "Step 2: Rot sehen", "Step 3: Grün sehen", "Step 4: Commit."]
-    rendered = ptt.render_task_file(task, doc, "docs/superpowers/plans/x.md")
-    criteria = rendered.split("## Akzeptanzkriterien\n\n")[1].split("\n\n## ")[0]
+    rendered = _render(task, doc)
+    criteria = _criteria(rendered)
     assert criteria == (
         "- Step 1: Test schreiben\n"
         "  `test_a`: erste Zeile\n"
         "  zweite Zeile, eingerückt\n"
-        "  dritte Zeile, tiefer.\n"
+        "    dritte Zeile, tiefer.\n"
         "- Step 2: Rot sehen\n"
         "- Step 3: Grün sehen\n"
         "  volle Suite.\n"
@@ -1600,3 +1600,125 @@ def test_gate_json_keys_backward_compatible(tmp_path):
     mini = json.loads((tmp_path / "plan-mini-two-tasks" / "gate.json").read_text(encoding="utf-8"))
     assert [(t["model"], t["consumers"]) for t in mini["tasks"]] == [("sonnet", []), ("sonnet", [])]
     assert _kinds(mini["checkpoints"]) == [("final", None, "standard", ["C4"])]
+
+
+# --------------------------------------------------------------------------
+# Fix nach Prüfpunkt vor Task 6 (Plan 2026-10-30-subagent-dev-checkpoints)
+# --------------------------------------------------------------------------
+
+FENCE_STEP_PLAN = """### Task 1: Mit Code
+
+**Files:**
+- Create: `src/a.py`
+
+**Interfaces:**
+- Consumes: nichts Neues
+- Produces: nichts Neues
+
+- [ ] **Step 1: Test schreiben** — erster Absatz:
+
+  ```python
+  def test_a():
+      assert helper(1) == 2
+
+      assert True
+  ```
+
+  zweiter Absatz.
+- [ ] **Step 2: Weiter**
+"""
+
+
+def _criteria(rendered):
+    return rendered.split("## Akzeptanzkriterien\n\n")[1].split("\n\n## ")[0]
+
+
+def _render(task, doc, plan_path="docs/superpowers/plans/x.md"):
+    consumers = ptt.consumers_of(doc.tasks)[task.id]
+    return ptt.render_task_file(task, doc, plan_path, consumers, ptt.choose_model(task, consumers))
+
+
+def test_step_text_keeps_fenced_code():
+    doc = ptt.parse_plan(FENCE_STEP_PLAN)
+    rendered = _render(doc.tasks[0], doc)
+    assert "  ```python\n" in rendered
+    assert "      assert helper(1) == 2" in rendered
+    assert [t for t, _ in doc.tasks[0].step_texts] == ["Step 1: Test schreiben", "Step 2: Weiter"]
+
+
+def test_step_text_keeps_relative_indent_and_paragraphs():
+    doc = ptt.parse_plan(FENCE_STEP_PLAN)
+    assert doc.tasks[0].step_texts[0][1] == (
+        "erster Absatz:\n\n```python\ndef test_a():\n    assert helper(1) == 2\n\n    assert True\n```\n\nzweiter Absatz."
+    )
+    assert _criteria(_render(doc.tasks[0], doc)) == (
+        "- Step 1: Test schreiben\n"
+        "  erster Absatz:\n\n"
+        "  ```python\n"
+        "  def test_a():\n"
+        "      assert helper(1) == 2\n\n"
+        "      assert True\n"
+        "  ```\n\n"
+        "  zweiter Absatz.\n"
+        "- Step 2: Weiter"
+    )
+
+
+def test_risk_words_split_at_every_capital():
+    assert "auth" in ptt.risk_words("src/OAuthClient.py")
+    assert "migration" in ptt.risk_words("db/DBMigration.cs")
+    assert "session" in ptt.risk_words("web/HTTPSession.ts")
+    assert ptt.risk_words("src/authors.py") == []
+    assert ptt.risk_words("ui/LoginForm.pas") == ["login"]
+
+
+def test_c1_reason_names_risk_path_with_consumers():
+    plan = "\n".join([
+        _consumer_task(1, "Anmeldung", "src/auth.py", "nichts Neues", "`fn:sign_in(user)`"),
+        _consumer_task(2, "A", "src/a.py", "`fn:sign_in(user)`"),
+        _consumer_task(3, "B", "src/b.py", "`fn:sign_in(user)`"),
+    ])
+    reason = _place(plan)[0]["reasons"][0]
+    assert reason.startswith("C1: Task 1 (2 Abnehmer, Risikopfad src/auth.py) vor dem ersten Abnehmer Task 2")
+
+
+def test_title_helper_shared():
+    assert ptt.title_is("Verifikation", "Verifikation")
+    assert ptt.title_is("Verifikation — Gesamtlauf", "Verifikation")
+    assert not ptt.title_is("Verifikation der API", "Verifikation")
+    assert not ptt.title_is("Reporting", "Report")
+
+
+def test_write_tasks_computes_gate_and_models_once(tmp_path, monkeypatch):
+    doc = ptt.parse_plan(CP_PLAN)
+    calls = {"gate": 0, "model": 0}
+    gate_verdict, choose_model = ptt.gate_verdict, ptt.choose_model
+
+    def counting_gate(*a, **k):
+        calls["gate"] += 1
+        return gate_verdict(*a, **k)
+
+    def counting_model(*a, **k):
+        calls["model"] += 1
+        return choose_model(*a, **k)
+
+    monkeypatch.setattr(ptt, "gate_verdict", counting_gate)
+    monkeypatch.setattr(ptt, "choose_model", counting_model)
+    ptt.write_tasks(doc, "plan.md", tmp_path)
+    assert calls == {"gate": 1, "model": len(doc.tasks)}
+
+
+def test_render_task_file_needs_consumers_and_model():
+    doc = ptt.parse_plan(SAMPLE_PLAN)
+    try:
+        ptt.render_task_file(doc.tasks[0], doc, "plan.md")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("render_task_file ohne Abnehmer und Modell darf nicht rechnen")
+    # Eine Task außerhalb des (gefilterten) Docs wirft keinen KeyError; die Angaben gelten.
+    only = ptt.PlanDoc(global_constraints=doc.global_constraints, tasks=doc.tasks[1:])
+    rendered = ptt.render_task_file(doc.tasks[0], only, "plan.md", [{"task": 9, "symbols": ["parse(1)"]}], ("opus", "Plan"))
+    assert "- Modell: `opus` — Plan" in rendered and "Task 9 (`parse(1)`)" in rendered
+    block = ptt.parse_task_machine_block(rendered)
+    assert block["model"] == "opus" and block["consumers"] == [{"task": 9, "symbols": ["parse(1)"]}]
