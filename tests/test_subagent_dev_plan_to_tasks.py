@@ -1386,3 +1386,73 @@ def test_consumers_exclude_mandatory_tasks():
         "Verifikation", "Evals", "Nachbarn", "known-limits", "Report", "Report — Basislinie",
         "Report und Runner-CLI", "Reporting", "Verifikation der API")] == [
         True, True, True, True, True, True, False, False, False]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 4: Modell je Task
+# --------------------------------------------------------------------------
+
+
+def _model_task(n, title, files, modell=None, consumes="nichts Neues", produces="nichts Neues", after_files=""):
+    """`files`: Liste von (Verb, Pfad). `modell`: Zeile direkt unter dem Titel."""
+    head = f"**Modell:** {modell}\n\n" if modell is not None else ""
+    lines = "\n".join(f"- {verb}: `{path}`" for verb, path in files)
+    return (
+        f"### Task {n}: {title}\n\n{head}**Files:**\n{lines}\n{after_files}\n**Interfaces:**\n"
+        f"- Consumes: {consumes}\n- Produces: {produces}\n\n- [ ] **Step 1: Bauen**\n"
+    )
+
+
+def _choose(*task_texts, idx=0):
+    tasks = ptt.parse_plan("\n".join(task_texts)).tasks
+    return ptt.choose_model(tasks[idx], ptt.consumers_of(tasks)[tasks[idx].id])
+
+
+def test_model_rules():
+    plain = [("Create", "src/a.py")]
+    # Standard
+    assert _choose(_model_task(1, "A", plain)) == ("sonnet", "Standard")
+    # M0 schlägt M1 bis M3, Wert ohne Groß-/Kleinschreibung
+    producer = "`fn:parse_order(line)`"
+    users = [_model_task(2, "B", [("Create", "src/b.py")], consumes=producer),
+             _model_task(3, "C", [("Create", "src/c.py")], consumes=producer)]
+    assert _choose(_model_task(1, "A", plain, produces=producer), *users)[0] == "opus"
+    assert _choose(_model_task(1, "A", plain, modell="Sonnet", produces=producer), *users) == ("sonnet", "Plan")
+    assert _choose(_model_task(1, "A", [("Create", "src/auth.py")], modell="sonnet")) == ("sonnet", "Plan")
+    # M0 nur direkt unter dem Titel, vor Files: — nicht dahinter, nicht im Step
+    late = _model_task(1, "A", [("Create", "src/auth.py")], after_files="**Modell:** sonnet\n")
+    assert _choose(late)[0] == "opus"
+    in_step = _model_task(1, "A", plain).replace("Bauen**", "Bauen**\n**Modell:** opus")
+    assert _choose(in_step) == ("sonnet", "Standard")
+    # M1 ab zwei Abnehmern, nicht bei einem
+    assert _choose(_model_task(1, "A", plain, produces=producer), *users) == ("opus", "Vorleistung für Task 2, 3")
+    assert _choose(_model_task(1, "A", plain, produces=producer), users[0]) == ("sonnet", "Standard")
+    # M2: Risikowort im Pfad, auch zerlegt an Großbuchstaben und Suffix .sql
+    assert _choose(_model_task(1, "A", [("Create", "src/auth_service.py")])) == ("opus", "Risikopfad src/auth_service.py")
+    assert _choose(_model_task(1, "A", [("Test", "ui/LoginForm.pas")]))[0] == "opus"
+    assert _choose(_model_task(1, "A", [("Create", "db/x.sql")]))[0] == "opus"
+    assert _choose(_model_task(1, "A", [("Create", "src/authors.py")])) == ("sonnet", "Standard")
+    assert ptt.risk_words("src/auth_service.py") == ["auth"]
+    assert ptt.risk_words("ui/LoginForm.pas") == ["login"]
+    assert ptt.risk_words("db/migrations/x.sql") == ["migrations", ".sql"]
+    assert ptt.risk_words("src/UserSession-Store.py") == ["session"]
+    assert ptt.risk_words("src/authors.py") == []
+    # M3: ab fünf Create/Modify-Pfaden, Test-Zeilen zählen nicht
+    five = [("Create" if i % 2 else "Modify", f"src/f{i}.py") for i in range(5)]
+    assert _choose(_model_task(1, "A", five)) == ("opus", "Breite: 5 Dateien")
+    assert _choose(_model_task(1, "A", five[:4] + [("Test", "tests/t.py")])) == ("sonnet", "Standard")
+    assert _choose(_model_task(1, "A", five[:4])) == ("sonnet", "Standard")
+    # Ungültiger Wert: Lint-Befund und Rückfall auf M1 bis M3
+    bad = _model_task(1, "A", [("Create", "src/auth.py")], modell="gpt")
+    assert _choose(bad)[0] == "opus" and _choose(bad)[1].startswith("Risikopfad")
+    assert _choose(_model_task(1, "A", plain, modell="gpt")) == ("sonnet", "Standard")
+    findings = ptt.lint_plan(_wp_bad_model())
+    assert any("Modell" in f.message and "gpt" in f.message for f in findings)
+    assert not any("Modell" in f.message for f in ptt.lint_plan(_wp_bad_model("opus")))
+
+
+def _wp_bad_model(value="gpt"):
+    return (
+        "<!-- skill: impl-plan | schema: 1 | generated: x -->\n\n**Goal:** g\n\n**Spec:** `none.md`\n\n"
+        + _model_task(1, "A", [("Create", "src/a.py")], modell=value)
+    )
