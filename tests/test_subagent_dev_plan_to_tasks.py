@@ -2050,3 +2050,72 @@ def test_verify_hints(tmp_path):
     assert [h["kind"] for h in nobase["hints"]] == ["diff-ungeprüft", "sofort-grün"]  # kein stiller Erfolg
     assert (code, nobase["verdict"]) == (1, "unverified")
     assert [h["kind"] for h in ptt.collect_hints(tmp_path / "dirty" / "wt", None)] == ["diff-ungeprüft", "sofort-grün"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 9: fix-task aus verdicts.jsonl oder /code-review-Funden
+# --------------------------------------------------------------------------
+
+
+def _verdict(fid, path, status, related=(), lines="3-9", reason="Grund"):
+    return {"id": fid, "path": path, "lines": lines, "class": "bug", "status": status,
+            "reason": reason, "evidence": "", "related": list(related)}
+
+
+def test_fix_task_from_verdicts(tmp_path):
+    verdicts = tmp_path / "verdicts.jsonl"
+    rows = [{"_meta": {"skill": "deep-review", "schema": 1}},
+            _verdict("F1", "src/a.py", "bestätigt", ["src/helper.py"], reason="a bricht bei leerer Eingabe"),
+            _verdict("F2", "src/b.py", "plausibel", ["src/a.py"]),
+            _verdict("F3", "src/c.py", "widerlegt"),
+            _verdict("F4", "src/d.py", "offen", ["src/e.py"])]
+    verdicts.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    out = tmp_path / "tasks"
+    target = ptt.fix_task_from_verdicts(verdicts, out)
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("<!-- skill: subagent-dev | schema: 1 | generated: ")
+    block = ptt.parse_task_machine_block(text)
+    assert block["allowlist"] == ["src/a.py", "src/helper.py", "src/b.py"]
+    assert block["produces"] == [] and block["plan"] == str(verdicts)
+    assert {"task_id", "plan", "allowlist", "produces"} <= set(block)
+    criteria = _criteria(text)
+    assert criteria.count("behoben und mit Test belegt") == 2
+    assert "F1" in criteria and "F2" in criteria and "F3" not in criteria and "F4" not in criteria
+    assert "a bricht bei leerer Eingabe" in criteria
+
+
+def test_fix_task_from_code_review_list(tmp_path):
+    findings = tmp_path / "findings.json"
+    findings.write_text(json.dumps([
+        {"file": "src/x.py", "line": 12, "summary": "Off-by-one", "failure_scenario": "leere Liste"},
+        {"file": "src/y.py", "line": 3, "summary": "KeyError", "failure_scenario": "fehlender Schlüssel"},
+        {"file": "src/x.py", "line": 40, "summary": "None", "failure_scenario": "kein Wert"},
+    ]), encoding="utf-8")
+    target = ptt.fix_task_from_verdicts(findings, tmp_path / "tasks")
+    text = target.read_text(encoding="utf-8")
+    assert ptt.parse_task_machine_block(text)["allowlist"] == ["src/x.py", "src/y.py"]
+    assert _criteria(text).count("behoben und mit Test belegt") == 3
+    assert "Off-by-one" in text and "leere Liste" in text
+
+
+def test_fix_task_model_is_highest_of_affected_tasks_and_command(tmp_path):
+    out = tmp_path / "tasks"
+    out.mkdir()
+    (out / "gate.json").write_text(json.dumps({"tasks": [
+        {"id": 1, "files": ["src/a.py"], "model": "sonnet"},
+        {"id": 2, "files": ["src/b.py"], "model": "opus"},
+        {"id": 3, "files": ["src/z.py"], "model": "opus"}]}), encoding="utf-8")
+    verdicts = tmp_path / "v.jsonl"
+    verdicts.write_text(json.dumps(_verdict("F1", "src/a.py", "bestätigt", ["src/b.py"])) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "opus"
+    verdicts.write_text(json.dumps(_verdict("F1", "src/a.py", "bestätigt")) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "sonnet"
+    assert ptt.main(["fix-task", "--verdicts", str(verdicts), "--out-dir", str(out)]) == 0
+
+
+def test_fix_task_without_actionable_findings_writes_nothing(tmp_path):
+    verdicts = tmp_path / "v.jsonl"
+    verdicts.write_text(json.dumps(_verdict("F3", "src/c.py", "widerlegt")) + "\n", encoding="utf-8")
+    out = tmp_path / "tasks"
+    assert ptt.main(["fix-task", "--verdicts", str(verdicts), "--out-dir", str(out)]) == 1
+    assert not list(out.glob("*fix*"))

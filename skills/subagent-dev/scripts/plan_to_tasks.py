@@ -750,9 +750,10 @@ def _header(command: str) -> str:
 
 
 def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str,
-                     consumers: list[dict], model: tuple[str, str]) -> str:
+                     consumers: list[dict], model: tuple[str, str], command: str | None = None) -> str:
     """`consumers`: Abnehmer dieser Task, `model`: `(model, model_reason)` — beides aus
-    dem ganzen Plan (`write_tasks`); `doc` kann gefiltert sein und taugt dafür nicht."""
+    dem ganzen Plan (`write_tasks`); `doc` kann gefiltert sein und taugt dafür nicht.
+    `command` ersetzt den Aufruf in der Kopfzeile (Fix-Task)."""
     model, model_reason = model
     allowlist = [f.path for f in task.files]
     produces = [s for s in extract_symbols(task.produces) if s[0] != "file"]
@@ -781,7 +782,7 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str,
     }
 
     return (
-        f"{_header(f'python skills/subagent-dev/scripts/plan_to_tasks.py generate {plan_path}')}\n\n"
+        f"{_header(command or f'python skills/subagent-dev/scripts/plan_to_tasks.py generate {plan_path}')}\n\n"
         f"# Task {task.id}: {task.title}\n\n"
         f"## Ziel\n\n{task.title}\n\n"
         f"## Datei-Allowlist\n\n"
@@ -1394,6 +1395,64 @@ def _cmd_checkpoint(args: argparse.Namespace) -> int:
     except (PlanParseError, json.JSONDecodeError) as exc:
         print(f"checkpoint {args.action}: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+# --------------------------------------------------------------------------
+# fix-task — Funde eines Prüfpunkts als Task-Datei (Spec 27, Fix-Pfad)
+# --------------------------------------------------------------------------
+
+FIX_STATUSES = ("bestätigt", "plausibel")
+FIX_TASK_NAME = "fix-task.md"
+
+
+def _read_findings(path: Path) -> list[dict]:
+    """Funde aus `verdicts.jsonl` (Spec 26: `_meta` in Zeile 1, Status je Fund; nur
+    `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von `/code-review`
+    (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund)."""
+    text = path.read_text(encoding="utf-8")
+    if text.lstrip().startswith("["):
+        return [{"id": f"F{i}", "path": f["file"], "lines": str(f["line"]), "related": [],
+                 "reason": "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)}
+                for i, f in enumerate(json.loads(text), 1)]
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
+
+
+def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Path:
+    """Schreibt `fix-task.md` nach `out_dir`: Allowlist aus `path` und `related` der Funde,
+    Akzeptanz je Fund „behoben und mit Test belegt", Modell das höchste der Tasks aus
+    `gate.json`, deren Dateien die Funde berühren (sonst `opus`)."""
+    verdicts_path, out_dir = Path(verdicts_path), Path(out_dir)
+    findings = _read_findings(verdicts_path)
+    if not findings:
+        raise PlanParseError(f"{verdicts_path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
+    paths = list(dict.fromkeys(p for f in findings for p in [f["path"], *f.get("related", [])]))
+    gate = _read_json(out_dir / "gate.json") or {}
+    hit = [t["model"] for t in gate.get("tasks", []) if t.get("model") in MODELS and set(t.get("files", [])) & set(paths)]
+    # MODELS steht stärkstes Modell zuerst — min ist das höchste.
+    model = (min(hit, key=MODELS.index), "höchstes Modell der betroffenen Tasks") if hit else ("opus", "keine betroffene Task in gate.json")
+    task = PlanTask(
+        id=0, title="Funde des Prüfpunkts beheben", files=[FileRef(raw=p, path=p) for p in paths],
+        files_unknown=False, consumes="", produces="", interfaces_unknown=False, steps=[],
+        step_texts=[(f"Fund {f['id']} ({f['path']}:{f['lines']}): behoben und mit Test belegt", f.get("reason", ""))
+                    for f in findings],
+    )
+    doc = PlanDoc(global_constraints="- Je Fund zuerst ein Test, der rot ist; Änderungen nur in der Allowlist.", tasks=[task])
+    command = f"python skills/subagent-dev/scripts/plan_to_tasks.py fix-task --verdicts {shlex.quote(str(verdicts_path))}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / FIX_TASK_NAME
+    target.write_text(render_task_file(task, doc, str(verdicts_path), [], model, command), encoding="utf-8")
+    return target
+
+
+def _cmd_fix_task(args: argparse.Namespace) -> int:
+    try:
+        target = fix_task_from_verdicts(args.verdicts, args.out_dir)
+    except (OSError, PlanParseError, KeyError, json.JSONDecodeError) as exc:
+        print(f"fix-task: {exc}", file=sys.stderr)
+        return 1
+    print(f"Fix-Task geschrieben -> {target}")
     return 0
 
 
@@ -2206,6 +2265,11 @@ def main(argv: list[str] | None = None) -> int:
     cp_mark.add_argument("--run", required=True, help="Lauf-ID der Nachprüfung; none hängt nichts an")
     cp_mark.add_argument("--tasks", required=True, help="Kommagetrennte Task-IDs des Bereichs")
     cp.set_defaults(func=_cmd_checkpoint)
+
+    fix = sub.add_parser("fix-task", help="Funde eines Prüfpunkts (verdicts.jsonl oder /code-review-Liste) als Fix-Task-Datei schreiben")
+    fix.add_argument("--verdicts", required=True, help="verdicts.jsonl (Spec 26) oder JSON-Liste von /code-review-Funden")
+    fix.add_argument("--out-dir", default=str(TASKS_DIR))
+    fix.set_defaults(func=_cmd_fix_task)
 
     args = parser.parse_args(argv)
     return args.func(args)
