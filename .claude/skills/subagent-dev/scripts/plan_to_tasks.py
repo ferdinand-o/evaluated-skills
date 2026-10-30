@@ -32,9 +32,15 @@ from pathlib import Path, PurePosixPath
 
 SCHEMA_VERSION = 1
 PARALLEL_THRESHOLD = 3
+# Modellwahl (E8, Spec 27 M1–M3): Grenzwerte und Risikowörter als Konstanten.
+BREADTH_MIN_FILES = 5
+CONSUMERS_FOR_OPUS = 2
+MODELS = ("opus", "sonnet")
+RISK_WORDS = ("auth", "login", "session", "security", "crypto", "permission",
+              "migration", "migrations", "payment", "billing")
 
 TASK_HEADER_RE = re.compile(r"^### Task (\d+):\s*(.+?)\s*$", re.MULTILINE)
-FILE_LINE_RE = re.compile(r"^-\s*(?:Create|Modify|Test|Delete):\s*`([^`]+)`", re.MULTILINE)
+FILE_LINE_RE = re.compile(r"^-\s*(Create|Modify|Test|Delete):\s*`([^`]+)`", re.MULTILINE)
 RENAME_LINE_RE = re.compile(r"^-\s*Rename:\s*`([^`]+)`\s*->\s*`([^`]+)`", re.MULTILINE)
 # Jede Bullet-Zeile im Files:-Block — dient als Sicherheitsnetz: Was hier eine
 # Zeile mehr zählt als FILE_LINE_RE/RENAME_LINE_RE zusammen erkannt haben, ist
@@ -74,6 +80,7 @@ class PlanParseError(ValueError):
 class FileRef:
     raw: str
     path: str
+    verb: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,6 +98,8 @@ class PlanTask:
     # `file:`-Konsumpfade aus Consumes (Spec 16) — fließen in die Pfad-Überlappung
     # des Gates ein, nicht in den Symbolabgleich.
     consumed_files: list[str] = field(default_factory=list)
+    # Wert hinter `**Modell:**` unter dem Titel (M0), roh; None = keine Zeile.
+    model_line: str | None = None
 
 
 @dataclass(frozen=True)
@@ -165,16 +174,16 @@ def _parse_files(block: str) -> tuple[list[FileRef], bool]:
     refs: list[FileRef] = []
     matched_lines = 0
 
-    for raw in FILE_LINE_RE.findall(files_text):
-        refs.append(FileRef(raw=raw, path=_strip_range(raw)))
+    for verb, raw in FILE_LINE_RE.findall(files_text):
+        refs.append(FileRef(raw=raw, path=_strip_range(raw), verb=verb))
         matched_lines += 1
 
     for old_raw, new_raw in RENAME_LINE_RE.findall(files_text):
         # Ein Rename betrifft zwei Pfade — beide gehören in die Allowlist und
         # in die Überlappungsprüfung; wer die alte ODER die neue Datei anfasst,
         # kollidiert mit diesem Task.
-        refs.append(FileRef(raw=old_raw, path=_strip_range(old_raw)))
-        refs.append(FileRef(raw=new_raw, path=_strip_range(new_raw)))
+        refs.append(FileRef(raw=old_raw, path=_strip_range(old_raw), verb="Rename"))
+        refs.append(FileRef(raw=new_raw, path=_strip_range(new_raw), verb="Rename"))
         matched_lines += 1
 
     total_lines = len(BULLET_LINE_RE.findall(files_text))
@@ -284,6 +293,17 @@ def parse_step_texts(block: str) -> list[tuple[str, str]]:
     return [(title, "\n".join(l for l in lines if l).strip()) for title, lines in steps]
 
 
+MODEL_LINE_RE = re.compile(r"^\*\*Modell:\*\*[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+
+
+def _parse_model_line(block: str) -> str | None:
+    """Wert der `**Modell:**`-Zeile zwischen Titel und `**Files:**` (M0); eine Zeile
+    weiter unten, etwa in einem Step, zählt nicht."""
+    head = re.split(r"\*\*Files:\*\*|\n- \[[ xX]\]", block, maxsplit=1)[0]
+    match = MODEL_LINE_RE.search(head)
+    return match.group(1) if match else None
+
+
 def parse_plan(text: str) -> PlanDoc:
     """Parse einen impl-plan- oder work-plan-Plan in `PlanDoc`.
 
@@ -331,6 +351,7 @@ def parse_plan(text: str) -> PlanDoc:
             id=task_id, title=title, files=files, files_unknown=files_unknown,
             consumes=consumes, produces=produces, interfaces_unknown=interfaces_unknown,
             steps=steps, step_texts=step_texts, consumed_files=consumed_files,
+            model_line=_parse_model_line(block),
         ))
 
     seen: set[int] = set()
@@ -491,6 +512,31 @@ def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
                 "symbols": [n if arity.get(n) is None else f"{n}({arity[n]})" for n in names],
             })
     return result
+
+
+def risk_words(path: str) -> list[str]:
+    """Risikowörter (M2) im Pfad: zerlegt an `/`, `_`, `-`, `.` und Großbuchstaben,
+    ohne Groß-/Kleinschreibung verglichen; `.sql` am Ende zählt als eigener Treffer."""
+    parts = re.split(r"[/_\-.]", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", path))
+    found = [w.lower() for w in parts if w.lower() in RISK_WORDS]
+    return found + [".sql"] if path.lower().endswith(".sql") else found
+
+
+def choose_model(task: PlanTask, consumers: list[dict]) -> tuple[str, str]:
+    """(model, model_reason) nach M0–M3; die erste Regel, die greift. `consumers` ist
+    die Abnehmer-Liste dieser Task aus `consumers_of`. Ein ungültiger M0-Wert gilt
+    nicht (der Lint meldet ihn), dann zählen M1 bis M3."""
+    if task.model_line is not None and task.model_line.lower() in MODELS:
+        return task.model_line.lower(), "Plan"
+    if len(consumers) >= CONSUMERS_FOR_OPUS:
+        return "opus", "Vorleistung für Task " + ", ".join(str(c["task"]) for c in consumers)
+    for ref in task.files:
+        if risk_words(ref.path):
+            return "opus", f"Risikopfad {ref.path}"
+    breadth = len({r.path for r in task.files if r.verb in ("Create", "Modify")})
+    if breadth >= BREADTH_MIN_FILES:
+        return "opus", f"Breite: {breadth} Dateien"
+    return "sonnet", "Standard"
 
 
 def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
@@ -1314,6 +1360,8 @@ def lint_report(
             findings.extend(LintFinding(task_id, r) for r in _explain_files(block))
         for r in _explain_interfaces(block):
             findings.append(LintFinding(task_id, r))
+        if task.model_line is not None and task.model_line.lower() not in MODELS:
+            findings.append(LintFinding(task_id, f"**Modell:** {task.model_line!r} ist weder opus noch sonnet — die Zeile gilt nicht, das Skript wählt nach M1–M3"))
         if not task.steps:
             findings.append(LintFinding(task_id, "keine Steps im Format `- [ ] **Step N: …**`"))
     return LintReport(findings, coverage)
