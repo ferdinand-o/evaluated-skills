@@ -42,6 +42,8 @@ RENAME_LINE_RE = re.compile(r"^-\s*Rename:\s*`([^`]+)`\s*->\s*`([^`]+)`", re.MUL
 BULLET_LINE_RE = re.compile(r"^-\s*.+$", re.MULTILINE)
 LINE_RANGE_RE = re.compile(r"^(?P<path>.+?)(?::\d+(?:-\d+)?)?$")
 STEP_RE = re.compile(r"^-\s*\[[ xX]\]\s*\*\*(Step \d+:[^*]*)\*\*", re.MULTILINE)
+# Wie STEP_RE, aber zeilenweise und mit dem Rest der Zeile — der Anfang des Step-Texts.
+STEP_LINE_RE = re.compile(r"^-\s*\[[ xX]\]\s*\*\*(Step \d+:[^*]*)\*\*(.*)$")
 # Backtick-Symbol mit Klammern (Funktion/Methode) — Name vor der ersten "(".
 CALLABLE_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)\(([^)]*)\)")
 # Backtick-Symbol ohne Klammern (Klasse/Konstante) — nur, falls es kein
@@ -81,6 +83,8 @@ class PlanTask:
     produces: str
     interfaces_unknown: bool
     steps: list[str]
+    # (Titel, Text) je Step — `steps` bleibt der reine Titel für den Lint.
+    step_texts: list[tuple[str, str]] = field(default_factory=list)
     # `file:`-Konsumpfade aus Consumes (Spec 16) — fließen in die Pfad-Überlappung
     # des Gates ein, nicht in den Symbolabgleich.
     consumed_files: list[str] = field(default_factory=list)
@@ -257,6 +261,26 @@ def _parse_steps(block: str) -> list[str]:
     return [m.strip() for m in STEP_RE.findall(block)]
 
 
+def parse_step_texts(block: str) -> list[tuple[str, str]]:
+    """Je Step `(Titel, Text)`: der Text ist der Rest der Step-Zeile plus alle
+    eingerückten Folgezeilen bis zum nächsten Step (Leerzeilen zählen mit, wenn
+    danach wieder eingerückt weitergeht). Ein Step ohne Text liefert `""`.
+    """
+    steps: list[tuple[str, list[str]]] = []
+    open_step = False
+    for line in block.split("\n"):
+        match = STEP_LINE_RE.match(line)
+        if match:
+            # Trenner zwischen Titel und Text („ — “, „, “) gehört nicht zum Text.
+            steps.append((match.group(1).strip(), [match.group(2).lstrip(" \t—–,:")]))
+            open_step = True
+        elif open_step and (not line.strip() or line[0] in " \t"):
+            steps[-1][1].append(line.strip())
+        else:
+            open_step = False
+    return [(title, "\n".join(l for l in lines if l).strip()) for title, lines in steps]
+
+
 def parse_plan(text: str) -> PlanDoc:
     """Parse einen impl-plan- oder work-plan-Plan in `PlanDoc`.
 
@@ -298,11 +322,12 @@ def parse_plan(text: str) -> PlanDoc:
         files, files_unknown = _parse_files(block)
         consumes, produces, interfaces_unknown = _parse_interfaces(block)
         steps = _parse_steps(block)
+        step_texts = parse_step_texts(block)
         consumed_files = [name for kind, name, _ in extract_symbols(consumes) if kind == "file"]
         tasks.append(PlanTask(
             id=task_id, title=title, files=files, files_unknown=files_unknown,
             consumes=consumes, produces=produces, interfaces_unknown=interfaces_unknown,
-            steps=steps, consumed_files=consumed_files,
+            steps=steps, step_texts=step_texts, consumed_files=consumed_files,
         ))
 
     seen: set[int] = set()
@@ -578,7 +603,11 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
     allowlist_md = "\n".join(f"- `{p}`" for p in allowlist) if allowlist else (
         "- (keine geparst — Allowlist unklar, gilt als leer und damit als riskant)"
     )
-    steps_md = "\n".join(f"- {s}" for s in task.steps) if task.steps else "- (keine Steps im Plan gefunden)"
+    # Titel als Listenpunkt, der Text eingerückt darunter — ein Step ohne Text bleibt eine Zeile.
+    steps_md = "\n".join(
+        f"- {title}" + "".join(f"\n  {l}" for l in text.split("\n") if l)
+        for title, text in task.step_texts
+    ) if task.step_texts else "- (keine Steps im Plan gefunden)"
     others_md = "\n".join(f"- {o}" for o in others) if others else "- (keine weiteren Tasks in diesem Plan)"
 
     machine_block = {

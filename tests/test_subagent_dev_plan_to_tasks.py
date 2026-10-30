@@ -1294,3 +1294,51 @@ def test_work_plan_coverage_against_feature_spec_criteria(tmp_path):
     plain.write_text("# Irgendeine Spec\n\n## Akzeptanzkriterien\n\n### X\n", encoding="utf-8")
     report = ptt.lint_report(_wp_plan(source="**Spec:** `../specs/plain.md`"), plan_path=plan_path)
     assert report.coverage["status"] == "unchecked" and "feature-spec" in report.coverage["reason"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 1: Step-Text in der Task-Datei
+# --------------------------------------------------------------------------
+
+STEP_TEXT_PLAN = """### Task 1: Mit Text
+
+**Files:**
+- Create: `src/a.py`
+
+**Interfaces:**
+- Consumes: nichts Neues
+- Produces: nichts Neues
+
+- [ ] **Step 1: Test schreiben** — `test_a`: erste Zeile
+      zweite Zeile, eingerückt
+        dritte Zeile, tiefer.
+- [ ] **Step 2: Rot sehen**
+- [ ] **Step 3: Grün sehen**, volle Suite.
+- [ ] **Step 4: Commit.**
+"""
+
+
+def test_task_file_keeps_step_text():
+    doc = ptt.parse_plan(STEP_TEXT_PLAN)
+    task = doc.tasks[0]
+    assert ptt.parse_step_texts(STEP_TEXT_PLAN) == [
+        ("Step 1: Test schreiben", "`test_a`: erste Zeile\nzweite Zeile, eingerückt\ndritte Zeile, tiefer."),
+        ("Step 2: Rot sehen", ""),
+        ("Step 3: Grün sehen", "volle Suite."),
+        ("Step 4: Commit.", ""),
+    ]
+    assert task.steps == ["Step 1: Test schreiben", "Step 2: Rot sehen", "Step 3: Grün sehen", "Step 4: Commit."]
+    rendered = ptt.render_task_file(task, doc, "docs/superpowers/plans/x.md")
+    criteria = rendered.split("## Akzeptanzkriterien\n\n")[1].split("\n\n## ")[0]
+    assert criteria == (
+        "- Step 1: Test schreiben\n"
+        "  `test_a`: erste Zeile\n"
+        "  zweite Zeile, eingerückt\n"
+        "  dritte Zeile, tiefer.\n"
+        "- Step 2: Rot sehen\n"
+        "- Step 3: Grün sehen\n"
+        "  volle Suite.\n"
+        "- Step 4: Commit."
+    )
+    block = ptt.parse_task_machine_block(rendered)
+    assert set(block) == {"task_id", "plan", "allowlist", "produces"}
