@@ -1,6 +1,6 @@
 # Spec 27: subagent-dev-checkpoints — Reviews dort, wo ein Fehler wandern kann, und das Modell je Task aus dem Plan
 
-Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags; Abgleich mit Spec 26: `runs` statt `last_run`, finaler Prüfpunkt mit `--since` über alle Läufe, Wiederverwendungsschlüssel statt Paket, `offen` am finalen Prüfpunkt, Profil als `--profile`/`--depth`)
+Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags; Abgleich mit Spec 26: `runs` statt `last_run`, finaler Prüfpunkt mit `--since` über alle Läufe, Wiederverwendungsschlüssel statt Paket, `offen` am finalen Prüfpunkt, Profil als `--profile`/`--depth`; nach dem pausierten Bau von Spec 26: Basislinie als Wiederholung auf gemergter Historie statt drei neu gebauter Pläne, Task-Datei trägt den Text der Steps)
 
 ## Problem
 
@@ -70,7 +70,7 @@ skills/subagent-dev/
 ├── SKILL.md                         Schritt 2 mit Modell, Prüfpunkten und checkpoint init; Schritt 4 Dispatch mit Modell; Schritt 5 verify, Vertragsprüfung, checkpoint status, Review nur am Prüfpunkt; Fix-Pfad; Eskalation zu Opus; Kostentabelle und Zeile „Review pro Task" entfallen
 ├── references/checkpoints.md        Regeln M0–M3 und C1–C5, Abnehmer, review-state, Aufruf von deep-review und Ersatz durch /code-review, Fix-Pfad, runlog
 ├── references/contract-check.md     Auftrag an den Haiku-Agenten: Steps gegen Diff, Änderungen ohne Bezug zu einem Step, Hinweise aus verify
-├── references/task-file.md          Abschnitt Modell und Abnehmer; Maschinenblock mit model und consumers
+├── references/task-file.md          Abschnitt Modell und Abnehmer; Akzeptanzkriterien mit dem Text der Steps; Maschinenblock mit model und consumers
 ├── references/merge-protocol.md     Zeile 3 „mechanisch + `/code-review`" → verify, Vertragsprüfung, Prüfpunkt; Abschluss mit finalem Prüfpunkt
 └── scripts/plan_to_tasks.py         Tier 1 — generate mit model, consumers, checkpoints aus dem ganzen Plan; verify mit consumer_check und hints; neu checkpoint init/status/mark, fix-task, log
 
@@ -269,6 +269,7 @@ schon nach Spec 26.
 | `test_checkpoint_command` | dito | init löst Tags auf; status nimmt Refs aus review-state; fällig an geplantem Prüfpunkt, bei `group` nach der höchsten ID, ab 400 Zeilen, mit `--tests-red`, sonst nicht; Binärdateien zählen 0; `.skills/` zählt nicht; ohne review-state fällig ohne Bereich; mark setzt Commit und hängt den Lauf an `runs` an, `--run none` hängt nichts an; am finalen Prüfpunkt stehen alle Läufe in `since_runs` |
 | `test_log_line` | dito | `log` schreibt `_meta` in Zeile 1 und je Aufruf eine Zeile mit festen Schlüsseln; fehlende `subagent_tokens` als `null` |
 | `test_fix_task_from_verdicts` | dito | Allowlist aus `path` und `related` der Funde mit `bestätigt`/`plausibel`; `widerlegt` und `offen` nicht |
+| `test_task_file_keeps_step_text` | dito | Akzeptanzkriterien tragen je Step den Titel und den Text bis zum nächsten Step, auch über mehrere Zeilen; Steps ohne Text bleiben eine Zeile |
 | `test_gate_json_keys_backward_compatible` | dito | alle bisherigen Schlüssel mit unveränderten Werten an den bestehenden Fixtures; neue Schlüssel in der festgelegten Reihenfolge |
 
 ### Evals
@@ -372,8 +373,15 @@ Ob `/code-review` als Ersatz einen Commit-Bereich annimmt, ist ungemessen.
 
 ## Next steps
 
-Vor dem Bau: Basislinie. Drei echte Pläne des Nutzers im heutigen Ablauf, je Review die
-`subagent_tokens` und die Funde notieren, im Report festhalten. *Annahme:* Abnahme, wenn die
-Review-Tokens je Plan um mindestens 40 % sinken, bei mindestens gleich vielen bestätigten
-Funden über alle Prüfpunkte. Danach Plan mit `impl-plan` (16) und Bau nach `skill-forge` (17)
-Schritt 3 bis 7, nach dem Bau von Spec 26; bis dahin greift der Ersatz durch `/code-review`.
+Vor dem Bau: Basislinie als Wiederholung auf gemergter Historie, nicht mit drei neu
+gebauten Plänen (Entscheidung des Nutzers 2026-10-30: Limit sparen). Drei fertige Pläne unter
+`docs/superpowers/plans/`, deren Tasks als eigene Commits `<skill> Task N: …` in der
+Historie stehen; je Task `/code-review` über den Commit der Task mit `claude -p`, notiert
+werden `total_cost_usd`, die Tokens aus `usage` und die Funde. Nach dem Bau läuft
+`/code-review` über dieselbe Historie nur an den Prüfpunkten, die `generate` für diese Pläne
+setzt (Bereich vom letzten Prüfpunkt bis zum Commit der Task davor). *Annahme:* Abnahme, wenn
+die Review-Tokens je Plan um mindestens 40 % sinken, bei mindestens gleich vielen Funden, die
+eine Nachprüfung am Code bestehen. Die Wiederholung misst Review-Kosten, nicht den Fix-Kreislauf
+zwischen Autor und Reviewer; das steht im Report. Danach Plan mit `impl-plan` (16) und Bau nach
+`skill-forge` (17) Schritt 3 bis 7. Spec 26 ist nach ihrem Task 1 pausiert (Spec 26, Next
+steps); an den Prüfpunkten greift deshalb der Ersatz durch `/code-review`.
