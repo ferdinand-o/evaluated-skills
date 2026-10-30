@@ -96,8 +96,10 @@ ihrer `task`; `final` nach der letzten Nicht-Verifikations-Task. Weitere Regeln:
 
 ## Review am Prüfpunkt
 
-**Heute (deep-review, Spec 26, pausiert):** Ist `due` wahr, läuft `/code-review` im
-Hauptkontext über den `range` aus `checkpoint.json`: `last_reviewed..HEAD`, am finalen
+**Heute (deep-review, Spec 26, pausiert):** Ist `due` wahr, läuft
+`/code-review --max-findings all <range>` im Hauptkontext über den `range` aus
+`checkpoint.json` — ohne den Schalter meldet `/code-review` höchstens zehn Funde, und ein
+Prüfpunkt über mehrere Tasks bekäme nicht mehr Plätze als ein Review über eine: `last_reviewed..HEAD`, am finalen
 Prüfpunkt `base..HEAD`. Der finale Durchgang ist der einzige, der das Zusammenspiel aller
 Tasks sieht; ohne `--since` prüft er alles noch einmal, bleibt aber ein einzelnes Review
 statt eines je Task. Danach

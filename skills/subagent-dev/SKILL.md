@@ -69,7 +69,8 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 6. **Merge und Prüfpunkt:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem
    Merge, dann `plan_to_tasks.py checkpoint status --after-task <N>` (bei roten
    Gesamttests nach deren Behebung mit `--tests-red`). Nur wenn `due` wahr ist, läuft
-   das Review über den gemeldeten `range` — `/code-review`, solange deep-review fehlt;
+   das Review über den gemeldeten `range` — `/code-review --max-findings all <range>`,
+   solange deep-review fehlt;
    die Übergabe sagt dann „Review ohne Abdeckungsnachweis". Funde → `fix-task`, Fix in
    frischem Worktree, `verify`, Merge, Review des Fixes, dann
    `checkpoint mark --commit HEAD --run <lauf|none> --tasks <liste>`; höchstens zwei

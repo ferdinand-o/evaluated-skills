@@ -598,6 +598,36 @@ bleibt in beiden Plänen über 40 %, bei skill-dir mit 2,1 Punkten Abstand — i
 Streuung von 17 %, die ein Wiederholungslauf zeigte. Die Abnahme nach Spec 27 bleibt
 **nicht erfüllt** (Funde); ob die fehlenden Funde schwer wiegen, ist nicht gemessen.
 
+### Schwere der Funde (2026-10-30)
+
+Frage des Nutzers: Wiegen die Funde schwer, die die Prüfpunkte gegenüber dem Review je Task
+verlieren? Alle 206 Funde (145 Basislinie, 61 Prüfpunkte mit `--max-findings all`) wurden
+blind eingestuft: gemischt, ohne Herkunft und ohne Zuordnung, ein Lauf `claude -p --model
+sonnet` nur über den Text von Aussage und Szenario (0,54 USD). Schwere: **hoch** = falsches
+Ergebnis, Absturz, Datenverlust, Sicherheit im normalen Gebrauch oder ein Prüfschritt meldet
+fälschlich Erfolg; **mittel** = nur bei seltenen Eingaben oder Doku, die zu falschem Handeln
+führt; **niedrig** = Stil, Wartbarkeit, Effizienz, fehlende Tests, Formulierung.
+
+| Gruppe | hoch | mittel | niedrig |
+| --- | --- | --- | --- |
+| Basislinie, mit Gegenstück an einem Prüfpunkt | 4 | 21 | 13 |
+| Basislinie, ohne Gegenstück | **0** | 31 | 76 |
+| Prüfpunkte (`--max-findings all`) | 8 | 31 | 22 |
+
+Die vier Basislinien-Funde „hoch" sind von Hand nachgesehen: Jeder hat an einem Prüfpunkt
+einen Fund mit derselben Aussage (`missing_program` mit Umleitungen und Builtins in
+`tdd_log.py`, fehlendes `--repo` im Hook von sql-schema-architect, `detect_hook_installed`
+meldet G3 ohne Skript).
+
+**Urteil:** Spec 27 ist **abgenommen mit Vorbehalt**. Die Prüfpunkte sparen in beiden Plänen
+mehr als 40 % Review-Tokens und verlieren keinen Fund der Schwere „hoch"; sie verlieren
+aber 31 Funde „mittel" und 76 „niedrig", die das Review je Task fand. Die Bedingung der
+Spec „mindestens gleich viele Funde" ist damit nicht erfüllt; der Nutzer hat vorab
+festgelegt, dass Spec 27 gilt, wenn die fehlenden Funde überwiegend Kleinkram sind (71 %
+niedrig, 0 hoch). Am Prüfpunkt läuft `/code-review --max-findings all` (SKILL.md,
+`checkpoints.md`). Vorbehalte: Einstufung nur aus dem Text, ein Lauf, ein Modell; Zuordnung
+der Funde mechanisch über Datei und Zeilenabstand; zwei Pläne aus diesem Repo.
+
 ### Grenzwerte (E8)
 
 Gelesen aus `skills/subagent-dev/scripts/plan_to_tasks.py` am Stand dieses Branches:

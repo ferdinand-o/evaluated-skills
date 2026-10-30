@@ -1355,6 +1355,10 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   Hinweise gehen in die Übergabe, lösen allein keine Fix-Runde aus (Festlegung beim Bau).
 - **Zwei Fix-Runden sind G1.** Das Skript zählt Fix-Runden nicht; die Grenze verlangt
   die SKILL.md.
+- **Prüfpunkte finden weniger als ein Review je Task.** Gemessen an zwei Plänen: 61
+  statt 145 Funde, davon fehlen 31 „mittel" und 76 „niedrig", kein „hoch" (Report,
+  „Schwere der Funde"). `--max-findings all` am Prüfpunkt holt nur einen Teil zurück.
+  Wer jeden mittleren Fund will, nimmt das Review je Task in Kauf.
 - **Basislinie aus zwei Plänen und ohne Fix-Kreislauf.** Gemessen wurden Reviews über die
   gemergten Commits von test-first und skill-dir (17 Tasks), nicht der Kreislauf aus
   Review, Fix und erneutem Review; ein dritter Plan entfiel auf Wunsch des Nutzers.
