@@ -14,7 +14,9 @@ schreibt sie nach `.skills/cache/tasks/task-<id>-<slug>.md` (Ephemera, Spec 00
 3. **Interfaces** — `Consumes:`/`Produces:` wörtlich aus dem Plan. So kennt
    der Agent seine Nachbarn (Namen, Signaturen), ohne ihre Tasks zu sehen.
 4. **Akzeptanzkriterien** — die `- [ ] **Step N: ...**`-Zeilen des Plans, als
-   Liste.
+   Liste: je Step der Titel und darunter eingerückt der Text bis zum nächsten
+   Step (auch über mehrere eingerückte Zeilen). Ein Step ohne Text bleibt eine
+   Zeile. Der Titel allein sagt nicht, was zu bauen ist — der Text ist es.
 5. **Global Constraints** — der komplette `## Global Constraints`-Abschnitt
    des Plans, wörtlich kopiert (ohne die eigene Überschrift, die die Task-Datei
    schon hat). Jeder Task-Vertrag schließt sie implizit ein.
@@ -66,6 +68,7 @@ Außerhalb dieser Dateien wird nicht geschrieben:
 ## Akzeptanzkriterien
 
 - Step 1: Write the failing test
+  `test_parse` prüft eine gültige und eine leere Zeile.
 - Step 2: Implement
 
 ## Global Constraints
