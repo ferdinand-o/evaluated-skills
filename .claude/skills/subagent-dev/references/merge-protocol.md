@@ -1,7 +1,9 @@
 # Merge-Protokoll
 
-Gilt nach jeder abgenommenen Task (mechanisch + `/code-review`, siehe
-SKILL.md), egal ob sie parallel oder sequenziell entstand.
+Gilt nach jeder abgenommenen Task (`verify` und Vertragsprüfung, siehe SKILL.md und
+`contract-check.md`), egal ob sie parallel oder sequenziell entstand. Ein Review läuft
+nicht je Task, sondern nur an den Prüfpunkten, die `checkpoint status` nach dem Merge
+meldet (`checkpoints.md`).
 
 ## Reihenfolge
 
@@ -22,6 +24,18 @@ Tests des Gesamtstands laufen — nicht nur die Tests der gemergten Task. Eine
 Task, die für sich grün war, kann im Zusammenspiel mit einer anderen rot
 werden; genau das soll dieser Schritt fangen, bevor die nächste Task darauf
 aufbaut.
+
+Danach `checkpoint status --after-task <N>`, bei roten Gesamttests nach deren Behebung
+mit `--tests-red`. Ist ein Prüfpunkt fällig, startet die nächste Task erst nach dem
+Review über den gemeldeten `range`, dem Fix seiner Funde und `checkpoint mark`.
+
+## Fix-Runden je Task
+
+Fällt `verify` oder die Vertragsprüfung durch, fixt die Task im selben Worktree,
+höchstens zwei Runden. Lief sie mit Sonnet, folgt ein Versuch mit Opus in einem frischen
+Worktree von derselben Basis, mit der Task-Datei und den Ergebnissen der gescheiterten
+Runden; danach Eskalation an den Nutzer. Das gilt für jede Task einzeln, gemergt wird
+erst nach bestandenem `verify`.
 
 ## Interface-Brüche
 
@@ -44,6 +58,7 @@ vor dem Merge fangen müssen).
 
 ## Abschluss
 
-Wenn alle Tasks eines Plans gemerged und die Gesamttests grün sind, ist der
-Plan fertig im Sinn dieser Skill. Was danach kommt (Branch-Abschluss, PR),
+Wenn alle Tasks eines Plans gemerged und die Gesamttests grün sind, folgt ein finaler
+Prüfpunkt über `base..HEAD` (Profil `standard`), mit Fix-Pfad wie an jedem Prüfpunkt.
+Erst danach ist der Plan fertig im Sinn dieser Skill. Was danach kommt (Branch-Abschluss, PR),
 ist nicht Teil dieses Protokolls.
