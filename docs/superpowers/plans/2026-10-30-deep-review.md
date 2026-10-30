@@ -34,6 +34,8 @@ Lauf gegen die eigene `quick`-Regel prüfen.
 
 **Spec:** `specs/Spec 26 – deep-review.md`
 
+**Stand 2026-10-30:** Task 1 gebaut, Tasks 2 bis 23 pausiert — siehe Spec 26, Next steps.
+
 ## Global Constraints
 
 - **E1 — Tier 1, nur Stdlib.** `review_kit.py` importiert nichts außerhalb der Stdlib, der

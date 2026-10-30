@@ -404,6 +404,18 @@ einer weiteren Description dazu.
 
 ## Next steps
 
+**Stand 2026-10-30: Bau pausiert.** Task 1 des Plans ist gebaut (`dr-seeded`,
+`dr-seeded-clean`, Basislinie im Report). Ergebnis: `/code-review` findet auf beiden Fassungen
+der Fixture in jedem Lauf alle fünf Fehler, auch die, die nur mit unverändertem Code aus
+`base` erkennbar sind; seine weiteren Funde auf der „sauberen" Fassung sind echte Fehler der
+Fixture, keine Fehlalarme. Damit trifft die Bedingung aus „Alternatives considered" zu, unter
+der „bei `/code-review` bleiben" gewinnt. Der Nutzer hat entschieden: Spec 27 zuerst, mit dem
+Ersatz `/code-review` an den Prüfpunkten. deep-review wird wieder aufgenommen, wenn sich im
+Einsatz eine Lücke von `/code-review` zeigt (große Diffs, Delphi; das runlog aus Spec 27 hält
+Funde je Prüfpunkt fest), dann in der schlanken Fassung: Python-Inventar mit Chunks,
+Delphi-Scanner, Pakete, record, merge/verdict, audit, Profil `checkpoint`, `--since`; ohne
+Sättigung, `quality`, TS-Muster und Pfad-Modus.
+
 Plan mit `impl-plan` (16); Bau nach `skill-forge` (17) Schritt 3 bis 7. Erste Aufgabe des
 Plans ist die Fixture `dr-seeded` mit der Messung aus „Messung der Trefferquote", damit die
 Abnahmeschwelle vor dem Ausbau steht. Danach Spec 27.
