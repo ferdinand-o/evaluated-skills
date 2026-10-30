@@ -1,6 +1,5 @@
-# Rechnungslauf
+# lagerwerk
 
-Kleines Beispielprojekt: Kundenstamm als JSON-Datei, Rechnungen aus Bestellungen,
-Export als CSV.
+Bestand, Kommissionierung und Versand eines kleinen Versandlagers.
 
 Tests: `python -m pytest`

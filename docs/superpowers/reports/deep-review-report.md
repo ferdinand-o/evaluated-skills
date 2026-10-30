@@ -9,133 +9,139 @@ woran sie sich in Task 23 messen lassen muss.
 ## Was entstanden ist
 
 ```
-evals/fixtures/dr-seeded/fixture.json        Rechnungslauf, fünf eingebaute Fehler
+evals/fixtures/dr-seeded/fixture.json        lagerwerk + Sammelversand, fünf eingebaute Fehler
 evals/fixtures/dr-seeded/README.md           Projekt-README (Baseline-Commit)
 evals/fixtures/dr-seeded-clean/fixture.json  dieselbe Fixture ohne die fünf Fehler
 evals/fixtures/dr-seeded-clean/README.md     wie oben
 tests/test_deep_review_kit.py                test_seeded_fixtures
 ```
 
-Beide Fixtures bauen mit `prepare()` drei Commits: `fixture baseline` (README.md),
-das Gerüst mit Tag `base` (`.gitignore`, `conftest.py`, `app/__init__.py`) und den Code
-(`app/store.py`, `app/billing.py`, `app/export.py`, drei Testdateien, 166 Zeilen).
-Der Bereich `base..HEAD` enthält damit genau den Code. Die README liegt als Datei im
-Fixture-Ordner, weil `prepare()` den Baseline-Commit ohne `--allow-empty` macht und eine
-Git-Fixture mit nur `fixture.json` dort abbricht.
+`prepare()` baut drei Commits: `fixture baseline` (README.md), bei Tag `base` das Paket
+`lagerwerk` (12 Module, 1.138 Zeilen, dazu 246 Zeilen Tests und Hilfsdateien: Bestand, Inventur,
+Wareneingang, Retouren, Reservierung, Paketdienst, Versand mit Wiederholung und Storno,
+Exporte), darauf als HEAD das Feature „Sammelversand" (4 neue Module, 2 geänderte, 2 neue
+Testdateien, 401 Zeilen hinzu, 1 entfernt). Die README liegt im Fixture-Ordner, weil `prepare()` den
+Baseline-Commit ohne `--allow-empty` macht.
 
-Die fünf Fehler, je eine Klasse aus der Spec; Lage und Klasse stehen in `fixture.json`
-unter `description`, nicht im Code:
+Jeder Fehler sieht im Diff allein korrekt aus. Erkennbar ist er erst mit einer Stelle aus
+`base`, die der Diff nicht berührt:
 
-| Nr. | Klasse | Stelle (`dr-seeded`) |
-| --- | --- | --- |
-| 1 | `None` über zwei Dateien | `app/store.py:31` liefert `None`, `app/billing.py:32` indiziert es; `build_invoices` fängt nur `UnknownCustomer` |
-| 2 | Grenzwert um eins daneben | `app/billing.py:15`, `>=` statt `>` gegen `MAX_POSITIONS` |
-| 3 | Ressourcenleck nur im Fehlerpfad | `app/export.py:7–12`, `open` ohne `with`/`finally` |
-| 4 | verschluckte Exception | `app/billing.py:23–25`, `except (KeyError, ArithmeticError): continue` |
-| 5 | Kommentar widerspricht Code | `app/store.py:34–35`, „neueste zuerst" über aufsteigendem `sorted` |
+| Nr. | Klasse | Stelle im Diff | Vertrag in `base` |
+| --- | --- | --- | --- |
+| 1 | `None` über zwei Dateien | `lagerwerk/batch.py:106`, `primary_bin()` ungeprüft in den `PickStop` | `lagerwerk/warehouse.py:95`: `None`, wenn aller Bestand unter Inventursperre liegt, obwohl die Reservierung gelingt |
+| 2 | Grenzwert um eins daneben | `lagerwerk/packing.py:15`, `<=` gegen `MAX_PARCEL_WEIGHT_G` | `lagerwerk/config.py:7`: Grenze exklusiv |
+| 3 | Ressourcenleck nur im Fehlerpfad | `lagerwerk/batch.py:149–153`, `ExportSink(...).open()` … `commit()` | `lagerwerk/storage.py:16`: nur `discard()`/`__exit__` schließen den Handle und löschen `.part` |
+| 4 | verschluckte Exception | `lagerwerk/booking.py:30–32`, `except CarrierError` → `return parcel.label` | `lagerwerk/dispatch.py:47`: Wiederholung und Storno in `Dispatcher.ship` laufen nie |
+| 5 | Kommentar widerspricht Code | `lagerwerk/zones.py:43`, Listenpreis netto | `lagerwerk/interfaces.py:26`: `RateProvider.quote` verspricht brutto |
 
 `test_seeded_fixtures` prüft: beide Manifeste mit `"git": true`, zwei Commits, Tag `base`
-am ersten; Gerüst, Messages und Dateimenge gleich; genau fünf abweichende Blöcke, jeder
-von einer `Datei:Zeile`-Angabe der `description` getroffen; keine verräterischen Wörter
-im Code; die mitgelieferten Tests laufen auf beiden Fassungen grün (also trifft keiner
-die fünf Fehler).
+am ersten; Gerüst und Messages gleich; genau fünf abweichende Blöcke, jeder von einer
+Diff-Stelle der `description` getroffen; je Fehler eine zweite Stelle in einer Datei, die
+`base..HEAD` nicht berührt; keine verräterischen Wörter im neuen Code; die mitgelieferten
+35 Tests laufen auf beiden Fassungen grün, treffen also keinen der fünf Fehler. Ein
+Probelauf außerhalb der Suite zeigt alle fünf: Absturz bei gesperrtem Fach, 31.500 g
+passt, Auftrag „versandt" mit Label `None` nach einem einzigen Ausfall, liegengebliebene
+`.part`-Datei, 410 statt 488 Cent.
 
 ## Basislinie
 
 **Aufbau.** Je Fixture und Werkzeug drei Läufe, jeder in einem frischen Workspace aus
-`evalkit.workspace.prepare(dest, None, fixture_dir)`, Timeout 600 s, Claude Code 2.1.314,
-Standard-Berechtigungsmodus:
+`evalkit.workspace.prepare(dest, None, fixture_dir)`, Timeout 600 s, `--max-turns 30`,
+Claude Code 2.1.314, Standard-Berechtigungsmodus:
 
 - `/code-review`: `claude -p "/code-review base..HEAD" --output-format json`
-  (Modell der Sitzung, laut `modelUsage` `claude-opus-5-5`; keine Stufe angegeben).
+  (laut `modelUsage` `claude-opus-5-5`; keine Stufe angegeben).
 - Sonnet: `claude -p --model sonnet "Prüf den Diff base..HEAD auf Fehler. Nenne je Fund
   Datei:Zeile und Grund." --output-format json` (`claude-sonnet-5-5`), ohne Inventar.
 
-Treffer heißt: richtige Datei und Stelle, Klasse sinngemäß. Ausgewertet von Hand aus dem
-Feld `result`; die Rohantworten liegen nicht im Repo.
+Treffer heißt: richtige Datei und Stelle im Diff, Klasse sinngemäß. Ausgewertet per
+Skript (Datei plus Stichwort je Fehler), jeder Treffer und jede Lücke danach am Text
+nachgeprüft; die Rohantworten liegen nicht im Repo. Kein Lauf stieß an `--max-turns`.
 
 ### Trefferquote auf `dr-seeded`
 
-| Lauf | F1 | F2 | F3 | F4 | F5 | Treffer | weitere Funde | `total_cost_usd` |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `/code-review` 1 | ja | ja | ja | ja | ja | 5/5 | 3 | 0,0811 |
-| `/code-review` 2 | ja | ja | ja | ja | ja | 5/5 | 4 | 0,1206 |
-| `/code-review` 3 | ja | ja | ja | ja | ja | 5/5 | 3 | 0,1215 |
-| Sonnet 1 | ja | ja | ja | ja | ja | 5/5 | 1 | 0,0632 |
-| Sonnet 2 | ja | ja | ja | ja | ja | 5/5 | 3 | 0,0840 |
-| Sonnet 3 | ja | ja | ja | ja | ja | 5/5 | 1 | 0,0527 |
+| Lauf | F1 | F2 | F3 | F4 | F5 | Treffer | `total_cost_usd` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `/code-review` 1 | ja | ja | ja | ja | ja | 5/5 | 0,3738 |
+| `/code-review` 2 | ja | ja | ja | ja | ja | 5/5 | 0,4480 |
+| `/code-review` 3 | ja | ja | ja | ja | ja | 5/5 | 0,2896 |
+| Sonnet 1 | nein | ja | ja | ja | ja | 4/5 | 0,2034 |
+| Sonnet 2 | nein | ja | ja | ja | ja | 4/5 | 0,2130 |
+| Sonnet 3 | ja | ja | ja | ja | ja | 5/5 | 0,2177 |
 
-Mittel: `/code-review` 5,0 von 5, Sonnet 5,0 von 5; Vereinigung beider ebenfalls 5.
-„Weitere Funde" sind Meldungen jenseits der fünf: nicht atomares `save()`, halb geladener
-Store nach doppelter ID in `load()`, CSV-Formel-Injection, fehlende Grenzwerttests.
+Mittel: `/code-review` 5,0 von 5, Sonnet 4,33 von 5; die Vereinigung beider findet in
+jedem Lauf alle fünf. Die Treffer begründen mit dem Vertrag aus `base` (exklusive Grenze
+in `config.py`, Brutto-Zusage von `RateProvider`, `ExportSink`-Docstring, Wiederholung
+und Storno im `Dispatcher`, Inventursperre): Die Werkzeuge lesen die unveränderten Dateien
+von sich aus. Sonnet verfehlt zweimal Fehler 1,
+den einzigen, dessen Vertrag zwei Schritte entfernt liegt (Reservierung gelingt, Fach
+trotzdem gesperrt).
 
 ### Fehlalarme auf `dr-seeded-clean`
 
-`/code-review` liefert eine JSON-Liste von Funden; Sonnet trennt selbst zwischen „Fehler"
-und „Schwächen/Hinweisen". Gezählt ist beides, getrennt nach Code und Tests/Stil.
-
-| Lauf | als Fehler gemeldet | davon Code | davon Tests/Stil | Hinweise ohne Fehler-Einstufung | `total_cost_usd` |
+| Lauf | als Fehler gemeldet | davon Code | davon Stil/Doppelung/Tests | Hinweise ohne Fehler-Einstufung | `total_cost_usd` |
 | --- | --- | --- | --- | --- | --- |
-| `/code-review` 1 | 7 | 5 | 2 | — | 0,1366 |
-| `/code-review` 2 | 8 | 4 | 4 | — | 0,1476 |
-| `/code-review` 3 | 10 | 9 | 1 | — | 0,1420 |
-| Sonnet 1 | 0 | 0 | 0 | 5 (3 Code, 2 Tests) | 0,0555 |
-| Sonnet 2 | 0 | 0 | 0 | 6 (4 Code, 2 Tests) | 0,0446 |
-| Sonnet 3 | 0 | 0 | 0 | 7 (5 Code, 2 Tests) | 0,0613 |
+| `/code-review` 1 | 10 | 7 | 3 | — | 0,3807 |
+| `/code-review` 2 | 10 | 7 | 3 | — | 0,5322 |
+| `/code-review` 3 | 10 | 8 | 2 | — | 0,4309 |
+| Sonnet 1 | 5 | 4 | 1 | — | 0,3005 |
+| Sonnet 2 | 1 | 1 | 0 | 5 | 0,2725 |
+| Sonnet 3 | 0 | 0 | 0 | 7 | 0,2654 |
 
-Zwei der `/code-review`-Läufe schreiben im Begleittext selbst, sie hätten keinen
-eindeutigen Fehler gefunden, und geben die Liste trotzdem als Funde aus. Wiederkehrend in
-allen sechs Läufen: `save()` schreibt nicht atomar, `load()` bleibt nach einer doppelten
-ID halb gefüllt, der Grenzwert 50/51 ist ungetestet; in fünf von sechs: CSV-Injection.
-Keiner dieser Funde betrifft eine der fünf Stellen.
+Keiner dieser Funde hält eine der fünf korrigierten Stellen für falsch; Sonnet 2 und 3
+bestätigen sie ausdrücklich. Gemeldet werden Schwächen, die beide Fassungen gleich haben
+und von denen einige echt sind: Zurückgestellte Aufträge verlieren ihre Reservierung nach
+`RESERVATION_TTL_MIN` oder kollidieren im nächsten Lauf mit ihr (alle drei
+`/code-review`-Läufe, Sonnet 1 und 3), Gefahrgut-Pakete
+außerhalb DE scheitern erst beim Buchen und reißen den Auftrag mit, `pick_list` nimmt die
+ganze Menge aus einem Fach ohne Blick auf dessen Bestand (`/code-review` 2, Sonnet 2 als
+einziger „Fehler"), `UnknownZone` aus `pack()` wird nicht gefangen. Für die Messung zählen
+sie als Fehlalarme; für Task 23 heißt das: Auch ein fehlerfreies deep-review wird auf
+der sauberen Fassung Funde haben, die Schwelle „höchstens zwei `plausibel`" ist daran zu
+messen, wie viele davon den fünf Stellen widersprechen, nicht an der Gesamtzahl.
 
-**Kosten.** Diese zwölf Läufe: 1,1106 USD (`/code-review` 0,7494, Sonnet 0,3612; im Mittel
-0,125 bzw. 0,060 je Lauf). Dazu kam eine erste Runde von zwölf Läufen auf einer früheren
-Fassung der Fixtures für 1,8539 USD, zusammen 2,9645 USD.
+### Kosten
 
-**Erste Runde.** Auch dort fanden alle sechs Läufe auf `dr-seeded` 5 von 5. Auf der
-sauberen Fassung meldeten drei von sechs Läufen zu Recht, dass `except LookupError` in
-`build_invoices` auch einen `KeyError` aus fehlenden Kundenfeldern als „Kunde unbekannt"
-verbucht, ein echter Fehler, den beide Fassungen gemeinsam hatten. Behoben in beiden
-gleich (eigene Exception `UnknownCustomer`, Serialisieren vor dem Schreiben,
-Duplikatprüfung beim Laden, `ROUND_HALF_UP`, dokumentierter Abbruch bei ungültiger
-Bestellung), danach alle zwölf Läufe neu. Die Tabellen oben gelten für die eingecheckte
-Fassung.
+Diese Runde: 3,9278 USD (`/code-review` 2,4554, im Mittel 0,409 je Lauf; Sonnet 1,4724,
+im Mittel 0,245 je Lauf). Die erste Fassung der Fixture (ein Rechnungslauf mit 166 Zeilen,
+alle Fehler lokal im Diff sichtbar) hatte beide Werkzeuge in allen zwölf Läufen bei 5 von 5
+und kostete in zwei Messrunden 2,9645 USD; sie ist durch diese Fassung ersetzt. Zusammen:
+6,8923 USD.
 
 ### Was das für die Abnahme heißt
 
-Die Spec setzt als Schwelle: deep-review findet im Mittel mindestens so viele der fünf wie
-`/code-review` und Sonnet zusammen. Beide Basislinien liegen schon bei 5 von 5, ihre
-Vereinigung auch; deep-review kann auf `dr-seeded` also höchstens gleichziehen. Die
-Fixture trennt in der Trefferquote nichts: 166 Zeilen passen ganz in den Kontext, und
-jeder Fehler ist lokal sichtbar (Fehlermeldung „mehr als" neben `>=`, Kommentar direkt
-über dem `sorted`, `UnknownCustomer` nirgends ausgelöst). Den Effekt, auf den die Spec
-zielt (eine Stelle wird nicht gelesen, OverclaimBench), erzeugt sie nicht. Messbar bleibt
-die Präzision: `/code-review` meldet auf der sauberen Fassung 7 bis 10 Funde.
+Die Schwelle der Spec — deep-review findet im Mittel mindestens so viele der fünf wie
+`/code-review` und Sonnet zusammen — liegt bei 5 von 5, weil schon die Vereinigung alle
+fünf findet. deep-review kann auf `dr-seeded` also gleichziehen, nicht überholen. Auch in
+dieser Fassung trennt die Trefferquote nur Sonnet (4,33) von `/code-review` (5,0); der
+Diff mit rund 400 Zeilen und die Basis mit 1.384 Zeilen passen beide ganz in den Kontext, und
+beide Werkzeuge lesen die Verträge in `base` ungefragt. Messbar unterscheiden wird sich
+deep-review vor allem in der Präzision: `/code-review` meldet auf der sauberen Fassung in
+jedem Lauf 10 Funde.
 
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
 die Abschaltungen und der Vergleich mit dieser Basislinie folgen in Task 23.
 
-**Ob die Fixture schwer genug ist** — die Basislinie sagt nein (siehe oben). Eine größere
-Fixture, in der eine Fehlerstelle ohne Lesen der zweiten Datei nicht auffällt, ist nicht
-gebaut und nicht gemessen.
+**Eine Fixture jenseits des Kontextfensters** — beide Fassungen sind klein genug, dass ein
+Agent alles lesen kann. Den Effekt, auf den die Spec zielt (eine Stelle liegt außerhalb
+des Gelesenen, OverclaimBench), erzeugt keine von beiden. Nach der Vorgabe dieser Runde
+nicht nachgeschärft.
 
 **Tests im Lauf** — alle Läufe im Standard-Berechtigungsmodus; `permission_denials` ist
-in 8 von 12 Läufen der zweiten Runde nicht leer: `python -m pytest`, `~/.claude/CLAUDE.md`
-und verkettete Bash-Aufrufe (`git log && git diff …`) bekamen keine Freigabe. Den Diff
-holten sich alle Läufe danach auf anderem Weg; die Funde stammen aus dem Lesen, nicht aus
+in 11 von 12 Läufen nicht leer: `python -m pytest`, `~/.claude/CLAUDE.md` und verkettete
+Bash-Aufrufe bekamen keine Freigabe. Die Funde stammen aus dem Lesen, nicht aus
 Ausführung.
 
 **Die Stufe von `/code-review`** — ohne Angabe übernimmt das Kommando die zuletzt
-getippte Stufe; welche das headless war, steht nicht in der Antwort. Mehrere Läufe
-schreiben, es habe keinen Verify-Schritt gegeben. Andere Stufen sind nicht gemessen.
+getippte Stufe; welche das headless war, steht nicht in der Antwort. Andere Stufen sind
+nicht gemessen.
 
 **Kosten der Unteragenten** — `total_cost_usd` ist die Zahl der CLI. Ob sie Unteragenten
 von `/code-review` vollständig enthält, ist nicht nachgeprüft; `modelUsage` nennt nur
-`claude-opus-5-5`.
+`claude-opus-5-5`, `num_turns` steht bei 0.
 
-**Streuung** — drei Läufe je Zelle; bei 5 von 5 in allen sechs Läufen sagt das nichts über
-seltene Ausfälle. Die Zählung der Fehlalarme ist eine Handauswertung durch eine Person
-(den bauenden Agenten), ohne zweite Auswertung.
+**Streuung und Auswertung** — drei Läufe je Zelle. Die Zuordnung der Treffer lief per
+Skript mit Nachprüfung am Text, die Einteilung der Fehlalarme in Code und Stil von Hand
+durch den bauenden Agenten, ohne zweite Auswertung.
