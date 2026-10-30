@@ -77,7 +77,7 @@ von sich aus. Sonnet verfehlt zweimal Fehler 1,
 den einzigen, dessen Vertrag zwei Schritte entfernt liegt (Reservierung gelingt, Fach
 trotzdem gesperrt).
 
-### Fehlalarme auf `dr-seeded-clean`
+### Weitere Funde auf `dr-seeded-clean`
 
 | Lauf | als Fehler gemeldet | davon Code | davon Stil/Doppelung/Tests | Hinweise ohne Fehler-Einstufung | `total_cost_usd` |
 | --- | --- | --- | --- | --- | --- |
@@ -89,16 +89,30 @@ trotzdem gesperrt).
 | Sonnet 3 | 0 | 0 | 0 | 7 | 0,2654 |
 
 Keiner dieser Funde hält eine der fünf korrigierten Stellen für falsch; Sonnet 2 und 3
-bestätigen sie ausdrücklich. Gemeldet werden Schwächen, die beide Fassungen gleich haben
-und von denen einige echt sind: Zurückgestellte Aufträge verlieren ihre Reservierung nach
-`RESERVATION_TTL_MIN` oder kollidieren im nächsten Lauf mit ihr (alle drei
-`/code-review`-Läufe, Sonnet 1 und 3), Gefahrgut-Pakete
-außerhalb DE scheitern erst beim Buchen und reißen den Auftrag mit, `pick_list` nimmt die
-ganze Menge aus einem Fach ohne Blick auf dessen Bestand (`/code-review` 2, Sonnet 2 als
-einziger „Fehler"), `UnknownZone` aus `pack()` wird nicht gefangen. Für die Messung zählen
-sie als Fehlalarme; für Task 23 heißt das: Auch ein fehlerfreies deep-review wird auf
-der sauberen Fassung Funde haben, die Schwelle „höchstens zwei `plausibel`" ist daran zu
-messen, wie viele davon den fünf Stellen widersprechen, nicht an der Gesamtzahl.
+bestätigen sie ausdrücklich. Die Funde betreffen Schwächen, die beide Fassungen gleich
+haben — und sie sind **keine Fehlalarme**. Nachgeprüft am 2026-10-30 mit einem
+Repro-Skript gegen den Code von `dr-seeded-clean` (Hilfen aus `tests/helpers.py`); jeder
+dieser fünf Funde lässt sich auslösen:
+
+| Fund (in wie vielen `/code-review`-Läufen) | Auslösung | Ergebnis |
+| --- | --- | --- |
+| zurückgestellter Auftrag kollidiert im nächsten Lauf mit seiner Reservierung (3 von 3) | Lauf 1 stellt `O1` zurück, Lauf 2 mit demselben `ReservationBook` ruft `add(O1)` | `ValueError: O1 ist schon reserviert`, `add()` fängt nur `InsufficientStock` |
+| `UnknownZone` aus `pack()` ungefangen (3 von 3) | Auftrag mit `zone="CH"` vor einem gültigen | `UnknownZone: 'CH'`, der ganze Packlauf bricht ab |
+| Gefahrgut außerhalb DE scheitert immer (3 von 3) | `A-100` + `L-400`, Zone `EU1` | erst gebucht, dann storniert, Auftrag `failed` |
+| `ship()` nicht wiederholbar (2 von 3) | `ship()` zweimal | zweite Sendung gebucht (1 → 2), dann `KeyError: 'O1'` ohne Storno |
+| Kommissionierung ohne Blick auf den Fachbestand (2 von 3) | 25 × `A-100`, Hauptfach hat 20 | ein Stopp „25 aus `G01-F04-E0`" |
+
+Nur gelesen, nicht ausgelöst, aber am Code nachvollziehbar: Export am selben Tag
+überschreibt den vorigen, abgelaufene Reservierung führt in `Dispatcher.ship` zu einem
+`KeyError` nach dem Buchen. Die Stil- und Doppelungsfunde (zweite Stufentabelle in
+`zones.py`, Liste statt Menge für `deferred`, toter `parcel_count`) stimmen sachlich und
+sind Hinweise, keine Fehler. Die Fixture enthält damit neben den fünf eingebauten Fehlern
+mindestens fünf weitere echte, unabsichtliche; `dr-seeded-clean` ist keine fehlerfreie
+Fassung, nur eine ohne die fünf.
+
+Für die Abnahme heißt das: Die Präzision lässt sich an der Gesamtzahl der Funde auf
+`dr-seeded-clean` nicht messen. Gezählt werden darf nur, ob ein Fund einer der fünf
+korrigierten Stellen widerspricht — das tat in keinem Lauf ein Werkzeug.
 
 ### Kosten
 
@@ -115,9 +129,11 @@ Die Schwelle der Spec — deep-review findet im Mittel mindestens so viele der f
 fünf findet. deep-review kann auf `dr-seeded` also gleichziehen, nicht überholen. Auch in
 dieser Fassung trennt die Trefferquote nur Sonnet (4,33) von `/code-review` (5,0); der
 Diff mit rund 400 Zeilen und die Basis mit 1.384 Zeilen passen beide ganz in den Kontext, und
-beide Werkzeuge lesen die Verträge in `base` ungefragt. Messbar unterscheiden wird sich
-deep-review vor allem in der Präzision: `/code-review` meldet auf der sauberen Fassung in
-jedem Lauf 10 Funde.
+beide Werkzeuge lesen die Verträge in `base` ungefragt. Ein Vorsprung in der Präzision zeichnet sich
+ebenfalls nicht ab: Was zunächst als zehn Fehlalarme je `/code-review`-Lauf gezählt wurde,
+sind echte Fehler der Fixture (siehe oben). `/code-review` ist auf dieser Fixture in
+Trefferquote und Präzision stärker als ein einzelner Sonnet-Lauf, der von denselben echten
+Fehlern höchstens einen als Fehler einstuft.
 
 ## Was nicht gemessen wurde
 
@@ -143,5 +159,5 @@ von `/code-review` vollständig enthält, ist nicht nachgeprüft; `modelUsage` n
 `claude-opus-5-5`, `num_turns` steht bei 0.
 
 **Streuung und Auswertung** — drei Läufe je Zelle. Die Zuordnung der Treffer lief per
-Skript mit Nachprüfung am Text, die Einteilung der Fehlalarme in Code und Stil von Hand
+Skript mit Nachprüfung am Text, die Einteilung der weiteren Funde in Code und Stil von Hand
 durch den bauenden Agenten, ohne zweite Auswertung.
