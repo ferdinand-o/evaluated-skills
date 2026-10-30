@@ -1,7 +1,11 @@
 import json
 import subprocess
+import sys
 
-from conftest import load_script
+from conftest import REPO_ROOT, load_script
+from evalkit.runner import grade
+from evalkit.schema import load_evals
+from evalkit.workspace import prepare
 
 ptt = load_script("skills/subagent-dev/scripts/plan_to_tasks.py")
 
@@ -2288,3 +2292,111 @@ def test_verify_consumer_check_reads_kind_from_prefix(tmp_path):
     assert block["consumers"][0]["symbols"] == ["token:Review ohne Abdeckungsnachweis"]
     (tmp_path / "SKILL.md").write_text("Review ohne Abdeckungsnachweis\n", encoding="utf-8")
     assert [r["status"] for r in ptt.check_consumers(tmp_path, ["SKILL.md"], block["consumers"])] == ["present"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 15: Evals und Fixtures
+# --------------------------------------------------------------------------
+
+SPEC27_EVALS = ("anti-ceremony-mini-plan-gets-only-final-checkpoint", "fanout-producer-gets-opus-and-checkpoint",
+                "plan-model-line-overrides-rules", "consumer-check-catches-arity-drift", "checkpoint-due-by-size")
+
+
+def _sd_run(root, *args):
+    """Das Skript so, wie der Agent es im Workspace aufruft: Subprozess mit cwd = Workspace."""
+    script = REPO_ROOT / "skills" / "subagent-dev" / "scripts" / "plan_to_tasks.py"
+    return subprocess.run([sys.executable, str(script), *args], cwd=root, capture_output=True, text=True)
+
+
+def _sd_commit(root, files, message, amend=False):
+    for rel, text in files.items():
+        (root / rel).write_text(text, encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", *(["--amend"] if amend else []), "-m", message)
+
+
+def test_evals_and_fixtures_spec27(tmp_path):
+    evals = {ev.id: ev for ev in load_evals(REPO_ROOT / "evals" / "subagent-dev" / "evals.json")}
+    assert len(evals) == 9 and set(SPEC27_EVALS) <= set(evals)
+    assert all(evals[i].eval_class == "contract" for i in SPEC27_EVALS)
+    fixtures = REPO_ROOT / "evals" / "fixtures"
+    for name in ("plan-fanout", "plan-fanout-override", "plan-fanout-dispatched", "cp-size"):
+        manifest = json.loads((fixtures / name / "fixture.json").read_text(encoding="utf-8"))
+        assert manifest["git"] is True and (fixtures / name / "README.md").is_file()
+        assert manifest["commits"][0]["touch"][".gitignore"] == ".skills/cache/\n.claude/\n"
+        assert sorted(p.name for p in (fixtures / name).iterdir()) == ["README.md", "fixture.json"]
+    skill = REPO_ROOT / "skills" / "subagent-dev"
+
+    def workspace(fixture, label):
+        ws = prepare(tmp_path / label, skill, fixtures / fixture)
+        return ws.root, ws.baseline
+
+    def passed(eval_id, root, baseline):
+        return grade(evals[eval_id], root, baseline, {}).passed
+
+    def generate(root, plan):
+        assert _sd_run(root, "generate", plan).returncode == 0
+
+    # Eval 1: Mini-Plan — nur der finale Prüfpunkt, kein opus; der Fanout-Plan trifft must_not.
+    root, base = workspace("plan-mini-two-tasks", "e1")
+    generate(root, "docs/superpowers/plans/mini-two-tasks.md")
+    assert passed(SPEC27_EVALS[0], root, base)
+    root, base = workspace("plan-fanout", "e1-variant")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[0], root, base)
+
+    # Eval 2: Task 1 mit zwei Abnehmern — opus und C1 vor Task 3; mit nur einem Abnehmer weder noch.
+    root, base = workspace("plan-fanout", "e2")
+    generate(root, "docs/plans/fanout.md")
+    assert passed(SPEC27_EVALS[1], root, base)
+    root, base = workspace("plan-fanout", "e2-variant")
+    plan = root / "docs" / "plans" / "fanout.md"
+    text = plan.read_text(encoding="utf-8")
+    one_consumer = text.replace("- Consumes: `fn:parse_order(line)`\n- Produces: `fn:export_orders",
+                                "- Consumes: (nichts Neues)\n- Produces: `fn:export_orders", 1)
+    assert one_consumer != text
+    _sd_commit(root, {"docs/plans/fanout.md": one_consumer}, "Task 4 ohne parse_order")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[1], root, base)
+
+    # Eval 3: **Modell:** sonnet schlägt M1; ohne die Zeile (plan-fanout) steht dort opus.
+    root, base = workspace("plan-fanout-override", "e3")
+    generate(root, "docs/plans/fanout.md")
+    assert passed(SPEC27_EVALS[2], root, base)
+    root, base = workspace("plan-fanout", "e3-variant")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[2], root, base)
+
+    # Eval 4: parse_order(line, strict) ohne Default — arity_mismatch, fail; mit Default pass.
+    def verify(root):
+        generate(root, "docs/plans/fanout.md")
+        task_file = next((root / ".skills" / "cache" / "tasks").glob("task-1-*.md")).relative_to(root)
+        return _sd_run(root, "verify", "--task-file", str(task_file), "--worktree", ".", "--base", "base",
+                       "--out", ".skills/cache/tasks/verify-task-1.json")
+
+    root, base = workspace("plan-fanout-dispatched", "e4")
+    assert verify(root).returncode == 1
+    assert passed(SPEC27_EVALS[3], root, base)
+    result = json.loads((root / ".skills/cache/tasks/verify-task-1.json").read_text(encoding="utf-8"))
+    assert result["allowlist_violations"] == [] and [p["status"] for p in result["produces"]] == ["present"]
+    root, base = workspace("plan-fanout-dispatched", "e4-variant")
+    parser = (root / "src" / "parser.py").read_text(encoding="utf-8")
+    _sd_commit(root, {"src/parser.py": parser.replace("(line, strict)", "(line, strict=False)")},
+               "Task 1: Parser", amend=True)
+    done = verify(root)
+    assert done.returncode == 0, done.stdout
+    assert not passed(SPEC27_EVALS[3], root, base)
+
+    # Eval 5: 430 Zeilen seit reviewed — fällig; mit 120 Zeilen nach Task 3 nicht.
+    root, base = workspace("cp-size", "e5")
+    gate = json.loads((root / ".skills/cache/tasks/gate.json").read_text(encoding="utf-8"))
+    assert all(ptt._checkpoint_after(cp, gate["plan_order"]) != 3 for cp in gate["checkpoints"])
+    assert _sd_run(root, "checkpoint", "status", "--after-task", "3").returncode == 0
+    assert passed(SPEC27_EVALS[4], root, base)
+    root, base = workspace("cp-size", "e5-variant")
+    lines = (root / "src" / "importer.py").read_text(encoding="utf-8").splitlines(keepends=True)
+    _sd_commit(root, {"src/importer.py": "".join(lines[:120])}, "Task 3: Import", amend=True)
+    assert _sd_run(root, "checkpoint", "status", "--after-task", "3").returncode == 0
+    status = json.loads((root / ".skills/cache/tasks/checkpoint.json").read_text(encoding="utf-8"))
+    assert (status["due"], status["changed_lines"]) == (False, 120)
+    assert not passed(SPEC27_EVALS[4], root, base)
