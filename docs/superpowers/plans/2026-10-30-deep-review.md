@@ -86,11 +86,15 @@ scripts/sync_skills.py, .claude/skills/deep-review/ und die Kopien der Nachbarn
 Die Spec verlangt die Messfixture als erste Aufgabe, damit die Abnahmeschwelle vor dem
 Ausbau steht. Die saubere Fassung liegt als eigene Fixture `dr-seeded-clean` neben
 `dr-seeded`, weil beide denselben Bereich `base..HEAD` brauchen und ein Workspace nur einen
-HEAD hat.
+HEAD hat. Je Fixture liegt eine `README.md` neben `fixture.json`, weil `evalkit.workspace`
+den ersten Commit ohne `--allow-empty` anlegt und eine Fixture nur aus `fixture.json` dort
+abbricht.
 
 **Files:**
 - Create: `evals/fixtures/dr-seeded/fixture.json`
+- Create: `evals/fixtures/dr-seeded/README.md`
 - Create: `evals/fixtures/dr-seeded-clean/fixture.json`
+- Create: `evals/fixtures/dr-seeded-clean/README.md`
 - Create: `docs/superpowers/reports/deep-review-report.md`
 - Test: `tests/test_deep_review_kit.py`
 
@@ -469,8 +473,11 @@ HEAD hat.
 **Files:**
 - Create: `evals/deep-review/evals.json`
 - Create: `evals/fixtures/dr-small/fixture.json`
+- Create: `evals/fixtures/dr-small/README.md`
 - Create: `evals/fixtures/dr-cross-file/fixture.json`
+- Create: `evals/fixtures/dr-cross-file/README.md`
 - Create: `evals/fixtures/dr-comments/fixture.json`
+- Create: `evals/fixtures/dr-comments/README.md`
 - Modify: `tests/test_deep_review_kit.py`
 
 **Interfaces:**
