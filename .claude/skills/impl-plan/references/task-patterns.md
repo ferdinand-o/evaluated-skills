@@ -73,6 +73,30 @@ nicht danach. Spec 15 (`explain`) hat das so gebaut; die Reihenfolge ist seither
 nicht Geschmack. Ein Plan für eine Tier-0-Skill, dessen `### Task N: Evals` hinter dem
 `SKILL.md`-Task steht, ist ein Befund im Reviewer-Prompt.
 
+## Modell und Abnehmer
+
+Welches Modell eine Task baut und wo reviewt wird, entscheidet subagent-dev aus dem
+ganzen Plan: Opus für Vorleistungen mit mindestens zwei Abnehmern, Risikopfade
+(`auth`, `migration`, `.sql` …) und breite Tasks ab fünf Dateien, sonst Sonnet. Der Plan
+kann das für eine Task festlegen — eine optionale Zeile direkt unter dem Task-Titel, vor
+`**Files:**`:
+
+```markdown
+### Task 4: Preisberechnung
+
+**Modell:** opus
+
+**Files:**
+```
+
+Nur `opus` oder `sonnet`; anderes meldet der Lint, und die Regeln greifen. Gedacht für
+das, was das Skript nicht sieht: Nebenläufigkeit, Algorithmen mit Sonderfällen.
+
+**Abnehmer-Task beginnt mit einem Test gegen die Vorleistung.** Konsumiert eine Task ein
+`Produces`-Symbol einer früheren, ist ihr erster Step ein Test, der dieses Symbol so
+aufruft, wie die Task es braucht. subagent-dev prüft vorher nur Name und Arity; ob die
+Vorleistung das Richtige tut, zeigt erst dieser Test.
+
 ## Zuschnittsregel
 
 Aus `writing-plans`, übersetzt und beibehalten, weil sie richtig ist:
