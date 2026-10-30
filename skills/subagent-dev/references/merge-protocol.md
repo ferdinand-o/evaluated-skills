@@ -58,7 +58,8 @@ vor dem Merge fangen müssen).
 
 ## Abschluss
 
-Wenn alle Tasks eines Plans gemerged und die Gesamttests grün sind, folgt ein finaler
-Prüfpunkt über `base..HEAD` (Profil `standard`), mit Fix-Pfad wie an jedem Prüfpunkt.
+Wenn alle Tasks eines Plans gemerged und die Gesamttests grün sind, folgt ein
+finaler Prüfpunkt über `base..HEAD` (Profil `standard`), mit Fix-Pfad wie an jedem
+Prüfpunkt.
 Erst danach ist der Plan fertig im Sinn dieser Skill. Was danach kommt (Branch-Abschluss, PR),
 ist nicht Teil dieses Protokolls.
