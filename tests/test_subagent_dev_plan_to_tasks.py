@@ -2119,3 +2119,36 @@ def test_fix_task_without_actionable_findings_writes_nothing(tmp_path):
     out = tmp_path / "tasks"
     assert ptt.main(["fix-task", "--verdicts", str(verdicts), "--out-dir", str(out)]) == 1
     assert not list(out.glob("*fix*"))
+
+
+def test_log_line(tmp_path):
+    path = tmp_path / ".skills" / "subagent-dev" / "runlog.jsonl"
+    ptt.append_log(path, {"plan": "p.md", "task": 3, "model": "sonnet", "reason": "Standard",
+                          "verdicts": ["pass"], "subagent_tokens": 1234})
+    ptt.append_log(path, {"plan": "p.md", "checkpoint": "after-3", "model": "opus", "reason": "Größe",
+                          "verdicts": ["bestätigt", "offen"], "findings": 2, "finding_task": 3})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    meta = json.loads(lines[0])
+    assert list(meta) == ["_meta"] and meta["_meta"]["skill"] == "subagent-dev" and meta["_meta"]["schema"] == 1
+    keys = ["plan", "task", "checkpoint", "model", "reason", "verdicts", "subagent_tokens", "findings", "finding_task"]
+    first, second = json.loads(lines[1]), json.loads(lines[2])
+    assert list(first) == keys and list(second) == keys
+    assert first["task"] == 3 and first["checkpoint"] is None and first["subagent_tokens"] == 1234
+    assert second["task"] is None and second["subagent_tokens"] is None and second["finding_task"] == 3
+
+
+def test_log_command_writes_relative_to_repo(tmp_path):
+    base = ["log", "--repo", str(tmp_path), "--plan", "p.md", "--model", "sonnet", "--reason", "Standard"]
+    assert ptt.main(base + ["--task", "4", "--verdict", "pass", "--verdict", "unverified"]) == 0
+    assert ptt.main(base + ["--checkpoint", "final", "--findings", "1", "--finding-task", "4", "--subagent-tokens", "99"]) == 0
+    rows = [json.loads(l) for l in (tmp_path / ".skills" / "subagent-dev" / "runlog.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert "_meta" in rows[0] and len(rows) == 3
+    assert rows[1]["task"] == 4 and rows[1]["verdicts"] == ["pass", "unverified"] and rows[1]["subagent_tokens"] is None
+    assert rows[2]["checkpoint"] == "final" and rows[2]["findings"] == 1 and rows[2]["subagent_tokens"] == 99
+
+
+def test_log_keeps_umlauts(tmp_path):
+    path = tmp_path / "runlog.jsonl"
+    ptt.append_log(path, {"plan": "p.md", "reason": "größer als 400 Zeilen"})
+    assert "größer" in path.read_text(encoding="utf-8")
