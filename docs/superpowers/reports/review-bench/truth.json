@@ -1,0 +1,192 @@
+{
+ "py-diff": [
+  {
+   "id": "P1",
+   "kind": "seeded",
+   "file": "network/download.py",
+   "line": 141,
+   "what": "HEADERS ohne copy() mutiert, Range/If-Range bleiben fuer Folgeanfragen"
+  },
+  {
+   "id": "P2",
+   "kind": "seeded",
+   "file": "req/req_dependency_group.py",
+   "line": 30,
+   "what": "TypeError des Resolvers nicht mehr gefangen"
+  },
+  {
+   "id": "P3",
+   "kind": "seeded",
+   "file": "models/wheel.py",
+   "line": 77,
+   "what": "Build-Tag () falsy -> Legacy-Regex, None -> TypeError"
+  },
+  {
+   "id": "P4",
+   "kind": "seeded",
+   "file": "commands/lock.py",
+   "line": 143,
+   "what": "ignore_installed=False: installierte Pakete fehlen im Lockfile"
+  },
+  {
+   "id": "P5",
+   "kind": "seeded",
+   "file": "cli/cmdoptions.py",
+   "line": 760,
+   "what": "partition statt rpartition, Windows-Laufwerk"
+  },
+  {
+   "id": "P6",
+   "kind": "seeded",
+   "file": "index/package_finder.py",
+   "line": 903,
+   "what": "Cache-Schluessel ohne hashes"
+  },
+  {
+   "id": "R1",
+   "kind": "real",
+   "file": "wheel_builder.py",
+   "line": 53,
+   "what": "assert req.source_dir / not req.constraint, Legacy-Resolver liefert Reqs ohne source_dir (Fix 25.1.1, #13353)"
+  },
+  {
+   "id": "R2",
+   "kind": "real",
+   "file": "operations/install/wheel.py",
+   "line": 610,
+   "what": "redirect_stdout(StringIO()) statt StreamWrapper, Absturz auf Python <=3.9.6 (Fix 25.1.1, #13364)"
+  }
+ ],
+ "py-path": [
+  {
+   "id": "Q1",
+   "kind": "seeded",
+   "file": "operations/install/wheel.py",
+   "line": 485,
+   "what": "Root-Scheme ohne assert_no_path_traversal"
+  },
+  {
+   "id": "Q2",
+   "kind": "seeded",
+   "file": "operations/prepare.py",
+   "line": 205,
+   "what": "if hashes is not None: leeres Hashes -> HashMismatch, Datei geloescht"
+  },
+  {
+   "id": "Q3",
+   "kind": "seeded",
+   "file": "req/req_file.py",
+   "line": 44,
+   "what": "COMMENT_RE frisst URL-Fragmente"
+  },
+  {
+   "id": "Q4",
+   "kind": "seeded",
+   "file": "operations/check.py",
+   "line": 100,
+   "what": "contains ohne prereleases=True"
+  },
+  {
+   "id": "Q5",
+   "kind": "seeded",
+   "file": "operations/install/wheel.py",
+   "line": 81,
+   "what": "RECORD-Hash aus hexdigest"
+  },
+  {
+   "id": "Q6",
+   "kind": "seeded",
+   "file": "req/req_install.py",
+   "line": 317,
+   "what": "hash_options ohne copy() mutiert"
+  }
+ ],
+ "dl-diff": [
+  {
+   "id": "D1",
+   "kind": "seeded",
+   "file": "MVCFramework.RQL.AST2MSSQL.pas",
+   "line": 75,
+   "what": "Extract statt Remove: Leck"
+  },
+  {
+   "id": "D2",
+   "kind": "seeded",
+   "file": "MVCFramework.Indy.Request.pas",
+   "line": 308,
+   "what": "lLine[lNameLen] statt +1: Duplikat-Schutz aus"
+  },
+  {
+   "id": "D3",
+   "kind": "seeded",
+   "file": "MVCFramework.Router.pas",
+   "line": 646,
+   "what": "Params[J] statt [J-1] beim Rueckbau"
+  },
+  {
+   "id": "D4",
+   "kind": "seeded",
+   "file": "MVCFramework.WebSocket.Server.pas",
+   "line": 746,
+   "what": "ParseFrame ohne FMaxPayloadLength"
+  },
+  {
+   "id": "D5",
+   "kind": "seeded",
+   "file": "MVCFramework.Session.pas",
+   "line": 848,
+   "what": "fSecure := aHttpOnly"
+  },
+  {
+   "id": "D6",
+   "kind": "seeded",
+   "file": "MVCFramework.SQLGenerators.MSSQL.pas",
+   "line": 188,
+   "what": "@@IDENTITY statt SCOPE_IDENTITY"
+  }
+ ],
+ "dl-path": [
+  {
+   "id": "E1",
+   "kind": "seeded",
+   "file": "MVCFramework.JWT.RefreshToken.pas",
+   "line": 405,
+   "what": "Record-Kopie nicht zurueckgeschrieben, Reuse-Erkennung tot"
+  },
+  {
+   "id": "E2",
+   "kind": "seeded",
+   "file": "MVCFramework.JWT.RefreshToken.pas",
+   "line": 368,
+   "what": "Now + ATTLSeconds: Tage statt Sekunden"
+  },
+  {
+   "id": "E3",
+   "kind": "seeded",
+   "file": "MVCFramework.Middleware.RangeMedia.pas",
+   "line": 337,
+   "what": "Stream nach SetContentStream nicht nil -> Doppelfreigabe"
+  },
+  {
+   "id": "E4",
+   "kind": "seeded",
+   "file": "MVCFramework.Middleware.OIDC.pas",
+   "line": 661,
+   "what": "UnixToDateTime UTC gegen Now Ortszeit"
+  },
+  {
+   "id": "E5",
+   "kind": "seeded",
+   "file": "MVCFramework.Serializer.CSV.pas",
+   "line": 753,
+   "what": "Anfuehrungszeichen loest kein Quoting aus"
+  },
+  {
+   "id": "E6",
+   "kind": "seeded",
+   "file": "MVCFramework.OIDC.JWKS.pas",
+   "line": 558,
+   "what": "IsCacheExpired umgedreht"
+  }
+ ]
+}
