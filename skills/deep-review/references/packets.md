@@ -153,8 +153,11 @@ Bericht von höchstens `REPORT_BASE_LINES` Zeilen plus einer je Fund.
 ## Folgeläufe: `--since`
 
 `plan --range <bereich> --since <lauf>[,<lauf>…]` übernimmt je Datei die Funde früherer
-Läufe. Das gilt nur beim Anlegen eines Laufs: `--since` auf einem Lauf, der schon übernommen
-oder schon `results/`, `packets/` oder Refs hat, ist ein Fehler.
+Läufe. `--since` wirkt nur beim Anlegen eines Laufs. Einem bestehenden Lauf lässt es sich
+nicht nachträglich geben, denn `plan` legt immer einen neuen Lauf an und hat kein `--run`. Wer
+die Funde früherer Läufe übernehmen will, startet einen neuen Lauf mit
+`plan --range <bereich> --since <lauf>`. Intern prüft `plan_since`, dass der eben angelegte Lauf
+noch frisch ist: nicht schon mit `--since` geplant, ohne `results/`, `packets/` und Refs.
 
 Eine Datei wird übernommen, wenn alles zutrifft:
 
