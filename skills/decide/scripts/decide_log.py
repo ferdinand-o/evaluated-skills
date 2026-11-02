@@ -71,16 +71,23 @@ Pflicht je Weg:
   `--decision` wird die Empfehlung, der Schlüssel `rule:<thema>`.
 `nie fragen` stuft eine große Frage nie herab; die Ausgabe sagt das. Jeder große Eintrag steht
 zusätzlich als Protokollzeile `gross` mit `D-<n>` unter `entscheidung`. Die Nummer ist die
-höchste in der Datei plus eins. Steht schon ein Block mit gleicher Frage, gleichem Schlüssel und
-gleichem Status (offen; freigegeben mit gleicher Quelle), legt `add` keinen zweiten an, meldet
-„D-<n> steht schon“ und holt nur eine fehlende Protokollzeile nach. Schlüssel: Leerraum um
-Kategorie und Pfadmuster fällt weg, Leerraum im Pfadmuster ist ein Fehler. `resolve` ändert nur
+höchste in der Datei plus eins. Steht schon ein Block mit gleicher Frage, gleichem Schlüssel,
+gleichen Optionen, gleicher Empfehlung und gleichem Status (offen; freigegeben mit gleicher Quelle),
+legt `add` keinen zweiten an, meldet „D-<n> steht schon“ (bei offen mit derselben Anweisung wie
+beim neuen Block) und ergänzt nur eine fehlende Protokollzeile; ob sie fehlt, prüft es unter der
+Sperre des Protokolls. Weichen nur Optionen oder Empfehlung ab, Exit 1 „D-<n> steht offen mit
+anderen Optionen — von Hand ändern oder mit resolve beantworten“, nichts geschrieben. Schlüssel:
+Leerraum um Kategorie und Pfadmuster fällt weg, Leerzeichen im Pfadmuster bleiben, Tab und
+Zeilenumbruch darin sind ein Fehler. Steht ein Feld in einem Block doppelt, gilt das erste — beim
+Lesen wie für `resolve`. `resolve` ändert nur
 Blöcke mit Status `offen` (sonst Exit 1 mit Status und Quelle; von Hand bleibt es möglich), dort
 Überschrift-Status, Antwort und Quelle — Felder auch leer oder mit Leerraum vor dem `:` —, und
-lässt den Block stehen; legt es `.skills/cache/` an oder schreibt es ohne Sperre, sagt es das wie
-`add`. Die Ablage wird unter der Sperre `.skills/cache/decide/big-decisions.md.lock`
-(nicht neben der Datei, `docs/` wird committet) neu gelesen und per `write_atomic` ersetzt;
-gelesen wird mit `utf-8-sig` (ein BOM aus dem Editor stört nicht), geschrieben ohne BOM.
+lässt den Block stehen; legt es `.skills/cache/` an (und steht der Ordner nicht in der
+`.gitignore`) oder schreibt es ohne Sperre, sagt es das wie `add`. Die Ablage wird unter der
+Sperre `.skills/cache/decide/big-decisions.md.lock` (nicht neben der Datei, `docs/` wird
+committet) neu gelesen und per `write_atomic` ersetzt;
+gelesen wird mit `utf-8-sig` (ein BOM aus dem Editor stört nicht; ebenso bei Protokoll, Regeln
+und Vorlage), geschrieben ohne BOM.
 Konsumenten-Regel (docs/artifact-header.md): fehlt die Kopfzeile von decide oder ist `schema`
 höher als 1, überspringen `read_ledger` und `open` die Datei sichtbar („docs/big-decisions.md
 schema 1 erwartet, 2 gefunden — Freigaben übersprungen“), `add` und `resolve` schreiben nichts.
@@ -226,8 +233,10 @@ def read_rules(root, home):
     rules, ignored = [], []
     for path, source in _rule_files(root, home):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            text = read_file(path)
+        except Unreadable:
+            continue
+        if text is None:
             continue
         for number, raw in enumerate(text.splitlines(), 1):
             line = _strip_comment(raw)
@@ -475,6 +484,11 @@ def _try_lock(fd):
         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
 
 
+def lock_file(path):
+    """Die Sperrdatei zu `path`: `<name>.lock` daneben."""
+    return path.with_name(path.name + ".lock")
+
+
 @contextmanager
 def log_lock(path):
     """Sperre des Betriebssystems auf der offenen Datei `<log>.lock`; das Betriebssystem gibt sie
@@ -482,7 +496,7 @@ def log_lock(path):
     alle `LOCK_POLL` Sekunden bis `LOCK_WAIT`, dann `LockBusy`. Die Datei bleibt liegen. Liefert
     None, wenn gesperrt wurde, sonst die Ursache, warum ohne Sperre geschrieben wird (ohne `fcntl`
     und `msvcrt` oder bei `NO_LOCK_ERRNOS`); das melden `add` und `resolve`."""
-    lock = path.with_name(path.name + ".lock")
+    lock = lock_file(path)
     lock.parent.mkdir(parents=True, exist_ok=True)
     if fcntl is None and msvcrt is None:
         yield "weder fcntl noch msvcrt verfügbar"
@@ -516,22 +530,27 @@ def log_lock(path):
         os.close(fd)
 
 
-def append_row(root, session, values):
+def append_row(root, session, values, once=False):
     """Hängt eine Zeile an; liest das Protokoll unter der Sperre unmittelbar davor neu.
-    (angelegt, Problem, ohne Sperre: None oder Ursache). Wirft `LockBusy` oder OSError, wenn nicht
-    geschrieben werden kann, `Unreadable`, wenn das vorhandene Protokoll nicht lesbar ist."""
+    (angelegt, Problem, ohne Sperre: None oder Ursache, geschrieben). Mit `once` unterbleibt die
+    Zeile, wenn schon eine mit gleicher `klasse` und `entscheidung` steht (`gross` mit `D-<n>`) —
+    geprüft unter der Sperre. Wirft `LockBusy` oder OSError, wenn nicht geschrieben werden kann,
+    `Unreadable`, wenn das vorhandene Protokoll nicht lesbar ist."""
     path = log_path(root, session)
     with log_lock(path) as unlocked:
         text = read_log(root, session)
         if text is not None:
             problem = header_problem(text, shown(path, root), "nichts geschrieben")
             if problem:
-                return False, problem, unlocked
+                return False, problem, unlocked, False
+            if once and any(e["klasse"] == values.get("klasse") and e["entscheidung"] == values.get("entscheidung")
+                            for e in parse_rows(text)):
+                return False, None, unlocked, False
         row = "| " + " | ".join(cell(values.get(c)) for c in COLUMNS) + " |"
         created = text is None
         body = f"{LOG_HEADER}\n\n{TABLE_HEAD}\n" if created else text.rstrip("\n") + "\n"
         write_atomic(path, body + row + "\n")
-    return created, None, unlocked
+    return created, None, unlocked, True
 
 
 def unversioned_notice(root):
@@ -588,8 +607,9 @@ def field_of(line):
 
 def parse_blocks(text):
     """Blöcke der Ablage, in Dateireihenfolge (siehe `read_ledger`). Ein Block reicht von seiner
-    Überschrift bis vor die nächste Zeile mit `## `."""
-    blocks, current, in_options = [], None, False
+    Überschrift bis vor die nächste Zeile mit `## `. Steht ein Feld doppelt, gilt das erste — wie
+    für `resolve`."""
+    blocks, current, in_options, seen = [], None, False, set()
     for line in text.splitlines():
         if line.startswith("## "):
             match = BLOCK_RE.match(line)
@@ -599,16 +619,17 @@ def parse_blocks(text):
                            "date": match.group("date"), "status": match.group("status"), "options": []}
                 current.update({name: None for name, _ in FIELDS if name != "options"})
                 blocks.append(current)
-            in_options = False
+            in_options, seen = False, set()
             continue
         if current is None:
             continue
         field = field_of(line)
         if field:
             name, value = field
-            in_options = name == "options"
-            if not in_options:
+            in_options = name == "options" and name not in seen
+            if name not in seen and name != "options":
                 current[name] = value
+            seen.add(name)
             continue
         if in_options and line.startswith("- "):
             current["options"].append(line[2:].strip())
@@ -646,11 +667,11 @@ def ledger_template():
     """Anfang einer neuen Ablage aus `assets/big-decisions.md`; fehlt die Vorlage oder trägt sie
     nicht die Kopfzeile, nur die Kopfzeile und der Titel."""
     try:
-        text = LEDGER_ASSET.read_text(encoding="utf-8")
-        if not header_problem(text, "assets/big-decisions.md") and not BLOCK_NUMBER_RE.search(text):
-            return text
-    except OSError:
-        pass
+        text = read_file(LEDGER_ASSET)
+    except Unreadable:
+        text = None
+    if text and not header_problem(text, "assets/big-decisions.md") and not BLOCK_NUMBER_RE.search(text):
+        return text
     return f"{LOG_HEADER}\n\n# Große Entscheidungen\n"
 
 
@@ -671,19 +692,28 @@ def render_block(number, day, status, fields):
     return "\n".join(lines)
 
 
-def _same_block(block, status, fields):
-    """Steht `fields` mit `status` schon als dieser Block? Gleiche Frage, gleicher Schlüssel, gleicher
-    Status — offen, oder freigegeben mit gleicher Quelle (derselbe Auftrag)."""
+def _same_question(block, status, fields):
+    """Gleiche Frage, gleicher Schlüssel, gleicher Status — offen, oder freigegeben mit gleicher
+    Quelle (derselbe Auftrag)."""
     return (block["status"] == status and block["question"] == line_value(fields.get("question"))
             and block["key"] == line_value(fields.get("key"))
             and (status == "offen" or block["source"] == line_value(fields.get("source"))))
 
 
+def _same_block(block, status, fields):
+    """Steht `fields` mit `status` schon als dieser Block? `_same_question`, dazu gleiche Optionen
+    und gleiche Empfehlung."""
+    return (_same_question(block, status, fields)
+            and block["options"] == [line_value(o) for o in fields.get("options") or []]
+            and block["recommendation"] == line_value(fields.get("recommendation")))
+
+
 def append_block(root, status, fields):
     """Hängt einen Block an; liest die Ablage unter ihrer Sperre unmittelbar davor neu.
     (Nummer, angelegt, Problem, ohne Sperre: None oder Ursache, schon da). Steht derselbe Block
-    schon (`_same_block`), wird nichts geschrieben und „schon da“ ist True. Wirft `LockBusy`,
-    `Unreadable` oder OSError."""
+    schon (`_same_block`), wird nichts geschrieben und „schon da“ ist True; weichen nur Optionen oder
+    Empfehlung ab (`_same_question`), wird nichts geschrieben und das Problem sagt das. Wirft
+    `LockBusy`, `Unreadable` oder OSError."""
     path = ledger_path(root)
     with log_lock(ledger_lock_path(root)) as unlocked:
         text = read_ledger_text(root)
@@ -691,9 +721,15 @@ def append_block(root, status, fields):
             problem = ledger_problem(text, "nichts geschrieben")
             if problem:
                 return None, False, problem, unlocked, False
-            same = next((b for b in parse_blocks(text) if _same_block(b, status, fields)), None)
+            blocks = parse_blocks(text)
+            same = next((b for b in blocks if _same_block(b, status, fields)), None)
             if same:
                 return same["number"], False, None, unlocked, True
+            other = next((b for b in blocks if _same_question(b, status, fields)), None)
+            if other:
+                how = " oder mit resolve beantworten" if status == "offen" else ""
+                return None, False, (f"{other['id']} steht {status} mit anderen Optionen — von Hand ändern{how} "
+                                     f"({LEDGER_SHOWN}); nichts geschrieben."), unlocked, False
         number = max((int(n) for n in BLOCK_NUMBER_RE.findall(text or "")), default=0) + 1
         created = text is None
         base = ledger_template() if created else text
@@ -709,14 +745,16 @@ def _locked_problem(busy, root, what):
 def store_big(root, session, status, fields, row):
     """Legt einen Block in der Ablage an und die Protokollzeile `gross` mit `D-<n>`; (exit, Zeilen).
     Das Protokoll wird vorher geprüft, damit ein unlesbares nicht erst nach dem Block auffällt.
-    Steht der Block schon (ein Wiederholungsaufruf), wird nur eine fehlende Protokollzeile nachgeholt."""
+    Steht der Block schon (ein Wiederholungsaufruf), wird nur eine fehlende Protokollzeile ergänzt;
+    ob sie fehlt, prüft `append_row` unter der Sperre des Protokolls."""
     root = Path(root)
-    log_name = log_shown(root, session)
+    log_rel = shown(log_path(root, session), root)
+    log_name = f"Protokoll {log_rel}"
     try:
         text = read_log(root, session)
     except Unreadable as error:
         return 1, [unreadable_problem(error, log_name)]
-    problem = header_problem(text, shown(log_path(root, session), root), "nichts geschrieben") if text else None
+    problem = header_problem(text, log_rel, "nichts geschrieben") if text else None
     if problem:
         return 1, [problem]
     try:
@@ -732,15 +770,15 @@ def store_big(root, session, status, fields, row):
 
     did = f"D-{number}"
     lines = ["angelegt: docs/big-decisions.md"] if created else []
+    pending = (f"Bis zur Freigabe unterbleibt der Schritt; Antwort mit `resolve {did} --answer \"…\"` "
+               "oder `--reject`.")
     if existing:
         lines.append(f"{did} steht schon {status} in {LEDGER_SHOWN}: {line_value(fields['topic'])} — "
-                     f"„{line_value(fields['question'])}“; kein zweiter Block.")
-        if any(e["klasse"] == "gross" and e["entscheidung"] == did for e in parse_rows(text or "")):
-            return 0, lines + [f"Protokollzeile für {did} steht schon."]
+                     f"„{line_value(fields['question'])}“; kein zweiter Block."
+                     + (f" {pending}" if status == "offen" else ""))
     elif status == "offen":
         lines.append(f"{did} offen in {LEDGER_SHOWN}: {line_value(fields['topic'])} — "
-                     f"„{line_value(fields['question'])}“. Bis zur Freigabe unterbleibt der Schritt; "
-                     f"Antwort mit `resolve {did} --answer \"…\"` oder `--reject`.")
+                     f"„{line_value(fields['question'])}“. {pending}")
     else:
         lines.append(f"{did} {status} in {LEDGER_SHOWN}: {line_value(fields['topic'])} — "
                      f"„{line_value(fields['question'])}“ ({line_value(fields['source'])}).")
@@ -748,7 +786,7 @@ def store_big(root, session, status, fields, row):
         lines.append(f"Hinweis: Ablage ohne Sperre geschrieben ({unlocked}).")
     row = dict(row, entscheidung=did, klasse="gross")
     try:
-        log_created, problem, log_unlocked = append_row(root, session, row)
+        log_created, problem, log_unlocked, written = append_row(root, session, row, once=True)
     except LockBusy as busy:
         problem = _locked_problem(busy, root, "Protokoll")
     except Unreadable as error:
@@ -757,12 +795,14 @@ def store_big(root, session, status, fields, row):
         problem = f"{log_name} nicht schreibbar ({error.strerror or error}); nichts geschrieben."
     if problem:
         return 1, lines + [f"Protokollzeile für {did} fehlt — {problem} Der Block steht in {LEDGER_SHOWN}."]
-    if existing:
-        lines.append(f"Protokollzeile für {did} nachgetragen.")
+    if not written:
+        lines.append(f"Protokollzeile für {did} steht schon.")
+    elif existing:
+        lines.append(f"Protokollzeile für {did} ergänzt.")
     if log_unlocked:
         lines.append(f"Hinweis: Protokoll ohne Sperre geschrieben ({log_unlocked}).")
     if log_created:
-        lines.append(f"Protokoll angelegt: {shown(log_path(root, session), root)}")
+        lines.append(f"Protokoll angelegt: {log_rel}")
         notice = unversioned_notice(root)
         if notice:
             lines.append(notice)
@@ -773,9 +813,10 @@ def check_key(key, topic, rules):
     """(Schlüssel, Problem): `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus `CATEGORIES`,
     oder — mit und ohne Auftrag — `rule:<thema>`, wenn eine Regel `immer fragen` dieses Thema und
     `topic` trifft, dann in der Schreibweise der Regel. Leerraum um Kategorie, Pfadmuster und Text
-    fällt weg; Leerraum im Pfadmuster ist ein Fehler."""
-    key = line_value(key)
-    category, sep, rest = key.partition(":")
+    fällt weg; Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler."""
+    raw = (key or "").strip()
+    key = line_value(raw)
+    category, sep, rest = raw.partition(":")
     category = category.strip()
     if category == RULE_CATEGORY and sep:
         hits = [r for r in match_rules(rules, rest)[0] if r.kind == "immer fragen"]
@@ -790,14 +831,14 @@ def check_key(key, topic, rules):
     pattern = pattern.strip()
     if not sep or not pattern:
         return None, f"Schlüssel „{key}“ hat nicht die Form {KEY_FORM}; nichts geschrieben."
-    if re.search(r"\s", pattern):
-        return None, (f"Schlüssel „{key}“: Leerraum im Pfadmuster „{pattern}“ — Form {KEY_FORM}; "
-                      "nichts geschrieben.")
+    if re.search(r"[^\S ]", pattern):
+        return None, (f"Schlüssel „{key}“: Tab oder Zeilenumbruch im Pfadmuster „{line_value(pattern)}“ — "
+                      f"Form {KEY_FORM}; nichts geschrieben.")
     if category not in CATEGORIES:
         return None, (f"Schlüssel „{key}“: Kategorie „{category}“ unbekannt — erlaubt: "
                       f"{', '.join(CATEGORIES)}, oder rule:<thema> bei einer Regel immer fragen; "
                       "nichts geschrieben.")
-    return f"{category}:{pattern}{hash_}{text.strip()}", None
+    return f"{category}:{pattern}{hash_}{' '.join(text.split())}", None
 
 
 def _options(args):
@@ -885,11 +926,10 @@ def resolve(root, decision_id, answer, reject):
     status = "abgelehnt" if reject else "freigegeben"
     if answer == NONE:
         answer = "abgelehnt"
-    lock = ledger_lock_path(root)
-    lock_file = lock.with_name(lock.name + ".lock")       # so legt log_lock sie an
-    fresh = not lock_file.exists()
-    code, message = _resolve(root, did, number, answer, status, lock)
-    notice = unversioned_notice(root) if fresh and lock_file.exists() else None   # wie add (Spec 00 §1)
+    cache = root / ".skills" / "cache"
+    fresh = not cache.exists()
+    code, message = _resolve(root, did, number, answer, status, ledger_lock_path(root))
+    notice = unversioned_notice(root) if fresh and cache.exists() else None   # wie add (Spec 00 §1)
     return code, message + (f"\n{notice}" if notice else "")
 
 
@@ -1013,7 +1053,7 @@ def _add_small(root, session, args):
               "regel": rule_label(never[0]) if never else NONE}
     path_shown = shown(log_path(root, session), root)
     try:
-        created, problem, unlocked = append_row(root, session, values)
+        created, problem, unlocked, _ = append_row(root, session, values)
     except LockBusy as busy:
         return 1, _locked_problem(busy, root, "Protokoll"), False
     except Unreadable as error:

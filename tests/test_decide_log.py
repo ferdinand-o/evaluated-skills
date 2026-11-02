@@ -906,8 +906,8 @@ def test_key_category_and_pattern_trimmed(decide_repo, capsys):
     assert [b["key"] for b in dl.read_ledger(root)[0]] == [
         "dependency:pyproject.toml", "dependency:pyproject.toml#python-dateutil"]
     capsys.readouterr()
-    assert big(*TWO, question="Dritte?", key="dependency:pyproject .toml") == 1
-    assert "Leerraum" in capsys.readouterr().err
+    assert big(*TWO, question="Dritte?", key="dependency:pyproject\t.toml") == 1   # Leerzeichen: CP2-R2-F7
+    assert "Tab oder Zeilenumbruch" in capsys.readouterr().err
     assert blocks_in(root) == ["D-1", "D-2"]
 
 
@@ -1018,3 +1018,140 @@ def test_approved_request_with_rule_key(decide_repo, capsys):
     [block] = dl.read_ledger(root)[0]
     assert (block["status"], block["key"], block["topic"]) == ("freigegeben", "rule:UI-Texte", "UI-Texte")
     assert block["source"] == "Auftrag: „ändere die Meldung auf „Datei fehlt““"
+
+
+# --- Funde des Prüfpunkts 2, Runde 2 (F1–F9) --------------------------------------------
+
+def concurrent_row(monkeypatch, root):
+    """Zwischen dem Schreiben des Blocks und der Protokollzeile trägt ein zweites, gleiches add
+    seine Zeile `gross | D-<n>` ein — so, wie es zwei gleichzeitige Prozesse tun können. Einmalig."""
+    real = dl.append_block
+
+    def append_block(*args):
+        result = real(*args)
+        monkeypatch.setattr(dl, "append_block", real)
+        if result[0] is not None:
+            dl.append_row(root, SESSION, {"zeit": "2026-11-02T10:00:00", "thema": "Abhängigkeiten",
+                                          "klasse": "gross", "frage": "Datumsangaben parsen?",
+                                          "entscheidung": f"D-{result[0]}", "beleg": "—", "regel": "—"})
+        return result
+
+    monkeypatch.setattr(dl, "append_block", append_block)
+
+
+def test_concurrent_same_big_writes_one_row(decide_repo, monkeypatch, capsys):
+    """CP2-R2-F1: Ob die Zeile für D-<n> steht, prüft append_row unter der Sperre des Protokolls;
+    zwei gleiche add --class gross gleichzeitig ergeben eine Zeile gross | D-1."""
+    root, _ = decide_repo
+    concurrent_row(monkeypatch, root)
+    assert big(*TWO) == 0, capsys.readouterr().err          # neuer Block, die Zeile kam dazwischen
+    assert [(r[2], r[4]) for r in rows(root)] == [("gross", "D-1")]
+    assert "Protokollzeile für D-1 steht schon" in capsys.readouterr().out
+    # Block steht schon ohne Zeile; beide Aufrufe sehen das, einer schreibt die Zeile zuerst
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
+    with hold_lock(root):
+        assert big(*TWO, question="Zweite?") == 1
+    concurrent_row(monkeypatch, root)
+    assert big(*TWO, question="Zweite?") == 0, capsys.readouterr().err
+    assert [(r[2], r[4]) for r in rows(root)] == [("gross", "D-1"), ("gross", "D-2")]
+    assert blocks_in(root) == ["D-1", "D-2"]
+
+
+def test_same_question_other_options_is_refused(decide_repo, capsys):
+    """CP2-R2-F2: Gleiche Frage und gleicher Schlüssel, aber andere Optionen oder Empfehlung:
+    Exit 1, nichts geschrieben, statt still „steht schon“."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    before, log_before = ledger_text(root), log_file(root).read_text(encoding="utf-8")
+    capsys.readouterr()
+    fixed = ("--option", "A: python-dateutil", "--option", "B: datetime.strptime", "--recommendation", "B, weil Stdlib")
+    assert big(*fixed) == 1
+    err = capsys.readouterr().err
+    assert "D-1 steht offen mit anderen Optionen — von Hand ändern oder mit resolve beantworten" in err, err
+    assert big("--option", "A: python-dateutil", "--option", "B: strptime", "--recommendation", "A") == 1
+    assert "D-1 steht offen mit anderen Optionen" in capsys.readouterr().err
+    assert ledger_text(root) == before
+    assert log_file(root).read_text(encoding="utf-8") == log_before
+    assert big(*TWO) == 0                                   # wirklich gleich: weiter „steht schon“
+    assert "D-1 steht schon" in capsys.readouterr().out
+
+
+def test_existing_open_block_repeats_instruction(decide_repo, monkeypatch, capsys):
+    """CP2-R2-F3: Steht der offene Block schon, sagt die Ausgabe trotzdem, dass der Schritt bis zur
+    Freigabe unterbleibt; „Protokollzeile … ergänzt“ nur, wenn sie wirklich fehlte."""
+    root, _ = decide_repo
+    instruction = "Bis zur Freigabe unterbleibt der Schritt; Antwort mit `resolve D-1 --answer \"…\"` oder `--reject`."
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
+    with hold_lock(root):
+        assert big(*TWO) == 1
+    capsys.readouterr()
+    assert big(*TWO) == 0                                   # andere Sitzung, gleiche offene Frage
+    out = capsys.readouterr().out
+    assert instruction in out and "Protokollzeile für D-1 ergänzt." in out, out
+    assert "nachgetragen" not in out, out
+    assert big(*TWO) == 0
+    out = capsys.readouterr().out
+    assert instruction in out and "Protokollzeile für D-1 steht schon." in out, out
+    assert "ergänzt" not in out, out
+
+
+def test_first_field_wins_for_read_and_resolve(decide_repo):
+    """CP2-R2-F4: Steht ein Feld doppelt, gilt das erste — für parse_blocks wie für resolve."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    path = root / "docs" / "big-decisions.md"
+    path.write_text(ledger_text(root).rstrip("\n") + "\n  Antwort : siehe Chat\nOptionen:\n- C: später\n",
+                    encoding="utf-8")
+    [block] = dl.read_ledger(root)[0]
+    assert block["answer"] == "—" and block["options"] == ["A: python-dateutil", "B: strptime"], block
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    [block] = dl.read_ledger(root)[0]
+    assert (block["status"], block["answer"]) == ("freigegeben", "B"), block
+
+
+def test_resolve_notice_follows_cache_folder(decide_repo, monkeypatch, capsys):
+    """CP2-R2-F5: resolve gibt den Hinweis zum unversionierten Ordner genau dann, wenn
+    .skills/cache/ dabei entstand — nicht nach der Sperrdatei."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert big(*TWO, question="Zweite?") == 0
+    (root / ".skills" / "cache" / "decide" / "big-decisions.md.lock").unlink()   # Ordner bleibt
+    capsys.readouterr()
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    assert ".gitignore" not in capsys.readouterr().out
+    shutil.rmtree(root / ".skills")
+    monkeypatch.setattr(dl, "fcntl", None)
+    monkeypatch.setattr(dl, "msvcrt", None)
+    assert dl.main(["resolve", "D-2", "--answer", "B"]) == 0
+    out = capsys.readouterr().out
+    assert ".skills/cache/ steht nicht in der .gitignore" in out and "ohne Sperre" in out, out
+
+
+def test_rules_and_template_with_bom(decide_repo, monkeypatch, tmp_path):
+    """CP2-R2-F6: rules.md und die Vorlage werden mit utf-8-sig gelesen; ein BOM macht die erste
+    Regel nicht ungültig und die Vorlage nicht unbrauchbar."""
+    root, home = decide_repo
+    rules = root / ".skills" / "decide" / "rules.md"
+    rules.parent.mkdir(parents=True)
+    rules.write_bytes(b"\xef\xbb\xbf" + "immer fragen: UI-Texte\n".encode("utf-8"))
+    assert [(r.kind, r.topic) for r in dl.load_rules(root, home)] == [("immer fragen", "UI-Texte")]
+    asset = tmp_path / "vorlage.md"
+    asset.write_bytes(b"\xef\xbb\xbf" + (dl.LOG_HEADER + "\n\n# Große Entscheidungen (Vorlage)\n").encode("utf-8"))
+    monkeypatch.setattr(dl, "LEDGER_ASSET", asset)
+    assert add_small("UI-Texte", "Text?", "A: kurz", "gesucht: a.py — Treffer: a.py:1",
+                     "--option", "A: kurz", "--option", "B: lang") == 0
+    raw = (root / "docs" / "big-decisions.md").read_bytes()
+    assert "# Große Entscheidungen (Vorlage)".encode("utf-8") in raw and not raw.startswith(b"\xef\xbb\xbf")
+    assert "rule:UI-Texte" in ledger_text(root)
+
+
+def test_key_pattern_with_inner_spaces(decide_repo, capsys):
+    """CP2-R2-F7: Leerzeichen im Pfadmuster sind erlaubt, nur Rand-Leerraum fällt weg; Tab und
+    Zeilenumbruch im Muster weist check_key weiter ab."""
+    root, _ = decide_repo
+    assert big(*TWO, key=" data-delete : docs/User Guides/*.md ") == 0, capsys.readouterr().err
+    assert dl.read_ledger(root)[0][0]["key"] == "data-delete:docs/User Guides/*.md"
+    for bad in ("data-delete:docs/User\tGuides/*.md", "data-delete:docs/User\nGuides/*.md"):
+        assert big(*TWO, question="Zweite?", key=bad) == 1, bad
+        assert "Tab oder Zeilenumbruch" in capsys.readouterr().err
+    assert blocks_in(root) == ["D-1"]
