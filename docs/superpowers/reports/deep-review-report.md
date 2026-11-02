@@ -548,6 +548,27 @@ Offen für known-limits:
 - Ein Fund aus `findings.json` mit nur einer Quelle wird auch in der Quellenform dargestellt,
   die Zeile steht dann doppelt.
 
+### Task 10, Task 11 und Prüfpunkt 8 (C5)
+
+Task 10 (review-brief.md, delphi.md) und Task 11 (Berichtsvorlage mit `test_report_template`)
+liefen mit Sonnet, `verify` PASS. Der Commit von Task 10 trug „Claude Sonnet 5.5“ statt der
+Attributionsvorgabe der Sitzung. Ich habe ihn vor dem Merge im lokalen Commit berichtigt, seither
+nennt jeder Dispatch die Zeilen wörtlich. Beim Suite-Lauf nach dem Merge von Task 11 startete
+der Container neu. Merge und Aufräumen waren schon durch; der wiederholte Lauf ergab 1.771 grün.
+
+`/code-review` über 504 Zeilen ergab 18 Funde. Die wichtigsten:
+
+- Eine korrekt ausgefüllte Vorlage konnte an der Längengrenze von `audit` scheitern: 18 feste
+  Zeilen plus eine je Grund unter „Nicht geprüft“.
+- Platz für `notes`, „Gegenstellen nicht gesammelt“ und die übernommenen Dateien fehlte.
+- `/security-review` prüft den aktuellen Branch, nicht den Planbereich.
+- In delphi.md stimmte der Zeitpunkt der Freigabe bei `as`-Interface-Temporären nicht, und es
+  standen zwei falsche RTL-Namen (`TStringList.Items`, `UTCNow`) darin.
+- Das Extract-Beispiel glich dem geplanten Eval-Szenario.
+
+Ein Fund (Runlog-Zeile für Task 11) war beim Review schon behoben. Die übrigen gehen
+zusammengefasst als F1–F12 in Fix-Runde 1.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
