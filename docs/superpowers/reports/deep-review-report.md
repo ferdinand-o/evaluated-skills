@@ -318,6 +318,38 @@ weiterzugeben. 4 Läufe, 3,27 USD.
   beides zusammen — Paket und Gegenstellen — findet P2 und P4 (je einmal in zwei Läufen).
   Für Spec 27 stützt die Messung kleine Prüfpunkt-Bereiche.
 
+## Bau (ab 2026-11-02)
+
+### Prüfpunkt 1 (vor Task 3, nach Task 2)
+
+`/code-review --max-findings all` über Task 2 (525 Zeilen): 17 Funde, Fix-Runde 1 behob alle;
+Review des Fixes: 10 Funde, Fix-Runde 2 behob alle; Review des zweiten Fixes: 12 Funde.
+Nach der Regel von subagent-dev (zwei Fix-Runden) entschied der Nutzer: eine dritte, schmale
+Runde für die drei echten (Delphi-Testregel als Segmentregel, Wurzel-Commit mit `root` und
+Hilfscommits, Quelldatei mit Nicht-UTF-8-Pfad mit eigenem Grund), die übrigen neun bleiben
+offen und gehen nach known-limits:
+
+- Einzelner Bereich `X` wird beim Wiedereinlesen über die Merge-Basis zu `Span(fork, X, fork)`;
+  bei Criss-Cross-Historie liefert `git log` dann andere Commit-Messages als `BASIS..X`.
+- `_toplevel` meldet jeden Git-Fehler als „kein Git-Repository" (auch „dubious ownership").
+- `git rev-parse --show-toplevel` und die Bereichsprüfung laufen je Plan zweimal.
+- Temp-Datei in `write_json` wird außerhalb des `try` angelegt; ein Abbruch genau dazwischen
+  hinterlässt eine `.tmp`-Datei.
+- Die escapte Form eines Nicht-UTF-8-Pfads ist nicht eindeutig gegen einen echten Pfad mit
+  Backslash-Folge.
+- Der Kommentar zu `DIFF_PATHSPEC` verschweigt, dass subagent-dev aus seinem Arbeitsordner
+  zählt, deep-review aus der Repo-Wurzel.
+- `test_f15` prüft nur UTC-Eingaben, nicht mehr die Sommerzeit-Reihenfolge.
+- `new_run_id` lehnt eine korrekte Ortszeit mit Offset ab, statt sie nach UTC umzurechnen.
+
+**Lessons für subagent-dev:** (1) Agent-Worktrees starten auf `main`, nicht auf dem
+Arbeitsbranch; jeder Agent musste die Basis selbst zurücksetzen — der Dispatch nennt sie seither
+ausdrücklich. (2) `fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die
+Testdatei, obwohl die Akzeptanz „mit Test belegt" verlangt; von Hand ergänzt. (3) Das Review
+des Fixes mit `--max-findings all` findet auf neuem Code jede Runde neue Randfälle; nach zwei
+Runden liefen die Funde von „Absturz" zu „Kommentar ungenau" — die Grenze von zwei Runden
+trägt.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,

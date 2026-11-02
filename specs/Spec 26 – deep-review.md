@@ -120,7 +120,9 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
      `.skills/` nie; eine Umbenennung ist eine gelöschte und eine neue Datei.
    - Nicht reviewt, mit Grund unter `not_reviewed`: Dateien ohne Quellcode (Markdown, `NEWS`,
      Bilder, `.dproj`, `.res`) und Testdateien (`test_*.py`, `*_test.py`, unter `tests/` oder
-     `unittests/`, `*Test*.pas`), Tests nur mit `--with-tests` — so lief die Messung.
+     `unittests/` ohne Rücksicht auf Groß/Klein, Delphi-Units mit einem Namenssegment
+     `Test` oder `Tests` — getrennt an `.`, `_` und Großbuchstaben, also `App.Tests.Core.pas`
+     ja, `Testament.pas` nein), Tests nur mit `--with-tests` — so lief die Messung.
    - Bis `split_at` (Standard 800) geänderte Zeilen, oder wenn der Schnitt nur ein Paket ergibt:
      ein Paket `p1` über den Bereich, `split: false`. Gezählt wird ab der Merge-Basis
      (`git diff <merge-base> ZIEL`), die Commit-Messages kommen aus `git log BASIS..ZIEL`. Darüber `split: true` und `packet_size` = kleiner von 600 und `split_at`.
