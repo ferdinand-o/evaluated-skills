@@ -61,7 +61,7 @@ und der Bootstrap nennt beide Orte.
 
 | Datei | schreibt | Inhalt |
 | --- | --- | --- |
-| `plan.json` | `plan` | `_meta`, `range`, `profile`, `focus`, `split`, `split_at`, `packet_size`, `changed_lines`, `packets` (je `id`, `files`, `changed_lines`, `range`, `reused_from`), `file_keys` (je Datei ein Schlüssel), `not_reviewed` (Dateien mit Grund) |
+| `plan.json` | `plan` | `_meta`, `range` (aufgelöst, `<base>..<target>`, beim Wurzel-Commit nur `<target>`), `base` (gezählte Basis: Merge-Basis, beim Wurzel-Commit der leere Baum), `target`, `log_base` (aufgelöste BASIS für die Commit-Messages), `profile`, `focus`, `split`, `split_at`, `packet_size`, `changed_lines`, `packets` (je `id`, `files`, `changed_lines`, `range`, `reused_from`), `file_keys` (je Datei ein Schlüssel), `not_reviewed` (Dateien mit Grund) |
 | `packets/<id>.md` | `counterparts` | Kopfzeile, Bereich und Dateien des Pakets, Gegenstellen je geänderter Stelle, Zahl der nicht aufgelösten |
 | `results/<id>.json` | `record` | `_meta` mit `packet`, `tool`; `findings` als Liste (`file`, `line`, `summary`, `failure_scenario`) |
 | `findings.json` | `merge` | `_meta`, `findings` als Liste mit `file`, `line`, `summary`, `failure_scenario`, `packets` — die Felder, die `fix-task` von `/code-review` liest (Spec 27) |
@@ -121,8 +121,9 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    - Nicht reviewt, mit Grund unter `not_reviewed`: Dateien ohne Quellcode (Markdown, `NEWS`,
      Bilder, `.dproj`, `.res`) und Testdateien (`test_*.py`, `*_test.py`, unter `tests/` oder
      `unittests/`, `*Test*.pas`), Tests nur mit `--with-tests` — so lief die Messung.
-   - Bis `split_at` (Standard 800) geänderte Zeilen: ein Paket `p1` über den Originalbereich,
-     `split: false`. Darüber `split: true` und `packet_size` = kleiner von 600 und `split_at`.
+   - Bis `split_at` (Standard 800) geänderte Zeilen, oder wenn der Schnitt nur ein Paket ergibt:
+     ein Paket `p1` über den Bereich, `split: false`. Gezählt wird ab der Merge-Basis
+     (`git diff <merge-base> ZIEL`), die Commit-Messages kommen aus `git log BASIS..ZIEL`. Darüber `split: true` und `packet_size` = kleiner von 600 und `split_at`.
    - **Schnittregel:** Dateien nach Pfad sortiert und nach ihrem Verzeichnis gruppiert. Gruppen
      werden in dieser Reihenfolge der Reihe nach in Pakete gefüllt, solange das Paket
      `packet_size` nicht überschreitet; ein Paket nimmt mehrere Verzeichnisse auf. Eine Gruppe,
