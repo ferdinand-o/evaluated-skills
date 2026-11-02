@@ -898,7 +898,9 @@ def _check_file_keys(keyed, bad) -> dict:
     """`file_keys` eines Plans prüfen; `bad(grund)` liefert den KitError. Ein Objekt Pfad →
     Objekt mit `key` (Text), `changed_lines` (Zahl ≥ 0), `base_blob`/`target_blob` (Text,
     wenn vorhanden — ältere Pläne haben sie nicht), `reused_from` (Text oder null),
-    `reused_chain` (Liste von Text, wenn vorhanden) und `findings` (Liste, wenn vorhanden).
+    `reused_chain` (Liste von Text, wenn vorhanden), `findings` (Liste, wenn vorhanden) und
+    `outside` (wenn vorhanden: Liste von Objekten mit `finding` (Objekt), `packet_files`
+    (nicht leere Liste von Text) und `file_blob` (Text); siehe `apply_since`).
     Fehlt `file_keys` ganz: leer."""
     if keyed is None:
         return {}
@@ -923,6 +925,15 @@ def _check_file_keys(keyed, bad) -> dict:
         chain = info.get("reused_chain", [])
         if not isinstance(chain, list) or not all(isinstance(r, str) and r for r in chain):
             raise bad(f"{where}: reused_chain ist keine Liste von Lauf-IDs")
+        outside = info.get("outside", [])
+        if not isinstance(outside, list) or not all(
+                isinstance(item, dict) and isinstance(item.get("finding"), dict)
+                and isinstance(item.get("packet_files"), list) and item["packet_files"]
+                and all(isinstance(p, str) and p for p in item["packet_files"])
+                and isinstance(item.get("file_blob"), str) and item["file_blob"]
+                for item in outside):
+            raise bad(f"{where}: outside ist keine Liste von Objekten mit finding, packet_files "
+                      "und file_blob")
     return keyed
 
 
@@ -3894,23 +3905,29 @@ def _checked_plan(directory, run_id: str) -> tuple[dict, dict]:
     """(Plan, `file_keys`) aus `<laufordner>/plan.json`, geprüft — der eine Weg für den eigenen
     Lauf (`merge`, `audit`) und die früheren Läufe von `--since` (`_earlier_plan`): der Plan
     wie `_read_plan`, `file_keys` wie `_check_file_keys`, und jeder übernommene Fund unter
-    `file_keys[…].findings` nach denselben Regeln wie in `record` (`_clean_finding`; im Plan
-    stehen danach die bereinigten Funde). Was nicht besteht, ist ein KitError, der Lauf und
-    Datei nennt. Fehlt `file_keys`: `{}`."""
+    `file_keys[…].findings` und `file_keys[…].outside[…].finding` nach denselben Regeln wie in
+    `record` (`_clean_finding`; im Plan stehen danach die bereinigten Funde). Was nicht
+    besteht, ist ein KitError, der Lauf und Datei nennt. Fehlt `file_keys`: `{}`."""
     directory = Path(directory)
     path = directory / "plan.json"
     plan = _read_plan(path, run_id)
     keyed = _check_file_keys(plan.get("file_keys"), lambda why: _plan_error(run_id, path, why))
     repo = None
     for file, info in keyed.items():
-        if "findings" not in info:
+        if "findings" not in info and "outside" not in info:
             continue
         if repo is None:
             repo = _layout(directory)[0]
+        field = "findings"
         try:
-            info["findings"] = [_clean_finding(f, i, repo) for i, f in enumerate(info["findings"], 1)]
+            if "findings" in info:
+                info["findings"] = [_clean_finding(f, i, repo)
+                                    for i, f in enumerate(info["findings"], 1)]
+            field = "outside"
+            for i, item in enumerate(info.get("outside", []), 1):
+                item["finding"] = _clean_finding(item["finding"], i, repo)
         except KitError as exc:
-            raise _plan_error(run_id, path, f"file_keys[{file!r}].findings: {exc}") from None
+            raise _plan_error(run_id, path, f"file_keys[{file!r}].{field}: {exc}") from None
     return plan, keyed
 
 
@@ -3935,9 +3952,9 @@ class _Reviewed(NamedTuple):
 
 
 class _Earlier(NamedTuple):
-    """Was ein früherer Lauf reviewt hat: `files` (Datei → `_Reviewed`) und `outside` — je
-    Paket mit angenommenem Ergebnis, das Funde zu Dateien außerhalb seiner eigenen Dateien
-    hat (etwa zur Definitionsdatei einer Gegenstelle), `(Dateien des Pakets, diese Funde)`."""
+    """Was ein früherer Lauf reviewt hat: `files` (Datei → `_Reviewed`) und `outside` — die
+    Funde zu Dateien außerhalb ihres Pakets (etwa zur Definitionsdatei einer Gegenstelle), je
+    als Element `{"finding", "packet_files", "file_blob"}` wie in `file_keys[…].outside`."""
     files: dict
     outside: list
 
@@ -3947,8 +3964,11 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
     angenommenes Ergebnis hat — dieselbe Regel wie in `audit` (`_read_result` mit dem
     Fingerabdruck des Plans, einmal je Plan berechnet) — und hat dann die Funde zu ihr daraus;
     oder wenn der Lauf sie selbst übernommen hat (`reused_from` mit `findings` in seinem
-    `file_keys`, darunter auch dort angehängte Funde zu anderen Dateien). `plan` ist geprüft
-    (`_earlier_plan`)."""
+    `file_keys`; gezählt werden dort nur die Funde zu ihr selbst). `outside`: je Fund eines
+    angenommenen Ergebnisses zu einer Datei außerhalb seines Pakets ein Element mit den
+    Dateien des Pakets und dem Stand der Fund-Datei am ZIEL dieses Laufs (`_file_blobs`, ein
+    git-Aufruf je Lauf); dazu die `outside`-Elemente seiner übernommenen Einträge, wie sie
+    sind. `plan` ist geprüft (`_earlier_plan`)."""
     directory = Path(directory)
     keyed = plan.get("file_keys") or {}
     run_id = directory.name
@@ -3968,12 +3988,17 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
         for path in packet["files"]:
             if path in keyed:
                 files[path] = reviewed(keyed[path], [f for f in result.findings if f["file"] == path])
-        rest = [f for f in result.findings if f["file"] not in own]
-        if rest:
-            outside.append((list(packet["files"]), rest))
+        outside += [{"finding": f, "packet_files": list(packet["files"]), "file_blob": None}
+                    for f in result.findings if f["file"] not in own]
+    if outside:
+        blobs = _file_blobs(repo, plan["target"], {item["finding"]["file"] for item in outside})
+        for item in outside:
+            item["file_blob"] = blobs[item["finding"]["file"]]
     for path, info in keyed.items():
         if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
-            files.setdefault(path, reviewed(info, info["findings"]))
+            mine = [f for f in info["findings"] if f["file"] == path]
+            files.setdefault(path, reviewed(info, mine))
+            outside += copy.deepcopy(info.get("outside", []))
     return _Earlier(files, outside)
 
 
@@ -4056,13 +4081,21 @@ def apply_since(plan, run_dirs):
     Angenommen ist ein Ergebnis nach derselben Regel wie in `audit` (`_read_result`).
 
     Funde eines früheren Pakets zu Dateien außerhalb seiner eigenen Dateien (etwa zur
-    Definitionsdatei einer Gegenstelle) gehören zu keiner Datei des Pakets. Sie werden nur
-    übernommen, wenn jede Datei dieses Pakets im neuen Plan übernommen wird und der frühere
-    Lauf in ihrer `reused_chain` steht; dann hängen sie, mit ihrem eigenen `file`, an den
-    `findings` der ersten dieser Dateien in der Reihenfolge von `file_keys` (ein Fund mit
-    gleichem `file`, `line` und `summary` nur einmal). Wird eine Datei des Pakets nicht
-    übernommen, entfallen sie: Die übrigen Dateien des Pakets werden neu reviewt, und dieses
-    Review sieht die Gegenstelle wieder.
+    Definitionsdatei einer Gegenstelle) gehören zu keiner Datei des Pakets. Sie stehen
+    getrennt von `findings` unter `outside` eines übernommenen Eintrags, je als Element
+    `{"finding": der Fund, "packet_files": die Dateien des Pakets, das ihn fand, "file_blob":
+    Stand der Fund-Datei am ZIEL des Laufs, der ihn fand (`<modus>:<sha>`, `ABSENT_MARK`,
+    `gitlink:<commit>`)}`; ein Lauf, der sie übernommen hat, gibt sie so weiter, nie als
+    eigene Funde seiner Datei. Bei jedem Hop wird neu geprüft: Übernommen wird ein Element nur,
+    wenn jede Datei aus `packet_files` im neuen Plan übernommen wird, der frühere Lauf, der das
+    Element trägt, in ihrer `reused_chain` steht und die Fund-Datei am ZIEL des neuen Plans
+    denselben `file_blob` hat (aus Git; das Repo ergibt sich aus dem Ordner des früheren
+    Laufs). Dann hängt es an `outside` der ersten dieser Dateien in der Reihenfolge von
+    `file_keys` (ein Fund mit gleichem `file`, `line` und `summary` nur einmal); `outside`
+    steht nur an Einträgen, die ein Element tragen. Sonst entfällt es: Die übrigen Dateien des
+    Pakets werden neu reviewt, und dieses Review sieht die Gegenstelle wieder; eine geänderte
+    Fund-Datei steht selbst im Bereich. `merge` und `audit` zählen die Elemente wie die
+    übrigen übernommenen Funde.
 
     Wurde etwas übernommen, werden die übrigen Dateien mit `_pack` neu gepackt — dieselbe
     Regel wie in `build_plan`, mit `split_at` und `packet_size` des Plans; keine Datei übrig:
@@ -4077,7 +4110,7 @@ def apply_since(plan, run_dirs):
                      lambda why: KitError(f"apply_since braucht einen deep-review-Plan ({why})"))
     new = copy.deepcopy(plan)
     own_run = (plan.get("_meta") or {}).get("run") if isinstance(plan.get("_meta"), dict) else None
-    earlier = {}
+    earlier, repo = {}, None
     for directory in run_dirs:
         run_id, eplan = _earlier_plan(directory)
         if run_id == own_run:
@@ -4085,6 +4118,7 @@ def apply_since(plan, run_dirs):
         if eplan.get("focus") != plan.get("focus") or eplan.get("profile") != plan.get("profile"):
             continue
         earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan))
+        repo = repo or _layout(Path(directory))[0]
     youngest_first = sorted(earlier, key=lambda r: earlier[r][0], reverse=True)
 
     reused = {}
@@ -4118,17 +4152,22 @@ def apply_since(plan, run_dirs):
     if not reused:
         return new
     order = {path: i for i, path in enumerate(plan["file_keys"])}
-    for run_id in youngest_first:
-        for files, findings in earlier[run_id][1].outside:
-            if not all(path in reused and run_id in reused[path][1] for path in files):
+    candidates = [item for run_id in youngest_first for item in earlier[run_id][1].outside
+                  if all(path in reused and run_id in reused[path][1]
+                         for path in item["packet_files"])]
+    outside: dict[str, list] = {}
+    if candidates and isinstance(plan.get("target"), str):
+        now = _file_blobs(repo, plan["target"], {item["finding"]["file"] for item in candidates})
+        seen: dict[str, set] = {}
+        for item in candidates:
+            if now[item["finding"]["file"]] != item["file_blob"]:
                 continue
-            found = reused[min(files, key=order.__getitem__)][2]
-            seen = {(f.get("file"), f.get("line"), f.get("summary")) for f in found}
-            for finding in findings:
-                mark = (finding.get("file"), finding.get("line"), finding.get("summary"))
-                if mark not in seen:
-                    seen.add(mark)
-                    found.append(finding)
+            home = min(item["packet_files"], key=order.__getitem__)
+            finding = item["finding"]
+            mark = (finding.get("file"), finding.get("line"), finding.get("summary"))
+            if mark not in seen.setdefault(home, set()):
+                seen[home].add(mark)
+                outside.setdefault(home, []).append(item)
 
     packet_files = [f for packet in plan["packets"] for f in packet["files"]]
     if sorted(packet_files) != sorted(plan["file_keys"]):
@@ -4137,6 +4176,8 @@ def apply_since(plan, run_dirs):
         new["file_keys"][path]["reused_from"] = run_id
         new["file_keys"][path]["reused_chain"] = chain
         new["file_keys"][path]["findings"] = copy.deepcopy(findings)
+        if path in outside:
+            new["file_keys"][path]["outside"] = copy.deepcopy(outside[path])
     remaining = {path: info["changed_lines"] for path, info in plan["file_keys"].items()
                  if path not in reused}
     packets = _pack(remaining, plan.get("focus"), plan.get("split_at", SPLIT_AT),
@@ -4217,9 +4258,13 @@ REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 REPORT_COUNT_RE = re.compile(r"^[ \t>*_#-]*Funde:[ \t*_]*(\d+)", re.MULTILINE)
 REPORT_COVERAGE_RE = re.compile(r"^[ \t>*_#-]*Abdeckung:[ \t*_]*(\d+)[ \t]*/[ \t]*(\d+)(.*)$",
                                 re.MULTILINE)
-REPORT_CLAIM_RE = re.compile(r"\bvollständig\b", re.IGNORECASE)        # nur das ganze Wort
-REPORT_NEGATION_RE = re.compile(r"(?:\bnicht(?:\s+mehr)?\s+|\bun\s*)\Z", re.IGNORECASE)
-REPORT_NEGATION_CHARS = 40  # so weit vor „vollständig" wird nach der Verneinung gesucht
+# „vollständig" und seine Adjektiv-Endungen als ganzes Wort, nicht „Vollständigkeit"
+REPORT_CLAIM_RE = re.compile(r"\bvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
+# Verneinung vor der Behauptung: „nicht", „kein…" (auch „keineswegs") oder „un", mit höchstens
+# zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz"); Satzzeichen beenden sie
+REPORT_NEGATION_RE = re.compile(r"\b(?:nicht|kein\w*|un)(?:\s+\w+){0,2}\s*\Z", re.IGNORECASE)
+REPORT_EMPHASIS_RE = re.compile(r"[*_`]+")   # Markdown-Hervorhebung zählt beim Lesen nicht
+REPORT_NEGATION_CHARS = 80  # so weit vor „vollständig" wird nach der Verneinung gesucht
 REPORT_DENIAL_RE = re.compile(r"\bunvollständig|\bnicht(?:\s+mehr)?\s+vollständig\b",
                               re.IGNORECASE)
 # Fundzeile: `datei:zeile` in Backticks (Pfad darf Leerzeichen haben) oder ohne (dann ohne)
@@ -4324,13 +4369,21 @@ def _clean_finding(item, index: int, repo: Path) -> dict:
 def _read_payload(payload_path) -> list:
     """Die Liste der Funde aus `payload_path` (`-`: stdin): eine JSON-Liste oder ein Objekt
     mit der Liste unter `findings`. stdin wird als UTF-8 gelesen, nicht in der Kodierung des
-    Systems; kein UTF-8 ist ein KitError."""
+    Systems, ein BOM am Anfang zählt nicht; kein UTF-8, kein stdin (`sys.stdin` None, etwa
+    unter pythonw) oder ein geschlossenes stdin ist ein KitError."""
     if str(payload_path) == "-":
-        raw = getattr(sys.stdin, "buffer", None)
+        stdin = sys.stdin
+        if stdin is None:
+            raise KitError("kein stdin für das Ergebnis (-) — die Liste auf stdin geben oder "
+                           "eine Datei nennen")
+        raw = getattr(stdin, "buffer", None)
         try:
-            text = raw.read().decode("utf-8") if raw is not None else sys.stdin.read()
+            text = (raw.read().decode("utf-8-sig") if raw is not None
+                    else stdin.read().removeprefix("﻿"))
         except UnicodeDecodeError as exc:
             raise KitError(f"Ergebnis auf stdin ist kein UTF-8: {exc}") from None
+        except (ValueError, OSError) as exc:
+            raise KitError(f"stdin nicht lesbar: {exc}") from None
     else:
         try:
             text = Path(payload_path).read_text(encoding="utf-8")
@@ -4457,12 +4510,14 @@ def _results(directory: Path, plan: dict, run_id: str, repo: Path) -> tuple[dict
 
 def _sources(accepted: dict, keyed: dict) -> list:
     """Alle Funde, die in `findings.json` stehen müssen: die der angenommenen Ergebnisse, dann
-    die übernommenen aus `file_keys` (Dateien mit `reused_from` und `findings`; geprüft von
-    `_checked_plan`)."""
+    die übernommenen aus `file_keys` (Dateien mit `reused_from` und `findings`, dazu die Funde
+    ihrer `outside`-Elemente mit demselben `reused_from`; geprüft von `_checked_plan`)."""
     out = [_Source(f, pid, None) for pid, result in accepted.items() for f in result.findings]
     for info in keyed.values():
         if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
             out += [_Source(dict(f), None, info["reused_from"]) for f in info["findings"]]
+            out += [_Source(dict(item["finding"]), None, info["reused_from"])
+                    for item in info.get("outside", [])]
     return out
 
 
@@ -4497,11 +4552,14 @@ def _merge_sources(sources: list, rank: dict) -> list:
     """Funde derselben Datei mit höchstens `MERGE_LINE_GAP` Zeilen Abstand werden ein Fund —
     nicht verkettet: In Zeilenfolge (Anfang, Ende, Herkunft) eröffnet ein Fund eine Gruppe, und
     ein späterer kommt nur hinein, wenn sein Anfang höchstens `MERGE_LINE_GAP` nach dem Ende
-    dieses ersten Funds liegt; sonst eröffnet er die nächste. 10, 12 ist ein Fund; 10, 13, 16
-    sind zwei (10 und 13, dann 16), obwohl 16 nur drei nach 13 liegt; `20-22` und 25 sind einer.
-    So liegt kein Glied weiter als `MERGE_LINE_GAP` von der Zeile, die der Fund nennt. Ohne
-    Zeile bleibt jeder für sich. Je Fund wird die Zeile einmal gelesen (`_line_span`).
-    Sortiert nach Datei, Zeile (ohne Zeile zuletzt) und Herkunft."""
+    dieses ersten Funds liegt (dem Anker) oder seine Spanne die eines Glieds der Gruppe
+    überschneidet; sonst eröffnet er die nächste. Ein Glied verlängert den Anker nicht. 10, 12
+    ist ein Fund; 10, 13, 16 sind zwei (10 und 13, dann 16), obwohl 16 nur drei nach 13 liegt;
+    `20-22` und 25 sind einer; 10, `11-40`, 14 sind einer (14 liegt in `11-40`), 10, `11-40`,
+    42 zwei. So liegt kein Glied weiter als `MERGE_LINE_GAP` von der Zeile, die der Fund nennt,
+    außer es liegt in der Spanne eines anderen Glieds. Ohne Zeile bleibt jeder für sich. Je Fund
+    wird die Zeile einmal gelesen (`_line_span`). Sortiert nach Datei, Zeile (ohne Zeile
+    zuletzt) und Herkunft."""
     by_file: dict[str, list] = {}
     for order, source in enumerate(sources):
         by_file.setdefault(source.finding["file"], []).append((order, source))
@@ -4515,23 +4573,26 @@ def _merge_sources(sources: list, rank: dict) -> list:
             else:
                 spans.append((span, order, source))
         spans.sort(key=lambda t: (t[0], t[1]))
-        groups, anchor = [], None
+        groups, anchor, reach = [], None, None   # reach: das späteste Ende eines Glieds
         for span, _order, source in spans:
-            if groups and span[0] - anchor <= MERGE_LINE_GAP:
+            # Nach Anfang sortiert: Überschneidung mit einem Glied, wenn sie bis `reach` beginnt.
+            if groups and (span[0] - anchor <= MERGE_LINE_GAP or span[0] <= reach):
                 groups[-1].append(source)
+                reach = max(reach, span[1])
             else:
                 groups.append([source])
-                anchor = span[1]
+                anchor = reach = span[1]
         out += [_merged(group, rank) for group in groups + loose]
     return out
 
 
 def merge(run_path):
     """`merge --run <lauf>`: `findings.json` aus allen angenommenen Ergebnissen und den
-    übernommenen Funden des Plans (Spec 26, Ablauf Schritt 5). Abgestimmt wird nicht: Funde
-    derselben Datei mit höchstens `MERGE_LINE_GAP` Zeilen Abstand zum ersten Fund ihrer Gruppe
-    werden einer (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die des ersten),
-    `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
+    übernommenen Funden des Plans (Spec 26, Ablauf Schritt 5; auch die `outside`-Elemente der
+    übernommenen Einträge). Abgestimmt wird nicht: Funde derselben Datei mit höchstens
+    `MERGE_LINE_GAP` Zeilen Abstand zum ersten Fund ihrer Gruppe oder in der Spanne eines ihrer
+    Glieder werden einer (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die
+    des ersten), `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
     `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (Lauf-ID aus
     `file_keys` oder null) und `sources` (jeder ursprüngliche Fund mit `packet` oder
     `reused_from`). Pakete ohne angenommenes Ergebnis fehlen — das meldet `audit`. `_meta`
@@ -4638,14 +4699,30 @@ def _header_mismatch(head, run_id: str, plan: dict, tools: set) -> list:
 
 
 def _claims_complete(text: str) -> bool:
-    """Ob `text` „vollständig" behauptet: das ganze Wort (nicht „Vollständigkeit",
-    „vollständige"), nicht verneint durch „nicht", „nicht mehr" oder „un" davor, mit
-    beliebigem Leerraum dazwischen, auch über einen Zeilenumbruch."""
+    """Ob `text` „vollständig" behauptet: das ganze Wort oder eine Adjektivform („vollständige",
+    „vollständiges", „vollständigen", „vollständiger", „vollständigem"; groß oder klein, nicht
+    „Vollständigkeit"), nicht verneint durch „nicht", „kein…" („keine", „keineswegs") oder „un"
+    davor, mit höchstens zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz") und
+    beliebigem Leerraum, auch über einen Zeilenumbruch (`REPORT_NEGATION_RE`). Markdown-
+    Hervorhebung (`*`, `_`, `` ` ``) zählt nicht: „**nicht** vollständig" ist verneint."""
+    text = REPORT_EMPHASIS_RE.sub("", text)
     for match in REPORT_CLAIM_RE.finditer(text):
-        before = text[max(0, match.start() - REPORT_NEGATION_CHARS):match.start()]
+        lo = max(0, match.start() - REPORT_NEGATION_CHARS)
+        before = text[lo:match.start()]
+        if lo and re.match(r"\w", text[lo - 1]):
+            before = re.sub(r"\A\w+", "", before)          # kein abgeschnittenes Wort am Anfang
         if not REPORT_NEGATION_RE.search(before):
             return True
     return False
+
+
+def _lists_finding(where: str, path: str, line) -> bool:
+    """Ob die Stelle `where` einer Fundzeile (`datei:zeile` oder `datei`) den Fund `path`,
+    `line` nennt: `path:line`, ohne Zeile `path` oder `path:` mit etwas anderem als einer Zahl."""
+    if line is None:
+        rest = where[len(path) + 1:]
+        return where == path or (where.startswith(path + ":") and not rest[:1].isdigit())
+    return where == f"{path}:{line}"
 
 
 def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings: list,
@@ -4658,8 +4735,9 @@ def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings
     Pakete mit angenommenem Ergebnis, b = Pakete; „unvollständig" dort nur mit Lücke); je Fund
     eine Zeile `datei:zeile — …` (ohne Zeile `datei — …`; der Pfad in Backticks darf
     Leerzeichen haben); bei einer Lücke kein „vollständig" außerhalb von HTML-Kommentaren und
-    Fundzeilen (`_claims_complete`); und im Anti-Zeremonie-Fall (`split: false`, ein Paket über
-    den Originalbereich) höchstens `REPORT_BASE_LINES` Zeilen plus eine je Fund, die Kopfzeile
+    Fundzeilen (`_claims_complete`) — als Fundzeile zählt nur eine, deren `datei:zeile` ein
+    Fund aus `findings.json` ist (`_lists_finding`), nicht jede Zeile `Wort — …`; und im
+    Anti-Zeremonie-Fall (`split: false`, ein Paket über den Originalbereich) höchstens `REPORT_BASE_LINES` Zeilen plus eine je Fund, die Kopfzeile
     nicht gezählt."""
     try:
         text = report.read_text(encoding="utf-8")
@@ -4692,20 +4770,21 @@ def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings
                        f"{covered}/{total}")
         if not gaps and REPORT_DENIAL_RE.search(coverage[3]):
             out.append("Bericht sagt „unvollständig“, das Audit findet keine Lücke")
-    prose = "\n".join("" if REPORT_FINDING_RE.match(line) else line for line in body.split("\n"))
+    known = [(f["file"], f.get("line")) for f in findings if isinstance(f.get("file"), str)]
+
+    def finding_line(line: str) -> bool:
+        match = REPORT_FINDING_RE.match(line)
+        if match is None:
+            return False
+        where = (match["quoted"] or match["bare"]).strip()
+        return any(_lists_finding(where, path, at) for path, at in known)
+
+    prose = "\n".join("" if finding_line(line) else line for line in body.split("\n"))
     if gaps and _claims_complete(prose):
         out.append("Bericht sagt „vollständig“, obwohl das Audit Lücken meldet")
     wheres = {(m["quoted"] or m["bare"]).strip() for m in REPORT_FINDING_RE.finditer(body)}
-    for finding in findings:
-        path, line = finding.get("file"), finding.get("line")
-        if not isinstance(path, str):
-            continue
-        if line is None:
-            listed = path in wheres or any(w.startswith(path + ":") and not w[len(path) + 1:][:1].isdigit()
-                                           for w in wheres)
-        else:
-            listed = f"{path}:{line}" in wheres
-        if not listed:
+    for path, line in known:
+        if not any(_lists_finding(where, path, line) for where in wheres):
             label = path if line is None else f"{path}:{line}"
             out.append(f"Fund fehlt im Bericht: {label} (Zeile `datei:zeile — Zusammenfassung`)")
     return out
@@ -4722,7 +4801,8 @@ def audit(run_path, report_path):
     — Paket nicht im Plan, anderer Lauf, anderes Paket, anderer Plan (`_meta.plan`),
     unlesbar oder ungültig —, je `{"packet", "reason"}`; ihr Paket steht dann auch unter
     `missing`. `lost_findings`: Funde der angenommenen Ergebnisse und die übernommenen aus
-    `file_keys` (`--since`), die in `findings.json` fehlen (`_lost`; ein `findings.json` zu
+    `file_keys` (`--since`, auch die `outside`-Elemente; `_sources`), die in `findings.json`
+    fehlen (`_lost`; ein `findings.json` zu
     einem anderen Plan zählt als leer), je `{"file", "line", "summary", "packet",
     "reused_from"}`. `report_mismatch`: was am Bericht nicht passt (`_report_mismatch`;
     `report_path` None: `report.md` im Laufordner; ein relativer `report_path` gilt einmal ab

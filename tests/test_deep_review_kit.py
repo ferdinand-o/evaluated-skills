@@ -4014,11 +4014,15 @@ def test_cp6_f04_since_keeps_findings_outside_the_packet_files(tmp_path, monkeyp
     outside = _finding("c.py", 3, "Gegenstelle wirft")          # c.py steht in keinem Paket
     _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A"), outside])
 
-    # Alle Dateien von p1 übernommen: der Fund zu c.py kommt mit, am ersten Eintrag (a.py).
+    # Alle Dateien von p1 übernommen: der Fund zu c.py kommt mit, am ersten Eintrag (a.py),
+    # getrennt von dessen eigenen Funden unter `outside`.
     again = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     done = kit.plan_since(root, again["_meta"]["run"], [id_a])
     assert done["packets"] == []
-    assert done["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A"), outside]
+    item = {"finding": outside, "packet_files": ["a.py", "b.py"],
+            "file_blob": "100644:" + _blob(root, "t1", "c.py")}
+    assert done["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
+    assert done["file_keys"]["a.py"]["outside"] == [item]
     assert done["file_keys"]["b.py"]["findings"] == []
     merged = kit.merge(_run_path(root, done))["findings"]
     assert [(f["file"], f["line"], f["reused_from"]) for f in merged] == [
@@ -4026,7 +4030,8 @@ def test_cp6_f04_since_keeps_findings_outside_the_packet_files(tmp_path, monkeyp
     # Ein Lauf, der den Fund von A übernommen hat, gibt ihn weiter.
     third = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     chained = kit.apply_since(third, [_run_path(root, done)])
-    assert outside in chained["file_keys"]["a.py"]["findings"]
+    assert chained["file_keys"]["a.py"]["outside"] == [item]
+    assert outside not in chained["file_keys"]["a.py"]["findings"]
 
     # Nur a.py übernommen (b.py hat sich geändert): der Fund zu c.py nicht; b.py neu reviewt.
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
@@ -4291,3 +4296,176 @@ def test_cp6_f15_run_path_parameter_and_report_length(tmp_path):
     kit.merge(dir2)
     _report(dir2, run2, [], "2/2", extra=[f"Zeile {i}" for i in range(40)])
     assert kit.audit(dir2, None)["report_mismatch"] == []
+
+
+# --- review_kit.py: Funde der zweiten Runde von Prüfpunkt 6 (F1–F6) -------------------------
+
+def _gap_run(kit, tmp_path, findings):
+    """Lauf mit zwei Paketen, nur p1 hat ein Ergebnis (`findings`): das Audit meldet p2."""
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    kit.record(directory, "p1", "/code-review", _payload(tmp_path, findings))
+    return run, directory, kit.merge(directory)["findings"]
+
+
+def _claim_flagged(kit, directory, run, merged, lines, claim="unvollständig"):
+    _report(directory, run, merged, "1/2", claim=claim, extra=lines)
+    data = kit.audit(directory, None)
+    assert data["missing"] == ["p2"], data
+    return any("vollständig" in m for m in data["report_mismatch"])
+
+
+def test_cp6b_f1_only_real_finding_lines_skip_the_claim_check(tmp_path):
+    kit = _kit()
+    run, directory, merged = _gap_run(kit, tmp_path,
+                                      [_finding("a/x.py", 3, "vollständige Prüfung fehlt")])
+    # Die echte Fundzeile `a/x.py:3 — vollständige …` zählt nicht als Behauptung.
+    assert not _claim_flagged(kit, directory, run, merged, [])
+    for line in ("Fazit — vollständig reviewt", "- **Status** — vollständig",
+                 "- `b/y.py:9` — vollständig", "- `a/x.py:4` — vollständig"):
+        assert _claim_flagged(kit, directory, run, merged, [line]), line
+
+
+def test_cp6b_f2_inflected_claims_count(tmp_path):
+    kit = _kit()
+    run, directory, merged = _gap_run(kit, tmp_path, [])
+    for line in ("Vollständige Abdeckung aller Pakete.", "Ein vollständiges Review.",
+                 "Mit vollständigen Daten.", "Ein vollständiger Lauf.", "Mit vollständigem Plan.",
+                 "VOLLSTÄNDIGE Liste."):
+        assert _claim_flagged(kit, directory, run, merged, [line]), line
+    for line in ("Die Vollständigkeit ist nicht gegeben.", "Unvollständige Abdeckung."):
+        assert not _claim_flagged(kit, directory, run, merged, [line]), line
+
+
+def test_cp6b_f3_negation_with_emphasis_and_words_between(tmp_path):
+    kit = _kit()
+    run, directory, merged = _gap_run(kit, tmp_path, [])
+    for line in ("Das Review ist **nicht** vollständig.", "Das Review ist nicht *vollständig*.",
+                 "Das Review ist noch nicht ganz vollständig.", "Es ist keineswegs vollständig.",
+                 "Es gibt kein vollständiges Review.", "Keine vollständige Abdeckung.",
+                 "Das ist `nicht` vollständig.", "Das ist _nicht_ mehr vollständig.",
+                 "Das Review ist nicht\nganz vollständig."):
+        assert not _claim_flagged(kit, directory, run, merged, [line]), line
+    # Ohne Verneinung bleibt es eine Behauptung, auch auf der Zeile der Abdeckung.
+    assert _claim_flagged(kit, directory, run, merged, [], claim="vollständig")
+    for line in ("Nicht alles lief, aber vollständig geprüft.", "Das ist nicht. Vollständig."):
+        assert _claim_flagged(kit, directory, run, merged, [line]), line
+
+
+def _outside_repo(root):
+    """base: def.py. t1: a.py und b.py neu. t2 (ab t1): b.py geändert. t3 (ab t1): def.py
+    geändert, a.py und b.py nicht."""
+    _fresh_repo(root)
+    _commit_files(root, "basis", {"def.py": _lines(8, "d"), "README.md": "# x\n"})
+    git(root, "tag", "base")
+    _commit_files(root, "t1", {"a.py": _lines(5, "a"), "b.py": _lines(6, "b")})
+    git(root, "tag", "t1")
+    _commit_files(root, "t2", {"b.py": _lines(6, "b") + "b_neu = 1\n"})
+    git(root, "tag", "t2")
+    git(root, "checkout", "--quiet", "-b", "def", "t1")
+    _commit_files(root, "t3", {"def.py": _lines(8, "d") + "d_neu = 1\n"})
+    git(root, "tag", "t3")
+    git(root, "checkout", "--quiet", "main")
+    return root
+
+
+def test_cp6b_f4_outside_findings_are_rechecked_on_every_hop(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _outside_repo(tmp_path / "repo")
+    own, outside = _finding("a.py", 2, "A"), _finding("def.py", 5, "Def")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    id_a = run_a["_meta"]["run"]
+    assert [p["files"] for p in run_a["packets"]] == [["a.py", "b.py"]]
+    _record(kit, root, run_a, "p1", [own, outside])
+    item = {"finding": outside, "packet_files": ["a.py", "b.py"],
+            "file_blob": "100644:" + _blob(root, "t1", "def.py")}
+
+    # B --since A übernimmt beide Dateien: def.py:5 kommt mit, getrennt von den eigenen Funden.
+    run_b = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    done = kit.plan_since(root, run_b["_meta"]["run"], [id_a])
+    assert done["packets"] == []
+    assert done["file_keys"]["a.py"]["findings"] == [own]
+    assert done["file_keys"]["a.py"]["outside"] == [item]
+    assert "outside" not in done["file_keys"]["b.py"]
+    dir_b = _run_path(root, done)
+    merged = kit.merge(dir_b)["findings"]
+    assert [(f["file"], f["line"], f["reused_from"]) for f in merged] == [
+        ("a.py", 2, id_a), ("def.py", 5, id_a)]
+    assert kit.audit(dir_b, None)["lost_findings"] == []
+    path = dir_b / "findings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["findings"] = [f for f in data["findings"] if f["file"] != "def.py"]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert [(f["file"], f["line"]) for f in kit.audit(dir_b, None)["lost_findings"]] == [
+        ("def.py", 5)]
+
+    # Nächster Hop mit denselben Dateien: B gibt das Element weiter, wie es ist.
+    again = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    hop = kit.apply_since(again, [dir_b])
+    assert hop["file_keys"]["a.py"]["findings"] == [own]
+    assert hop["file_keys"]["a.py"]["outside"] == [item]
+
+    # C --since B, b.py geändert: def.py:5 nicht, auch nicht als eigener Fund von a.py.
+    run_c = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    applied = kit.apply_since(run_c, [dir_b])
+    assert applied["file_keys"]["a.py"]["reused_from"] == done["_meta"]["run"]
+    assert applied["file_keys"]["a.py"]["findings"] == [own]
+    assert "outside" not in applied["file_keys"]["a.py"]
+    assert [p["files"] for p in applied["packets"]] == [["b.py"]]
+
+    # B' --since A, def.py zwischen dem ZIEL von A und dem von B' geändert: nicht übernommen.
+    run_b2 = kit.build_plan(root, "base..t3", "standard", "bugs", None, False)
+    applied = kit.apply_since(run_b2, [_run_path(root, run_a)])
+    assert applied["file_keys"]["a.py"]["reused_from"] == id_a
+    assert applied["file_keys"]["b.py"]["reused_from"] == id_a
+    assert "outside" not in applied["file_keys"]["a.py"]
+    assert [p["files"] for p in applied["packets"]] == [["def.py"]]
+
+    # Ein ungültiges Element ist ein KitError, der den Lauf nennt.
+    def bad(data):
+        data["file_keys"]["a.py"]["outside"] = [{"finding": {"summary": "x"},
+                                                 "packet_files": ["a.py"], "file_blob": "absent"}]
+
+    _rewrite_plan(root, done, bad)
+    with pytest.raises(kit.KitError, match=re.escape(done["_meta"]["run"])):
+        kit.merge(dir_b)
+
+
+def test_cp6b_f5_stdin_with_bom_or_without_stdin(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf[]"),
+                                                       encoding="cp1252"))
+    assert _cli_record(kit, root, run, "p1", "-") == 0
+    stored = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    assert stored["findings"] == []
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "stdin", None)
+    assert _cli_record(kit, root, run, "p2", "-") == 1
+    err = capsys.readouterr().err
+    assert "stdin" in err and "Traceback" not in err, err
+    assert not (directory / "results" / "p2.json").exists()
+    # Ein Textstrom ohne `buffer` mit BOM geht auch.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("﻿[]"))
+    assert _cli_record(kit, root, run, "p2", "-") == 0
+
+
+def test_cp6b_f6_merge_joins_findings_inside_a_members_span():
+    kit = _kit()
+
+    def merged(*lines):
+        sources = [kit._Source(_finding("a.py", n, f"L{n}"), "p1", None) for n in lines]
+        return kit._merge_sources(sources, {"p1": 0})
+
+    found = merged(10, "11-40", 14)
+    assert [[s["line"] for s in f["sources"]] for f in found] == [[10, "11-40", 14]]
+    assert found[0]["line"] == 10
+    assert [[s["line"] for s in f["sources"]] for f in merged(10, 13, 16)] == [[10, 13], [16]]
+    # 40 liegt in der Spanne von 11-40 und kommt hinein, verlängert den Anker aber nicht:
+    # 42 liegt hinter dem Ende jedes Glieds und mehr als MERGE_LINE_GAP nach 10.
+    assert [[s["line"] for s in f["sources"]] for f in merged(10, "11-40", 40, 42)] == [
+        [10, "11-40", 40], [42]]
