@@ -2600,3 +2600,242 @@ def test_n19_used_units_scanned_only_on_demand(tmp_path, monkeypatch):
     assert [e["lines"][0] for e in found.entries] == [
         f"### Lazy.pas:{_line_no(LAZY_PAS, 'Check(0)')} ruft Check(...)"]
     assert scanned == ["Lazy.pas"]
+
+
+# --- review_kit.py: Funde des Prüfpunkts nach Task 5, zweite Runde (Delphi) -----------------
+
+def _unit(name, interface, implementation, uses=""):
+    """Kleine Unit: `uses` (ohne Liste: keine), interface- und implementation-Teil."""
+    head = f"uses\n  {uses};\n\n" if uses else ""
+    return (f"unit {name};\n\ninterface\n\n{head}{interface}\nimplementation\n\n"
+            f"{implementation}\nend.\n")
+
+
+def _raising(head, exc="EX"):
+    """Implementierung `head` (ohne `;`), die `exc` wirft."""
+    return f"{head};\nbegin\n  raise {exc}.Create('x');\nend;\n\n"
+
+
+def _heads(found):
+    return [e["lines"][0] for e in found.entries]
+
+
+SETTINGS_PAS = _unit(
+    "Settings",
+    "type\n  TSettings = class\n  public\n    procedure Load(A: Integer = 0);\n  end;\n\n"
+    "var\n  Settings: TSettings;\n",
+    _raising("procedure TSettings.Load(A: Integer)"))
+USESET_PAS = _unit("UseSet", "procedure Run;\n",
+                   "procedure Run;\nbegin\n  Settings.Load(0);\nend;\n", uses="Settings")
+
+
+def test_p01_variable_named_like_its_unit_shadows_the_unit(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Settings.pas": SETTINGS_PAS, "UseSet.pas": USESET_PAS},
+                          {"UseSet.pas": USESET_PAS.replace("Load(0)", "Load(1)")})
+    (entry,) = found.entries
+    assert entry["lines"][:2] == [
+        f"### UseSet.pas:{_line_no(USESET_PAS, 'Settings.Load')} ruft Load(...)",
+        f"- Gegenstelle TSettings.Load [Settings.pas:"
+        f"{_line_no(SETTINGS_PAS, 'procedure TSettings.Load')}]: procedure Load(A: Integer = 0)"]
+
+
+BRANCH_PAS = _unit(
+    "Branch", "procedure Check(A: Integer = 0);\nprocedure Run;\n",
+    _raising("procedure Check(A: Integer)")
+    + "procedure Run;\nbegin\n  {$IFDEF A}\n  Check(1);\n  {$ELSE}\n  Check(2);\n"
+      "  {$ENDIF}\nend;\n")
+
+
+def test_p02_changed_lines_in_a_skipped_branch_are_counted_and_named(tmp_path):
+    kit = _kit()
+    after = BRANCH_PAS.replace("Check(2)", "Check(3)").replace("Check(1)", "Check(4)")
+    found = _delphi_found(kit, tmp_path, {"Branch.pas": BRANCH_PAS}, {"Branch.pas": after})
+    # Der erste Zweig wird gelesen; die Zeile im {$ELSE}-Zweig steht gezählt und benannt da.
+    assert _heads(found) == [f"### Branch.pas:{_line_no(after, 'Check(4)')} ruft Check(...)"]
+    reason = f"1 {kit.SKIP_BRANCH} ({_line_no(after, 'Check(3)')})"
+    assert found.unparsed == [("Branch.pas", reason)]
+    block = kit.render_block({"id": "p1", "files": ["Branch.pas"], "unreadable": found.unparsed},
+                             found.entries, found.unresolved, None)
+    assert f"- `Branch.pas` — {reason}, dort keine Gegenstellen gesammelt\n" in block
+    assert f"1 {kit.SKIP_BRANCH} in Paketdateien (in der Dateiliste genannt).\n" in block
+    assert "nicht lesbar" not in block
+
+
+PROPS_PAS = _unit(
+    "Props",
+    "type\n  TMy = class\n  public\n    function Count: Integer;\n  end;\n\n"
+    "  TQ = class\n  public\n    procedure Clear;\n  end;\n\nprocedure Run(S: TObject);\n",
+    _raising("function TMy.Count: Integer") + _raising("procedure TQ.Clear")
+    + "procedure Run(S: TObject);\nvar\n  N: Integer;\nbegin\n  N := 0;\nend;\n")
+PROPS_AFTER = PROPS_PAS.replace("  N := 0;\n",
+                                "  N := S.Items.Count + 1;\n  Form1.Memo.Lines.Clear;\n")
+
+
+def test_p03_parenless_on_an_unknown_receiver_is_never_guessed(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Props.pas": PROPS_PAS}, {"Props.pas": PROPS_AFTER})
+    assert found.entries == []
+    # Die Anweisung `Form1.Memo.Lines.Clear;` ist ein Aufruf: nicht geraten, aber gezählt.
+    assert found.unresolved == 1
+
+
+IDX_PAS = _unit("Idx", "procedure Idx(A: Integer = 0);\n", _raising("procedure Idx(A: Integer)"))
+CMP_PAS = _unit("Cmp", "procedure Run;\n",
+                "procedure Run;\nvar\n  Idx, Limit, Max: Integer;\nbegin\n  Idx := 0;\nend;\n",
+                uses="Idx")
+
+
+def test_p04_comparison_with_keywords_is_no_generic_call(tmp_path):
+    kit = _kit()
+    after = CMP_PAS.replace("  Idx := 0;\n",
+                            "  if Idx < Limit or Max > (Limit - 1) then\n    Exit;\n")
+    found = _delphi_found(kit, tmp_path, {"Idx.pas": IDX_PAS, "Cmp.pas": CMP_PAS},
+                          {"Cmp.pas": after})
+    assert found == kit.Collected([], 0, [])
+
+
+HELP_PAS = _unit(
+    "Help",
+    "type\n  TCH = class helper for TObject\n  end;\n\n"
+    "  TSH = record helper for string\n  end;\n\nprocedure Check(A: Integer = 0);\n"
+    "procedure Run;\n",
+    _raising("procedure Check(A: Integer)") + "procedure Run;\nbegin\n  Check(0);\nend;\n")
+
+
+def test_p05_empty_helper_body_keeps_its_end(tmp_path):
+    kit = _kit()
+    after = HELP_PAS.replace("Check(0)", "Check(1)")
+    found = _delphi_found(kit, tmp_path, {"Help.pas": HELP_PAS}, {"Help.pas": after})
+    assert found.unparsed == []
+    assert _heads(found) == [f"### Help.pas:{_line_no(after, 'Check(1)')} ruft Check(...)"]
+
+
+PARK_PAS = _unit("Park", "procedure Check(A: Integer = 0);\nprocedure Run;\n",
+                 _raising("procedure Check(A: Integer)")
+                 + "procedure Run;\nbegin\n  Check(0);\nend;\n")
+PARK_AFTER = PARK_PAS.replace("Check(0)", "Check(1)") + "\nprocedure Old;\nbegin\n  Check(2);\n"
+
+
+def test_p06_text_after_the_final_end_is_not_scanned(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Park.pas": PARK_PAS}, {"Park.pas": PARK_AFTER})
+    assert found.unparsed == []
+    assert _heads(found) == [f"### Park.pas:{_line_no(PARK_AFTER, 'Check(1)')} ruft Check(...)"]
+
+
+DATA_PAS = _unit(
+    "DataUse",
+    "type\n  TMy = class\n  public\n    function Count(A: Integer = 0): Integer;\n  end;\n\n"
+    "  TC = class\n  public\n    Data: TExternal;\n    procedure Run;\n  end;\n",
+    _raising("function TMy.Count(A: Integer): Integer")
+    + "procedure TC.Run;\nbegin\n  Data.Items.Count(0);\nend;\n")
+
+
+def test_p07_known_field_is_no_rtl_unit_scope(tmp_path):
+    kit = _kit()
+    after = DATA_PAS.replace("Count(0)", "Count(1)")
+    found = _delphi_found(kit, tmp_path, {"DataUse.pas": DATA_PAS}, {"DataUse.pas": after})
+    assert found.unresolved == 0
+    assert [e["lines"][:2] for e in found.entries] == [[
+        f"### DataUse.pas:{_line_no(after, 'Count(1)')} ruft Count(...)",
+        f"- Gegenstelle TMy.Count [DataUse.pas:{_line_no(DATA_PAS, 'function TMy.Count')}]: "
+        "function Count(A: Integer = 0): Integer"]]
+
+
+BAD_PAS = _unit("Bad", "procedure Check(A: Integer = 0);\n",
+                "procedure Check(A: Integer);\nbegin\n  if A then begin\n    Exit;\nend;\n")
+
+
+def test_p08_unbalanced_packet_file_without_changed_lines_is_unparsed(tmp_path):
+    kit = _kit()
+    after = BAD_PAS.replace("    Exit;\n", "")
+    found = _delphi_found(kit, tmp_path, {"Bad.pas": BAD_PAS}, {"Bad.pas": after})
+    assert found == kit.Collected([], 0, [("Bad.pas", kit.SKIP_UNBALANCED)])
+
+
+def test_p08_note_on_unbalanced_units_does_not_depend_on_packet_order(tmp_path):
+    kit = _kit()
+    one = _unit("Main1", "procedure Run;\n", "procedure Run;\nbegin\n  Run;\nend;\n")
+    two = _unit("Main2", "procedure Run2;\n", "procedure Run2;\nbegin\n  Check(0);\nend;\n",
+                uses="Bad")
+    root = _commit_repo(tmp_path, {"a/Main1.pas": one, "b/Main2.pas": two, "c/Bad.pas": BAD_PAS},
+                        {"a/Main1.pas": one.replace("  Run;\n", "  Run;\n  Run;\n"),
+                         "b/Main2.pas": two.replace("Check(0)", "Check(1)")})
+    plan, run = _split_plan(kit, root, split_at=1)
+    assert [p["files"] for p in plan["packets"]] == [["a/Main1.pas"], ["b/Main2.pas"]]
+    kit.write_counterparts(root, run)
+    note = (f"\n1 Delphi-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar "
+            f"({kit.SKIP_UNBALANCED}) — dort keine Gegenstellen gesucht.\n")
+    for pid in ("p1", "p2"):
+        assert note in (kit.run_dir(root, run) / "packets" / f"{pid}.md").read_text("utf-8")
+
+
+GSET_PAS = _unit("GSet", "var\n  GSettings: TObject;\n", "")
+NAMES_PAS = _unit(
+    "Names", "type\n  TP = procedure(const S: string = ''; X: Integer) of object;\n"
+    "  TN = class\n  public\n    procedure Run;\n  end;\n\n"
+    "procedure GSettings;\nprocedure L;\nprocedure P;\nprocedure C;\n"
+    "procedure Use(A: TObject);\n",
+    _raising("procedure GSettings") + _raising("procedure L") + _raising("procedure P")
+    + _raising("procedure C") + "procedure Use(A: TObject);\nbegin\nend;\n")
+INFER_PAS = _unit("Infer", "procedure Run(const P);\n",
+                  "procedure Run(const P);\nconst\n  C = 1;\nbegin\n"
+                  "  var L := TObject.Create;\n  Use(nil);\nend;\n", uses="Names, GSet")
+
+
+def test_p09_names_of_values_are_no_parenless_calls(tmp_path):
+    kit = _kit()
+    after = INFER_PAS.replace("  Use(nil);\n",
+                              "  Use(L);\n  Use(GSettings);\n  Use(P);\n  Use(C);\n")
+    found = _delphi_found(kit, tmp_path, {"GSet.pas": GSET_PAS, "Names.pas": NAMES_PAS,
+                                          "Infer.pas": INFER_PAS}, {"Infer.pas": after})
+    assert found == kit.Collected([], 0, [])
+    # `const` in den Parametern eines Prozedurtyps öffnet keinen const-Abschnitt.
+    names = kit._PasUnit("Names.pas", NAMES_PAS)
+    assert not names.broken and "tn" in names.classes and names.consts == set()
+
+
+def test_p10_call_on_an_unbalanced_repo_unit_is_counted(tmp_path):
+    kit = _kit()
+    main = _unit("Main", "procedure Run;\n", "procedure Run;\nbegin\n  Bad.Check(0);\nend;\n",
+                 uses="Bad")
+    found = _delphi_found(kit, tmp_path, {"Bad.pas": BAD_PAS, "Main.pas": main},
+                          {"Main.pas": main.replace("Check(0)", "Check(1)")})
+    assert found == kit.Collected([], 1, [])
+
+
+BADSHARED_PAS = BAD_PAS.replace("unit Bad;", "unit Shared;")
+
+
+def _linked_repo(root, main):
+    """lib/Shared.pas (Blöcke gehen nicht auf), app/Compat.pas → ../lib/Shared.pas, dann ein
+    Commit, der den Aufruf in app/Main.pas ändert."""
+    root.mkdir(parents=True)
+    root = _commit_repo(root,{"lib/Shared.pas": BADSHARED_PAS, "app/Main.pas": main},
+                        {"lib/Shared.pas": BADSHARED_PAS + "\n"})
+    _link_commit(root, {"app/Compat.pas": "../lib/Shared.pas"})
+    (root / "app" / "Main.pas").write_text(main.replace("Check(0)", "Check(1)"), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "aufruf")
+    return root
+
+
+def test_p11_unbalanced_symlink_target_noted_once_and_scanned_once(tmp_path, monkeypatch):
+    kit = _kit()
+    main = _unit("Main", "procedure Run;\n", "procedure Run;\nbegin\n  Check(0);\nend;\n",
+                 uses="Compat")
+    md = _counterparts_md(kit, _linked_repo(tmp_path / "note", main), "HEAD~1..HEAD")
+    assert (f"\n1 Delphi-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar "
+            f"({kit.SKIP_UNBALANCED}) — dort keine Gegenstellen gesucht.\n") in md
+
+    scanned = []
+
+    class Spy(kit._PasUnit):
+        def __init__(self, rel, text):
+            scanned.append(rel)
+            super().__init__(rel, text)
+
+    monkeypatch.setattr(kit, "_PasUnit", Spy)
+    root = _linked_repo(tmp_path / "scan", main.replace("  Compat;", "  Compat, Shared;"))
+    kit.collect_delphi(root, "HEAD~1..HEAD", ["app/Main.pas"])
+    assert sorted(scanned) == ["app/Main.pas", "lib/Shared.pas"]

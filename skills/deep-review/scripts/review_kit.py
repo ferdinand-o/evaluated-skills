@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import bisect
 import contextlib
+import copy
 import datetime as dt
 import fnmatch
 import functools
@@ -1180,6 +1181,9 @@ SKIP_SYMLINK = "Symlink"
 SKIP_NOT_UTF8 = "Pfad nicht UTF-8"
 SKIP_GITLINK = "Submodul (gitlink), keine Datei"
 SKIP_UNBALANCED = "Blöcke gehen nicht auf (Delphi-Scanner)"
+# Grund in `unparsed` für eine gelesene Delphi-Datei: `<n> SKIP_BRANCH (<zeilen>)`.
+SKIP_BRANCH = "geänderte Zeile(n) in nicht gelesenem bedingtem Zweig"
+_BRANCH_REASON = re.compile(r"(\d+) " + re.escape(SKIP_BRANCH) + r" \(.*\)")
 QUALITY_INTRO = "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n"
 HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _C_ESCAPES = {ord(k): ord(v) for k, v in
@@ -1207,7 +1211,10 @@ class Collected(NamedTuple):
     `files`), die der Sammler am ZIEL nicht lesen konnte (Python: `Syntaxfehler`,
     `Symlink`, `Pfad nicht UTF-8`, `Submodul (gitlink), keine Datei`; Delphi dieselben, statt
     `Syntaxfehler` aber `SKIP_UNBALANCED`, wenn die Blockzählung des Scanners nicht aufgeht;
-    sonst `NOT_IN_TARGET`), sortiert — übersprungen, im Paketblock genannt und gezählt."""
+    sonst `NOT_IN_TARGET`), sortiert — übersprungen, im Paketblock genannt und gezählt. Bei
+    Delphi steht hier auch eine gelesene Datei, deren geänderte Zeilen zum Teil in einem nicht
+    gelesenen bedingten Zweig liegen: Grund `<n> SKIP_BRANCH (<zeilen>)`, im Block mit den
+    Zeilen genannt und gezählt; ihre übrigen Stellen stehen in `entries`."""
     entries: list
     unresolved: int
     unparsed: list
@@ -1755,12 +1762,16 @@ def collect_python(repo, rng, files):
                     lambda index, rel: index.trees.get(rel), _python_sites)
 
 
-def _collect(repo, rng, files, accepts, build_index, parsed, sites) -> Collected:
+def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None) -> Collected:
     """Gerüst beider Sammler: die Dateien aus `files`, die `accepts` annimmt (außerhalb von
-    `.skills/`), der Index am ZIEL (`build_index(repo, ziel)`, mit `unreadable`), je Datei mit
-    geänderten Zeilen ihr gelesener Stand (`parsed(index, pfad)`, None ohne) und ihre Stellen
-    (`sites(index, pfad, stand, zeilen, unresolved)`). Eigene Dateien ohne lesbaren Stand
-    stehen in `unparsed` mit dem Grund aus `unreadable`, sonst `NOT_IN_TARGET`."""
+    `.skills/`), der Index am ZIEL (`build_index(repo, ziel)`, mit `unreadable`), je Datei
+    ihr gelesener Stand (`parsed(index, pfad)`, None ohne — für jede eigene Datei, auch ohne
+    geänderte Zeilen, damit `unreadable` nicht von früheren Aufrufen abhängt), je Datei mit
+    geänderten Zeilen ihre Stellen (`sites(index, pfad, stand, zeilen, unresolved)`) und,
+    mit `partial(stand, zeilen)`, ein Grund für geänderte Zeilen, die der Sammler nicht
+    gelesen hat (None ohne). Eigene Dateien ohne lesbaren Stand stehen in `unparsed` mit dem
+    Grund aus `unreadable`, sonst `NOT_IN_TARGET`; teilweise gelesene mit dem Grund von
+    `partial`."""
     repo = _toplevel(repo)
     wanted = sorted({str(f) for f in files if accepts(str(f)) and not _under_skills(str(f))})
     if not wanted:
@@ -1769,13 +1780,17 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites) -> Collected
     index = build_index(repo, span.target)
     unresolved: set = set()
     entries = []
+    items = {rel: parsed(index, rel) for rel in wanted if rel not in index.unreadable}
     unparsed = {rel: index.unreadable[rel] for rel in wanted if rel in index.unreadable}
     for rel, lines in sorted(_changed_lines(repo, span, wanted).items()):
         if rel in unparsed:
             continue
-        item = parsed(index, rel)
+        item = items.get(rel)
         if item is not None:
             entries += sites(index, rel, item, lines, unresolved)
+            reason = partial(item, lines) if partial is not None else None
+            if reason:
+                unparsed[rel] = reason
         else:
             unparsed[rel] = index.unreadable.get(rel, NOT_IN_TARGET)
     entries.sort(key=lambda e: (e["file"], e["line"], e["kind"]))
@@ -1785,12 +1800,14 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites) -> Collected
 # --- Gegenstellen für Delphi (Text-Scanner) -------------------------------------------------
 #
 # Kein Parser: `_pas_scan` blendet Strings, Kommentare und bedingten Code nach dem ersten
-# Zweig aus (Zeilen und Spalten bleiben), danach zählt ein Token-Scanner Blöcke
-# (`begin`/`case`/`try`/`asm`/`record` und Klassenrümpfe gegen `end`); geht die Zählung nicht
+# Zweig aus (Zeilen und Spalten bleiben; geänderte Zeilen im weggefallenen Zweig werden
+# gezählt und genannt), danach zählt ein Token-Scanner Blöcke (`begin`/`case`/`try`/`asm`/
+# `record` und Klassenrümpfe gegen `end`) bis zum Schluss-`end.`; geht die Zählung nicht
 # auf, gilt die Unit als nicht lesbar. Bezeichner ohne Rücksicht auf Groß/Klein. Gesucht wird
 # in der eigenen Unit und, erst bei Bedarf gescannt, in den Units ihrer `uses`-Listen; wie in
-# Delphi verdeckt die zuletzt genannte Unit die früheren. Was der Scanner nicht sicher
-# zuordnen kann, steht nicht im Block.
+# Delphi verdeckt die zuletzt genannte Unit die früheren und eine Variable einen
+# gleichnamigen Unit-Namen. Was der Scanner nicht sicher zuordnen kann, steht nicht im Block —
+# lieber keine Gegenstelle und gezählt als eine falsche.
 
 DELPHI_RELEASES = frozenset({"extract", "remove", "free", "freeandnil", "setcontentstream"})
 CLASS_CHAIN_MAX = 4        # Klassen je Empfängertyp im Block (die Klasse und ihre Basisklassen)
@@ -1820,6 +1837,7 @@ _PAS_TOKEN = re.compile(r"&?[^\W\d]\w*|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\$[0-9A-Fa
                         r"|<=|>=|\S")
 _PAS_IDENT = re.compile(r"&?[^\W\d]\w*")
 _PAS_SPACE = re.compile(r"\s+")
+_PAS_WORD_RUN = re.compile(r"\S+")
 _PAS_TYPE_HEAD = re.compile(r"\s*&?([^\W\d][\w.]*)")
 _PAS_QUOTED = re.compile(r"'([^']*)'")
 _PAS_DIRECTIVE = re.compile(r"\$([A-Za-z]+)")
@@ -1847,6 +1865,8 @@ _PAS_KEYWORDS = frozenset({
     "xor"})
 _PAS_NOT_TYPES = frozenset({"array", "set", "file", "packed", "procedure", "function",
                             "reference", "record", "class", "string"})
+# Schlüsselwörter, die in Typargumenten `Name<…>(` stehen können (`TFunc<string>`).
+_PAS_TYPE_ARG_WORDS = frozenset({"string", "array", "of", "set", "file", "packed"})
 # Erste Teile der Unit-Namen der RTL und VCL/FMX (`System.SysUtils`, `Vcl.Forms`, …): ein
 # Empfänger `System.X.Name(` ist ein Unit-Name, auch ohne Eintrag in den uses-Listen.
 _PAS_UNIT_SCOPES = frozenset({
@@ -1858,7 +1878,15 @@ _PAS_PARENLESS_NEXT = frozenset({
     ";", "end", "else", "until", "except", "finally", "then", "do", "of", ")", ",", "]",
     "and", "or", "xor", "=", "<>", "<=", ">=", "+", "-", "*", "/", "div", "mod", "to",
     "downto", "in", "is", "as"})
-_PAS_PROPERTY_STOP = frozenset({"read", "write", "default", "nodefault", "stored", "index",
+# Vor und nach einer Anweisung, die nur aus einem Bezeichner-Pfad besteht (`Obj.Run;`).
+_PAS_STMT_BEFORE = frozenset({";", "begin", "then", "else", "do", "try", "finally", "except",
+                              "repeat"})
+_PAS_STMT_AFTER = frozenset({";", "end", "else", "until", "except", "finally"})
+# In einem const-Eintrag nie: hier beginnt oder endet ein Block oder ein Abschnitt.
+_PAS_BLOCK_WORDS = frozenset({"begin", "end", "try", "case", "asm", "type", "var", "const",
+                              "implementation", "initialization", "finalization", "procedure",
+                              "function", "constructor", "destructor"})
+_PAS_PROPERTY_STOP =frozenset({"read", "write", "default", "nodefault", "stored", "index",
                                 "implements", "readonly", "writeonly", "dispid", ";"})
 
 
@@ -1886,21 +1914,28 @@ def _pas_string_end(text: str, pos: int) -> int:
         return k + 1
 
 
-def _pas_scan(text: str, branches: bool) -> tuple[str, str]:
-    """In einem Durchgang: (Text ohne Kommentare, Text ohne Kommentare und String-Literale) —
-    Kommentare (`{ }`, `(* *)`, `//`) und Strings werden Leerzeichen, Zeilenumbrüche bleiben,
-    also auch Zeilen und Spalten. Mit `branches` fällt bedingter Code nach dem ersten Zweig
-    weg: von `{$IFDEF}`, `{$IFNDEF}`, `{$IF}`, `{$IFOPT}` (geschachtelt) bleibt der Zweig bis
-    zum ersten `{$ELSE}`/`{$ELSEIF}`, der Rest bis `{$ENDIF}`/`{$IFEND}` wird Leerraum —
-    sonst zählte der Scanner `begin` und Köpfe beider Zweige."""
-    clean, masked = [], []
+def _pas_scan(text: str, branches: bool) -> tuple[str, str, list]:
+    """In einem Durchgang: (Text ohne Kommentare, Text ohne Kommentare und String-Literale,
+    Bereiche (von, bis) des weggefallenen bedingten Codes) — Kommentare (`{ }`, `(* *)`,
+    `//`) und Strings werden Leerzeichen, Zeilenumbrüche bleiben, also auch Zeilen und
+    Spalten. Mit `branches` fällt bedingter Code nach dem ersten Zweig weg: von `{$IFDEF}`,
+    `{$IFNDEF}`, `{$IF}`, `{$IFOPT}` (geschachtelt) bleibt der Zweig bis zum ersten
+    `{$ELSE}`/`{$ELSEIF}`, der Rest bis `{$ENDIF}`/`{$IFEND}` wird Leerraum — sonst zählte
+    der Scanner `begin` und Köpfe beider Zweige; Code und Strings darin stehen in den
+    Bereichen (nur solche mit mehr als Leerraum)."""
+    clean, masked, skipped = [], [], []
     stack, active = [], True   # je offenes {$IF…}: ob der umschließende Code gelesen wird
+    at = 0                     # Anfang des nächsten Stücks im Text
 
     def put(piece: str, kind: str) -> None:
+        nonlocal at
+        start, at = at, at + len(piece)
         if kind == "code" and active:
             clean.append(piece)
             masked.append(piece)
             return
+        if not active and kind != "comment" and not piece.isspace() and piece:
+            skipped.append((start, at))
         blank = _PAS_NOT_BLANK.sub(" ", piece)
         clean.append(piece if kind == "string" and active else blank)
         masked.append(blank)
@@ -1945,7 +1980,7 @@ def _pas_scan(text: str, branches: bool) -> tuple[str, str]:
             elif word in _PAS_IF_CLOSE and stack:
                 active = stack.pop()
     put(text[pos:], "code")
-    return "".join(clean), "".join(masked)
+    return "".join(clean), "".join(masked), skipped
 
 
 def mask_pascal(text):
@@ -2001,28 +2036,31 @@ class _PasHead:
 
 class _PasClass:
     """Klassen-, Objekt- oder Record-Deklaration: Felder und Properties (klein → Typtext),
-    Methodenköpfe (klein → [_PasHead]), Basisklasse als Text (`base`, None ohne) und als
-    Schlüssel (`parent`, `_type_key`)."""
-    __slots__ = ("name", "low", "line", "sig", "base", "parent", "fields", "methods")
+    Konstanten (Namen klein), Methodenköpfe (klein → [_PasHead]), Basisklasse als Text
+    (`base`, None ohne) und als Schlüssel (`parent`, `_type_key`)."""
+    __slots__ = ("name", "low", "line", "sig", "base", "parent", "fields", "consts", "methods")
 
     def __init__(self, name: str, line: int, sig: str, base) -> None:
         self.name, self.low, self.line, self.sig = name, name.lower(), line, sig
         self.base, self.parent = base, _type_key(base) if base else None
         self.fields: dict[str, str] = {}
+        self.consts: set[str] = set()
         self.methods: dict[str, list] = {}
 
 
 class _PasImpl:
     """Implementierung einer Routine: Kopf, Rumpf `begin`…`end` als Token-Indizes, Variablen
-    aus `var`-Abschnitten (`vars`, im ganzen Rumpf sichtbar), Inline-`var` und Parameter und
-    `var` anonymer Methoden (`inline`: je (von, bis, Name, Typtext), sichtbar zwischen den
+    aus `var`-Abschnitten (`vars`, im ganzen Rumpf sichtbar), Namen aus `const`-Abschnitten
+    (`consts`), Inline-`var`/`const` und Parameter und `var` anonymer Methoden (`inline`: je
+    (von, bis, Name, Typtext oder None ohne Typ wie `var L := …`), sichtbar zwischen den
     Token-Indizes), umschließende Routine bei geschachtelten."""
-    __slots__ = ("head", "outer", "begin", "stop", "end_line", "vars", "inline")
+    __slots__ = ("head", "outer", "begin", "stop", "end_line", "vars", "consts", "inline")
 
     def __init__(self, head: _PasHead, outer) -> None:
         self.head, self.outer = head, outer
         self.begin = self.stop = self.end_line = None
         self.vars: dict[str, str] = {}
+        self.consts: set[str] = set()
         self.inline: list[tuple] = []
 
     def top(self):
@@ -2038,8 +2076,11 @@ class _PasUnit:
 
     def __init__(self, rel: str, text: str) -> None:
         self.rel, self.text = rel, text
-        self.clean, masked = _pas_scan(text, branches=True)
+        self.clean, masked, skipped = _pas_scan(text, branches=True)
         self.newlines = [m.start() for m in re.finditer("\n", text)]
+        # Zeilen mit Code aus nicht gelesenen bedingten Zweigen (`{$ELSE}` …)
+        self.skipped_lines = {bisect.bisect_right(self.newlines, m.start()) + 1
+                              for a, b in skipped for m in _PAS_WORD_RUN.finditer(text, a, b)}
         toks = []
         for match in _PAS_TOKEN.finditer(masked):
             word = match.group()
@@ -2058,7 +2099,10 @@ class _PasUnit:
         self.by_name: dict[str, list] = {}
         self.globals: dict[str, str] = {}        # var-Abschnitte im interface-Teil
         self.impl_globals: dict[str, str] = {}   # var-Abschnitte im implementation-Teil
+        self.consts: set[str] = set()            # const-Abschnitte im interface-Teil
+        self.impl_consts: set[str] = set()       # const-Abschnitte im implementation-Teil
         self.broken = False   # Blöcke gehen nicht auf: die Unit gilt als nicht lesbar
+        self.code_toks = len(toks)   # Tokens bis zum Schluss-`end.`; danach liest Delphi nichts
         self._parse()
 
     # -- Hilfen über die Tokens
@@ -2145,8 +2189,10 @@ class _PasUnit:
             if self._t(k) == "(":
                 k = self._close(k) + 1
             if self._t(k) == "for":
-                k += 1
-                while self._ident(k) or self._t(k) == ".":
+                # Der erweiterte Typ; ein Schlüsselwort (`end`) gehört schon zum Rumpf, außer
+                # `string` (`record helper for string`).
+                k += 1 + (self._t(k + 1) == "string")
+                while (self._ident(k) and self._t(k) not in _PAS_KEYWORDS) or self._t(k) == ".":
                     k += 1
             return k, k, None
         base = None
@@ -2202,13 +2248,17 @@ class _PasUnit:
             low = toks[i].low
             if low in ("begin", "try", "case", "asm") and section == "implementation":
                 end = self._block_end(i)   # Hauptprogramm, Anweisungen in initialization
-                closed = closed or self._t(end + 1) == "."
+                if self._t(end + 1) == ".":
+                    closed, self.code_toks = True, end + 2
+                    break   # das Schluss-`end.`: was danach steht, liest Delphi nicht
                 i = end + 1
                 continue
             if low == "end":
-                if self._t(i + 1) != ".":
-                    self.broken = True   # ein `end` zu viel: ein Block schloss zu früh
                 closed = True
+                if self._t(i + 1) == ".":
+                    self.code_toks = i + 2
+                    break
+                self.broken = True   # ein `end` zu viel: ein Block schloss zu früh
                 i += 1
                 continue
             if low == "interface" and section == "head":
@@ -2222,6 +2272,13 @@ class _PasUnit:
                 into = self.globals if section == "interface" else self.impl_globals
                 i = self._var_section(i + 1, into)
                 continue
+            elif low in ("const", "resourcestring"):
+                i = self._const_section(i + 1, self.consts if section == "interface"
+                                        else self.impl_consts)
+                continue
+            elif low == "(" and self._t(i - 1) in _PAS_ROUTINES:
+                i = self._close(i) + 1   # Parameter eines Prozedurtyps (`const` darin ist kein
+                continue                 # Abschnitt)
             elif low in _PAS_STRUCTS and self._structural(i):
                 i = self._struct(i)
                 continue
@@ -2323,6 +2380,9 @@ class _PasUnit:
             if self._t(k + 1) == ":" and self._t(k + 2) == "(":
                 k += 3  # Marke eines varianten Teils `kA: (`; die Felder stehen in der Klammer
                 continue
+            if low == "const":
+                k = max(self._const_section(k + 1, cls.consts), k + 1)
+                continue
             if low == "property" and self._ident(k + 1):
                 stop = min(self._stmt_end(k), end)
                 j, depth = k + 2, 0
@@ -2349,6 +2409,20 @@ class _PasUnit:
         while self._ident(k) and self._t(k) not in _PAS_KEYWORDS and self._t(k + 1) in (",", ":"):
             decls, k = self._decls(k)
             into.update(decls)
+        return k
+
+    def _const_section(self, k: int, into: set) -> int:
+        """`const`-Abschnitt ab `k` (`Name = Wert;`, `Name: Typ = Wert;`): Namen nach `into`;
+        Index danach. Ein Eintrag, der einen Typrumpf oder ein Blockwort enthielte, ist keiner
+        (dort endete der Abschnitt schon) — so schluckt er nie Blöcke."""
+        while self._ident(k) and self._t(k) not in _PAS_KEYWORDS and self._t(k + 1) in ("=", ":"):
+            end = self._stmt_end(k)
+            if any(self._t(j) in _PAS_BLOCK_WORDS or (self._t(j) in _PAS_STRUCTS
+                                                      and self._structural(j))
+                   for j in range(k, end)):
+                break
+            into.add(self._t(k))
+            k = end + 1
         return k
 
     def _decls(self, k: int) -> tuple[dict, int]:
@@ -2497,6 +2571,12 @@ class _PasUnit:
             elif low in ("var", "threadvar"):
                 k = self._var_section(k + 1, impl.vars)
                 continue
+            elif low in ("const", "resourcestring"):
+                k = self._const_section(k + 1, impl.consts)
+                continue
+            elif low == "(" and self._t(k - 1) in _PAS_ROUTINES:
+                k = self._close(k) + 1   # Parameter eines lokalen Prozedurtyps
+                continue
             elif low in _PAS_STRUCTS and self._structural(k):
                 k = self._struct(k)
                 continue
@@ -2506,9 +2586,10 @@ class _PasUnit:
         return n
 
     def _body_decls(self, begin: int, stop: int) -> list:
-        """Deklarationen im Rumpf `begin`…`stop`: Inline-`var` (auch `for var`) und Parameter
-        und `var`-Abschnitt anonymer Methoden, je (von, bis, Name, Typtext) — sichtbar ab der
-        Deklaration bis zum `end` des Blocks (`begin`, `try`, `case`), der sie umschließt."""
+        """Deklarationen im Rumpf `begin`…`stop`: Inline-`var` und -`const` (auch `for var`)
+        und Parameter und `var`-Abschnitt anonymer Methoden, je (von, bis, Name, Typtext oder
+        None ohne Typ) — sichtbar ab der Deklaration bis zum `end` des Blocks (`begin`, `try`,
+        `case`), der sie umschließt."""
         toks, out, frames, pending, k = self.toks, [], [], None, begin
         while k <= stop:
             low = toks[k].low
@@ -2525,11 +2606,14 @@ class _PasUnit:
                 if self._t(k + 1) == "(":
                     close = self._close(k + 1)
                     params = self._params(k + 2, close)[0]
-                    pending += [(k, name, typ) for name, typ in params.items() if typ]
+                    pending += [(k, name, typ) for name, typ in params.items()]
                     k = close
-            elif low == "var" and self._ident(k + 1):
+            elif (low in ("var", "const") and self._ident(k + 1)
+                  and self._t(k + 1) not in _PAS_KEYWORDS):
                 decls: dict = {}
                 end = self._var_section(k + 1, decls)
+                if not decls:   # ohne Typ: `var L := …`, `for var N in …`, `const C = …`
+                    decls, end = {self._t(k + 1): None}, k + 2
                 into = pending if pending is not None else (frames[-1] if frames else [])
                 into += [(k, name, typ) for name, typ in decls.items()]
                 k = max(end - 1, k)
@@ -2596,28 +2680,43 @@ class _PasUnit:
             impl = impl.outer
         return []
 
-    def local_type(self, impl: _PasImpl, name: str, at: int | None = None):
-        """Typ eines Namens in einer Routine am Token `at`: die nächste davor stehende
-        Inline-Deklaration, die dort sichtbar ist (auch Parameter einer anonymen Methode), dann
-        Parameter (der Implementierung, sonst der Deklaration), `var`, `Result`; dann die
-        umschließenden Routinen."""
+    def local(self, impl: _PasImpl, name: str, at: int | None = None) -> tuple[bool, str | None]:
+        """(Ist der Name in einer Routine am Token `at` lokal deklariert, sein Typ oder None):
+        die nächste davor stehende Inline-Deklaration, die dort sichtbar ist (auch Parameter
+        einer anonymen Methode), dann Parameter (der Implementierung, sonst der Deklaration),
+        `var`, `const`, `Result`; dann die umschließenden Routinen. Ein Name ohne Typ (`var L
+        := …`, `const P`, eine Konstante) ist bekannt, sein Typ None — er verdeckt Äußeres."""
         while impl is not None:
             if at is not None:
                 seen = [(start, typ) for start, end, low, typ in impl.inline
                         if low == name and start < at <= end]
                 if seen:
-                    return max(seen)[1]
+                    return True, max(seen, key=lambda s: s[0])[1]
             decl = self.decl_of(impl)
             params = impl.head.params or (decl.params if decl else {})
-            if params.get(name):
-                return params[name]
+            if name in params:
+                return True, params[name]
             if name in impl.vars:
-                return impl.vars[name]
+                return True, impl.vars[name]
+            if name in impl.consts:
+                return True, None
             ret = impl.head.ret or (decl.ret if decl else None)
             if name == "result" and ret:
-                return ret
+                return True, ret
             impl = impl.outer
-        return None
+        return False, None
+
+    def local_type(self, impl: _PasImpl, name: str, at: int | None = None):
+        """Typ eines lokalen Namens am Token `at` (`local`), None ohne."""
+        return self.local(impl, name, at)[1]
+
+    def statement(self, k: int) -> bool:
+        """Steht der Bezeichner-Pfad, der bei `k` endet (`Obj.A.Run`), allein als Anweisung
+        (`…; Obj.A.Run;`, `then Obj.Run else`)?"""
+        j = k
+        while self._t(j - 1) == "." and self._ident(j - 2):
+            j -= 2
+        return self._t(j - 1) in _PAS_STMT_BEFORE and self._t(k + 1) in _PAS_STMT_AFTER
 
     def chain_before(self, dot: int):
         """Empfänger vor dem `.` bei `dot`: (Teile klein, Text) oder None, wenn davor kein
@@ -2687,8 +2786,9 @@ class _PasUnit:
         return None
 
     def _generic_end(self, j: int):
-        """Index des `>`, das die Typargumente ab `<` bei `j` schließt — nur Bezeichner, `.`,
-        `,` und geschachtelte `<…>` dazwischen; None sonst."""
+        """Index des `>`, das die Typargumente ab `<` bei `j` schließt — nur Bezeichner (von
+        den Schlüsselwörtern nur `_PAS_TYPE_ARG_WORDS`, kein `or` eines Vergleichs `A < B or
+        C > (D)`), `.`, `,` und geschachtelte `<…>` dazwischen; None sonst."""
         depth = 0
         for g in range(j, len(self.toks)):
             low = self.toks[g].low
@@ -2698,7 +2798,9 @@ class _PasUnit:
                 depth -= 1
                 if depth == 0:
                     return g
-            elif not (self.toks[g].ident or low in (".", ",")):
+            elif not ((self.toks[g].ident and (low not in _PAS_KEYWORDS
+                                               or low in _PAS_TYPE_ARG_WORDS))
+                      or low in (".", ",")):
                 return None
         return None
 
@@ -2750,16 +2852,19 @@ class _PasIndex:
     klein), gescannt erst bei Bedarf; `unreadable` wie beim Python-Index, dazu Units, deren
     Blöcke nicht aufgehen (`SKIP_UNBALANCED`, sobald gescannt). Ein Symlink, dessen Ziel —
     auch über weitere Symlinks — eine Delphi-Datei im Repo ist, wird verfolgt: Unter seinem
-    Pfad steht der Inhalt des Ziels (Delphi findet die Unit unter dem Namen des Links); als
-    eigene Paketdatei bleibt er `SKIP_SYMLINK`."""
+    Pfad steht der Inhalt des Ziels (Delphi findet die Unit unter dem Namen des Links), einmal
+    gescannt mit dem Ziel; als eigene Paketdatei bleibt er `SKIP_SYMLINK`, ein
+    `SKIP_UNBALANCED` steht beim Ziel."""
 
     def __init__(self, sources: dict, skipped: dict, links: dict | None = None) -> None:
         self.sources = dict(sources)
         self.unreadable = dict(skipped)
+        self.followed: dict[str, str] = {}   # verfolgter Symlink → Datei, auf die er zeigt
         for rel in sorted(links or {}):
             final = _link_target(links, rel)
             if final in sources:
                 self.sources[rel] = sources[final]
+                self.followed[rel] = final
         sources = self.sources
         self.lower_paths = {rel.lower(): rel for rel in sorted(sources)}
         self.by_unit: dict[str, list] = {}
@@ -2778,14 +2883,23 @@ class _PasIndex:
 
     def unit(self, rel: str):
         """Die gescannte Unit oder None: nicht am ZIEL, oder ihre Blöcke gehen nicht auf
-        (dann in `unreadable` mit `SKIP_UNBALANCED`)."""
+        (dann in `unreadable` mit `SKIP_UNBALANCED`). Ein verfolgter Symlink wird nicht
+        eigens gescannt: Er ist die Unit seines Ziels unter seinem Pfad, und geht sie nicht
+        auf, steht der Grund einmal beim Ziel (der Symlink bleibt `SKIP_SYMLINK`)."""
         if rel not in self.sources:
             return None
         if rel not in self._units:
-            unit = _PasUnit(rel, _pas_text(self.sources[rel]))
-            if unit.broken:
-                self.unreadable.setdefault(rel, SKIP_UNBALANCED)
-                unit = None
+            final = self.followed.get(rel)
+            if final is not None:
+                unit = self.unit(final)
+                if unit is not None:
+                    unit = copy.copy(unit)
+                    unit.rel = rel
+            else:
+                unit = _PasUnit(rel, _pas_text(self.sources[rel]))
+                if unit.broken:
+                    self.unreadable.setdefault(rel, SKIP_UNBALANCED)
+                    unit = None
             self._units[rel] = unit
         return self._units[rel]
 
@@ -2856,11 +2970,11 @@ class _PasIndex:
         if first == "self":
             found = (top.head.parts[-2], unit) if top is not None and top.head.cls else None
         else:
-            typ = unit.local_type(impl, first, at) if impl is not None else None
+            known, typ = unit.local(impl, first, at) if impl is not None else (False, None)
             found = (typ, unit) if typ else None
-            if found is None and top is not None and top.head.cls:
+            if not known and top is not None and top.head.cls:
                 found = self._field(top.head.cls, first, unit)
-            if found is None:
+            if not known and found is None:
                 found = self._named(unit, first)
         for part in rest:
             if found is None:
@@ -2889,13 +3003,59 @@ class _PasIndex:
                 return cls.fields[name], scoped
         return None
 
-    def resolve_call(self, unit: _PasUnit, at: int, receiver, name: str):
+    def _member(self, cls_key, name: str, unit: _PasUnit) -> bool:
+        """Ist `name` Feld, Property oder Konstante der Klasse oder ihrer Basisklassen?"""
+        return any(name in cls.fields or name in cls.consts
+                   for _scoped, cls in self.class_chain(cls_key, unit)[0])
+
+    def _unit_level(self, unit: _PasUnit, name: str):
+        """Was `name` auf Unit-Ebene benennt — die erste Unit des Scopes, die ihn deklariert,
+        entscheidet (Delphi: die zuletzt genannte verdeckt die früheren): `"value"` (Variable
+        oder Konstante; der eigenen Unit auch aus dem implementation-Teil), `"routine"` (freie
+        Routine), None sonst."""
+        for scoped in self.scope(unit):
+            own = scoped is unit
+            if (name in scoped.globals or name in scoped.consts
+                    or own and (name in scoped.impl_globals or name in scoped.impl_consts)):
+                return "value"
+            if name in scoped.decls or scoped.standalone(name):
+                return "routine"
+        return None
+
+    def known(self, unit: _PasUnit, at: int, name: str) -> bool:
+        """Benennt `name` am Token `at` einen Wert — `Self`, lokal (auch ohne Typ), Feld,
+        Property oder Konstante der eigenen Klasse, Variable oder Konstante auf Unit-Ebene
+        (`_unit_level`)? Ein solcher Name ist kein Unit-Name, auch wenn er wie einer heißt."""
+        if name == "self":
+            return True
+        impl = unit.enclosing(unit.toks[at].line)
+        if impl is not None and unit.local(impl, name, at)[0]:
+            return True
+        top = impl.top() if impl is not None else None
+        if top is not None and top.head.cls and self._member(top.head.cls, name, unit):
+            return True
+        return self._unit_level(unit, name) == "value"
+
+    def unit_named(self, unit: _PasUnit, receiver: list):
+        """Pfad der Unit im Repo (die eigene oder eine der `uses`-Listen), die der Empfänger
+        benennt (`Helpers`, `App.Helpers`), oder None."""
+        joined = ".".join(receiver)
+        for rel in [unit.rel, *self.used(unit)]:
+            stem = PurePosixPath(rel).stem.lower()
+            if stem == joined or stem.endswith("." + joined):
+                return rel
+        return None
+
+    def resolve_call(self, unit: _PasUnit, at: int, receiver, name: str, guess: bool = True):
         """(Liste (unit, Implementierung), gezählt) für einen Aufruf `name` am Token `at`: ohne
         Empfänger die geschachtelten Routinen, die dort sichtbar sind, dann die Methoden der
-        eigenen Klasse, dann freie Routinen der Unit und der `uses`-Units; mit dem Namen einer
-        Unit im Repo als Empfänger deren Routinen; mit bekanntem Typ nur dessen Klassenkette;
-        mit dem Namen einer Unit außerhalb des Repos (`_outside_unit`) nichts, gezählt; sonst
-        alle Methoden des Namens — mehr als `AMBIGUOUS_MAX`: nichts, gezählt."""
+        eigenen Klasse, dann freie Routinen der Unit und der `uses`-Units; mit bekanntem Typ
+        des Empfängers nur dessen Klassenkette (eine Variable verdeckt eine gleichnamige Unit);
+        ist sein erster Teil kein bekannter Wert (`known`): mit dem Namen einer Unit im Repo
+        deren Routinen (geht die Unit nicht auf: nichts, gezählt), mit dem Namen einer Unit
+        außerhalb des Repos (`_outside_unit`) nichts, gezählt; sonst alle Methoden des Namens —
+        mehr als `AMBIGUOUS_MAX` oder ohne `guess` (Aufruf ohne Klammer): nichts, gezählt, wenn
+        es welche gibt."""
         line = unit.toks[at].line
         if receiver == []:
             impl = unit.enclosing(line)
@@ -2914,13 +3074,6 @@ class _PasIndex:
                     return [(scoped, x) for x in found], False
             return [], False
         if receiver is not None:
-            joined = ".".join(receiver)
-            for rel in [unit.rel, *self.used(unit)]:
-                stem = PurePosixPath(rel).stem.lower()
-                if stem == joined or stem.endswith("." + joined):
-                    scoped = self.unit(rel)
-                    return ([(scoped, x) for x in scoped.standalone(name)]
-                            if scoped is not None else []), False
             typed = self.receiver(unit, at, receiver)
             if typed is not None:
                 for scoped, cls in self.class_chain(_type_key(typed[0]), typed[1])[0]:
@@ -2928,10 +3081,19 @@ class _PasIndex:
                     if found:
                         return [(scoped, x) for x in found], False
                 return [], False
-            if _outside_unit(unit, receiver):
-                return [], True
+            if not self.known(unit, at, receiver[0]):
+                rel = self.unit_named(unit, receiver)
+                if rel is not None:
+                    scoped = self.unit(rel)
+                    if scoped is None:
+                        return [], True   # die Unit geht nicht auf: nicht gesucht, gezählt
+                    return [(scoped, x) for x in scoped.standalone(name)], False
+                if _outside_unit(unit, receiver):
+                    return [], True
         found = [(scoped, x) for scoped in self.scope(unit)
                  for x in scoped.by_name.get(name, []) if x.head.cls and x.outer is None]
+        if not guess:
+            return [], bool(found)
         if len(found) > AMBIGUOUS_MAX:
             return [], True
         return found, False
@@ -2987,23 +3149,39 @@ class _PasIndex:
 
 def _parenless(index: _PasIndex, unit: _PasUnit, k: int, receiver) -> bool:
     """Gilt der Bezeichner ohne Klammer bei `k` als Aufruf? Nur im Rumpf einer Routine und mit
-    bekanntem Empfänger; ohne Empfänger nicht, wenn er eine Variable benennt (lokal an der
-    Stelle, Feld der eigenen Klasse, Variable der Unit)."""
+    bekanntem Empfänger-Pfad. Mit Empfänger, wenn der Pfad allein als Anweisung steht
+    (`Obj.Run;`), dessen Typ bekannt ist oder er eine Unit im Repo benennt — sonst ist
+    `S.Items.Count + 1` eher eine Property. Ohne Empfänger nicht, wenn er dort einen Wert
+    benennt: lokal (auch ohne Typ: `var L := …`, `const P`, lokale Konstante), Feld, Property
+    oder Konstante der eigenen Klasse, Variable oder Konstante auf Unit-Ebene in der
+    eigenen oder einer `uses`-Unit (die erste des Scopes, die den Namen deklariert,
+    entscheidet; eine geschachtelte Routine oder Methode der eigenen Klasse geht vor)."""
     impl = unit.enclosing(unit.toks[k].line)
     if receiver is None or impl is None or not impl.begin < k < impl.stop:
         return False
     if receiver:
-        return True
+        return (unit.statement(k) or index.receiver(unit, k, receiver) is not None
+                or (not index.known(unit, k, receiver[0])
+                    and index.unit_named(unit, receiver) is not None))
     name, top = unit.toks[k].low, impl.top()
-    return not (unit.local_type(impl, name, k) or name in unit.globals
-                or name in unit.impl_globals
-                or (top.head.cls and index._field(top.head.cls, name, unit)))
+    if unit.local(impl, name, k)[0]:
+        return False
+    if unit.nested(impl, name):
+        return True
+    if top.head.cls:
+        if index._member(top.head.cls, name, unit):
+            return False
+        if any(scoped.methods(cls.low, name)
+               for scoped, cls in index.class_chain(top.head.cls, unit)[0]):
+            return True
+    return index._unit_level(unit, name) != "value"
 
 
 def _outside_unit(unit: _PasUnit, receiver: list) -> bool:
-    """Ist ein Empfänger, der weder lokal noch als Feld, Variable oder Klasse bekannt ist, ein
-    Unit-Name: eine Unit der uses-Listen (auch ohne Präfix: `SysUtils` für `System.SysUtils`)
-    oder `A.B` mit einem Präfix der RTL (`_PAS_UNIT_SCOPES`)?"""
+    """Ist ein Empfänger, dessen erster Teil weder lokal noch als Feld, Variable, Konstante
+    oder Klasse bekannt ist (`_PasIndex.known`, `receiver` — der Aufrufer prüft das vorher),
+    ein Unit-Name: eine Unit der uses-Listen (auch ohne Präfix: `SysUtils` für
+    `System.SysUtils`) oder `A.B` mit einem Präfix der RTL (`_PAS_UNIT_SCOPES`)?"""
     joined = ".".join(receiver)
     if any(name == joined or name.endswith("." + joined) for name, _path in unit.uses):
         return True
@@ -3068,7 +3246,9 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
     je `Extract`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream` und je `inherited Create`
     im Konstruktor einer Klasse mit Besitz-Default der RTL (`owner`). Mehrere Einträge gleicher
     Art und gleichen Namens auf einer Zeile tragen die Spalte wie bei Python. Gezählt
-    (`unresolved`) werden nur Aufrufe mit Klammer."""
+    (`unresolved`) wird jeder Aufruf, für den `resolve_call` nichts statt einer Vermutung
+    liefert — ohne Klammer auch, wenn es auf unbekanntem Empfänger gleichnamige Methoden gibt
+    (dort wird nie geraten)."""
     toks = unit.toks
     entries, shown, groups = [], set(), {}
 
@@ -3085,7 +3265,7 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
 
     for line in sorted(lines):
         lo = bisect.bisect_left(unit.tok_lines, line)
-        hi = bisect.bisect_right(unit.tok_lines, line)
+        hi = min(bisect.bisect_right(unit.tok_lines, line), unit.code_toks)
         for k in range(lo, hi):
             tok = toks[k]
             if not tok.ident:
@@ -3113,8 +3293,8 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
             if call is None:
                 continue
             receiver, paren = call
-            cands, counted = index.resolve_call(unit, k, receiver, tok.low)
-            if counted and paren:
+            cands, counted = index.resolve_call(unit, k, receiver, tok.low, guess=paren)
+            if counted:
                 unresolved.add((rel, line, tok.start))
             body, show = _call_lines(index, cands) if cands else ([], False)
             if show:
@@ -3132,16 +3312,22 @@ def collect_delphi(repo, rng, files):
     `rng` und `files` wie bei `collect_python`; gezählt nur `.pas`, `.dpr`, `.dpk` (ohne
     Rücksicht auf Groß/Klein) außerhalb von `.skills/`. Der Code kommt aus dem Baum des ZIELS
     in Git und wird nie ausgeführt; gelesen wird nur der erste Zweig bedingten Codes
-    (`{$IFDEF}` …), Strings und Kommentare sind ausgeblendet. Geht die Blockzählung einer Unit
-    nicht auf (auch eine abgeschnittene Datei), steht sie mit `SKIP_UNBALANCED` in `unparsed`
-    (eigene Datei) oder fehlt bei der Suche (`uses`-Unit) — nichts statt einer sicheren
-    falschen Antwort. Je Aufruf auf einer geänderten Zeile — `Name(`, `Obj.Name(`,
-    `Name<T>(`, im Rumpf einer Routine auch ohne Klammer (`Validate;`, `Obj.Run;`,
-    `TFoo.Create;`; nicht, wenn der Name dort eine Variable ist) — die Implementierung
+    (`{$IFDEF}` …) bis zum Schluss-`end.`, Strings und Kommentare sind ausgeblendet; geänderte
+    Zeilen mit Code in einem nicht gelesenen Zweig stehen mit `<n> SKIP_BRANCH (<zeilen>)` in
+    `unparsed` (die übrigen Stellen der Datei werden gesammelt). Jede eigene Datei wird
+    gescannt, auch ohne geänderte Zeile; geht ihre Blockzählung nicht auf (auch eine
+    abgeschnittene Datei), steht sie mit `SKIP_UNBALANCED` in `unparsed`, eine solche
+    `uses`-Unit fehlt bei der Suche (ein Aufruf `Unit.Name(` auf ihr ist gezählt) — nichts
+    statt einer sicheren falschen Antwort. Je Aufruf auf einer geänderten Zeile — `Name(`,
+    `Obj.Name(`, `Name<T>(`, im Rumpf einer Routine auch ohne Klammer (`Validate;`,
+    `Obj.Run;`, `TFoo.Create;`; ohne Empfänger nicht, wenn der Name dort einen Wert benennt —
+    Variable, Konstante, Parameter, auch ohne Typ; mit Empfänger nur als eigene Anweisung, mit
+    bekanntem Typ oder auf einer Unit im Repo) — die Implementierung
     `procedure|function|constructor|destructor [TKlasse.]Name`: zuerst die geschachtelten
     Routinen, die an der Stelle sichtbar sind, dann die eigene Klasse, die eigene Unit und die
-    Units der `uses`-Listen (Empfänger mit bekanntem Typ: nur dessen Klassenkette; mit einem
-    Unit-Namen außerhalb des Repos wie `System.SysUtils.Format(`: nichts, gezählt), ihr Kopf
+    Units der `uses`-Listen (Empfänger mit bekanntem Typ: nur dessen Klassenkette, auch wenn
+    eine Unit so heißt; mit einem Unit-Namen außerhalb des Repos wie
+    `System.SysUtils.Format(`: nichts, gezählt; unbekannt ohne Klammer: nie geraten), ihr Kopf
     aus der Deklaration (interface-Teil oder Klassenrumpf; bei Überladungen nach Namen und
     Typen der Parameter) mit Default-Werten und ihre `raise`-Zeilen (transitiv in der Unit
     nach derselben Aufrufregel, `RAISE_DEPTH`); im Block, wenn sie etwas wirft oder einen
@@ -3154,10 +3340,27 @@ def collect_delphi(repo, rng, files):
     Klasse in `OWNERSHIP_RTL` (`TObjectList<…>`, `TObjectDictionary<…>`, `TObjectQueue<…>`,
     `TObjectStack<…>`, `TObjectList` aus Contnrs), steht der Besitz-Default der RTL dabei —
     ebenso bei einem geänderten `inherited Create(…)` im Konstruktor einer solchen Klasse.
-    Format wie bei `Collected`, Arten `call` und `owner`; `unresolved` zählt Aufrufe mit
-    Klammer auf unbekanntem Empfänger mit mehr als `AMBIGUOUS_MAX` gleichnamigen Methoden und
-    auf Units außerhalb des Repos. Rückgabe: `Collected(entries, unresolved, unparsed)`."""
-    return _collect(repo, rng, files, _is_delphi, _delphi_index, _PasIndex.unit, _delphi_sites)
+    Format wie bei `Collected`, Arten `call` und `owner`; `unresolved` zählt Aufrufe auf
+    unbekanntem Empfänger mit mehr als `AMBIGUOUS_MAX` gleichnamigen Methoden (ohne Klammer:
+    mit überhaupt welchen), auf Units außerhalb des Repos und auf Units im Repo, deren Blöcke
+    nicht aufgehen. Rückgabe: `Collected(entries, unresolved, unparsed)`."""
+    return _collect(repo, rng, files, _is_delphi, _delphi_index, _PasIndex.unit, _delphi_sites,
+                    _branch_reason)
+
+
+def _branch_reason(unit: _PasUnit, lines: set):
+    """Grund für die geänderten Zeilen mit Code aus einem nicht gelesenen bedingten Zweig
+    (`<n> SKIP_BRANCH (<zeilen>)`, Zeilen als Bereiche `12–14, 20`), None ohne solche."""
+    last = unit.toks[unit.code_toks - 1].line if unit.code_toks else 0
+    hit = sorted(n for n in lines if n in unit.skipped_lines and n <= last)
+    if not hit:
+        return None
+    spans, start = [], hit[0]
+    for prev, cur in zip(hit, hit[1:] + [None]):
+        if cur is None or cur != prev + 1:
+            spans.append(str(start) if start == prev else f"{start}–{prev}")
+            start = cur
+    return f"{len(hit)} {SKIP_BRANCH} ({', '.join(spans)})"
 
 
 class _Collector(NamedTuple):
@@ -3182,9 +3385,18 @@ def _file_line(path: str, unreadable: dict) -> str:
     """Zeile der Dateiliste: eine Datei ohne Sammler oder ohne lesbaren Stand mit Hinweis."""
     if not _has_collector(path):
         return f"- `{path}` — {NO_COLLECTOR}\n"
+    if path in unreadable and _branch_lines(unreadable[path]) is not None:
+        return f"- `{path}` — {unreadable[path]}, dort keine Gegenstellen gesammelt\n"
     if path in unreadable:
         return f"- `{path}` — Datei am ZIEL nicht lesbar: {unreadable[path]}\n"
     return f"- `{path}`\n"
+
+
+def _branch_lines(reason: str):
+    """Zahl der Zeilen eines Grunds `<n> SKIP_BRANCH (…)` (Datei gelesen, diese Zeilen nicht),
+    None bei einem anderen Grund."""
+    match = _BRANCH_REASON.fullmatch(reason)
+    return int(match.group(1)) if match else None
 
 
 def _packet_extras(packet) -> tuple[dict, str, str | None]:
@@ -3227,10 +3439,14 @@ def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
         intro = (f"\n## Gegenstellen\n\n{total} Stelle(n) nach der Sammelregel, mechanisch "
                  f"gesammelt (ohne Auswahl nach Verdacht); {unresolved} nicht aufgelöst (ohne "
                  "Importbezug und mehrdeutig: nichts statt Raten).\n")
-        mine = sum(1 for f in files if f in unreadable)
+        branch = [_branch_lines(unreadable[f]) for f in files if f in unreadable]
+        mine = branch.count(None)
         if mine:
             intro += (f"{mine} Paketdatei(en) am ZIEL nicht lesbar (übersprungen, in der "
                       "Dateiliste genannt).\n")
+        skipped = sum(n for n in branch if n is not None)
+        if skipped:
+            intro += f"{skipped} {SKIP_BRANCH} in Paketdateien (in der Dateiliste genannt).\n"
     else:
         intro = "\n" + intro
     rows = [_file_line(f, unreadable) for f in files]
@@ -3291,7 +3507,10 @@ def render_block(packet, entries, unresolved, cap):
 
     - `unreadable`: Liste von Paaren `(datei, grund)` (Tupel oder JSON-Listen, etwa
       `Collected.unparsed`) — die Datei steht in der Dateiliste mit „Datei am ZIEL nicht
-      lesbar: <grund>", die Zahl der betroffenen Paketdateien unter `## Gegenstellen`.
+      lesbar: <grund>", die Zahl der betroffenen Paketdateien unter `## Gegenstellen`; ein
+      Grund `<n> SKIP_BRANCH (<zeilen>)` (Datei gelesen, diese Zeilen nicht) steht als
+      „<grund>, dort keine Gegenstellen gesammelt", die Summe der Zeilen unter
+      `## Gegenstellen`.
     - `notes`: Liste von Texten, je einer als eigener Absatz am Ende des Blocks (etwa die
       Zahl der nicht lesbaren Dateien außerhalb des Pakets).
     - `intro`: Text, der den Anfang des Abschnitts ab `## Gegenstellen` samt Zählzeilen
@@ -3319,8 +3538,9 @@ def write_counterparts(repo, run_id):
     ZIEL, mit Grund in der Dateiliste), `notes` = je Sprache mit eigenen Dateien im Paket die
     übrigen nicht durchsuchten Dateien dieser Sprache im Repo als eine Zahl mit den
     vorkommenden Gründen (`not_indexed` des Index: ohne Submodule und ohne Symlinks auf
-    gelesene Dateien; bei Delphi dazu die bis dahin gescannten Units, deren Blöcke nicht
-    aufgehen), bei Fokus `quality` statt Gegenstellen `intro` = `QUALITY_INTRO`.
+    gelesene Dateien; bei Delphi dazu die gescannten Units, deren Blöcke nicht aufgehen —
+    die Hinweise entstehen erst, wenn alle Pakete gesammelt sind, also unabhängig von ihrer
+    Reihenfolge), bei Fokus `quality` statt Gegenstellen `intro` = `QUALITY_INTRO`.
     Höchstens `BLOCK_MAX_CHARS` Zeichen je Datei, Kopfzeile eingeschlossen. Schreibt atomar,
     überschreibt einen früheren Block. Rückgabe: je Paket in
     Plan-Reihenfolge `{"packet", "path" (repo-relativ), "counterparts", "shown",
@@ -3331,26 +3551,34 @@ def write_counterparts(repo, run_id):
     plan_range = plan.get("range")
     if not isinstance(plan_range, str) or not plan_range:
         raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
-    target = None
-    written = []
+    quality = plan.get("focus") == "quality"
+    collected = []
     for packet in plan["packets"]:
-        pid = packet["id"]
-        rng = make_packet_range(repo, run_id, pid, None, None)
-        shown_packet = {**packet, "range": rng}
-        header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
-                  f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
-        cap = BLOCK_MAX_CHARS - len(header)
-        if plan.get("focus") == "quality":
-            shown_packet["intro"] = QUALITY_INTRO
-            body, _shown = _render(shown_packet, [], 0, cap)
-            total = shown = unresolved = 0
-        else:
+        rng = make_packet_range(repo, run_id, packet["id"], None, None)
+        found = None
+        if not quality:
             results = [c.collect(repo, plan_range, packet["files"]) for c in COLLECTORS]
             found = Collected(
                 sorted((e for r in results for e in r.entries),
                        key=lambda e: (e["file"], e["line"], e["kind"])),
                 sum(r.unresolved for r in results),
                 sorted(pair for r in results for pair in r.unparsed))
+        collected.append((packet, rng, found))
+    # Die Hinweise erst nach allen Paketen: Delphi-Units werden bei Bedarf gescannt, und
+    # welche nicht aufgehen, darf nicht von der Reihenfolge der Pakete abhängen.
+    target = None
+    written = []
+    for packet, rng, found in collected:
+        pid = packet["id"]
+        shown_packet = {**packet, "range": rng}
+        header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
+                  f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+        cap = BLOCK_MAX_CHARS - len(header)
+        if found is None:
+            shown_packet["intro"] = QUALITY_INTRO
+            body, _shown = _render(shown_packet, [], 0, cap)
+            total = shown = unresolved = 0
+        else:
             notes = []
             for collector in COLLECTORS:
                 own = {str(f) for f in packet["files"] if collector.accepts(str(f))}
