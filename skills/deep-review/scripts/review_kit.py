@@ -9,11 +9,12 @@ Hilfscommits der Paket-Bereiche, gebaut über einen temporären Index; der Vergl
 Arbeitsbaum läuft auf einer Kopie des Index); HEAD, Index und Arbeitsbaum des Nutzers
 bleiben unberührt (E6).
 
-Stand Task 4: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
+Stand Task 5: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
 ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel,
 `build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
-Python (`collect_python`, `render_block`, `write_counterparts`; Zielcode nur per `ast`
-gelesen, aus Git am ZIEL).
+Python (`collect_python`; Zielcode nur per `ast` gelesen) und Delphi (`collect_delphi`,
+Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
+`write_counterparts`.
 """
 
 from __future__ import annotations
@@ -1165,7 +1166,7 @@ def cleanup(repo, run_id, stale):
 # Schlüsselwort-Arguments, `except` → Ausnahmen der Aufrufe im try-Block; ohne Importbezug und
 # mit mehr als `AMBIGUOUS_MAX` gleichnamigen Definitionen: nichts statt Raten, aber gezählt.
 
-COUNTERPART_SUFFIXES = frozenset({".py"})  # Dateiendungen mit Sammler, klein geschrieben
+COUNTERPART_SUFFIXES = frozenset({".py", ".pas", ".dpr", ".dpk"})  # mit Sammler, klein
 COUNTERPART_MAX_DEFS = 2   # Definitionen je Aufruf im Block (wie im Prototyp)
 RAISE_LINES_MAX = 8        # raise-Zeilen je Gegenstelle
 FLOW_LINES_MAX = 12        # Zeilen des Wegs je geändertem Schlüsselwort-Argument
@@ -1187,10 +1188,13 @@ _TRIES = (ast.Try, *((ast.TryStar,) if hasattr(ast, "TryStar") else ()))
 
 
 class Collected(NamedTuple):
-    """Rückgabe eines Sammlers (`collect_python`; Delphi folgt demselben Format).
+    """Rückgabe eines Sammlers (`collect_python`, `collect_delphi`).
 
     `entries`: je Stelle, die die Sammelregel trifft, ein Dict `{"file", "line", "kind",
-    "lines"}` — `kind` `call` oder `except`, `lines[0]` die Überschrift
+    "lines"}` — `kind` `call` oder `except` (Python), `call` oder `owner` (Delphi: `###
+    <datei>:<zeile> <Op> auf <Empfänger>: <Typ>`, dann je Klasse `- Gegenstelle …`,
+    `  inherited Create(…) at <datei>:<zeile>`, `  Besitz (RTL): …`; ein Delphi-Aufruf
+    trägt `  deklariert: <datei>:<zeile>` für den Kopf), `lines[0]` die Überschrift
     `### <datei>:<zeile> …` (`### <datei>:<zeile>:<spalte> …`, wenn eine Zeile mehrere
     Einträge für denselben Namen hat), danach die Zeilen `- Gegenstelle <Name> [<datei>:<zeile>]:
     <Signatur>`, `  Doc: …`, `  wirft: <Typen>`, `    raise <Typ> at <datei>:<zeile>`,
@@ -1199,8 +1203,9 @@ class Collected(NamedTuple):
     Definitionen — auch Weitergaben eines geänderten Arguments, deren Weg dort endet — nicht
     im Block, aber gezählt. `unparsed`: Paare `(datei, grund)` der eigenen Dateien (aus
     `files`), die der Sammler am ZIEL nicht lesen konnte (Python: `Syntaxfehler`,
-    `Symlink`, `Pfad nicht UTF-8`, `Submodul (gitlink), keine Datei`; sonst
-    `NOT_IN_TARGET`), sortiert — übersprungen, im Paketblock genannt und gezählt."""
+    `Symlink`, `Pfad nicht UTF-8`, `Submodul (gitlink), keine Datei`; Delphi dieselben ohne
+    `Syntaxfehler`, der Scanner lehnt nichts ab; sonst `NOT_IN_TARGET`), sortiert —
+    übersprungen, im Paketblock genannt und gezählt."""
     entries: list
     unresolved: int
     unparsed: list
@@ -1286,13 +1291,18 @@ def _python_sources(repo: Path, target: str, links: dict | None = None) -> tuple
     (`SKIP_SYMLINK`), Pfade, die kein UTF-8 sind (`SKIP_NOT_UTF8`), und Submodule mit
     `.py`-Namen (`SKIP_GITLINK`). Ein übergebenes Dict `links` bekommt je Symlink sein Ziel
     im Repo (`_link_dest`, None ohne)."""
+    return _tree_sources(repo, target, _is_python, links)
+
+
+def _tree_sources(repo: Path, target: str, accept, links: dict | None = None) -> tuple[dict, dict]:
+    """Wie `_python_sources`, für die Pfade, die `accept(pfad)` annimmt (Python, Delphi)."""
     blobs, skipped = [], {}
     for record in _git(repo, "ls-tree", "-r", "-z", "--full-tree", target).split("\0"):
         if not record:
             continue
         info, path = record.split("\t", 1)
         mode, kind, sha = info.split()
-        if not _is_python(path) or _under_skills(path):
+        if not accept(path) or _under_skills(path):
             continue
         if kind == "commit":
             skipped[path] = SKIP_GITLINK
@@ -1755,6 +1765,1066 @@ def collect_python(repo, rng, files):
     return Collected(entries, len(unresolved), sorted(unparsed.items()))
 
 
+# --- Gegenstellen für Delphi (Text-Scanner) -------------------------------------------------
+#
+# Kein Parser: `mask_pascal` blendet Strings und Kommentare aus (Zeilen und Spalten bleiben),
+# danach zählt ein Token-Scanner Blöcke (`begin`/`case`/`try`/`asm`/`record` und Klassenrümpfe
+# gegen `end`). Bezeichner ohne Rücksicht auf Groß/Klein. Gesucht wird in der eigenen Unit und
+# in den Units ihrer `uses`-Listen; wie in Delphi verdeckt die zuletzt genannte Unit die
+# früheren. Was der Scanner nicht sicher zuordnen kann, steht nicht im Block.
+
+DELPHI_SUFFIXES = frozenset({".pas", ".dpr", ".dpk"})
+DELPHI_RELEASES = frozenset({"extract", "remove", "free", "freeandnil", "setcontentstream"})
+CLASS_CHAIN_MAX = 4        # Klassen je Empfängertyp im Block (die Klasse und ihre Basisklassen)
+INHERITED_LINES_MAX = 4    # inherited-Zeilen je Klasse
+OWNERSHIP_RTL = {          # Besitz-Default der RTL je Basisklasse (Schlüssel klein, ohne <…>)
+    "tobjectlist": "TObjectList<…>: OwnsObjects standardmäßig wahr (Create(AOwnsObjects: "
+                   "Boolean = True)) — Remove, Delete und Clear geben Elemente frei, Extract "
+                   "nicht",
+    "tobjectdictionary": "TObjectDictionary<…>: Besitz nur nach Ownerships im Konstruktor "
+                         "(doOwnsKeys, doOwnsValues; das geerbte Create ohne sie besitzt "
+                         "nichts) — Remove und Clear geben Besitztes frei, ExtractPair nicht",
+}
+_PAS_SPECIAL = re.compile(r"[{('/]")
+_PAS_EOL = re.compile(r"[\r\n]")
+_PAS_NOT_BLANK = re.compile(r"[^\r\n]")
+_PAS_MULTILINE_END = re.compile(r"\n[ \t]*'''")
+_PAS_TOKEN = re.compile(r"&?[^\W\d]\w*|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\$[0-9A-Fa-f]+|:=|\.\.|<>"
+                        r"|<=|>=|\S")
+_PAS_IDENT = re.compile(r"&?[^\W\d]\w*")
+_PAS_SPACE = re.compile(r"\s+")
+_PAS_TYPE_HEAD = re.compile(r"\s*&?([^\W\d][\w.]*)")
+_PAS_QUOTED = re.compile(r"'([^']*)'")
+_PAS_ROUTINES = frozenset({"procedure", "function", "constructor", "destructor", "operator"})
+_PAS_STRUCTS = frozenset({"class", "record", "object", "interface", "dispinterface"})
+# Vor einem Routinen-Wort steht bei einem Prozedurtyp oder einer anonymen Methode eines davon.
+_PAS_TYPE_PREV = frozenset({"=", "to", ":", "of", "(", ",", ":="})
+_PAS_PARAM_MODS = frozenset({"const", "var", "out", "constref"})
+_PAS_DIRECTIVES = frozenset({
+    "overload", "inline", "stdcall", "cdecl", "register", "pascal", "safecall", "winapi",
+    "static", "virtual", "override", "reintroduce", "dynamic", "abstract", "final",
+    "assembler", "platform", "deprecated", "experimental", "library", "varargs", "local",
+    "message", "dispid", "export", "far", "near", "unsafe", "forward", "external", "noreturn"})
+_PAS_KEYWORDS = frozenset({
+    "and", "array", "as", "asm", "at", "begin", "case", "class", "const", "constructor",
+    "destructor", "dispinterface", "div", "do", "downto", "else", "end", "except", "exports",
+    "file", "finalization", "finally", "for", "function", "goto", "if", "implementation", "in",
+    "inherited", "initialization", "inline", "interface", "is", "label", "library", "mod",
+    "nil", "not", "object", "of", "on", "operator", "or", "packed", "procedure", "program",
+    "property", "raise", "record", "repeat", "resourcestring", "set", "shl", "shr", "string",
+    "then", "threadvar", "to", "try", "type", "unit", "until", "uses", "var", "while", "with",
+    "xor"})
+_PAS_NOT_TYPES = frozenset({"array", "set", "file", "packed", "procedure", "function",
+                            "reference", "record", "class", "string"})
+_PAS_PROPERTY_STOP = frozenset({"read", "write", "default", "nodefault", "stored", "index",
+                                "implements", "readonly", "writeonly", "dispid", ";"})
+
+
+def _pas_eol(text: str, pos: int) -> int:
+    match = _PAS_EOL.search(text, pos)
+    return match.start() if match else len(text)
+
+
+def _pas_string_end(text: str, pos: int) -> int:
+    """Ende des String-Literals ab dem `'` bei `pos`: `''` ist ein Anführungszeichen im
+    String, ein String endet spätestens am Zeilenende; `'''` allein am Zeilenende öffnet einen
+    mehrzeiligen String (Delphi 12), der an einer Zeile endet, die mit `'''` beginnt."""
+    eol = _pas_eol(text, pos)
+    if text.startswith("'''", pos) and not text[pos + 3:eol].strip():
+        match = _PAS_MULTILINE_END.search(text, eol)
+        return match.end() if match else len(text)
+    j = pos + 1
+    while True:
+        k = text.find("'", j, eol)
+        if k < 0:
+            return eol
+        if k + 1 < eol and text[k + 1] == "'":
+            j = k + 2
+            continue
+        return k + 1
+
+
+def _pas_mask(text: str, strings: bool) -> str:
+    """Kommentare (`{ }`, `(* *)`, `//`) und, mit `strings`, String-Literale durch Leerzeichen
+    ersetzt; Zeilenumbrüche bleiben, also auch Zeilen und Spalten."""
+    pieces, pos, i, n = [], 0, 0, len(text)
+    while True:
+        match = _PAS_SPECIAL.search(text, i)
+        if match is None:
+            break
+        i = match.start()
+        char = text[i]
+        if char == "{":
+            j = text.find("}", i + 1)
+            j = n if j < 0 else j + 1
+        elif char == "(" or char == "/":
+            if not text.startswith("(*" if char == "(" else "//", i):
+                i += 1
+                continue
+            if char == "/":
+                j = _pas_eol(text, i)
+            else:
+                j = text.find("*)", i + 2)
+                j = n if j < 0 else j + 2
+        else:
+            j = _pas_string_end(text, i)
+            if not strings:
+                i = j
+                continue
+        pieces.append(text[pos:i])
+        pieces.append(_PAS_NOT_BLANK.sub(" ", text[i:j]))
+        pos = i = j
+    pieces.append(text[pos:])
+    return "".join(pieces)
+
+
+def mask_pascal(text):
+    """Object-Pascal-Quelltext mit ausgeblendeten `'…'`-Strings (auch `''` darin und
+    mehrzeilige `'''`-Strings), `{ }`-, `(* *)`- und `//`-Kommentaren: jedes Zeichen darin
+    wird ein Leerzeichen, Zeilenumbrüche bleiben — gleiche Länge, gleiche Zeilen und Spalten.
+    Ein `end` in einem String oder Kommentar verschiebt so keinen Block. Compiler-Direktiven
+    `{$…}` sind Kommentare und verschwinden mit."""
+    return _pas_mask(str(text), strings=True)
+
+
+def _pas_text(raw: bytes) -> str:
+    """Quelltext einer Delphi-Datei: UTF-8 mit BOM, UTF-16 mit BOM, UTF-8, sonst Windows-1252
+    (der Standard älterer Delphi-Projekte)."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw[3:].decode("utf-8", errors="replace")
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+def _is_delphi(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in DELPHI_SUFFIXES
+
+
+def _type_key(type_text):
+    """Klassenname eines Typs, klein, ohne Unit-Präfix und ohne `<…>` — None ohne Namen."""
+    match = _PAS_TYPE_HEAD.match(type_text or "")
+    if not match:
+        return None
+    key = match.group(1).split(".")[-1].lower()
+    return None if key in _PAS_NOT_TYPES else key
+
+
+class _Tok(NamedTuple):
+    low: str      # Bezeichner klein und ohne `&`, sonst das Zeichen selbst
+    start: int
+    end: int
+    line: int
+    ident: bool
+
+
+class _PasHead:
+    """Routinenkopf: Art, Name (Teile wie geschrieben), Parameter (klein → Typtext oder None),
+    ob ein Parameter einen Default hat, Rückgabetyp, Signatur ohne `;`, Index des `;`."""
+    __slots__ = ("kind", "parts", "low", "cls", "qual", "line", "params", "defaults", "ret",
+                 "sig", "end")
+
+
+class _PasClass:
+    """Klassen-, Objekt- oder Record-Deklaration: Felder und Properties (klein → Typtext),
+    Methodenköpfe (klein → [_PasHead]), Basisklasse als Schlüssel (`_type_key`)."""
+    __slots__ = ("name", "low", "line", "sig", "parent", "fields", "methods")
+
+    def __init__(self, name: str, line: int, sig: str, parent) -> None:
+        self.name, self.low, self.line, self.sig, self.parent = name, name.lower(), line, sig, parent
+        self.fields: dict[str, str] = {}
+        self.methods: dict[str, list] = {}
+
+
+class _PasImpl:
+    """Implementierung einer Routine: Kopf, Rumpf `begin`…`end` als Token-Indizes, Variablen
+    aus `var`-Abschnitten und Inline-`var`, umschließende Routine bei geschachtelten."""
+    __slots__ = ("head", "outer", "begin", "stop", "end_line", "vars")
+
+    def __init__(self, head: _PasHead, outer) -> None:
+        self.head, self.outer = head, outer
+        self.begin = self.stop = self.end_line = None
+        self.vars: dict[str, str] = {}
+
+    def top(self):
+        impl = self
+        while impl.outer is not None:
+            impl = impl.outer
+        return impl
+
+
+class _PasUnit:
+    """Eine Delphi-Datei, gescannt: `uses`-Listen (interface und implementation, auch
+    `in '…'`), Klassen, Köpfe im interface-Teil, Implementierungen."""
+
+    def __init__(self, rel: str, text: str) -> None:
+        self.rel, self.text = rel, text
+        self.clean = _pas_mask(text, strings=False)
+        masked = _pas_mask(self.clean, strings=True)
+        self.newlines = [m.start() for m in re.finditer("\n", text)]
+        toks = []
+        for match in _PAS_TOKEN.finditer(masked):
+            word = match.group()
+            ident = bool(_PAS_IDENT.fullmatch(word))
+            toks.append(_Tok(word.lstrip("&").lower() if ident else word, match.start(),
+                             match.end(), bisect.bisect_right(self.newlines, match.start()) + 1,
+                             ident))
+        self.toks = toks
+        self.tok_lines = [t.line for t in toks]
+        self.name = PurePosixPath(rel).stem.lower()
+        self.uses: list[tuple] = []
+        self.classes: dict[str, _PasClass] = {}
+        self.decls: dict[str, list] = {}
+        self.impls: list[_PasImpl] = []
+        self.by_name: dict[str, list] = {}
+        self._parse()
+
+    # -- Hilfen über die Tokens
+    def _t(self, j: int) -> str:
+        return self.toks[j].low if 0 <= j < len(self.toks) else ""
+
+    def _ident(self, j: int) -> bool:
+        return 0 <= j < len(self.toks) and self.toks[j].ident
+
+    def _word(self, j: int) -> str:
+        tok = self.toks[j]
+        return self.text[tok.start:tok.end].lstrip("&")
+
+    def _text(self, start: int, end: int) -> str:
+        """Quelltext ohne Kommentare, Leerraum zu einem Leerzeichen."""
+        return _PAS_SPACE.sub(" ", self.clean[start:end]).strip()
+
+    def _close(self, j: int) -> int:
+        """Index der Klammer, die `(` oder `[` bei `j` schließt."""
+        depth = 0
+        for k in range(j, len(self.toks)):
+            low = self.toks[k].low
+            if low in ("(", "["):
+                depth += 1
+            elif low in (")", "]"):
+                depth -= 1
+                if depth == 0:
+                    return k
+        return len(self.toks) - 1
+
+    def _close_angle(self, j: int) -> int:
+        depth = 0
+        for k in range(j, len(self.toks)):
+            low = self.toks[k].low
+            if low == "<":
+                depth += 1
+            elif low == ">":
+                depth -= 1
+                if depth == 0:
+                    return k
+            elif low in (";", "(", ")", ":=", "begin"):
+                return k - 1
+        return len(self.toks) - 1
+
+    def _stmt_end(self, j: int) -> int:
+        """Index des nächsten `;` außerhalb von Klammern."""
+        depth = 0
+        for k in range(j, len(self.toks)):
+            low = self.toks[k].low
+            if low in ("(", "["):
+                depth += 1
+            elif low in (")", "]"):
+                depth -= 1
+            elif low == ";" and depth <= 0:
+                return k
+        return len(self.toks) - 1
+
+    def column(self, tok: _Tok) -> int:
+        line_start = self.newlines[tok.line - 2] + 1 if tok.line > 1 else 0
+        return tok.start - line_start + 1
+
+    # -- Struktur
+    def _structural(self, j: int) -> bool:
+        """Steht `class`/`record`/… bei `j` für einen Typ (nach `=`, `packed`, bei `record`
+        auch nach `:` und `of`) — nicht `class function`, `of object`, Unit-`interface`?"""
+        low, prev = self._t(j), self._t(j - 1)
+        if low == "record":
+            return prev in ("=", ":", "of", "packed")
+        return low in _PAS_STRUCTS and prev in ("=", "packed")
+
+    def _struct_head(self, j: int):
+        """(Index des Rumpfs oder None ohne Rumpf, Index danach, Basisliste (von, bis) oder
+        None) für den Typ bei `j`."""
+        low, k = self._t(j), j + 1
+        if low == "class" and self._t(k) == "of":
+            return None, k + 1, None
+        while self._t(k) in ("sealed", "abstract"):
+            k += 1
+        if self._t(k) == "helper":
+            k += 1
+            if self._t(k) == "(":
+                k = self._close(k) + 1
+            if self._t(k) == "for":
+                k += 1
+                while self._ident(k) or self._t(k) == ".":
+                    k += 1
+            return k, k, None
+        base = None
+        if low != "record" and self._t(k) == "(":
+            close = self._close(k)
+            base, k = (k, close), close + 1
+        if low != "record" and self._t(k) == ";":
+            return None, k, base
+        return k, k, base
+
+    def _block_end(self, j: int) -> int:
+        """Index des `end`, das den Block ab `j` schließt: `begin`, `try`, `case` (nicht im
+        varianten Teil eines Records), `asm` (bis zum nächsten `end`), Typrümpfe."""
+        toks, n, stack, k = self.toks, len(self.toks), [], j
+        while k < n:
+            low = toks[k].low
+            if low == "asm":
+                e = k + 1
+                while e < n and toks[e].low != "end":
+                    e += 1
+                if not stack:
+                    return min(e, n - 1)
+                k = e + 1
+                continue
+            if low in ("begin", "try") or (low == "case" and (not stack or stack[-1] != "record")):
+                stack.append(low)
+            elif low in _PAS_STRUCTS and self._structural(k):
+                body, after, _base = self._struct_head(k)
+                if body is None:
+                    k = after
+                    continue
+                stack.append("record" if low == "record" else "class")
+                k = body
+                continue
+            elif low == "end":
+                if stack:
+                    stack.pop()
+                if not stack:
+                    return k
+            k += 1
+        return n - 1
+
+    def _parse(self) -> None:
+        toks, n = self.toks, len(self.toks)
+        section, i = "implementation", 0
+        if n and toks[0].low in ("unit", "program", "library", "package"):
+            section = "head" if toks[0].low == "unit" else "implementation"
+            i = self._stmt_end(0) + 1
+        while i < n:
+            low = toks[i].low
+            if low == "interface" and section == "head":
+                section = "interface"
+            elif low == "implementation":
+                section = "implementation"
+            elif low == "uses":
+                i = self._uses(i + 1)
+                continue
+            elif low in _PAS_STRUCTS and self._structural(i):
+                i = self._struct(i)
+                continue
+            elif low in _PAS_ROUTINES and self._t(i - 1) not in _PAS_TYPE_PREV:
+                head = self._head(i)
+                if head is not None:
+                    if section == "implementation":
+                        i = self._impl(head, None)
+                    else:
+                        if head.cls is None:
+                            self.decls.setdefault(head.low, []).append(head)
+                        i = head.end + 1
+                    continue
+            i += 1
+
+    def _uses(self, k: int) -> int:
+        toks, n = self.toks, len(self.toks)
+        while k < n and toks[k].low != ";":
+            if not toks[k].ident:
+                k += 1
+                continue
+            parts = [toks[k].low]
+            k += 1
+            while self._t(k) == "." and self._ident(k + 1):
+                parts.append(toks[k + 1].low)
+                k += 2
+            path = None
+            if self._t(k) == "in":
+                stop = toks[k + 1].start if k + 1 < n else len(self.clean)
+                quoted = _PAS_QUOTED.search(self.clean, toks[k].end, stop)
+                path = quoted.group(1) if quoted else None
+                k += 1
+            self.uses.append((".".join(parts), path))
+        return k + 1
+
+    def _struct(self, i: int) -> int:
+        """Typ bei `i` (nach `Name =`): als Klasse ablegen (class, object, record mit Namen);
+        Index nach dem Typ."""
+        body, after, base = self._struct_head(i)
+        eq_i = i - 2 if self._t(i - 1) == "packed" else i - 1
+        name_i = eq_i - 1
+        if self._t(name_i) == ">":
+            depth = 0
+            while name_i >= 0:
+                low = self._t(name_i)
+                depth += low == ">"
+                depth -= low == "<"
+                name_i -= 1
+                if depth == 0:
+                    break
+        kind = self._t(i)
+        named = (self._ident(name_i) and self._t(eq_i) == "="
+                 and kind in ("class", "object", "record"))
+        cls = None
+        if named and (body is not None or base is not None):
+            sig_end = self.toks[base[1]].end if base else self.toks[i].end
+            parent = None
+            if base:
+                depth, k, start = 0, base[0] + 1, base[0] + 1
+                while k < base[1] and not (self._t(k) == "," and depth == 0):
+                    depth += (self._t(k) in ("<", "(")) - (self._t(k) in (">", ")"))
+                    k += 1
+                if k > start:
+                    parent = _type_key(self._text(self.toks[start].start, self.toks[k - 1].end))
+            cls = _PasClass(self._word(name_i), self.toks[name_i].line,
+                            self._text(self.toks[name_i].start, sig_end), parent)
+            self.classes.setdefault(cls.low, cls)
+        if body is None:
+            return after
+        end = self._block_end(i)
+        if cls is not None and self.classes.get(cls.low) is cls:
+            self._members(cls, body, end)
+        return end + 1
+
+    def _members(self, cls: _PasClass, start: int, end: int) -> None:
+        toks, k = self.toks, start
+        while k < end:
+            low = toks[k].low
+            if low in _PAS_STRUCTS and self._structural(k):
+                k = self._struct(k)
+                continue
+            if low in _PAS_ROUTINES and self._t(k - 1) not in _PAS_TYPE_PREV:
+                head = self._head(k)
+                if head is not None:
+                    cls.methods.setdefault(head.low, []).append(head)
+                    k = head.end + 1
+                    continue
+            if low == "case":  # varianter Teil eines Records: `case [Name:] Typ of`
+                while k < end and self._t(k) != "of":
+                    if self._ident(k + 1) and self._t(k + 2) == ":" and self._t(k) == "case":
+                        cls.fields[toks[k + 1].low] = self._text(toks[k + 3].start,
+                                                                 toks[k + 3].end)
+                    k += 1
+                k += 1
+                continue
+            if self._t(k + 1) == ":" and self._t(k + 2) == "(":
+                k += 3  # Marke eines varianten Teils `kA: (`; die Felder stehen in der Klammer
+                continue
+            if low == "property" and self._ident(k + 1):
+                stop = min(self._stmt_end(k), end)
+                j, depth = k + 2, 0
+                while j < stop and not (self._t(j) == ":" and depth == 0):
+                    depth += (self._t(j) == "[") - (self._t(j) == "]")
+                    j += 1
+                if j < stop:
+                    e = j + 1
+                    while e < stop and self._t(e) not in _PAS_PROPERTY_STOP:
+                        e += 1
+                    if e > j + 1:
+                        cls.fields[toks[k + 1].low] = self._text(toks[j + 1].start,
+                                                                 toks[e - 1].end)
+                k = stop + 1
+                continue
+            if toks[k].ident and low not in _PAS_KEYWORDS and self._t(k + 1) in (",", ":"):
+                decls, k = self._decls(k)
+                cls.fields.update(decls)
+                continue
+            k += 1
+
+    def _decls(self, k: int) -> tuple[dict, int]:
+        """`A, B: Typ [= Wert];` ab `k`: (Name klein → Typtext, Index danach)."""
+        toks, n = self.toks, len(self.toks)
+        names = []
+        while k < n and toks[k].ident and toks[k].low not in _PAS_KEYWORDS:
+            names.append(toks[k].low)
+            k += 1
+            if self._t(k) != ",":
+                break
+            k += 1
+        if not names or self._t(k) != ":":
+            return {}, k + 1
+        k += 1
+        start, depth = k, 0
+        while k < n:
+            low = toks[k].low
+            if low in ("(", "[", "<"):
+                depth += 1
+            elif low in (")", "]", ">"):
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and low in (";", "=", ":=", "in", "do"):
+                break
+            elif low in _PAS_STRUCTS and self._structural(k):
+                k = self._block_end(k) + 1
+                continue
+            k += 1
+        typ = self._text(toks[start].start, toks[k - 1].end) if k > start else ""
+        depth = 0
+        while k < n:
+            low = toks[k].low
+            if low in ("(", "["):
+                depth += 1
+            elif low in (")", "]"):
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and low == ";":
+                k += 1
+                break
+            elif depth == 0 and low in ("begin", "end", "var", "const", "type", "in", "do"):
+                break
+            k += 1
+        return ({name: typ for name in names} if typ else {}), k
+
+    def _head(self, i: int):
+        """Kopf ab dem Routinen-Wort bei `i` bis zum `;` (Direktiven danach gehören nicht
+        dazu); None ohne Namen."""
+        toks, n = self.toks, len(self.toks)
+        start = toks[i - 1].start if self._t(i - 1) == "class" else toks[i].start
+        k, parts = i + 1, []
+        while self._ident(k):
+            parts.append(self._word(k))
+            k += 1
+            if self._t(k) == "<":
+                k = self._close_angle(k) + 1
+            if self._t(k) == "." and self._ident(k + 1):
+                k += 1
+                continue
+            break
+        if not parts:
+            return None
+        head = _PasHead()
+        head.kind, head.parts, head.line = toks[i].low, parts, toks[i].line
+        head.low, head.qual = parts[-1].lower(), ".".join(parts)
+        head.cls = parts[-2].lower() if len(parts) > 1 else None
+        head.params, head.defaults, head.ret = {}, False, None
+        if self._t(k) == "(":
+            close = self._close(k)
+            head.params, head.defaults = self._params(k + 1, close)
+            k = close + 1
+        if self._t(k) == ":":
+            ret_start = k + 1
+            while k < n and toks[k].low not in (";", "="):
+                k += 1
+            if k > ret_start:
+                head.ret = self._text(toks[ret_start].start, toks[k - 1].end)
+        while k < n and toks[k].low != ";":
+            k += 1
+        k = min(k, n - 1)
+        head.end = k
+        head.sig = self._text(start, toks[k].start if toks[k].low == ";" else toks[k].end)
+        return head
+
+    def _params(self, a: int, b: int) -> tuple[dict, bool]:
+        """Parameterliste zwischen den Klammern: (Name klein → Typtext oder None, Default?)."""
+        params, defaults, k = {}, False, a
+        while k < b:
+            g, depth = k, 0
+            while g < b and not (self._t(g) == ";" and depth == 0):
+                depth += (self._t(g) in ("(", "[", "<")) - (self._t(g) in (")", "]", ">"))
+                g += 1
+            j = k
+            while j < g and (self._t(j) == "[" or self._t(j) in _PAS_PARAM_MODS):
+                j = self._close(j) + 1 if self._t(j) == "[" else j + 1
+            names = []
+            while j < g and self._ident(j):
+                names.append(self._t(j))
+                j += 1
+                if self._t(j) != ",":
+                    break
+                j += 1
+            typ = None
+            if j < g and self._t(j) == ":":
+                e, depth = j + 1, 0
+                while e < g and not (self._t(e) == "=" and depth == 0):
+                    depth += (self._t(e) in ("(", "[", "<")) - (self._t(e) in (")", "]", ">"))
+                    e += 1
+                if e > j + 1:
+                    typ = self._text(self.toks[j + 1].start, self.toks[e - 1].end)
+                defaults = defaults or e < g
+            for name in names:
+                params[name] = typ
+            k = g + 1
+        return params, defaults
+
+    def _impl(self, head: _PasHead, outer) -> int:
+        """Implementierung ab dem Kopf: Direktiven, Deklarationen (mit geschachtelten
+        Routinen und `var`-Abschnitten), Rumpf. Index danach."""
+        toks, n = self.toks, len(self.toks)
+        k = head.end + 1
+        while k < n and toks[k].low in _PAS_DIRECTIVES:
+            if toks[k].low in ("forward", "external"):
+                return self._stmt_end(k) + 1
+            k = self._stmt_end(k) + 1
+        impl = _PasImpl(head, outer)
+        while k < n:
+            low = toks[k].low
+            if low in ("begin", "asm"):
+                stop = self._block_end(k)
+                impl.begin, impl.stop, impl.end_line = k, stop, toks[stop].line
+                for j in range(k, stop):
+                    if toks[j].low == "var" and self._ident(j + 1):
+                        impl.vars.update(self._decls(j + 1)[0])
+                self.impls.append(impl)
+                self.by_name.setdefault(head.low, []).append(impl)
+                return stop + 1
+            if low in _PAS_ROUTINES and self._t(k - 1) not in _PAS_TYPE_PREV:
+                nested = self._head(k)
+                if nested is not None:
+                    k = self._impl(nested, impl)
+                    continue
+            elif low in ("var", "threadvar"):
+                k += 1
+                while (self._ident(k) and toks[k].low not in _PAS_KEYWORDS
+                       and self._t(k + 1) in (",", ":")):
+                    decls, k = self._decls(k)
+                    impl.vars.update(decls)
+                continue
+            elif low in _PAS_STRUCTS and self._structural(k):
+                k = self._struct(k)
+                continue
+            elif low in ("implementation", "initialization", "finalization", "end"):
+                return k
+            k += 1
+        return n
+
+    # -- Abfragen
+    def decl_of(self, impl: _PasImpl):
+        """Kopf der Deklaration zu einer Implementierung (Klassenrumpf oder interface-Teil);
+        bei Überladungen der mit denselben Parameternamen, sonst nach Reihenfolge."""
+        head = impl.head
+        if impl.outer is not None:
+            return None
+        if head.cls:
+            cls = self.classes.get(head.cls)
+            cands = cls.methods.get(head.low, []) if cls else []
+        else:
+            cands = self.decls.get(head.low, [])
+        if not cands:
+            return None
+        if head.params:
+            same = [d for d in cands if list(d.params) == list(head.params)]
+            if same:
+                return same[0]
+        siblings = [x for x in self.by_name.get(head.low, [])
+                    if x.head.cls == head.cls and x.outer is None]
+        if len(siblings) == len(cands) and impl in siblings:
+            return cands[siblings.index(impl)]
+        return cands[0]
+
+    def enclosing(self, line: int):
+        """Innerste Implementierung, deren Kopf bis `end` die Zeile enthält."""
+        best = None
+        for impl in self.impls:
+            if impl.head.line <= line <= impl.end_line and (
+                    best is None or impl.head.line >= best.head.line):
+                best = impl
+        return best
+
+    def methods(self, cls_low: str, name: str) -> list:
+        return [x for x in self.by_name.get(name, []) if x.head.cls == cls_low and x.outer is None]
+
+    def standalone(self, name: str, nested: bool) -> list:
+        return [x for x in self.by_name.get(name, [])
+                if x.head.cls is None and (nested or x.outer is None)]
+
+    def local_type(self, impl: _PasImpl, name: str):
+        """Typ eines Namens in einer Routine: Parameter (der Implementierung, sonst der
+        Deklaration), `var`, `Result`; dann die umschließenden Routinen."""
+        while impl is not None:
+            decl = self.decl_of(impl)
+            params = impl.head.params or (decl.params if decl else {})
+            if params.get(name):
+                return params[name]
+            if name in impl.vars:
+                return impl.vars[name]
+            ret = impl.head.ret or (decl.ret if decl else None)
+            if name == "result" and ret:
+                return ret
+            impl = impl.outer
+        return None
+
+    def chain_before(self, dot: int):
+        """Empfänger vor dem `.` bei `dot`: (Teile klein, Text) oder None, wenn davor kein
+        einfacher Bezeichner-Pfad steht (Aufruf, Index, Typumwandlung)."""
+        parts, j = [], dot - 1
+        while self._ident(j) and self._t(j) not in _PAS_KEYWORDS:
+            parts.insert(0, j)
+            if self._t(j - 1) == "." and j - 2 >= 0:
+                j -= 2
+                continue
+            break
+        if not parts or self._t(parts[0] - 1) == ".":
+            return None
+        return [self._t(p) for p in parts], ".".join(self._word(p) for p in parts)
+
+    def chain_after(self, k: int):
+        """Bezeichner-Pfad ab `k` bis zur schließenden Klammer (`FreeAndNil(X.Y)`)."""
+        parts = []
+        while self._ident(k) and self._t(k) not in _PAS_KEYWORDS:
+            parts.append(k)
+            if self._t(k + 1) == "." and self._ident(k + 2):
+                k += 2
+                continue
+            break
+        if not parts or self._t(parts[-1] + 1) != ")":
+            return None
+        return [self._t(p) for p in parts], ".".join(self._word(p) for p in parts)
+
+    def is_head_name(self, k: int) -> bool:
+        """Ist der Bezeichner bei `k` der Name in einem Routinenkopf (`procedure TA.Foo(`)?"""
+        j = k
+        while self._t(j - 1) == "." and self._ident(j - 2):
+            j -= 2
+        return self._t(j - 1) in _PAS_ROUTINES
+
+    def raise_type(self, k: int):
+        """Typ nach `raise` ab `k`: `EFoo.Create(…)` → `EFoo`; None bei `raise;`."""
+        parts = []
+        while self._ident(k) and self._t(k) not in _PAS_KEYWORDS:
+            parts.append(self._word(k))
+            if self._t(k + 1) == "." and self._ident(k + 2):
+                k += 2
+                continue
+            break
+        while len(parts) > 1 and parts[-1].lower().startswith("create"):
+            parts.pop()
+        return ".".join(parts) or None
+
+    def inherited_creates(self, cls_low: str) -> list:
+        """(Text, Zeile) der `inherited Create(…)` und bloßen `inherited` in den
+        Konstruktoren einer Klasse."""
+        out = []
+        for impl in self.impls:
+            if impl.head.cls != cls_low or impl.head.kind != "constructor" or impl.outer:
+                continue
+            for k in range(impl.begin, impl.stop):
+                if self._t(k) != "inherited":
+                    continue
+                nxt = self._t(k + 1)
+                if nxt == "create":
+                    end = self._close(k + 2) if self._t(k + 2) == "(" else k + 1
+                    out.append((self._text(self.toks[k].start, self.toks[end].end),
+                                self.toks[k].line))
+                elif nxt in (";", "end", "else"):
+                    out.append(("inherited", self.toks[k].line))
+        return out
+
+
+class _PasIndex:
+    """Alle Delphi-Dateien am ZIEL: Bytes je Pfad, Units nach Namen (Dateiname ohne Endung,
+    klein), gescannt erst bei Bedarf; `unreadable` wie beim Python-Index."""
+
+    def __init__(self, sources: dict, skipped: dict) -> None:
+        self.sources = sources
+        self.unreadable = dict(skipped)
+        self.lower_paths = {rel.lower(): rel for rel in sorted(sources)}
+        self.by_unit: dict[str, list] = {}
+        for rel in sorted(sources):
+            if PurePosixPath(rel).suffix.lower() == ".pas":
+                self.by_unit.setdefault(PurePosixPath(rel).stem.lower(), []).append(rel)
+        self._units: dict[str, _PasUnit] = {}
+        self._scope: dict[str, list] = {}
+        self.raises_memo: dict[tuple, list] = {}
+
+    def unit(self, rel: str):
+        if rel not in self.sources:
+            return None
+        if rel not in self._units:
+            self._units[rel] = _PasUnit(rel, _pas_text(self.sources[rel]))
+        return self._units[rel]
+
+    def scope(self, unit: _PasUnit) -> list:
+        """Die Unit selbst, dann die Units ihrer `uses`-Listen, die zuletzt genannte zuerst
+        (Delphi: sie verdeckt die früheren). Gleichnamige Units: die mit den meisten
+        gemeinsamen Verzeichnissen, dann nach Pfad; `in '…'` geht vor."""
+        rel = unit.rel
+        if rel not in self._scope:
+            found = []
+            here = PurePosixPath(rel).parent.parts
+            for name, path in unit.uses:
+                hit = None
+                if path:
+                    cand = posixpath.normpath(posixpath.join(posixpath.dirname(rel),
+                                                             path.replace("\\", "/")))
+                    hit = self.lower_paths.get(cand.lower())
+                if hit is None and self.by_unit.get(name):
+                    def shared(c, here=here):
+                        there = PurePosixPath(c).parent.parts
+                        return next((i for i, (a, b) in enumerate(zip(here, there)) if a != b),
+                                    min(len(here), len(there)))
+                    hit = min(self.by_unit[name], key=lambda c: (-shared(c), c))
+                if hit is not None and hit != rel and hit not in found:
+                    found.append(hit)
+            self._scope[rel] = [unit] + [self.unit(r) for r in reversed(found)]
+        return self._scope[rel]
+
+    def find_class(self, key, unit: _PasUnit):
+        for scoped in self.scope(unit):
+            if key in scoped.classes:
+                return scoped, scoped.classes[key]
+        return None
+
+    def class_chain(self, key, unit: _PasUnit) -> tuple[list, str | None]:
+        """([(unit, Klasse)] ab `key` über die Basisklassen im Repo, höchstens
+        `CLASS_CHAIN_MAX`), Schlüssel der ersten Basisklasse außerhalb des Repos."""
+        chain, seen = [], set()
+        while key and len(chain) < CLASS_CHAIN_MAX:
+            hit = self.find_class(key, unit)
+            if hit is None or (hit[0].rel, key) in seen:
+                break
+            seen.add((hit[0].rel, key))
+            chain.append(hit)
+            unit, key = hit[0], hit[1].parent
+        return chain, key
+
+    def receiver(self, unit: _PasUnit, line: int, chain: list):
+        """Typtext eines Empfängers `a.b.c` an einer Zeile: `Self`, Parameter, `var`,
+        Feld oder Property der Klasse (auch geerbt), Klassenname; weiter über Felder."""
+        first, rest = chain[0], chain[1:]
+        impl = unit.enclosing(line)
+        top = impl.top() if impl is not None else None
+        typ = None
+        if first == "self":
+            typ = top.head.parts[-2] if top is not None and top.head.cls else None
+        else:
+            typ = unit.local_type(impl, first) if impl is not None else None
+            if typ is None and top is not None and top.head.cls:
+                typ = self._field(top.head.cls, first, unit)
+            if typ is None:
+                hit = self.find_class(first, unit)
+                typ = hit[1].name if hit else None
+        for part in rest:
+            if typ is None:
+                return None
+            typ = self._field(_type_key(typ), part, unit)
+        return typ
+
+    def _field(self, cls_key, name: str, unit: _PasUnit):
+        for _scoped, cls in self.class_chain(cls_key, unit)[0]:
+            if name in cls.fields:
+                return cls.fields[name]
+        return None
+
+    def resolve_call(self, unit: _PasUnit, line: int, receiver, name: str):
+        """(Liste (unit, Implementierung), mehrdeutig) für einen Aufruf `name(`: ohne
+        Empfänger die Methoden der eigenen Klasse, dann freie Routinen der Unit und der
+        `uses`-Units; mit Unit-Namen als Empfänger dessen Routinen; mit bekanntem Typ nur
+        dessen Klassenkette; sonst alle Methoden des Namens — mehr als `AMBIGUOUS_MAX`:
+        mehrdeutig, nichts."""
+        if receiver == []:
+            impl = unit.enclosing(line)
+            top = impl.top() if impl is not None else None
+            if top is not None and top.head.cls:
+                for scoped, cls in self.class_chain(top.head.cls, unit)[0]:
+                    found = scoped.methods(cls.low, name)
+                    if found:
+                        return [(scoped, x) for x in found], False
+            for scoped in self.scope(unit):
+                found = scoped.standalone(name, nested=scoped is unit)
+                if found:
+                    return [(scoped, x) for x in found], False
+            return [], False
+        if receiver is not None:
+            joined = ".".join(receiver)
+            for scoped in self.scope(unit):
+                if scoped.name == joined:
+                    return [(scoped, x) for x in scoped.standalone(name, nested=False)], False
+            typ = self.receiver(unit, line, receiver)
+            if typ is not None:
+                for scoped, cls in self.class_chain(_type_key(typ), unit)[0]:
+                    found = scoped.methods(cls.low, name)
+                    if found:
+                        return [(scoped, x) for x in found], False
+                return [], False
+        found = [(scoped, x) for scoped in self.scope(unit)
+                 for x in scoped.by_name.get(name, []) if x.head.cls and x.outer is None]
+        if len(found) > AMBIGUOUS_MAX:
+            return [], True
+        return found, False
+
+    def raises(self, unit: _PasUnit, impl: _PasImpl) -> list:
+        """(Typ, Zeile) der `raise` im Rumpf, transitiv über Aufrufe von Routinen derselben
+        Unit (eigene Klasse oder frei) bis `RAISE_DEPTH`; nach Zeile, ohne Doppelte."""
+        key = (unit.rel, impl.head.line, impl.begin)
+        if key not in self.raises_memo:
+            found = self._raises_in(unit, impl, RAISE_DEPTH, set())
+            self.raises_memo[key] = sorted(set(found), key=lambda r: (r[1], r[0]))
+        return self.raises_memo[key]
+
+    def _raises_in(self, unit: _PasUnit, impl: _PasImpl, depth: int, seen: set) -> list:
+        key = (impl.head.line, impl.begin)
+        if key in seen:
+            return []
+        seen.add(key)
+        cls = impl.top().head.cls
+        out = []
+        for k in range(impl.begin, impl.stop):
+            tok = unit.toks[k]
+            if tok.low == "raise":
+                typ = unit.raise_type(k + 1)
+                if typ:
+                    out.append((typ, tok.line))
+            elif (depth > 0 and tok.ident and unit._t(k + 1) in ("(", ";")
+                  and (unit._t(k - 1) != "." or unit._t(k - 2) == "self")):
+                for callee in unit.by_name.get(tok.low, []):
+                    if callee is not impl and callee.head.cls in (cls, None):
+                        out += self._raises_in(unit, callee, depth - 1, seen)
+        return out
+
+
+def _delphi_sources(repo: Path, target: str) -> tuple[dict, dict]:
+    return _tree_sources(repo, target, _is_delphi)
+
+
+@functools.lru_cache(maxsize=INDEX_CACHE_SIZE)
+def _delphi_index(repo: Path, target: str) -> _PasIndex:
+    """Delphi-Index am ZIEL, je (Repo, SHA) einmal gebaut; Units werden erst bei Bedarf
+    gescannt."""
+    return _PasIndex(*_delphi_sources(repo, target))
+
+
+def _owner_lines(index: _PasIndex, unit: _PasUnit, typ: str) -> list:
+    """Klassendeklaration des Empfängertyps und seiner Basisklassen im Repo, je mit den
+    `inherited Create(…)` ihrer Konstruktoren; erbt die Kette von einer Klasse mit
+    Besitz-Default der RTL (`OWNERSHIP_RTL`), steht er dabei — auch ohne Deklaration im Repo."""
+    chain, last = index.class_chain(_type_key(typ), unit)
+    lines = []
+    for scoped, cls in chain:
+        lines.append(f"- Gegenstelle {cls.name} [{scoped.rel}:{cls.line}]: {cls.sig}")
+        lines += [f"  {text} at {scoped.rel}:{line}"
+                  for text, line in scoped.inherited_creates(cls.low)[:INHERITED_LINES_MAX]]
+    if last in OWNERSHIP_RTL:
+        lines.append(f"  Besitz (RTL): {OWNERSHIP_RTL[last]}")
+    return lines
+
+
+def _call_lines(index: _PasIndex, cands: list) -> tuple[list, bool]:
+    """Zeilen je erreichter Implementierung und ob die Sammelregel greift (wirft etwas oder
+    der Kopf hat einen Default-Wert)."""
+    body, show = [], False
+    for scoped, impl in cands[:COUNTERPART_MAX_DEFS]:
+        decl = scoped.decl_of(impl)
+        head = decl or impl.head
+        raises = index.raises(scoped, impl)
+        show = show or bool(raises) or head.defaults
+        body.append(f"- Gegenstelle {impl.head.qual} [{scoped.rel}:{impl.head.line}]: {head.sig}")
+        if decl is not None:
+            body.append(f"  deklariert: {scoped.rel}:{decl.line}")
+        if raises:
+            body.append("  wirft: " + ", ".join(sorted({t for t, _ in raises})))
+            body += [f"    raise {t} at {scoped.rel}:{n}" for t, n in raises[:RAISE_LINES_MAX]]
+    return body, show
+
+
+def _delphi_sites(index: _PasIndex, unit: _PasUnit, lines: set, unresolved: set) -> list:
+    """Die Stellen einer Delphi-Datei nach der Sammelregel (Spec 26, Schritt 3): je Aufruf
+    `Name(`/`Obj.Name(` auf einer geänderten Zeile (`call`), je `Extract`, `Remove`, `Free`,
+    `FreeAndNil`, `SetContentStream` (`owner`). Mehrere Einträge gleicher Art und gleichen
+    Namens auf einer Zeile tragen die Spalte wie bei Python."""
+    rel, toks = unit.rel, unit.toks
+    entries, shown, groups = [], set(), {}
+
+    def add(kind, k, name, head, body):
+        key = (toks[k].line, kind, name.lower(), tuple(body))
+        if key in shown:
+            return
+        shown.add(key)
+        entry = {"file": rel, "line": toks[k].line, "kind": kind,
+                 "lines": [f"### {rel}:{toks[k].line} {head}", *body]}
+        entries.append(entry)
+        groups.setdefault((toks[k].line, kind, name.lower()), []).append(
+            (entry, unit.column(toks[k]), head))
+
+    for line in sorted(lines):
+        lo = bisect.bisect_left(unit.tok_lines, line)
+        hi = bisect.bisect_right(unit.tok_lines, line)
+        for k in range(lo, hi):
+            tok = toks[k]
+            if not tok.ident:
+                continue
+            prev, nxt = unit._t(k - 1), unit._t(k + 1)
+            if tok.low in DELPHI_RELEASES:
+                found = None
+                if tok.low == "freeandnil":
+                    found = unit.chain_after(k + 2) if nxt == "(" else None
+                elif prev == ".":
+                    found = unit.chain_before(k - 1)
+                typ = index.receiver(unit, line, found[0]) if found else None
+                body = _owner_lines(index, unit, typ) if typ else []
+                if body:
+                    add("owner", k, tok.low, f"{unit._word(k)} auf {found[1]}: {typ}", body)
+            if (nxt != "(" or tok.low in _PAS_KEYWORDS or prev == "inherited"
+                    or unit.is_head_name(k)):
+                continue
+            if prev == ".":
+                found = unit.chain_before(k - 1)
+                receiver = found[0] if found else None   # None: Empfänger unbekannt
+            else:
+                receiver = []
+            cands, ambiguous = index.resolve_call(unit, line, receiver, tok.low)
+            if ambiguous:
+                unresolved.add((rel, line, tok.start))
+            body, show = _call_lines(index, cands) if cands else ([], False)
+            if show:
+                add("call", k, tok.low, f"ruft {unit._word(k)}(...)", body)
+    for (line, _kind, _name), group in groups.items():
+        if len(group) > 1:
+            for entry, col, head in group:
+                entry["lines"][0] = f"### {rel}:{line}:{col} {head}"
+    return entries
+
+
+def collect_delphi(repo, rng, files):
+    """Gegenstellen der geänderten Delphi-Zeilen (Spec 26, Ablauf Schritt 3), per Text-Scanner.
+
+    `rng` und `files` wie bei `collect_python`; gezählt nur `.pas`, `.dpr`, `.dpk` (ohne
+    Rücksicht auf Groß/Klein) außerhalb von `.skills/`. Der Code kommt aus dem Baum des ZIELS
+    in Git und wird nie ausgeführt; `mask_pascal` blendet Strings und Kommentare aus. Je
+    Aufruf `Name(` oder `Obj.Name(` auf einer geänderten Zeile die Implementierung
+    `procedure|function|constructor|destructor [TKlasse.]Name` aus der eigenen Unit und den
+    Units der `uses`-Listen (Empfänger mit bekanntem Typ: nur dessen Klassenkette), ihr Kopf
+    aus der Deklaration (interface-Teil oder Klassenrumpf) mit Default-Werten und ihre
+    `raise`-Zeilen (transitiv in der Unit, `RAISE_DEPTH`); im Block, wenn sie etwas wirft
+    oder einen Default-Wert zeigt. Je `Extract`, `Remove`, `Free`, `FreeAndNil` oder
+    `SetContentStream` auf einer geänderten Zeile der Typ des Empfängers (Parameterliste,
+    `var`-Abschnitt oder Inline-`var`, Feld oder Property der Klasse, `Self`), seine
+    Klassendeklaration mit Basisklasse und den `inherited Create(…)` des Konstruktors, über
+    die Basisklassen im Repo (`CLASS_CHAIN_MAX`); erbt sie von `TObjectList<…>` oder
+    `TObjectDictionary<…>`, steht der Besitz-Default der RTL dabei. Format wie bei
+    `Collected`, Arten `call` und `owner`; `unresolved` zählt Aufrufe auf unbekanntem
+    Empfänger mit mehr als `AMBIGUOUS_MAX` gleichnamigen Methoden. Rückgabe:
+    `Collected(entries, unresolved, unparsed)`."""
+    repo = _toplevel(repo)
+    wanted = sorted({str(f) for f in files if _is_delphi(str(f)) and not _under_skills(str(f))})
+    if not wanted:
+        return Collected([], 0, [])
+    span = split_range(repo, rng)
+    index = _delphi_index(repo, span.target)
+    unresolved: set = set()
+    entries = []
+    unparsed = {rel: index.unreadable[rel] for rel in wanted if rel in index.unreadable}
+    for rel, lines in sorted(_changed_lines(repo, span, wanted).items()):
+        unit = index.unit(rel)
+        if unit is not None:
+            entries += _delphi_sites(index, unit, lines, unresolved)
+        elif rel not in unparsed:
+            unparsed[rel] = NOT_IN_TARGET
+    entries.sort(key=lambda e: (e["file"], e["line"], e["kind"]))
+    return Collected(entries, len(unresolved), sorted(unparsed.items()))
+
+
 def _file_line(path: str, unreadable: dict) -> str:
     """Zeile der Dateiliste: eine Datei ohne Sammler oder ohne lesbaren Stand mit Hinweis."""
     if not _has_collector(path):
@@ -1884,7 +2954,9 @@ def write_counterparts(repo, run_id):
     """`counterparts --run <lauf>`: je Paket des Plans `packets/<id>.md` im Laufordner.
 
     Je Paket zuerst der reviewbare Bereich (`make_packet_range`; vorhandene Bereiche kommen
-    ohne neue Refs zurück), dann die Gegenstellen über den Bereich des Plans, beschränkt auf
+    ohne neue Refs zurück), dann die Gegenstellen (`collect_python` und `collect_delphi`,
+    Einträge zusammen nach Datei, Zeile, Art; `unresolved` addiert, `unparsed` vereinigt)
+    über den Bereich des Plans, beschränkt auf
     die Paketdateien — dieselben geänderten Zeilen wie im Paket-Bereich, der Code aber am
     ZIEL des Plans (`bis^{tree}` weicht bei einer Datei/Ordner-Kollision ab). Die Datei
     beginnt mit der Kopfzeile `<!-- skill: deep-review | schema: 1 | generated: … | packet:
@@ -1919,7 +2991,11 @@ def write_counterparts(repo, run_id):
             body, _shown = _render(shown_packet, [], 0, cap)
             total = shown = unresolved = 0
         else:
-            found = collect_python(repo, plan_range, packet["files"])
+            py = collect_python(repo, plan_range, packet["files"])
+            dl = collect_delphi(repo, plan_range, packet["files"])
+            found = Collected(
+                sorted(py.entries + dl.entries, key=lambda e: (e["file"], e["line"], e["kind"])),
+                py.unresolved + dl.unresolved, sorted(py.unparsed + dl.unparsed))
             own = {str(f) for f in packet["files"] if _is_python(str(f))}
             notes = []
             if own:

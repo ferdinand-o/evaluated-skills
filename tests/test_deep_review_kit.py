@@ -1958,3 +1958,250 @@ def test_m7_two_calls_of_one_name_on_a_line_get_columns(tmp_path):
         "### app/c.py:17 ruft f(...)"]
     assert all(set(e) == {"file", "line", "kind", "lines"} for e in found.entries)
     assert block.count("### app/c.py:5:") == 2
+
+
+# --- review_kit.py: Gegenstellen für Delphi (Task 5) ---------------------------------------
+
+def _line_no(text, needle):
+    """1-basierte Zeile des ersten Vorkommens von `needle` in `text`."""
+    return text[:text.index(needle)].count("\n") + 1
+
+
+TREE_PAS = (
+    "unit Tree;\n"
+    "\n"
+    "interface\n"
+    "\n"
+    "uses\n"
+    "  System.Generics.Collections, System.SysUtils;\n"
+    "\n"
+    "type\n"
+    "  EParse = class(Exception);\n"
+    "\n"
+    "  TNode = class\n"
+    "  public\n"
+    "    Name: string;\n"
+    "  end;\n"
+    "\n"
+    "  { Der Baum besitzt seine Knoten.\n"
+    "    end }\n"
+    "  TQueryTree = class(TObjectList<TNode>)\n"
+    "  private\n"
+    "    FDepth: Integer; // end\n"
+    "  public\n"
+    "    constructor Create;\n"
+    "    function Find(const AName: string): TNode;\n"
+    "  end;\n"
+    "\n"
+    "procedure Parse(const S: string; AMax: Integer = 0);\n"
+    "\n"
+    "implementation\n"
+    "\n"
+    "const\n"
+    "  CEnd = 'end; end';\n"
+    "\n"
+    "constructor TQueryTree.Create;\n"
+    "begin\n"
+    "  inherited Create(True);\n"
+    "  FDepth := 0;\n"
+    "end;\n"
+    "\n"
+    "function TQueryTree.Find(const AName: string): TNode;\n"
+    "begin\n"
+    "  Result := nil;\n"
+    "  for var N in Self do\n"
+    "    if N.Name = AName then\n"
+    "      Exit(N);\n"
+    "end;\n"
+    "\n"
+    "procedure Parse(const S: string; AMax: Integer);\n"
+    "begin\n"
+    "  if S = '' then\n"
+    "    Writeln('end'); (* end *)\n"
+    "  { end } // end\n"
+    "  if Length(S) > AMax then\n"
+    "    raise EParse.Create('zu lang: end');\n"
+    "end;\n"
+    "\n"
+    "end.\n"
+)
+QUERY_PAS = (
+    "unit Query;\n"
+    "\n"
+    "interface\n"
+    "\n"
+    "uses\n"
+    "  Tree;\n"
+    "\n"
+    "procedure Run(ATree: TQueryTree; N: TNode; const S: string);\n"
+    "\n"
+    "implementation\n"
+    "\n"
+    "procedure Run(ATree: TQueryTree; N: TNode; const S: string);\n"
+    "begin\n"
+    "  Writeln('begin end'); { end }\n"
+    "  // end\n"
+    "  ATree.Remove(N);\n"
+    "end;\n"
+    "\n"
+    "end.\n"
+)
+QUERY_PAS_AFTER = QUERY_PAS.replace("  ATree.Remove(N);\n", "  ATree.Extract(N);\n  Parse(S);\n")
+
+
+def test_counterparts_delphi(tmp_path):
+    kit = _kit()
+    before = {"Tree.pas": TREE_PAS, "Query.pas": QUERY_PAS, "vendor/__init__.py": "",
+              "vendor/lib.py": VENDOR_LIB, "app/__init__.py": "", "app/groups.py": GROUPS}
+    after = {"Query.pas": QUERY_PAS_AFTER,
+             "app/groups.py": GROUPS.replace("(ValueError, TypeError, LookupError)",
+                                             "(ValueError, LookupError)")}
+    root = _commit_repo(tmp_path, before, after)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    packet = plan["packets"][0]
+    assert "Query.pas" in packet["files"]
+    found = kit.collect_delphi(root, plan["range"], packet["files"])
+    assert (found.unresolved, found.unparsed) == (0, [])
+
+    extract = _line_no(QUERY_PAS_AFTER, "ATree.Extract")
+    parse = _line_no(QUERY_PAS_AFTER, "Parse(S)")
+    assert [(e["file"], e["line"], e["kind"]) for e in found.entries] == [
+        ("Query.pas", extract, "owner"), ("Query.pas", parse, "call")]
+    owner, call = found.entries
+    assert owner["lines"][:3] == [
+        f"### Query.pas:{extract} Extract auf ATree: TQueryTree",
+        f"- Gegenstelle TQueryTree [Tree.pas:{_line_no(TREE_PAS, 'TQueryTree = class')}]: "
+        "TQueryTree = class(TObjectList<TNode>)",
+        f"  inherited Create(True) at Tree.pas:{_line_no(TREE_PAS, 'inherited Create')}",
+    ]
+    assert len(owner["lines"]) == 4
+    assert owner["lines"][3].startswith("  Besitz (RTL): TObjectList<…>")
+    assert "OwnsObjects standardmäßig wahr" in owner["lines"][3]
+    # Kopf aus dem interface-Teil mit Default; raise hinter `end` in String und Kommentaren.
+    impl = _line_no(TREE_PAS, "procedure Parse(const S: string; AMax: Integer);")
+    assert call["lines"] == [
+        f"### Query.pas:{parse} ruft Parse(...)",
+        f"- Gegenstelle Parse [Tree.pas:{impl}]: "
+        "procedure Parse(const S: string; AMax: Integer = 0)",
+        f"  deklariert: Tree.pas:{_line_no(TREE_PAS, 'AMax: Integer = 0')}",
+        "  wirft: EParse",
+        f"    raise EParse at Tree.pas:{_line_no(TREE_PAS, 'raise EParse')}",
+    ]
+    block = kit.render_block(packet, found.entries, found.unresolved, None)
+    for needle in ("TQueryTree = class(TObjectList<TNode>)", "inherited Create(True)",
+                   "TObjectList", "AMax: Integer = 0", "raise EParse"):
+        assert needle in block, needle
+    assert "- `Query.pas` — " not in block
+
+    # counterparts --run: Delphi und Python im selben Paketblock, nach Datei und Zeile.
+    run = plan["_meta"]["run"]
+    written = kit.write_counterparts(root, run)
+    assert (written[0]["counterparts"], written[0]["shown"], written[0]["unresolved"]) == (3, 3, 0)
+    md = (kit.run_dir(root, run) / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert "- `Query.pas`\n" in md
+    assert md.index("\n".join(owner["lines"])) < md.index("\n".join(call["lines"])) < md.index(
+        "### app/groups.py:7 except")
+
+
+def test_mask_pascal_keeps_lines_and_columns():
+    kit = _kit()
+    text = ("s := 'it''s end'; t := '';  { end\n"
+            "  end } x := 1; (* end\n"
+            "*) y := '//'; // end\n"
+            "z := '{'; w := #13'(*';\n"
+            "m := '''\n"
+            "  end\n"
+            "  ''';\n"
+            "u := 'offen\n"
+            "end;\n")
+    masked = kit.mask_pascal(text)
+    assert len(masked) == len(text)
+    assert [i for i, c in enumerate(masked) if c == "\n"] == [
+        i for i, c in enumerate(text) if c == "\n"]
+    assert re.findall(r"\w+", masked) == ["s", "t", "x", "1", "y", "z", "w", "13", "m", "u",
+                                         "end"]
+    assert masked.splitlines()[1].index("x := 1;") == text.splitlines()[1].index("x := 1;")
+
+
+MANY_PAS = (
+    "unit Many;\n\ninterface\n\ntype\n"
+    + "".join(f"  T{c} = class\n    procedure Go(A: Integer = 0);\n  end;\n" for c in "ABCD")
+    + "\nfunction Thing: TObject;\n\nimplementation\n\n"
+    + "".join(f"procedure T{c}.Go(A: Integer);\nbegin\nend;\n\n" for c in "ABCD")
+    + "function Thing: TObject;\nbegin\n  Result := nil;\nend;\n\nend.\n"
+)
+OWNER_PAS = (
+    "unit Owner;\n"
+    "\n"
+    "interface\n"
+    "\n"
+    "uses\n"
+    "  tree, System.Generics.Collections, Many;\n"
+    "\n"
+    "type\n"
+    "  TBag = class(TObjectDictionary<string, TNode>)\n"
+    "  public\n"
+    "    constructor Create;\n"
+    "  end;\n"
+    "\n"
+    "  TRunner = class\n"
+    "  private\n"
+    "    FTree: TQUERYTREE;\n"
+    "    FBag: TBag;\n"
+    "  public\n"
+    "    procedure Done;\n"
+    "  end;\n"
+    "\n"
+    "implementation\n"
+    "\n"
+    "constructor TBag.Create;\n"
+    "begin\n"
+    "  inherited Create([doOwnsValues]);\n"
+    "end;\n"
+    "\n"
+    "procedure TRunner.Done;\n"
+    "var\n"
+    "  L: TObjectList<TNode>;\n"
+    "  T: tquerytree;\n"
+    "begin\n"
+    "  L := nil;\n"
+    "  T := nil;\n"
+    "end;\n"
+    "\n"
+    "end.\n"
+)
+OWNER_PAS_AFTER = OWNER_PAS.replace(
+    "  T := nil;\n",
+    "  T := nil;\n  t.FREE;\n  L.Free;\n  FreeAndNil(FTree);\n  Self.FBag.Remove('x');\n"
+    "  (Thing as TA).Go(1);\n")
+
+
+def test_counterparts_delphi_receiver_from_var_and_field(tmp_path):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"Tree.pas": TREE_PAS, "Many.pas": MANY_PAS,
+                                   "src/Owner.pas": OWNER_PAS},
+                        {"src/Owner.pas": OWNER_PAS_AFTER})
+    found = kit.collect_delphi(root, "base..HEAD", ["src/Owner.pas"])
+    heads = {e["lines"][0]: e["lines"][1:] for e in found.entries}
+    at = {needle: _line_no(OWNER_PAS_AFTER, needle)
+          for needle in ("t.FREE", "L.Free", "FreeAndNil", "Self.FBag")}
+    tree_head = (f"- Gegenstelle TQueryTree [Tree.pas:{_line_no(TREE_PAS, 'TQueryTree = class')}]: "
+                 "TQueryTree = class(TObjectList<TNode>)")
+    # var-Abschnitt, ohne Rücksicht auf Groß/Klein (uses tree, tquerytree, FREE)
+    assert heads[f"### src/Owner.pas:{at['t.FREE']} FREE auf t: tquerytree"][0] == tree_head
+    # Typ aus der RTL ohne Deklaration im Repo: nur der Besitz-Default
+    rtl = heads[f"### src/Owner.pas:{at['L.Free']} Free auf L: TObjectList<TNode>"]
+    assert len(rtl) == 1 and rtl[0].startswith("  Besitz (RTL): TObjectList<…>")
+    # Klassenfeld
+    assert heads[f"### src/Owner.pas:{at['FreeAndNil']} FreeAndNil auf FTree: TQUERYTREE"][0] \
+        == tree_head
+    # Self.Feld → TObjectDictionary-Ableitung mit ihrem inherited Create
+    bag = heads[f"### src/Owner.pas:{at['Self.FBag']} Remove auf Self.FBag: TBag"]
+    assert bag[:2] == [
+        f"- Gegenstelle TBag [src/Owner.pas:{_line_no(OWNER_PAS, 'TBag = class')}]: "
+        "TBag = class(TObjectDictionary<string, TNode>)",
+        f"  inherited Create([doOwnsValues]) at src/Owner.pas:{_line_no(OWNER_PAS, 'inherited')}"]
+    assert bag[2].startswith("  Besitz (RTL): TObjectDictionary<…>")
+    # Go auf unbekanntem Empfänger: vier gleichnamige Methoden in den uses-Units, nicht geraten
+    assert found.unresolved == 1
+    assert len(found.entries) == 4
