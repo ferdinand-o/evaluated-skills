@@ -240,6 +240,37 @@ Am Code nachvollziehbar, nicht ausgelöst.
 18 Läufe, 29,43 USD (Mittel `py-diff` 1,19, `dl-diff` 2,26, `dl-path` 1,50 je Lauf). Je
 Lauf 2–7 Minuten.
 
+### Entscheidungsexperiment (2026-11-02)
+
+Frage: Fehlen P2 und P4 wegen der Diffgröße oder weil niemand die Gegenstelle prüft? Zwei
+Varianten, nur `/code-review --max-findings all`, 6 Läufe, 5,01 USD.
+
+- **a) Aufteilen:** derselbe Endstand, Prüfbereich `mid..HEAD` je Paket — `cli+commands+req`
+  (591 Zeilen), `models+index+resolution+wheel_builder` (602), `network+metadata+utils+operations+Rest`
+  (651); Tests und Doku nicht geprüft (keine Einbauten).
+- **b) Gegenstelle:** ganzer Diff, `--append-system-prompt` mit dem Auftrag, je geänderter
+  Zeile die Gegenstelle nachzuschlagen — auch vendorten Code, Basisklassen, Framework — und
+  deren Vertrag zu prüfen (Ausnahmen, Randwerte, Besitz, Wirkung eines Flags).
+
+| Variante | Lauf | Eingebaut | Echte | USD |
+| --- | --- | --- | --- | --- |
+| a) `py-diff` in 3 Paketen | je 1 | P5 · P3 P6 · P1 = 4/6 | R1, **R2** | 0,56 + 0,36 + 0,50 = 1,43 |
+| b) `py-diff` ganz | 1 | 4/6 (P2, P4 fehlen) | — | 1,16 |
+| b) `py-diff` ganz | 2 | 4/6 (P2, P4 fehlen) | — | 0,93 |
+| b) `dl-diff` ganz | 1 | **6/6** | | 1,48 |
+
+- **Aufteilen** findet so viel wie ein ganzer Lauf, ist billiger und fand als einziger Lauf
+  der ganzen Messung R2 (`StringIO` ohne `.encoding`, das `compileall` auf dem Fehlerpfad
+  braucht — die Regression, die 25.1.1 behob). P2 und P4 fehlen auch im Paket mit 591 Zeilen.
+- **Die Anweisung allein** ändert auf `py-diff` nichts. Auf `dl-diff` fand der Lauf D1
+  (Besitz bei `TObjectList.Extract`, in der Anweisung genannt), das 3 von 5 Läufen ohne sie
+  verfehlten — ein Lauf, kein Beleg.
+- **Die Ursache für P2 und P4 steht in den Transkripten:** Kein einziger der acht Läufe auf
+  `py-diff` und seinen Paketen hat `src/pip/_vendor/dependency_groups` geöffnet, auch nicht
+  mit der Anweisung. Den Resolver (`resolvelib/factory.py`, `candidates.py`) las nur `cr 1`
+  ausführlich — der einzige Lauf, der P4 fand. Die Lücke ist eine nicht geöffnete
+  Gegenstelle, und eine Bitte im Prompt öffnet sie nicht.
+
 ### Was das für Spec 26 heißt
 
 - **Pfad-Review bis rund 5k Zeilen ist kein Problem der etablierten Werkzeuge.** Auf
@@ -251,11 +282,13 @@ Lauf 2–7 Minuten.
   Vertrag lag woanders. Ein Inventar, das nur Abdeckung erzwingt, schließt D4, nicht P2.
 - **Zwei Läufe vereinigt** bringen `py-diff` auf 5/6 und `dl-diff` auf 6/6 — zum doppelten
   Preis, ohne neue Skill.
-- **Vorschlag:** Spec 26 bleibt pausiert. Prüfenswert, bevor gebaut wird: derselbe
-  `py-diff` mit `/code-review` je Paket statt als Ganzes (rund vier Läufe, um 5 USD) — trifft
-  die Aufteilung P2 und P4, ist der Kern von Spec 26 (Pakete je Einheit) belegt; trifft sie
-  sie nicht, braucht es die Linse „Vertrag der Gegenstelle", nicht das Inventar. Für Spec 27
-  stützt die Messung kleine Prüfpunkt-Bereiche: Die Trefferquote fällt mit der Diffgröße.
+- **Nach dem Entscheidungsexperiment:** Spec 26 in der Form des Entwurfs (eigene
+  Such-Pipeline, Inventar, Nonce) wird nicht gebaut. Was fehlt, ist schmaler und mechanisch:
+  große Bereiche in Pakete schneiden und `/code-review` je Paket laufen lassen (billiger,
+  fand R2), und die Gegenstellen der geänderten Aufrufe — Definitionen der aufgerufenen
+  Funktionen samt vendortem Code, ihre `raise`-Stellen, Besitz- und Flag-Verträge — per
+  Skript sammeln und dem Review mitgeben, statt darum zu bitten. Ob das P2 und P4 schließt,
+  ist nicht gemessen. Für Spec 27 stützt die Messung kleine Prüfpunkt-Bereiche.
 
 ## Was nicht gemessen wurde
 

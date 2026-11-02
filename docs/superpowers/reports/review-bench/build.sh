@@ -69,3 +69,18 @@ R=$OUT/dl-path; rm -rf $R; mkdir -p $R; init $R
 git -C $DMVC archive v3.5.0-silicon-rc7 | tar -x -C $R
 python3 $SEEDS dl-path $R
 git -C $R add -A; git -C $R commit -qm "3.5.0-silicon-rc7"
+
+# --- py-c1..c3: Endstand wie py-diff, Pruefbereich mid..HEAD je Paket (Entscheidungsexperiment)
+P=src/pip/_internal
+declare -A CH
+CH[c1]="$P/commands $P/cli $P/req"
+CH[c2]="$P/models $P/index $P/resolution $P/wheel_builder.py"
+CH[c3]="$P/network $P/metadata $P/utils $P/operations $P/exceptions.py $P/locations $P/build_env.py $P/vcs $P/cache.py src/pip/__init__.py src/pip/__pip-runner__.py"
+for c in c1 c2 c3; do
+  R=$OUT/py-$c; rm -rf $R; git clone -q $OUT/py-diff $R
+  git -C $R config user.name Fixture; git -C $R config user.email fixture@example.invalid
+  git -C $R diff base HEAD -- ${CH[$c]} > $B/$c.patch
+  MSG=$(git -C $R log -1 --format=%B HEAD)
+  git -C $R apply -R --index $B/$c.patch; git -C $R commit -qm "Release 25.1 (ohne $c)"; git -C $R tag mid
+  git -C $R apply --index $B/$c.patch; git -C $R commit -qm "$MSG"; git -C $R remote remove origin
+done

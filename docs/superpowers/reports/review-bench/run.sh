@@ -1,9 +1,10 @@
 #!/bin/bash
-# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff   tool: cr|eng|sp
+# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|eng|sp
 set -uo pipefail
 B=${BENCH:?BENCH auf das Arbeitsverzeichnis setzen}
 REPO=$1; TOOL=$2; N=$3
 NAME=$REPO-$TOOL-$N
+EXTRA=()
 W=$B/work/$NAME
 OUT=$B/out; mkdir -p $OUT $B/work
 rm -rf $W; git clone -q $B/repos/$REPO $W
@@ -13,11 +14,14 @@ HEAD=$(git -C $W rev-parse HEAD)
 case $REPO in
   py-path) TARGET="src/pip/_internal/req src/pip/_internal/operations" ;;
   dl-path) TARGET="sources/MVCFramework.JWT.RefreshToken.pas sources/MVCFramework.Middleware.RangeMedia.pas sources/MVCFramework.Middleware.OIDC.pas sources/MVCFramework.OIDC.JWKS.pas sources/MVCFramework.Serializer.CSV.pas sources/MVCFramework.SSE.Writer.pas sources/MVCFramework.JWT.RSA.pas" ;;
+  py-c*) TARGET="mid..HEAD" ;;
   *) TARGET="base..HEAD" ;;
 esac
 
 case $TOOL in
   cr)  PROMPT="/code-review --max-findings all $TARGET" ;;
+  crc) PROMPT="/code-review --max-findings all $TARGET"
+       EXTRA=(--append-system-prompt "In every review, for each changed line, look up the counterpart it calls or that calls it - including vendored libraries, base classes and framework code outside the diff - and check the contract the change relies on: which exceptions the callee raises, what it returns for edge cases (empty, None, zero), who owns and frees objects, and what a flag or parameter does downstream. Report a finding when the changed code violates that contract.") ;;
   eng) PROMPT="/engineering:code-review $TARGET" ;;
   sp)
     mkdir -p $W/.claude/skills
@@ -27,7 +31,7 @@ case $TOOL in
 esac
 
 START=$(date +%s)
-( cd $W && timeout 1800 claude -p "$PROMPT" --output-format json \
+( cd $W && timeout 1800 claude -p "$PROMPT" "${EXTRA[@]}" --output-format json \
     --allowedTools "Bash(git:*)" Read Grep Glob \
     --disallowedTools "Read(//usr/**)" "Grep(//usr/**)" "Glob(//usr/**)" \
       "Read(//opt/**)" "Grep(//opt/**)" "Glob(//opt/**)" \
