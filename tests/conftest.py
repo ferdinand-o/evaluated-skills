@@ -34,8 +34,8 @@ def git(root: Path, *args: str) -> str:
 
 
 # --- decide (Spec 28): Repo, Protokoll, add --class klein ---------------------------------
-# Einmal hier statt wortgleich in jeder tests/test_decide_*.py: eine Format-Änderung am
-# Protokoll wird an einer Stelle nachgezogen.
+# Einmal hier statt wortgleich in jeder tests/test_decide_*.py; Pfad und Zeilen kommen aus
+# decide_log.py selbst, eine Format-Änderung wird also nur dort nachgezogen.
 
 DECIDE_SCRIPT = "skills/decide/scripts/decide_log.py"
 DECIDE_SESSION = "sitzung-1"
@@ -65,15 +65,17 @@ def decide_repo(tmp_path, monkeypatch):
 
 
 def decide_log_file(root: Path, session: str = DECIDE_SESSION) -> Path:
-    return root / ".skills" / "cache" / "decide" / session / "log.md"
+    """Pfad des Protokolls, wie decide_log.py ihn bildet (`log_path`)."""
+    return decide_script().log_path(root, session)
 
 
 def decide_rows(root: Path, session: str = DECIDE_SESSION):
-    """Zellen der Tabellenzeilen ohne Kopf: [zeit, thema, klasse, frage, entscheidung, beleg, regel]."""
-    lines = decide_log_file(root, session).read_text(encoding="utf-8").splitlines()
-    return [[c.strip() for c in line.strip()[1:-1].split("|")]
-            for line in lines
-            if line.startswith("| ") and not line.startswith(("| zeit ", "| ---"))]
+    """Zellen der Tabellenzeilen ohne Kopf: [zeit, thema, klasse, frage, entscheidung, beleg, regel],
+    gelesen mit `parse_rows` aus decide_log.py. Das Format selbst prüft
+    tests/test_decide_log.py::test_log_format_against_raw_text gegen den Rohtext."""
+    dl = decide_script()
+    text = decide_log_file(root, session).read_text(encoding="utf-8")
+    return [[entry[c] for c in dl.COLUMNS] for entry in dl.parse_rows(text)]
 
 
 def decide_add_small(topic, question, decision, evidence, *extra):

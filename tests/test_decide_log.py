@@ -1,7 +1,10 @@
 """Tests für skills/decide/scripts/decide_log.py (Spec 28, Task 1): Wurzel und Sitzung,
 Form der Belegzeile, Tabellenzeichen und Umlaute, Regeln aus Repo- und Nutzerdatei."""
 
+import os
+import re
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -332,3 +335,221 @@ def test_contradiction_once_per_topic(decide_repo, capsys):
     lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("Widerspruch")]
     assert len(lines) == 1, lines
     assert ".skills/decide/rules.md" in lines[0] and "~/.skills/decide/rules.md" in lines[0]
+
+
+# --- Funde des Prüfpunkts 1, Runde 2 (F1–F10) -------------------------------------------
+
+def unreadable(monkeypatch, name="log.md"):
+    """Lesefehler auf `name` simulieren — als root greift Modus 0200 nicht."""
+    real = Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self.name == name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
+def test_unreadable_log_is_not_replaced(decide_repo, monkeypatch, capsys):
+    """R2-F1: Ein vorhandenes, aber unlesbares log.md gilt nicht als fehlend — add und summary
+    enden mit 1, das Protokoll bleibt, wie es war."""
+    root, _ = decide_repo
+    for n in range(3):
+        assert add_small("CLI", f"Frage {n}?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    before = log_file(root).read_bytes()
+    capsys.readouterr()
+    unreadable(monkeypatch)
+    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
+    captured = capsys.readouterr()
+    assert "nicht lesbar" in captured.err and "nichts geschrieben" in captured.err, captured.err
+    assert "Permission denied" in captured.err
+    assert "Protokoll angelegt" not in captured.out + captured.err
+    assert log_file(root).read_bytes() == before
+    assert not log_file(root).with_name("log.md.lock").exists()
+
+    assert dl.main(["summary"]) == 1
+    err = capsys.readouterr().err
+    assert "nicht lesbar" in err and f".skills/cache/decide/{SESSION}/log.md" in err, err
+
+
+def test_relative_path_outside_root_stays_as_written(decide_repo, monkeypatch):
+    """R2-F2: `./`, `../` und `..` außerhalb der Wurzel bleiben, wie sie stehen."""
+    root, _ = decide_repo
+    for text in ("gesucht: ../other — nichts gefunden", "gesucht: .. — nichts gefunden",
+                 "gesucht: x — Treffer: ../other/a.py:3"):
+        assert dl.normalize_evidence(text, root) == text
+    (root / "src").mkdir()
+    monkeypatch.chdir(root / "src")
+    assert (dl.normalize_evidence("gesucht: ../../x, ../docs — nichts gefunden", root)
+            == "gesucht: ../../x, docs — nichts gefunden")
+
+
+def dead_pid():
+    """PID eines eben beendeten Prozesses."""
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+@pytest.mark.skipif(os.name == "nt", reason="unter Windows zählt nur das Alter der Sperre")
+def test_lock_of_dead_process_is_taken_over(decide_repo, capsys):
+    """R2-F3: Eine Sperre, deren Prozess nicht mehr lebt (add per SIGKILL beendet), wird übernommen."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    lock = log_file(root).with_name("log.md.lock")
+    lock.write_text(f"{dead_pid()} 0123456789abcdef\n", encoding="ascii")
+    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
+    assert [r[3] for r in rows(root)] == ["Vorher?", "Danach?"]
+    assert not lock.exists()
+
+
+def test_old_lock_is_taken_over(decide_repo, capsys):
+    """R2-F3: Eine Sperre, die älter als 30 s ist, wird übernommen — auch wenn ihr Prozess noch lebt."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    lock = log_file(root).with_name("log.md.lock")
+    lock.write_text(f"{os.getpid()} fedcba9876543210\n", encoding="ascii")
+    old = time.time() - 31
+    os.utime(lock, (old, old))
+    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
+    assert [r[3] for r in rows(root)] == ["Vorher?", "Danach?"]
+    assert not lock.exists()
+
+
+def test_lock_timeout_names_pid_and_age(decide_repo, monkeypatch, capsys):
+    """R2-F3: Bei Zeitgrenze nennt die Meldung PID und Alter der Sperre."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    lock = log_file(root).with_name("log.md.lock")
+    lock.write_text(f"{os.getpid()} 0011223344556677\n", encoding="ascii")
+    old = time.time() - 5
+    os.utime(lock, (old, old))
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.1)
+    capsys.readouterr()
+    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
+    err = capsys.readouterr().err
+    assert re.search(rf"PID {os.getpid()}, \d+ s alt", err), err
+    assert "nichts geschrieben" in err
+    assert lock.exists()
+
+
+def test_foreign_lock_is_not_removed(decide_repo, monkeypatch):
+    """R2-F4: Ersetzt jemand die Sperre während add läuft, entfernt add sie am Ende nicht."""
+    root, home = decide_repo
+    assert dl.add_small(root, SESSION, small_args(home, question="Vorher?"))[0] == 0
+    lock = log_file(root).with_name("log.md.lock")
+    foreign = f"{os.getpid()} ffffffffffffffff\n"
+    read_log = dl.read_log
+
+    def swap_lock(*args):
+        lock.unlink()                               # von Hand gelöscht, C sperrt neu
+        lock.write_text(foreign, encoding="ascii")
+        return read_log(*args)
+
+    monkeypatch.setattr(dl, "read_log", swap_lock)
+    assert dl.add_small(root, SESSION, small_args(home, question="A?"))[0] == 0
+    assert lock.read_text(encoding="ascii") == foreign
+
+
+def test_lock_retries_on_permission_error(decide_repo, monkeypatch):
+    """R2-F5: PermissionError beim Anlegen der Sperre (Windows, Sperre wird gerade gelöscht)
+    wird wie FileExistsError innerhalb der Zeitgrenze wiederholt."""
+    root, home = decide_repo
+    real_open, calls = dl.os.open, []
+
+    def flaky_open(path, *args, **kwargs):
+        if str(path).endswith(".lock") and not calls:
+            calls.append(path)
+            raise PermissionError(13, "Access is denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(dl.os, "open", flaky_open)
+    code, message = dl.add_small(root, SESSION, small_args(home))
+    assert code == 0, message
+    assert calls and len(rows(root)) == 1
+    assert not log_file(root).with_name("log.md.lock").exists()
+
+
+def test_write_failure_keeps_cause(decide_repo, monkeypatch, capsys):
+    """R2-F6: Scheitern alle Ersetzungen, nennt die Meldung die Ursache und den Pfad einmal,
+    relativ zur Wurzel."""
+    root, _ = decide_repo
+
+    def deny(src, dst):
+        raise PermissionError(13, "Permission denied", str(src), None, str(dst))
+
+    monkeypatch.setattr(dl.os, "replace", deny)
+    monkeypatch.setattr(dl.time, "sleep", lambda _: None)
+    with pytest.raises(PermissionError):
+        dl.write_atomic(root / "x.md", "x\n")
+    assert add_small("CLI", "Kurzoption?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
+    err = capsys.readouterr().err
+    assert "Permission denied" in err, err
+    assert err.count("log.md") == 1 and str(root) not in err, err
+
+
+def test_hint_for_topic_starting_with_non_word_char(decide_repo):
+    """R2-F7: Beginnt das kürzere Thema mit einem Nicht-Wortzeichen, reicht der Teilstring."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: .NET\n")
+    rules = dl.load_rules(root, home)
+    assert dl.match_rules(rules, "ASP.NET") == ([], rules)
+    assert dl.match_rules(rules, "Build") == ([], [])
+
+
+def test_log_format_against_raw_text(decide_repo):
+    """R2-F9: Pfad und Zeilenformat des Protokolls, unabhängig von log_path/parse_rows geprüft."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Kurz|option?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    raw = (root / ".skills" / "cache" / "decide" / "sitzung-1" / "log.md").read_text(encoding="utf-8")
+    lines = raw.split("\n")
+    assert lines[:4] == [
+        "<!-- skill: decide | schema: 1 | generated: python decide_log.py add -->",
+        "",
+        "| zeit | thema | klasse | frage | entscheidung | beleg | regel |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    assert re.fullmatch(r"\| \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d \| CLI \| klein \| Kurz¦option\? \| kurz "
+                        r"\| gesucht: cli\.py — Treffer: cli\.py:3 \| — \|", lines[4]), lines[4]
+    assert lines[5:] == [""]
+
+
+def test_summary_many_entries_and_rules(decide_repo, monkeypatch):
+    """R2-F10: summary schlägt Themen in Mengen nach statt match_rules je Eintrag — mit vielen
+    Einträgen und Regeln dasselbe Ergebnis wie der Abgleich über match_rules."""
+    root, home = decide_repo
+    rule_lines = [f"nie fragen: Thema {n}" for n in range(0, 30, 2)]
+    rule_lines += [f"immer fragen: thema  {n}" for n in range(0, 30, 6)]      # Widersprüche
+    rule_lines += ["nie fragen: a|b", "immer fragen: Thema", "nie fragen: Thema 1x"]
+    write_rules(root / ".skills" / "decide" / "rules.md", "\n".join(rule_lines) + "\n")
+    rules = dl.load_rules(root, home)
+    topics = [f"THEMA {n % 31}" for n in range(60)] + ["a|b", "A ¦ B", "Thema"]
+    for n, topic in enumerate(topics):
+        klasse = ("klein", "annahme", "gross")[n % 3]
+        dl.append_row(root, SESSION, {"zeit": "2026-11-02T10:00:00", "thema": topic, "klasse": klasse,
+                                      "frage": f"F{n}?", "entscheidung": "e", "beleg": "b", "regel": "—"})
+
+    def old_silent(entry):
+        hits, _ = dl.match_rules(rules, entry["thema"])
+        return (any(r.kind == "nie fragen" for r in hits) and not any(r.kind == "immer fragen" for r in hits)
+                and entry["klasse"] in ("klein", "annahme"))
+
+    entries, _ = dl.log_entries(root, SESSION)
+    visible = [e["frage"] for e in entries if not old_silent(e)]
+    hidden = len(entries) - len(visible)
+    assert 0 < hidden < len(entries) and len(visible) > dl.SUMMARY_LIMIT
+
+    def no_match_rules(*_):
+        raise AssertionError("summary ruft match_rules je Eintrag auf")
+
+    monkeypatch.setattr(dl, "match_rules", no_match_rules)
+    code, text = dl.summary(root, SESSION, home)
+    assert code == 0
+    lines = text.splitlines()
+    assert lines[0] == f"Einträge der Sitzung {SESSION}: {len(visible)}"
+    assert f"ausgelassen per nie fragen: {hidden}" in lines
+    shown_questions = [re.search(r": (F\d+\?) →", line).group(1) for line in lines if line.startswith("- ")]
+    assert shown_questions == visible[-dl.SUMMARY_LIMIT:]

@@ -13,25 +13,29 @@ mit Exit 1 und nennen `--session`.
 Protokoll `.skills/cache/decide/<session>/log.md`: Kopfzeile, dann die Tabelle
 `| zeit | thema | klasse | frage | entscheidung | beleg | regel |` mit `klasse` aus `klein`,
 `annahme` (Belegzeile „nichts gefunden"), `gross`. `|` in Werten wird `¦`. Ein leeres
-Protokoll gilt als fehlend. Unter der Sperrdatei `log.md.lock` (höchstens `LOCK_WAIT` Sekunden
-Wartezeit, danach Exit 1) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt;
-scheitert das Schreiben, endet `add` mit 1 und einer Zeile Grund.
+Protokoll gilt als fehlend; ein vorhandenes, aber unlesbares nicht — dann enden `add` und
+`summary` mit 1, und nichts wird geschrieben. Unter der Sperrdatei `log.md.lock` (PID und
+Zufallstoken; höchstens `LOCK_WAIT` Sekunden Wartezeit, danach Exit 1 mit PID und Alter der
+Sperre) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt. Eine Sperre, deren
+Prozess nicht mehr lebt oder die älter als `LOCK_STALE` Sekunden ist, wird übernommen; entfernt
+wird nur die eigene. Scheitert das Schreiben, endet `add` mit 1 und einer Zeile Grund.
 
 Belegzeile `--evidence`: `gesucht: <ort> — Treffer: <datei:zeile>` oder
 `gesucht: <ort> — nichts gefunden`. `.`, `,`, `;` und `)` am Ende fallen weg; nur der Trenner
-vor dem Ergebnis wird aus ` - `, ` -- ` oder ` – ` zu ` — `. Pfade mit `./` oder `../` gelten
-relativ zum Arbeitsverzeichnis, absolute Pfade (auch über Symlinks) unter der Wurzel werden
-relativ zur Wurzel; andere Pfade bleiben, wie sie stehen. Danach prüft das Skript die Form.
-Fehlt sie: „Keine Belegzeile", Exit 1, nichts geschrieben. Ob die Fundstelle stimmt, prüft es
-nicht.
+vor dem Ergebnis wird aus ` - `, ` -- ` oder ` – ` zu ` — `. Pfade mit `./` oder `../` und `..`
+gelten relativ zum Arbeitsverzeichnis; sie und absolute Pfade (auch über Symlinks) werden
+relativ zur Wurzel, wenn sie darunter liegen; andere Pfade bleiben, wie sie stehen. Danach
+prüft das Skript die Form. Fehlt sie: „Keine Belegzeile", Exit 1, nichts geschrieben. Ob die
+Fundstelle stimmt, prüft es nicht.
 
 Regeln `.skills/decide/rules.md` (Repo) und `~/.skills/decide/rules.md` (Nutzer): je Zeile
 `immer fragen: <thema>` oder `nie fragen: <thema>`; `#` am Zeilenanfang oder nach Leerraum
 beginnt einen Kommentar. Ein Thema trifft, wenn es nach Kleinschreibung, Trimmen und
 Zusammenziehen von Leerraum (`|` als `¦`, wie in der Tabelle) gleich `--topic` ist — dann gilt
-die Schreibweise der Regel; enthält eines das andere ab einem Wortanfang, ist es nur ein
-Hinweis. `immer fragen` geht vor `nie fragen` und stuft eine kleine Frage zur großen hoch;
-`nie fragen` nimmt kleine Einträge aus `summary`. `rules` meldet je Thema einen Widerspruch.
+die Schreibweise der Regel; enthält eines das andere ab einem Wortanfang (beginnt das kürzere
+mit einem Nicht-Wortzeichen wie `.NET`, genügt der Teilstring), ist es nur ein Hinweis.
+`immer fragen` geht vor `nie fragen` und stuft eine kleine Frage zur großen hoch; `nie fragen`
+nimmt kleine Einträge aus `summary`. `rules` meldet je Thema einen Widerspruch.
 `--option`, `--recommendation`, `--key` und `--approved-by-request` bei einer kleinen
 Entscheidung meldet `add` als ignoriert (stderr, Exit bleibt 0).
 
@@ -42,6 +46,7 @@ Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
 import argparse
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -64,6 +69,7 @@ SUMMARY_LIMIT = 10
 NONE = "—"
 LOCK_WAIT = 2.0          # Sekunden, die add auf eine fremde Sperrdatei wartet
 LOCK_POLL = 0.05         # Abstand der Versuche
+LOCK_STALE = 30.0        # Sekunden, ab denen eine Sperre als verwaist gilt
 WRITE_ATTEMPTS = 3
 BIG_FLAGS = (("options", "--option"), ("recommendation", "--recommendation"), ("key", "--key"),
              ("approved_by_request", "--approved-by-request"))
@@ -175,7 +181,10 @@ def _norm(topic):
 
 
 def _at_word_start(longer, shorter):
-    """`shorter` steht in `longer` und beginnt dort einen Wort (`UI` in `UI-Texte`, nicht in `Build`)."""
+    """`shorter` steht in `longer` und beginnt dort ein Wort (`UI` in `UI-Texte`, nicht in `Build`);
+    beginnt `shorter` mit einem Nicht-Wortzeichen, reicht der Teilstring (`.NET` in `ASP.NET`)."""
+    if not re.match(r"\w", shorter):
+        return shorter in longer
     return re.search(r"(?<!\w)" + re.escape(shorter), longer) is not None
 
 
@@ -217,7 +226,7 @@ _TRAILING = " .,;)"
 
 def _under_root(path, root):
     """Absoluter Pfad relativ zur Wurzel, wo er darunter liegt — erst wörtlich, dann mit
-    aufgelösten Symlinks auf beiden Seiten; sonst `path` unverändert."""
+    aufgelösten Symlinks auf beiden Seiten; sonst None."""
     root = Path(root)
     try:
         return Path(os.path.normpath(path)).relative_to(root).as_posix()
@@ -226,12 +235,13 @@ def _under_root(path, root):
     try:
         return Path(path).resolve().relative_to(root.resolve()).as_posix()
     except (ValueError, OSError, RuntimeError):
-        return path
+        return None
 
 
 def _norm_path(token, root):
-    """Ein Token: `./…`/`../…` gegen das Arbeitsverzeichnis, ein absoluter Pfad unter der Wurzel
-    relativ zur Wurzel; `:zeile` und ein Komma oder Semikolon am Ende bleiben stehen."""
+    """Ein Token: `./…`/`../…`/`..` gegen das Arbeitsverzeichnis und ein absoluter Pfad werden
+    relativ zur Wurzel, wenn sie darunter liegen, sonst bleiben sie; `:zeile` und ein Komma oder
+    Semikolon am Ende bleiben stehen."""
     core, trail = re.match(r"^(.*?)([,;]*)$", token).groups()
     match = _LINE_SUFFIX.search(core)
     suffix = match.group(1) if match else ""
@@ -241,9 +251,9 @@ def _norm_path(token, root):
             cwd = Path.cwd()
         except OSError:
             cwd = Path(root)
-        path = _under_root(os.path.normpath(os.path.join(cwd, path)), root)
+        path = _under_root(os.path.normpath(os.path.join(cwd, path)), root) or path
     elif os.path.isabs(path):
-        path = _under_root(path, root)
+        path = _under_root(path, root) or path
     return path + suffix + trail
 
 
@@ -282,13 +292,27 @@ def cell(text):
     return value or NONE
 
 
+class LogUnreadable(Exception):
+    """Das Protokoll besteht, lässt sich aber nicht lesen; `args[0]` ist der OSError."""
+
+
 def read_log(root, session):
-    """Text des Protokolls; None, wenn es fehlt, nicht lesbar ist oder nur Leerraum enthält."""
+    """Text des Protokolls; None, wenn es fehlt oder nur Leerraum enthält. Jeder andere
+    Lesefehler wirft `LogUnreadable` — ein unlesbares Protokoll ist nicht fehlend."""
     try:
         text = log_path(root, session).read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError as error:
+        raise LogUnreadable(error) from error
     return text if text.strip() else None
+
+
+def unreadable_problem(error, root, session, tail="; nichts geschrieben."):
+    """Eine Zeile Grund für ein unlesbares Protokoll, Pfad relativ zur Wurzel."""
+    cause = error.args[0]
+    return (f"Protokoll {shown(log_path(root, session), root)} nicht lesbar "
+            f"({getattr(cause, 'strerror', None) or cause}){tail}")
 
 
 def header_problem(text, path_shown):
@@ -317,8 +341,11 @@ def parse_rows(text):
 
 def log_entries(root, session):
     """(Einträge, Problem): Einträge der Sitzung, oder [] und ein Grund nach der
-    Konsumenten-Regel; ein fehlendes Protokoll ist kein Problem."""
-    text = read_log(root, session)
+    Konsumenten-Regel oder weil es nicht lesbar ist; ein fehlendes Protokoll ist kein Problem."""
+    try:
+        text = read_log(root, session)
+    except LogUnreadable as error:
+        return [], unreadable_problem(error, root, session, " — übersprungen")
     if text is None:
         return [], None
     problem = header_problem(text, shown(log_path(root, session), root))
@@ -327,7 +354,7 @@ def log_entries(root, session):
 
 def write_atomic(path, text):
     """Schreibt über eine Nachbardatei und `os.replace`; wartet nur zwischen den Versuchen.
-    Wirft OSError, wenn alle Versuche scheitern."""
+    Scheitern alle Versuche, wirft es den letzten OSError weiter."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
@@ -339,49 +366,99 @@ def write_atomic(path, text):
                 os.replace(tmp, path)
                 return
             except OSError:
-                continue
-    except BaseException:
+                if attempt == WRITE_ATTEMPTS - 1:
+                    raise
+    finally:
         tmp.unlink(missing_ok=True)
-        raise
-    tmp.unlink(missing_ok=True)
-    raise OSError(f"{path}: nicht schreibbar")
 
 
 class LockBusy(Exception):
-    """Die Sperrdatei bestand länger als `LOCK_WAIT` Sekunden; `args[0]` ist ihr Pfad."""
+    """Die Sperrdatei bestand länger als `LOCK_WAIT` Sekunden; `args` sind ihr Pfad, die PID
+    darin und ihr Alter in Sekunden (beide None, wenn unbekannt)."""
+
+
+def _pid_alive(pid):
+    """False nur, wenn der Prozess sicher nicht mehr lebt. Unter Windows beendet `os.kill`
+    einen Prozess, statt ihn zu prüfen — dort zählt allein das Alter der Sperre."""
+    if os.name == "nt":
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, OverflowError):
+        return True
+    return True
+
+
+def _lock_state(lock):
+    """(Inhalt, PID oder None, Alter in Sekunden) der Sperrdatei; None, wenn sie nicht lesbar ist."""
+    try:
+        content = lock.read_text(encoding="ascii", errors="replace")
+        age = max(time.time() - lock.stat().st_mtime, 0.0)
+    except OSError:
+        return None
+    first = content.split()[:1]
+    pid = int(first[0]) if first and first[0].isdigit() else None
+    return content, pid, age
+
+
+def _remove_lock(lock, expected):
+    """Entfernt die Sperre nur, wenn sie noch `expected` enthält: atomar beiseite benennen, dann
+    prüfen; war es inzwischen eine andere, wird sie zurückgelegt, sofern der Platz frei ist."""
+    aside = lock.with_name(f"{lock.name}.{secrets.token_hex(8)}.old")
+    try:
+        os.rename(lock, aside)
+    except OSError:
+        return
+    try:
+        if aside.read_text(encoding="ascii", errors="replace") != expected:
+            os.link(aside, lock)
+    except OSError:
+        pass
+    finally:
+        aside.unlink(missing_ok=True)
 
 
 @contextmanager
 def log_lock(path):
-    """Sperrdatei `<log>.lock` neben dem Protokoll (`O_CREAT|O_EXCL`); wartet bis `LOCK_WAIT`
-    Sekunden in Schritten von `LOCK_POLL`, dann `LockBusy`. Entfernt nur die eigene Sperre."""
+    """Sperrdatei `<log>.lock` neben dem Protokoll (`O_CREAT|O_EXCL`) mit PID und Zufallstoken;
+    wartet bis `LOCK_WAIT` Sekunden in Schritten von `LOCK_POLL`, dann `LockBusy`. Eine Sperre,
+    deren PID nicht mehr lebt oder die älter als `LOCK_STALE` Sekunden ist, wird übernommen.
+    `PermissionError` beim Anlegen (Windows: Sperre wird gerade gelöscht) zählt wie eine
+    bestehende Sperre. Entfernt nur die eigene Sperre."""
     lock = path.with_name(path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
+    mine = f"{os.getpid()} {secrets.token_hex(8)}\n"
     deadline = time.monotonic() + LOCK_WAIT
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError) as error:
+            state = _lock_state(lock)
             if time.monotonic() >= deadline:
-                raise LockBusy(lock) from None
-            time.sleep(LOCK_POLL)
+                if state is None and isinstance(error, PermissionError):
+                    raise                   # keine Sperre da: der Ordner ist nicht schreibbar
+                raise LockBusy(lock, *(state[1:] if state else (None, None))) from None
+            if state and ((state[1] is not None and not _pid_alive(state[1])) or state[2] > LOCK_STALE):
+                _remove_lock(lock, state[0])
+            else:
+                time.sleep(LOCK_POLL)
     try:
         try:
-            os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+            os.write(fd, mine.encode("ascii"))
         finally:
             os.close(fd)
         yield
     finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        _remove_lock(lock, mine)
 
 
 def append_row(root, session, values):
     """Hängt eine Zeile an; liest das Protokoll unter der Sperre unmittelbar davor neu.
-    (angelegt, Problem). Wirft `LockBusy` oder OSError, wenn nicht geschrieben werden kann."""
+    (angelegt, Problem). Wirft `LockBusy` oder OSError, wenn nicht geschrieben werden kann,
+    `LogUnreadable`, wenn das vorhandene Protokoll nicht lesbar ist."""
     path = log_path(root, session)
     with log_lock(path):
         text = read_log(root, session)
@@ -461,8 +538,14 @@ def add_small(root, session, args):
     try:
         created, problem = append_row(root, session, values)
     except LockBusy as busy:
-        return 1, (f"Protokoll gesperrt: {shown(busy.args[0], root)} besteht seit über {LOCK_WAIT:g} s — "
-                   "läuft ein zweites add? Sonst die Sperrdatei löschen; nichts geschrieben.")
+        lock, pid, age = busy.args
+        holder = f"PID {pid}" if pid is not None else "PID unbekannt"
+        since = f"{age:.0f} s alt" if age is not None else "Alter unbekannt"
+        return 1, (f"Protokoll gesperrt: {shown(lock, root)} ({holder}, {since}) — nach {LOCK_WAIT:g} s "
+                   f"aufgegeben; läuft ein zweites add? Eine verwaiste Sperre wird nach {LOCK_STALE:g} s "
+                   "übernommen; nichts geschrieben.")
+    except LogUnreadable as error:
+        return 1, unreadable_problem(error, root, session)
     except OSError as error:
         return 1, f"Protokoll {path_shown} nicht schreibbar ({error.strerror or error}); nichts geschrieben."
     if problem:
@@ -493,11 +576,12 @@ def summary(root, session, home):
     if not entries:
         return 0, f"Keine Einträge in dieser Sitzung ({session})."
     rules = load_rules(root, home)
+    never = {_norm(r.topic) for r in rules if r.kind == "nie fragen"}
+    always = {_norm(r.topic) for r in rules if r.kind == "immer fragen"}
     shown_entries, hidden = [], 0
     for entry in entries:
-        hits, _ = match_rules(rules, entry["thema"])
-        silent = any(r.kind == "nie fragen" for r in hits) and not any(r.kind == "immer fragen" for r in hits)
-        if silent and entry["klasse"] in ("klein", "annahme"):
+        topic = _norm(entry["thema"])
+        if topic in never and topic not in always and entry["klasse"] in ("klein", "annahme"):
             hidden += 1
         else:
             shown_entries.append(entry)
