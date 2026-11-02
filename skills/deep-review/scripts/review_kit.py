@@ -9,17 +9,31 @@ Hilfscommits der Paket-Bereiche, gebaut über einen temporären Index; der Vergl
 Arbeitsbaum läuft auf einer Kopie des Index); HEAD, Index und Arbeitsbaum des Nutzers
 bleiben unberührt (E6).
 
-Stand Task 6: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
+Stand Task 7: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
 ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel,
 `build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
 Python (`collect_python`; Zielcode nur per `ast` gelesen) und Delphi (`collect_delphi`,
 Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
 `write_counterparts`; dazu die Datei-Schlüssel (`file_keys`) und die Folgeläufe
-(`apply_since`, `plan_since`).
+(`apply_since`, `plan_since`); `record` (Ergebnis je Paket), `merge` (`findings.json`),
+`audit` (`audit.json`) und `main` mit den Unterbefehlen
+
+    plan --range R [--profile P] [--focus F] [--split-at N] [--since L[,L…]]
+         [--soll-file D] [--with-tests]
+    counterparts --run L
+    record --run L --packet ID --tool T DATEI|-
+    merge --run L
+    audit --run L [--report D]
+    cleanup (--run L | --stale [--run L])
+
+je mit `--repo` (Default: aktueller Ordner). Exit 0 bei Erfolg, 1 bei einem Fehler mit
+Meldung auf stderr und bei `audit` mit Lücke (audit.json ist dann trotzdem geschrieben),
+2 bei falschem Aufruf (argparse).
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import bisect
 import contextlib
@@ -40,11 +54,12 @@ import shutil
 import socket
 import string
 import subprocess
+import sys
 import tempfile
 import time
 import tokenize
 import warnings
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path, PurePath, PurePosixPath
 from typing import NamedTuple
 
@@ -3889,10 +3904,13 @@ def _earlier_plan(directory) -> tuple[str, dict]:
     return run_id, plan
 
 
-def _result_findings(path: Path, pid: str):
+def _result_findings(path: Path, pid: str, plan=None, run_id=None):
     """Die Funde in `results/<pid>.json` (nur Objekte mit Dateinamen) oder None, wenn das
-    Ergebnis fehlt, nicht lesbar ist, keine `findings`-Liste trägt oder laut `_meta.packet`
-    zu einem anderen Paket gehört — dann gilt das Paket als nicht reviewt."""
+    Ergebnis fehlt, nicht lesbar ist, keine `findings`-Liste trägt oder laut `_meta` zu
+    einem anderen Paket (`packet`), einem anderen Lauf (`run`, mit `run_id`) oder einem
+    anderen Plan (`plan`, mit `plan` und `run_id`: `_plan_digest`) gehört — dann gilt das
+    Paket als nicht reviewt. Fehlt ein solches Feld (Ergebnis nicht von `record`), wird es
+    nicht geprüft; streng prüft erst `audit` (`_read_result`)."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -3900,8 +3918,14 @@ def _result_findings(path: Path, pid: str):
     if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
         return None
     meta = data.get("_meta")
-    if isinstance(meta, dict) and meta.get("packet", pid) != pid:
-        return None
+    if isinstance(meta, dict):
+        if meta.get("packet", pid) != pid:
+            return None
+        if run_id is not None and meta.get("run", run_id) != run_id:
+            return None
+        if plan is not None and run_id is not None and "plan" in meta \
+                and meta["plan"] != _plan_digest(plan, run_id):
+            return None
     return [f for f in data["findings"] if isinstance(f, dict) and isinstance(f.get("file"), str)]
 
 
@@ -3927,7 +3951,8 @@ def _earlier_files(directory: Path, plan: dict) -> dict:
 
     out = {}
     for packet in plan["packets"]:
-        findings = _result_findings(directory / "results" / f"{packet['id']}.json", packet["id"])
+        findings = _result_findings(directory / "results" / f"{packet['id']}.json", packet["id"],
+                                    plan, directory.name)
         if findings is None:
             continue
         for path in packet["files"]:
@@ -4138,3 +4163,631 @@ def plan_since(repo, run_id, since):
         new["_meta"] = {**new["_meta"], "generated": f"{new['_meta']['generated']} --since "
                                                      f"{','.join(ids)}"}
         return _write_plan(path, new)
+
+
+# --- Ergebnisse, Vereinigung und Audit (Spec 26, Ablauf Schritt 4–6) ------------------------
+
+FINDING_FIELDS = ("file", "line", "summary", "failure_scenario")      # je Fund in results/<id>.json
+SOURCE_FIELDS = ("packet", "reused_from", "line", "summary", "failure_scenario")
+MERGE_JOIN = " | "          # verschiedene Texte vereinigter Funde, in der Reihenfolge der Zeilen
+REPORT_NAME = "report.md"
+RESULTS_DIR = "results"
+LINE_SPAN_RE = re.compile(r"\s*L?(\d+)(?:\s*[-–]\s*L?(\d+))?")
+REPORT_HEADER_RE = re.compile(r"\s*<!--(.*?)-->\s*")
+REPORT_HEADER_FIRST = ("skill", "schema", "generated")   # wie ARTIFACT_HEADER_RE (evalkit)
+REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+REPORT_COUNT_RE = re.compile(r"^[ \t>*_#-]*Funde:[ \t*_]*(\d+)", re.MULTILINE)
+REPORT_COVERAGE_RE = re.compile(r"^[ \t>*_#-]*Abdeckung:[ \t*_]*(\d+)[ \t]*/[ \t]*(\d+)(.*)$",
+                                re.MULTILINE)
+REPORT_CLAIM_RE = re.compile(r"(?<!nicht )\bvollständig", re.IGNORECASE)
+REPORT_DENIAL_RE = re.compile(r"unvollständig|nicht vollständig", re.IGNORECASE)
+REPORT_FINDING_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*`?(?P<where>[^`\s]+?)`?[ \t]+—[ \t]",
+                               re.MULTILINE)
+
+
+def _layout(directory) -> tuple[Path, str]:
+    """(Repo-Wurzel, Lauf-ID) eines Laufordners `<repo>/.skills/cache/deep-review/<lauf>`;
+    alles andere ist ein KitError."""
+    directory = Path(directory)
+    run_id = _check_run_id(directory.name)
+    if directory.parent.parts[-len(CACHE_DIR.parts):] != CACHE_DIR.parts:
+        raise KitError(f"kein Laufordner unter {CACHE_DIR}/: {directory}")
+    return directory.parents[len(CACHE_DIR.parts)], run_id
+
+
+def _shown_path(repo: Path, path) -> str:
+    """`path` für ein Artefakt: repo-relativ als POSIX-Pfad, wenn er im Repo liegt, sonst wie
+    gegeben."""
+    path = Path(path)
+    for mine, root in ((path.absolute(), Path(repo).absolute()),
+                       (path.resolve(), Path(repo).resolve())):
+        with contextlib.suppress(ValueError):
+            return mine.relative_to(root).as_posix()
+    return str(path)
+
+
+def _plan_digest(plan: dict, run_id: str) -> str:
+    """Fingerabdruck eines Plans für `_meta.plan` der Ergebnisse: Lauf, Bereich, Profil, Fokus
+    und je Paket ID und Dateien. Ohne `range` der Pakete und ohne `notes` — die schreiben
+    `counterparts` und `cleanup` später, ohne dass der Plan ein anderer wird."""
+    ident = {"run": run_id, "range": plan.get("range"), "base": plan["base"],
+             "target": plan["target"], "profile": plan.get("profile"), "focus": plan.get("focus"),
+             "packets": [[p["id"], list(p["files"])] for p in plan["packets"]]}
+    raw = json.dumps(ident, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8", errors="surrogateescape")).hexdigest()
+
+
+def _finding_path(text: str, repo: Path, where: str) -> str:
+    """`file` eines Funds als repo-relativer POSIX-Pfad: `./` fällt weg, ein absoluter Pfad im
+    Repo wird relativ; ein absoluter Pfad außerhalb und `..` sind ein KitError."""
+    pure = PurePosixPath(text)
+    if pure.is_absolute() or Path(text).is_absolute():
+        shown = _shown_path(repo, text)
+        if Path(shown).is_absolute():
+            raise KitError(f"{where}: Pfad {text!r} liegt nicht im Repo")
+        pure = PurePosixPath(shown)
+    if not pure.parts or ".." in pure.parts:
+        raise KitError(f"{where}: kein Pfad im Repo: {text!r}")
+    return pure.as_posix()
+
+
+def _clean_finding(item, index: int, repo: Path) -> dict:
+    """Ein Fund der JSON-Liste von `/code-review` (oder aus dem Brief) mit den festen Feldern
+    `file` (Pfad im Repo), `line` (Zahl ≥ 0, Text oder null; leerer Text heißt null),
+    `summary` (Text, Pflicht) und `failure_scenario` (Text oder null; fehlt: null). Andere
+    Felder fallen weg. Alles andere ist ein KitError mit der Nummer des Funds."""
+    where = f"Fund {index}"
+    if not isinstance(item, dict):
+        raise KitError(f"{where} ist kein Objekt: {item!r}")
+    file = item.get("file")
+    if not isinstance(file, str) or not file.strip():
+        raise KitError(f"{where} ohne file (Pfad)")
+    path = _finding_path(file.strip(), repo, where)
+    line = item.get("line")
+    if isinstance(line, bool) or not (line is None or isinstance(line, (int, str))):
+        raise KitError(f"{where}: line muss Zahl, Text oder null sein, nicht {line!r}")
+    if isinstance(line, int) and line < 0:
+        raise KitError(f"{where}: line {line} ist negativ")
+    if isinstance(line, str):
+        line = line.strip() or None
+    summary = item.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise KitError(f"{where} ({path}) ohne summary")
+    scenario = item.get("failure_scenario")
+    if scenario is not None and not isinstance(scenario, str):
+        raise KitError(f"{where} ({path}): failure_scenario muss Text oder null sein")
+    return {"file": path, "line": line, "summary": summary.strip(),
+            "failure_scenario": scenario.strip() or None if isinstance(scenario, str) else None}
+
+
+def _read_payload(payload_path) -> list:
+    """Die Liste der Funde aus `payload_path` (`-`: stdin): eine JSON-Liste oder ein Objekt
+    mit der Liste unter `findings`."""
+    if str(payload_path) == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            text = Path(payload_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise KitError(f"Ergebnis {payload_path} nicht lesbar: {exc}") from None
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise KitError(f"Ergebnis {payload_path} ist kein JSON: {exc}") from None
+    if isinstance(data, dict) and isinstance(data.get("findings"), list):
+        data = data["findings"]
+    if not isinstance(data, list):
+        raise KitError(f"Ergebnis {payload_path}: erwartet eine JSON-Liste von Funden "
+                       "(file, line, summary, failure_scenario), leer bei keinem Fund")
+    return data
+
+
+def _read_result(path: Path, pid: str, run_id: str, digest: str, repo: Path):
+    """Ein Ergebnis streng geprüft: `(Funde, None)`, wenn `record` es für dieses Paket dieses
+    Plans geschrieben hat (`_meta.run`, `_meta.packet`, `_meta.plan`, gültige Funde), sonst
+    `(None, Grund)`."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"nicht lesbar: {exc}"
+    if not isinstance(data, dict) or not isinstance(data.get("_meta"), dict) \
+            or not isinstance(data.get("findings"), list):
+        return None, "kein Ergebnis von record (_meta oder findings fehlt)"
+    meta = data["_meta"]
+    if meta.get("run") != run_id:
+        return None, f"Ergebnis von Lauf {meta.get('run')!r}, nicht von {run_id}"
+    if meta.get("packet") != pid:
+        return None, f"Ergebnis für Paket {meta.get('packet')!r}, nicht für {pid}"
+    if meta.get("plan") != digest:
+        return None, "Ergebnis zu einem anderen Plan dieses Laufs (_meta.plan)"
+    try:
+        return [_clean_finding(f, i, repo) for i, f in enumerate(data["findings"], 1)], None
+    except KitError as exc:
+        return None, f"ungültiger Fund: {exc}"
+
+
+def record(run_dir, packet, tool, payload_path):
+    """`record --run <lauf> --packet <id> --tool <werkzeug> <datei>`: das Ergebnis eines
+    Pakets annehmen (Spec 26, Ablauf Schritt 4).
+
+    `run_dir` ist der Laufordner, `payload_path` die JSON-Liste von `/code-review` oder die
+    Liste aus dem Brief (`-`: stdin; ein Objekt mit `findings` geht auch), je Fund `file`,
+    `line` (Zahl, Text oder null), `summary`, `failure_scenario` (`_clean_finding`). Eine
+    leere Liste ist ein Ergebnis ohne Funde. Angenommen wird nur, wenn das Paket im Plan
+    steht und noch kein Ergebnis hat; sonst — und bei einer ungültigen Liste oder einem
+    leeren Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des
+    Plans `results/<id>.json` mit `_meta` (`generated`, `run`, `packet` = Paket-ID, `tool`,
+    `plan` = `_plan_digest`) und `findings`. Rückgabe: das geschriebene Objekt."""
+    directory = Path(run_dir)
+    repo, run_id = _layout(directory)
+    if not isinstance(packet, str) or not PACKET_ID_RE.fullmatch(packet):
+        raise KitError(f"keine Paket-ID: {packet!r}")
+    if not isinstance(tool, str) or not tool.strip() or any(c in tool for c in "\r\n"):
+        raise KitError(f"--tool braucht das Werkzeug des Reviews (eine Zeile), nicht {tool!r}")
+    tool = tool.strip()
+    findings = [_clean_finding(item, i, repo) for i, item in enumerate(_read_payload(payload_path), 1)]
+    with _plan_lock(directory, run_id):
+        plan = _read_plan(directory / "plan.json", run_id)
+        ids = [p["id"] for p in plan["packets"]]
+        if packet not in ids:
+            raise KitError(f"Paket {packet!r} steht nicht im Plan von Lauf {run_id} (Pakete: "
+                           f"{', '.join(ids) or 'keine'}) — Ergebnis nicht angenommen")
+        target = directory / RESULTS_DIR / f"{packet}.json"
+        if os.path.lexists(target):
+            raise KitError(f"Paket {packet} von Lauf {run_id} hat schon ein Ergebnis "
+                           f"({_shown_path(repo, target)}) — ein zweites wird nicht angenommen")
+        shown = "-" if str(payload_path) == "-" else _shown_path(repo, payload_path)
+        meta = {"generated": f"{SCRIPT_CMD} record --run {run_id} --packet {packet} --tool "
+                             f"{shlex.quote(tool)} {shlex.quote(shown)}",
+                "run": run_id, "packet": packet, "tool": tool, "plan": _plan_digest(plan, run_id)}
+        return write_json(target, meta, {"findings": findings})
+
+
+class _Source(NamedTuple):
+    """Ein Fund vor dem Vereinigen: aus dem Ergebnis eines Pakets (`packet`) oder aus
+    `file_keys` übernommen (`reused_from`, Lauf-ID)."""
+    finding: dict
+    packet: str | None
+    reused_from: str | None
+
+
+def _plan_and_keys(directory: Path, run_id: str) -> tuple[dict, dict]:
+    path = directory / "plan.json"
+    plan = _read_plan(path, run_id)
+    return plan, _check_file_keys(plan.get("file_keys"), lambda why: _plan_error(run_id, path, why))
+
+
+def _results(directory: Path, plan: dict, run_id: str, repo: Path) -> tuple[dict, list]:
+    """Angenommene Ergebnisse `{Paket-ID: Funde}` in Plan-Reihenfolge und die übrigen
+    Ergebnisdateien als `{"packet", "reason"}` (`stale`): Paket nicht im Plan, oder nach
+    `_read_result` nicht angenommen."""
+    digest = _plan_digest(plan, run_id)
+    ids = [p["id"] for p in plan["packets"]]
+    folder = directory / RESULTS_DIR
+    names = sorted((p.name for p in folder.iterdir()
+                    if p.suffix == ".json" and not p.name.startswith(".")),
+                   key=lambda n: (ids.index(n[:-5]) if n[:-5] in ids else len(ids), n)) \
+        if folder.is_dir() else []
+    accepted, stale = {}, []
+    for name in names:
+        pid = name[:-len(".json")]
+        if pid not in ids:
+            stale.append({"packet": pid, "reason": f"Paket steht nicht im Plan von Lauf {run_id}"})
+            continue
+        found, why = _read_result(folder / name, pid, run_id, digest, repo)
+        if found is None:
+            stale.append({"packet": pid, "reason": why})
+        else:
+            accepted[pid] = found
+    return {pid: accepted[pid] for pid in ids if pid in accepted}, stale
+
+
+def _sources(accepted: dict, keyed: dict) -> list:
+    """Alle Funde, die in `findings.json` stehen müssen: die der angenommenen Ergebnisse, dann
+    die übernommenen aus `file_keys` (Dateien mit `reused_from` und `findings`)."""
+    out = [_Source(f, pid, None) for pid, found in accepted.items() for f in found]
+    for info in keyed.values():
+        if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
+            out += [_Source({k: f.get(k) for k in FINDING_FIELDS}, None, info["reused_from"])
+                    for f in info["findings"] if isinstance(f, dict)]
+    return out
+
+
+def _line_span(line):
+    """(erste, letzte) Zeile eines Funds — Zahl, `12-14` oder `L12` — oder None."""
+    if isinstance(line, int) and not isinstance(line, bool):
+        return line, line
+    if isinstance(line, str):
+        match = LINE_SPAN_RE.match(line)
+        if match:
+            first, last = int(match[1]), int(match[2] or match[1])
+            return min(first, last), max(first, last)
+    return None
+
+
+def _merged(group: list, rank: dict) -> dict:
+    def joined(field):
+        texts = [s.finding.get(field) for s in group]
+        texts = list(dict.fromkeys(t for t in texts if isinstance(t, str) and t))
+        return MERGE_JOIN.join(texts) if texts else None
+
+    head = group[0].finding
+    packets = sorted({s.packet for s in group if s.packet is not None}, key=lambda p: rank[p])
+    return {"file": head["file"], "line": head.get("line"), "summary": joined("summary"),
+            "failure_scenario": joined("failure_scenario"), "packets": packets,
+            "reused_from": next((s.reused_from for s in group if s.reused_from), None),
+            "sources": [{"packet": s.packet, "reused_from": s.reused_from,
+                         **{k: s.finding.get(k) for k in SOURCE_FIELDS[2:]}} for s in group]}
+
+
+def _merge_sources(sources: list, rank: dict) -> list:
+    """Funde derselben Datei, deren Zeilen höchstens `MERGE_LINE_GAP` auseinander liegen (vom
+    Ende des einen zum Anfang des nächsten, in Zeilenfolge verkettet), werden ein Fund; ohne
+    Zeile bleibt jeder für sich. Sortiert nach Datei, Zeile (ohne Zeile zuletzt) und Herkunft."""
+    by_file: dict[str, list] = {}
+    for order, source in enumerate(sources):
+        by_file.setdefault(source.finding["file"], []).append((order, source))
+    out = []
+    for path in sorted(by_file):
+        spans = sorted(((_line_span(s.finding.get("line")), o, s) for o, s in by_file[path]
+                        if _line_span(s.finding.get("line")) is not None),
+                       key=lambda t: (t[0], t[1]))
+        groups, end = [], None
+        for span, _order, source in spans:
+            if groups and span[0] - end <= MERGE_LINE_GAP:
+                groups[-1].append(source)
+                end = max(end, span[1])
+            else:
+                groups.append([source])
+                end = span[1]
+        groups += [[s] for _o, s in by_file[path] if _line_span(s.finding.get("line")) is None]
+        out += [_merged(group, rank) for group in groups]
+    return out
+
+
+def merge(run_dir):
+    """`merge --run <lauf>`: `findings.json` aus allen angenommenen Ergebnissen und den
+    übernommenen Funden des Plans (Spec 26, Ablauf Schritt 5). Abgestimmt wird nicht: Funde
+    derselben Datei mit höchstens `MERGE_LINE_GAP` Zeilen Abstand werden einer
+    (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die des ersten),
+    `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
+    `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (Lauf-ID aus
+    `file_keys` oder null) und `sources` (jeder ursprüngliche Fund mit `packet` oder
+    `reused_from`). Pakete ohne angenommenes Ergebnis fehlen — das meldet `audit`. `_meta`
+    trägt `run` und `plan` (`_plan_digest`). Rückgabe: das geschriebene Objekt."""
+    directory = Path(run_dir)
+    repo, run_id = _layout(directory)
+    with _plan_lock(directory, run_id):
+        plan, keyed = _plan_and_keys(directory, run_id)
+        accepted, _stale = _results(directory, plan, run_id, repo)
+        rank = {p["id"]: i for i, p in enumerate(plan["packets"])}
+        merged = _merge_sources(_sources(accepted, keyed), rank)
+        meta = {"generated": f"{SCRIPT_CMD} merge --run {run_id}", "run": run_id,
+                "plan": _plan_digest(plan, run_id)}
+        return write_json(directory / "findings.json", meta, {"findings": merged})
+
+
+def _source_key(file, packet, reused_from, line, summary, scenario) -> str:
+    return json.dumps([file, packet, reused_from, line, summary, scenario], ensure_ascii=False)
+
+
+def _merged_findings(path: Path, run_id: str, digest: str) -> list:
+    """Die Funde aus `findings.json`, wenn `merge` sie für diesen Plan geschrieben hat, sonst []."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict) or not isinstance(data.get("findings"), list) \
+            or not isinstance(data.get("_meta"), dict) or data["_meta"].get("run") != run_id \
+            or data["_meta"].get("plan") != digest:
+        return []
+    return [f for f in data["findings"] if isinstance(f, dict)]
+
+
+def _lost(sources: list, merged: list) -> list:
+    """Funde aus den Ergebnissen und aus `file_keys`, die in keinem Eintrag von `findings.json`
+    unter `sources` stehen (mit passendem `packets` bzw. `reused_from`)."""
+    present = Counter()
+    for finding in merged:
+        packets = finding.get("packets") if isinstance(finding.get("packets"), list) else []
+        for source in finding.get("sources") or ():
+            if not isinstance(source, dict):
+                continue
+            pid, reused = source.get("packet"), source.get("reused_from")
+            if (pid is not None and pid not in packets) or \
+                    (reused is not None and reused != finding.get("reused_from")):
+                continue
+            present[_source_key(finding.get("file"), pid, reused,
+                                *(source.get(k) for k in SOURCE_FIELDS[2:]))] += 1
+    lost = []
+    for source in sources:
+        f = source.finding
+        key = _source_key(f["file"], source.packet, source.reused_from,
+                          *(f.get(k) for k in SOURCE_FIELDS[2:]))
+        if present[key] > 0:
+            present[key] -= 1
+        else:
+            lost.append({"file": f["file"], "line": f.get("line"), "summary": f.get("summary"),
+                         "packet": source.packet, "reused_from": source.reused_from})
+    return lost
+
+
+def _report_header(line: str):
+    """Felder der Kopfzeile `<!-- key: value | … -->` in ihrer Reihenfolge, oder None."""
+    match = REPORT_HEADER_RE.fullmatch(line)
+    if not match:
+        return None
+    fields = {}
+    for part in match[1].split("|"):
+        key, sep, value = part.partition(":")
+        if not sep:
+            return None
+        fields.setdefault(key.strip(), value.strip())
+    return fields
+
+
+def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings: list,
+                     covered: int, gaps: bool) -> list:
+    """Was am Bericht nicht zu den Daten passt (Spec 26, Contract „Bericht und Daten stimmen
+    überein"). Gelesen wird: Zeile 1 als Kopfzeile `<!-- skill: deep-review | schema: 1 |
+    generated: … | run: <lauf> | … -->` (`profile`, `focus`, wenn genannt, wie im Plan); die
+    erste Zeile `Funde: <N>` (N = Einträge in `findings.json`); die erste Zeile
+    `Abdeckung: <a>/<b>` (a = Pakete mit angenommenem Ergebnis, b = Pakete; „unvollständig"
+    dort nur mit Lücke); je Fund eine Zeile `datei:zeile — …` (ohne Zeile `datei — …`); und —
+    bei einer Lücke — kein „vollständig" außerhalb von HTML-Kommentaren („unvollständig" und
+    „nicht vollständig" zählen nicht)."""
+    try:
+        text = report.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [f"Bericht fehlt: {shown}"]
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"Bericht {shown} nicht lesbar: {exc}"]
+    out = []
+    lines = text.splitlines()
+    head = _report_header(lines[0] if lines else "")
+    if head is None:
+        out.append("Kopfzeile fehlt oder falsch in Zeile 1 (erwartet <!-- skill: deep-review | "
+                   "schema: 1 | generated: … | run: <lauf> | … -->)")
+    else:
+        if tuple(head)[:len(REPORT_HEADER_FIRST)] != REPORT_HEADER_FIRST:
+            out.append("Kopfzeile: zuerst skill, schema, generated")
+        for key, want in (("skill", SKILL_NAME), ("schema", str(SCHEMA_VERSION))):
+            if head.get(key) != want:
+                out.append(f"Kopfzeile: {key} ist {head.get(key)!r}, erwartet {want!r}")
+        if head.get("run") != run_id:
+            out.append(f"Kopfzeile nennt Lauf {head.get('run')!r}, nicht {run_id}")
+        for key in ("profile", "focus"):
+            if key in head and head[key] != plan.get(key):
+                out.append(f"Kopfzeile: {key} {head[key]!r}, der Plan sagt {plan.get(key)!r}")
+    body = REPORT_COMMENT_RE.sub("", text)
+    count = REPORT_COUNT_RE.search(body)
+    if count is None:
+        out.append("Zahl der Funde fehlt (Zeile „Funde: <Zahl>“)")
+    elif int(count[1]) != len(findings):
+        out.append(f"Bericht nennt {count[1]} Funde, findings.json hat {len(findings)}")
+    total = len(plan["packets"])
+    coverage = REPORT_COVERAGE_RE.search(body)
+    if coverage is None:
+        out.append("Abdeckung fehlt (Zeile „Abdeckung: <Pakete mit Ergebnis>/<Pakete>“)")
+    else:
+        if (int(coverage[1]), int(coverage[2])) != (covered, total):
+            out.append(f"Bericht nennt Abdeckung {coverage[1]}/{coverage[2]}, angenommen sind "
+                       f"{covered}/{total}")
+        if not gaps and REPORT_DENIAL_RE.search(coverage[3]):
+            out.append("Bericht sagt „unvollständig“, das Audit findet keine Lücke")
+    if gaps and REPORT_CLAIM_RE.search(body):
+        out.append("Bericht sagt „vollständig“, obwohl das Audit Lücken meldet")
+    wheres = {m["where"] for m in REPORT_FINDING_RE.finditer(body)}
+    for finding in findings:
+        path, line = finding.get("file"), finding.get("line")
+        if not isinstance(path, str):
+            continue
+        if line is None:
+            listed = path in wheres or any(w.startswith(path + ":") and not w[len(path) + 1:][:1].isdigit()
+                                           for w in wheres)
+        else:
+            listed = f"{path}:{line}" in wheres
+        if not listed:
+            label = path if line is None else f"{path}:{line}"
+            out.append(f"Fund fehlt im Bericht: {label} (Zeile `datei:zeile — Zusammenfassung`)")
+    return out
+
+
+def audit(run_dir, report_path):
+    """`audit --run <lauf> [--report <datei>]`: Abdeckung, verlorene Funde und Bericht prüfen
+    (G2) und `audit.json` schreiben (Spec 26, Ablauf Schritt 6; Contract).
+
+    `missing`: Pakete des Plans ohne angenommenes Ergebnis (Plan-Reihenfolge; bei
+    `packets: []` leer). `stale`: Ergebnisdateien unter `results/`, die nicht angenommen sind
+    — Paket nicht im Plan, anderer Lauf, anderes Paket, anderer Plan (`_meta.plan`),
+    unlesbar oder ungültig —, je `{"packet", "reason"}`; ihr Paket steht dann auch unter
+    `missing`. `lost_findings`: Funde der angenommenen Ergebnisse und die übernommenen aus
+    `file_keys` (`--since`), die in `findings.json` fehlen (`_lost`; ein `findings.json` zu
+    einem anderen Plan zählt als leer), je `{"file", "line", "summary", "packet",
+    "reused_from"}`. `report_mismatch`: was am Bericht nicht passt (`_report_mismatch`;
+    `report_path` None: `report.md` im Laufordner). `complete` ist wahr nur, wenn alle vier
+    leer sind. Rückgabe: das geschriebene Objekt."""
+    directory = Path(run_dir)
+    repo, run_id = _layout(directory)
+    report = directory / REPORT_NAME if report_path is None else Path(report_path)
+    shown = _shown_path(repo, report)
+    with _plan_lock(directory, run_id):
+        plan, keyed = _plan_and_keys(directory, run_id)
+        digest = _plan_digest(plan, run_id)
+        accepted, stale = _results(directory, plan, run_id, repo)
+        missing = [p["id"] for p in plan["packets"] if p["id"] not in accepted]
+        merged = _merged_findings(directory / "findings.json", run_id, digest)
+        lost = _lost(_sources(accepted, keyed), merged)
+        mismatch = _report_mismatch(report, shown, run_id, plan, merged, len(accepted),
+                                    bool(missing or stale or lost))
+        command = f"{SCRIPT_CMD} audit --run {run_id}"
+        if report_path is not None:
+            command += f" --report {shlex.quote(shown)}"
+        meta = {"generated": command, "run": run_id, "plan": digest, "report": shown}
+        payload = {"complete": not (missing or stale or lost or mismatch), "missing": missing,
+                   "stale": stale, "lost_findings": lost, "report_mismatch": mismatch}
+        return write_json(directory / "audit.json", meta, payload)
+
+
+# --- Kommandozeile ---------------------------------------------------------------------------
+
+def _cmd_plan(args) -> int:
+    repo = _toplevel(args.repo)
+    since = None
+    if args.since is not None:
+        since = [s.strip() for s in args.since.split(",") if s.strip()]
+        if not since:
+            raise KitError("--since braucht mindestens eine Lauf-ID")
+        for earlier in since:
+            _check_run_id(earlier)
+            if not (run_dir(repo, earlier) / "plan.json").is_file():
+                raise KitError(f"Lauf {earlier} hat keinen Plan ({CACHE_DIR / earlier / 'plan.json'})"
+                               " — --since nennt nur vorhandene Läufe")
+    soll = None
+    if args.soll_file is not None:
+        if not Path(args.soll_file).is_file():
+            raise KitError(f"--soll-file {args.soll_file}: Datei fehlt")
+        soll = _shown_path(repo, args.soll_file)
+    plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at, args.with_tests)
+    run_id = plan["_meta"]["run"]
+    directory = run_dir(repo, run_id)
+    try:
+        if since:
+            plan = plan_since(repo, run_id, since)
+        if soll is not None:
+            with _plan_lock(directory, run_id):
+                path, plan = _load_plan(repo, run_id)
+                plan["_meta"] = {**plan["_meta"], "soll_file": soll, "generated":
+                                 f"{plan['_meta']['generated']} --soll-file {shlex.quote(soll)}"}
+                plan = _write_plan(path, plan)
+    except BaseException:
+        # Kein halber Lauf: build_plan hat noch keine Refs gebaut, der Ordner ist alles.
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    print(f"Lauf: {run_id}")
+    print(f"Plan: {(CACHE_DIR / run_id / 'plan.json').as_posix()}")
+    print(f"Bereich: {plan['range']} · Profil {plan['profile']} · Fokus {plan['focus']} · "
+          f"split: {'true' if plan['split'] else 'false'} · {plan['changed_lines']} Zeilen")
+    for packet in plan["packets"]:
+        print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen")
+    if not plan["packets"]:
+        print("Pakete: keine — alle Dateien übernommen")
+    reused = [p for p, info in plan["file_keys"].items() if info.get("reused_from")]
+    if reused:
+        print(f"Übernommen (--since): {len(reused)} Datei(en)")
+    if plan["not_reviewed"]:
+        print(f"Nicht reviewt: {len(plan['not_reviewed'])} Datei(en)")
+    return 0
+
+
+def _cmd_counterparts(args) -> int:
+    repo = _toplevel(args.repo)
+    written = write_counterparts(repo, args.run)
+    ranges = {p["id"]: p.get("range") for p in _load_plan(repo, args.run)[1]["packets"]}
+    for item in written:
+        print(f"{item['packet']}: {ranges.get(item['packet'])} · {item['path']} · "
+              f"{item['counterparts']} Gegenstellen, {item['shown']} gezeigt, "
+              f"{item['unresolved']} nicht aufgelöst")
+    return 0
+
+
+def _cmd_record(args) -> int:
+    repo = _toplevel(args.repo)
+    data = record(run_dir(repo, _check_run_id(args.run)), args.packet, args.tool, args.payload)
+    print(f"{args.packet}: {len(data['findings'])} Fund(e) angenommen → "
+          f"{(CACHE_DIR / args.run / RESULTS_DIR / f'{args.packet}.json').as_posix()}")
+    return 0
+
+
+def _cmd_merge(args) -> int:
+    repo = _toplevel(args.repo)
+    data = merge(run_dir(repo, _check_run_id(args.run)))
+    print(f"findings.json: {len(data['findings'])} Fund(e) → "
+          f"{(CACHE_DIR / args.run / 'findings.json').as_posix()}")
+    return 0
+
+
+def _cmd_audit(args) -> int:
+    repo = _toplevel(args.repo)
+    directory = run_dir(repo, _check_run_id(args.run))
+    data = audit(directory, args.report)
+    total = len(_load_plan(repo, args.run)[1]["packets"])
+    missing = data["missing"]
+    print(f"complete: {'true' if data['complete'] else 'false'} · Abdeckung: "
+          f"{total - len(missing)}/{total} · {(CACHE_DIR / args.run / 'audit.json').as_posix()}")
+    if missing:
+        print(f"missing: {', '.join(missing)}")
+    for item in data["stale"]:
+        print(f"stale: {item['packet']} — {item['reason']}")
+    for item in data["lost_findings"]:
+        print(f"lost: {item['file']}:{item['line']} — {item['summary']}")
+    for item in data["report_mismatch"]:
+        print(f"report_mismatch: {item}")
+    return 0 if data["complete"] else 1
+
+
+def _cmd_cleanup(args) -> int:
+    deleted = cleanup(_toplevel(args.repo), args.run, args.stale)
+    print(f"cleanup: {len(deleted)} Ref(s) gelöscht")
+    return 0
+
+
+def _parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--repo", default=".", help="Repo (Default: aktueller Ordner)")
+    parser = argparse.ArgumentParser(
+        prog="review_kit.py",
+        description="deep-review: Paketplan, Gegenstellen, Ergebnisse und Audit (Spec 26).")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="BEFEHL")
+
+    plan = sub.add_parser("plan", parents=[common], help="Paketplan schreiben")
+    plan.add_argument("--range", dest="rng", help="BASIS..ZIEL oder Revision (Default: HEAD)")
+    plan.add_argument("--profile", choices=PROFILES, default="standard")
+    plan.add_argument("--focus", choices=FOCI, default="bugs")
+    plan.add_argument("--split-at", type=int, default=None, help=f"Default {SPLIT_AT}")
+    plan.add_argument("--since", help="frühere Läufe, durch Komma getrennt")
+    plan.add_argument("--soll-file", help="Soll für das Profil checkpoint")
+    plan.add_argument("--with-tests", action="store_true", help="Testdateien mit reviewen")
+    plan.set_defaults(func=_cmd_plan)
+
+    counterparts = sub.add_parser("counterparts", parents=[common],
+                                  help="Paket-Bereiche und packets/<id>.md schreiben")
+    counterparts.add_argument("--run", required=True)
+    counterparts.set_defaults(func=_cmd_counterparts)
+
+    rec = sub.add_parser("record", parents=[common], help="Ergebnis eines Pakets annehmen")
+    rec.add_argument("--run", required=True)
+    rec.add_argument("--packet", required=True)
+    rec.add_argument("--tool", required=True, help="Werkzeug des Reviews, z. B. /code-review")
+    rec.add_argument("payload", help="JSON-Liste der Funde (- für stdin)")
+    rec.set_defaults(func=_cmd_record)
+
+    mrg = sub.add_parser("merge", parents=[common], help="findings.json schreiben")
+    mrg.add_argument("--run", required=True)
+    mrg.set_defaults(func=_cmd_merge)
+
+    aud = sub.add_parser("audit", parents=[common], help="Abdeckung und Bericht prüfen")
+    aud.add_argument("--run", required=True)
+    aud.add_argument("--report", default=None, help="Bericht (Default: report.md im Laufordner)")
+    aud.set_defaults(func=_cmd_audit)
+
+    clean = sub.add_parser("cleanup", parents=[common], help="Hilfscommit-Refs löschen")
+    clean.add_argument("--run", default=None)
+    clean.add_argument("--stale", action="store_true", help="Refs abgebrochener Läufe")
+    clean.set_defaults(func=_cmd_cleanup)
+    return parser
+
+
+def main(argv):
+    """Kommandozeile (siehe Modul-Docstring). Exit 0 bei Erfolg; 1 bei einem KitError oder
+    OSError (Meldung auf stderr) und bei `audit` mit Lücke; falscher Aufruf: argparse, Exit 2."""
+    args = _parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except (KitError, OSError) as exc:
+        print(f"review_kit {args.command}: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
