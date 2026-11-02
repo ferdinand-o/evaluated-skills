@@ -360,6 +360,23 @@ für known-limits:
 - `_refs_hold` und `cleanup` lesen Refs mit doppeltem Code.
 - `ARG_CHUNK_CHARS` rechnet feste Argumente, Quoting und UTF-16-Länge unter Windows nicht ein.
 
+### Prüfpunkt 3 (vor Task 5, C1 und C5)
+
+`/code-review` über Task 4 (785 Zeilen): 11 Funde, Fix-Runde 1 behob alle (zwei Aufrufe auf
+einer Zeile, `.PY` still übergangen, unlesbare Paketdateien ohne Hinweis, Kappung über den
+ganzen Block, Performance). Review des Fixes: 13 Funde; in Runde 2 die sieben mit falschem
+Inhalt (Ausschnitt bei Latin-1 und BOM verschoben, `render_block` ohne Kennzeichnung für
+andere Sprachen, falsche Symlink- und Grund-Hinweise, Zählung bei `Path`, gleiche Überschriften);
+offen für known-limits:
+
+- Der Index hält die Quell-Bytes aller Python-Dateien des Repos im Prozess-Cache (Speicher bei
+  großen vendorten Bäumen).
+- Mehrzeilige Rumpf-Anweisungen zeigen im Weg die erste Quellzeile samt Kommentar.
+- `INDEX_CACHE_SIZE = 1`: Wechsel zwischen zwei Zielen baut den Index jedes Mal neu.
+- `_is_python` und `_has_collector` prüfen dasselbe doppelt.
+- `write_counterparts` löst den Bereich und den Index ein zweites Mal auf.
+- `_render` hat einen Sonderzweig für den Qualitätsfokus.
+
 **Lessons für subagent-dev:** (1) Agent-Worktrees starten auf `main`, nicht auf dem
 Arbeitsbranch; jeder Agent musste die Basis selbst zurücksetzen — der Dispatch nennt sie seither
 ausdrücklich. (2) `fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die
