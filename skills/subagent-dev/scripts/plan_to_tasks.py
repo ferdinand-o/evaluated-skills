@@ -1438,37 +1438,168 @@ def _cmd_checkpoint(args: argparse.Namespace) -> int:
 
 FIX_STATUSES = ("bestätigt", "plausibel")
 FIX_TASK_NAME = "fix-task.md"
+FIX_LINE_RE = re.compile(r"\s*[Ll]?(\d+)(?:\s*(?:-|–|bis)\s*[Ll]?(\d+))?\s*")  # wie LINE_TEXT_RE in review_kit.py
+
+
+def _loc(path: str, lines: object) -> str:
+    """`pfad:zeilen` für das Kriterium; ohne Zeile (null oder leer) nur der Pfad. 0 bleibt stehen."""
+    return f"{path}:{lines}" if lines not in (None, "") else path
+
+
+def _is_line(value: object) -> bool:
+    return value is None or isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _repo_path(value: object, where: str) -> str:
+    """Ein Repo-relativer POSIX-Pfad (Backslashes werden zu `/`) oder PlanParseError — kein
+    leerer, absoluter (auch `C:`, `//server`) oder mit `..` aus dem Repo führender Pfad."""
+    if not isinstance(value, str) or not value.strip():
+        raise PlanParseError(f"{where} ist kein nicht-leerer Text ({value!r})")
+    path = value.strip().replace("\\", "/")
+    if path.startswith("/") or re.match(r"[A-Za-z]:", path):
+        raise PlanParseError(f"{where} ist absolut ({value!r}), erwartet ein Pfad relativ zum Repo")
+    if ".." in path.split("/"):
+        raise PlanParseError(f"{where} enthält `..` ({value!r}), erwartet ein Pfad im Repo")
+    return path
+
+
+def _checked_finding(n: int, f: object) -> dict:
+    """Ein Eintrag der /code-review-Liste oder von `findings`: Objekt mit `file` (Repo-Pfad),
+    `summary` (Text), `failure_scenario` (Text oder null), `line` (Zahl, Text oder null) und
+    optional `sources` (Liste von Objekten mit `line`, `summary`, `failure_scenario`)."""
+    where = f"Fund {n}"
+    if not isinstance(f, dict):
+        raise PlanParseError(f"{where}: ist kein Objekt ({f!r})")
+    path = _repo_path(f.get("file"), f"{where}: `file`")
+    if not isinstance(f.get("summary"), str):
+        raise PlanParseError(f"{where}: `summary` ist kein Text ({f.get('summary')!r})")
+    if not isinstance(f.get("failure_scenario"), (str, type(None))):
+        raise PlanParseError(f"{where}: `failure_scenario` ist weder Text noch null ({f.get('failure_scenario')!r})")
+    if not _is_line(f.get("line")):
+        raise PlanParseError(f"{where}: `line` ist weder Zahl noch Text noch null ({f.get('line')!r})")
+    sources = f.get("sources")
+    if sources is None:
+        sources = []
+    if not isinstance(sources, list):
+        raise PlanParseError(f"{where}: `sources` ist keine Liste ({sources!r})")
+    for m, s in enumerate(sources, 1):
+        if not isinstance(s, dict):
+            raise PlanParseError(f"{where}: Quelle {m} ist kein Objekt ({s!r})")
+        if not _is_line(s.get("line")):
+            raise PlanParseError(f"{where}: Quelle {m}: `line` ist weder Zahl noch Text noch null ({s.get('line')!r})")
+        for key in ("summary", "failure_scenario"):
+            if not isinstance(s.get(key), (str, type(None))):
+                raise PlanParseError(f"{where}: Quelle {m}: `{key}` ist weder Text noch null ({s.get(key)!r})")
+    return {**f, "file": path, "sources": sources}
+
+
+def _line_span(line: object) -> tuple[int, int] | None:
+    if isinstance(line, int) and not isinstance(line, bool):
+        return line, line
+    match = FIX_LINE_RE.fullmatch(line) if isinstance(line, str) else None
+    if match:
+        first, last = int(match[1]), int(match[2] or match[1])
+        return min(first, last), max(first, last)
+    return None
+
+
+def _pair(line: object, summary: object, scenario: object) -> str:
+    """Eine Quelle als `<line>: <summary>; <failure_scenario>`; fehlende Teile entfallen."""
+    text = "; ".join(x for x in (summary, scenario) if x)
+    if line in (None, ""):
+        return text
+    return f"{line}: {text}" if text else str(line)
 
 
 def _list_findings(items: list) -> list[dict]:
-    """Funde aus einer Liste mit `file`, `line`, `summary`, `failure_scenario`. `line` ist
-    eine Zahl, ein Text `a-b` oder null (dann bleibt `lines` leer); `summary` und
-    `failure_scenario` können null sein. Weitere Felder (`packets`, `reused_from`, `sources`)
-    bleiben unbeachtet."""
-    return [{"id": f"F{i}", "path": f["file"], "lines": "" if f.get("line") is None else str(f["line"]),
-             "related": [],
-             "reason": "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)}
-            for i, f in enumerate(items, 1)]
+    """Funde aus einer Liste mit `file`, `line`, `summary`, `failure_scenario` (geprüft von
+    `_checked_finding`). `line` ist eine Zahl, ein Text `a-b` oder null. Hat ein Fund
+    `sources` (vereinigter Fund von `review_kit.py merge`), steht je Quelle ein eigenes Paar
+    `<line>: <summary>; <failure_scenario>`, und das Kriterium nennt die Spanne aller
+    Quellzeilen; sonst `summary; failure_scenario` wie bei der /code-review-Liste. `packets`
+    und `reused_from` bleiben unbeachtet."""
+    out = []
+    for i, raw in enumerate(items, 1):
+        f = _checked_finding(i, raw)
+        lines, reason = f.get("line"), "; ".join(x for x in (f["summary"], f.get("failure_scenario")) if x)
+        if f["sources"]:
+            spans = [s for s in (_line_span(src.get("line")) for src in f["sources"]) if s]
+            if spans:
+                first, last = min(s[0] for s in spans), max(s[1] for s in spans)
+                lines = first if first == last else f"{first}-{last}"
+            pairs = [_pair(s.get("line"), s.get("summary"), s.get("failure_scenario")) for s in f["sources"]]
+            reason = "\n".join(f"- {p}" for p in pairs if p) or reason
+        out.append({"id": f"F{i}", "path": f["file"], "lines": lines, "related": [], "reason": reason})
+    return out
+
+
+def _deep_review_findings(path: Path, whole: dict) -> list[dict]:
+    """`findings.json` von `review_kit.py merge`: `_meta.skill` ist `deep-review`, und `_meta`
+    hat kein `packet` — das trägt nur `results/<id>.json`, das Ergebnis eines Pakets."""
+    meta = whole.get("_meta")
+    if not isinstance(meta, dict):
+        raise PlanParseError(f"{path}: `_meta` fehlt oder ist kein Objekt — kein findings.json von deep-review")
+    if meta.get("skill") != "deep-review":
+        raise PlanParseError(f"{path}: `_meta.skill` ist {meta.get('skill')!r}, nicht 'deep-review' — "
+                             "kein findings.json von deep-review")
+    if "packet" in meta:
+        raise PlanParseError(f"{path}: ist ein Paket-Ergebnis, nicht findings.json (`_meta.packet` = "
+                             f"{meta['packet']!r}); erst `review_kit.py merge --run <lauf>`, dann dessen findings.json")
+    if not isinstance(whole["findings"], list):
+        raise PlanParseError(f"{path}: `findings` ist keine Liste")
+    if not whole["findings"]:
+        raise PlanParseError(f"{path}: findings.json ohne Funde")
+    return _list_findings(whole["findings"])
+
+
+def _verdict_findings(path: Path, rows: list) -> list[dict]:
+    """Zeilen von `verdicts.jsonl`: ohne die `_meta`-Zeile, nur Status `bestätigt`/`plausibel`;
+    `path` und `related` müssen Repo-Pfade sein."""
+    if not all(isinstance(r, dict) for r in rows):
+        raise PlanParseError(f"{path}: Format nicht erkannt — verdicts.jsonl braucht je Zeile ein Objekt")
+    kept = [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
+    if not kept:
+        raise PlanParseError(f"{path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
+    out = []
+    for n, r in enumerate(kept, 1):
+        related = r.get("related") or []
+        if not isinstance(related, list):
+            raise PlanParseError(f"Fund {n}: `related` ist keine Liste ({related!r})")
+        out.append({**r, "path": _repo_path(r.get("path"), f"Fund {n}: `path`"),
+                    "related": [_repo_path(p, f"Fund {n}: `related`") for p in related]})
+    return out
 
 
 def _read_findings(path: Path) -> list[dict]:
     """Funde aus `findings.json` von `review_kit.py merge` (Spec 26: Objekt mit `_meta` und
     `findings`; jeder Fund zählt), aus `verdicts.jsonl` (Spec 26: `_meta` in Zeile 1, Status
     je Fund; nur `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von
-    `/code-review` (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund)."""
-    text = path.read_text(encoding="utf-8")
-    if text.lstrip().startswith("["):
-        return _list_findings(json.loads(text))
+    `/code-review` (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund).
+    Ein `json.loads` über die ganze Datei (BOM erlaubt) entscheidet: Liste, Objekt mit
+    `findings`, eine einzelne Verdikt-Zeile; nur wenn es scheitert, gilt die Datei als jsonl.
+    Jede Meldung nennt das Format, an dem sie scheitert."""
+    text = path.read_text(encoding="utf-8-sig")
+    if not text.strip():
+        raise PlanParseError(f"{path}: Datei ist leer")
     try:
         whole = json.loads(text)
     except json.JSONDecodeError:
-        whole = None  # mehrere Zeilen: verdicts.jsonl
+        try:
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+        except json.JSONDecodeError as exc:
+            raise PlanParseError(f"{path}: Format nicht erkannt — weder JSON noch verdicts.jsonl ({exc})") from None
+        return _verdict_findings(path, rows)
+    if isinstance(whole, list):
+        if not whole:
+            raise PlanParseError(f"{path}: /code-review-Liste ohne Funde")
+        return _list_findings(whole)
     if isinstance(whole, dict) and "findings" in whole:
-        if not isinstance(whole["findings"], list):
-            raise PlanParseError(f"{path}: `findings` ist keine Liste")
-        return _list_findings(whole["findings"])
-    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
-    return [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
+        return _deep_review_findings(path, whole)
+    if isinstance(whole, dict) and ("status" in whole or set(whole) == {"_meta"}):
+        return _verdict_findings(path, [whole])  # verdicts.jsonl mit einer Zeile
+    keys = ", ".join(map(str, whole)) if isinstance(whole, dict) else type(whole).__name__
+    raise PlanParseError(f"{path}: Format nicht erkannt ({keys}) — erwartet findings.json von deep-review "
+                         "(Objekt mit `_meta` und `findings`), verdicts.jsonl oder eine /code-review-Liste")
 
 
 def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Path:
@@ -1477,9 +1608,7 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
     Akzeptanz je Fund „behoben und mit Test belegt", Modell das höchste der Tasks aus
     `gate.json`, deren Dateien die Funde berühren (sonst `opus`)."""
     verdicts_path, out_dir = Path(verdicts_path), Path(out_dir)
-    findings = _read_findings(verdicts_path)
-    if not findings:
-        raise PlanParseError(f"{verdicts_path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
+    findings = _read_findings(verdicts_path)  # nie leer: jedes Format meldet „ohne Funde“ selbst
     paths = list(dict.fromkeys(p for f in findings for p in [f["path"], *f.get("related", [])]))
     gate = _read_json(out_dir / "gate.json") or {}
     hit = [t["model"] for t in gate.get("tasks", [])
@@ -1489,7 +1618,7 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
     task = PlanTask(
         id=0, title="Funde des Prüfpunkts beheben", files=[FileRef(raw=p, path=p) for p in paths],
         files_unknown=False, consumes="", produces="", interfaces_unknown=False, steps=[],
-        step_texts=[(f"Fund {f['id']} ({f['path']}{':' + str(f['lines']) if f['lines'] else ''}): behoben und mit Test belegt",
+        step_texts=[(f"Fund {f['id']} ({_loc(f['path'], f.get('lines'))}): behoben und mit Test belegt",
                      f.get("reason", ""))
                     for f in findings],
     )
@@ -1504,7 +1633,7 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
 def _cmd_fix_task(args: argparse.Namespace) -> int:
     try:
         target = fix_task_from_verdicts(args.verdicts, args.out_dir)
-    except (OSError, PlanParseError, KeyError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, PlanParseError, KeyError, json.JSONDecodeError) as exc:
         print(f"fix-task: {exc}", file=sys.stderr)
         return 1
     print(f"Fix-Task geschrieben -> {target}")
