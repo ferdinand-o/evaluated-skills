@@ -404,6 +404,23 @@ des Fixes mit `--max-findings all` findet auf neuem Code jede Runde neue Randfä
 Runden liefen die Funde von „Absturz" zu „Kommentar ungenau" — die Grenze von zwei Runden
 trägt.
 
+### Prüfpunkt 5 (nach Task 6, C5: Datei-Schlüssel und `--since`)
+
+Task 6 mit Sonnet: `verify` PASS, Vertrag geprüft (0 von 5 Steps fehlen), 1.721 Tests grün.
+`/code-review` über 469 Zeilen ergab 12 Funde. Der wichtigste: Der Schlüssel aus Inhalt am ZIEL
+plus Gegenstellen sagt nicht, ob der frühere Lauf alle Änderungen des neuen Bereichs gesehen
+hat. Ein Lauf über `t1..t2` hätte eine Datei für `t0..t2` freigegeben, auch gelöschte Dateien
+mit anderem Inhalt. Fix-Runde 1 bekommt dafür eine Abdeckungskette (`base_blob`/`target_blob`
+je Datei): Übernommen wird nur, wenn sich die Kette über die angegebenen Läufe bis zur neuen
+Basis schließt. Außerdem in Runde 1: Profil-Abgleich, `plan_since` nur auf frischem Lauf, Gleichstand
+der Lauf-IDs, Symlinks, gemeinsames `_pack`, Validierung früherer Pläne, `test_f03` wieder streng.
+
+Offen für known-limits:
+
+- `plan` sammelt die Gegenstellen über den ganzen Bereich, um die Schlüssel zu bilden;
+  `counterparts` sammelt je Paket erneut. Damit kostet das Sammeln etwa doppelt, und ein
+  Sammelfehler bricht schon `plan` ab.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
