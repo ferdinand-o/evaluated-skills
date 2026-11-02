@@ -3496,6 +3496,7 @@ def _report(directory, run, findings, coverage, claim="vollständig", count=None
             extra=()):
     """report.md wie nach assets/report-template.md: Kopfzeile (Bereich, Profil und Fokus aus
     plan.json, Werkzeug /code-review; `header` ersetzt Felder, None lässt eins weg), Funde,
+    die Pflichtzeilen Hinweise und Übernommen aus dem Plan (vor der Abdeckung wie im Gerüst),
     Abdeckung, die Zeilen `extra`, je Fund eine Zeile `datei:zeile — Zusammenfassung`."""
     plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
     fields = {"skill": "deep-review", "schema": "1",
@@ -3506,6 +3507,8 @@ def _report(directory, run, findings, coverage, claim="vollständig", count=None
     lines = [f"<!-- {head} -->",
              "# deep-review", "",
              f"Funde: {len(findings) if count is None else count}",
+             f"- Hinweise: {_notes_line(plan)}",
+             f"- Übernommen (--since): {_reused_line(plan)}",
              f"Abdeckung: {coverage} — {claim}", *extra, ""]
     for f in findings:
         where = f["file"] if f["line"] is None else f"{f['file']}:{f['line']}"
@@ -4477,18 +4480,22 @@ TEMPLATE_PATH = REPO_ROOT / "skills" / "deep-review" / "assets" / "report-templa
 PLACEHOLDER_RE = re.compile(r"<(?!!--)[^<>\n]*>")
 # Zeilen des Gerüsts, deren Rest nach dem Doppelpunkt der Hauptagent ganz ersetzt
 TEMPLATE_SLOTS = ("- Hinweise:", "- Übernommen (--since):", "- Nicht geprüft:")
-NOT_GATHERED = "– (nicht gesammelt: Sprache)"
+NOT_GATHERED = "Gegenstellen nicht gesammelt (Sprache)"   # NO_COLLECTOR, wörtlich (F4, zweite Runde)
+# Gründe unter not_reviewed, die Quellcode betreffen: im Bericht mit ihren Dateien genannt.
+SOURCE_REASONS = ("Quelldatei mit Nicht-UTF-8-Pfad — nicht reviewt",)
 
 
 def _not_reviewed_line(plan):
-    """„Nicht geprüft" als eine Zeile: je Grund die Zahl der Dateien, oder `keine`."""
-    counts = {}
+    """„Nicht geprüft" als eine Zeile: zuerst je Grund aus `SOURCE_REASONS` die Dateien, dann je
+    übrigem Grund die Zahl der Dateien, oder `keine`."""
+    files = {}
     for item in plan["not_reviewed"]:
-        counts[item["reason"]] = counts.get(item["reason"], 0) + 1
-    if not counts:
+        files.setdefault(item["reason"], []).append(item["file"])
+    if not files:
         return "keine"
-    return (", ".join(f"{r} ({n})" for r, n in counts.items())
-            + " — Dateien in plan.json not_reviewed")
+    named = [f"{r} ({', '.join(fs)})" for r, fs in files.items() if r in SOURCE_REASONS]
+    counted = [f"{r} ({len(fs)})" for r, fs in files.items() if r not in SOURCE_REASONS]
+    return ", ".join(named + counted) + " — Dateien in plan.json not_reviewed"
 
 
 def _notes_line(plan):
@@ -4499,12 +4506,14 @@ def _notes_line(plan):
 
 
 def _reused_line(plan):
-    """„Übernommen (--since)": Dateien mit `reused_from`, ihre Läufe und Funde, oder `keine`."""
+    """„Übernommen (--since)": Dateien mit `reused_from`, ihre Läufe und Funde (`findings` und
+    `outside`), oder `keine`."""
     reused = {p: info for p, info in plan["file_keys"].items() if info.get("reused_from")}
     if not reused:
         return "keine"
     runs = ", ".join(sorted({info["reused_from"] for info in reused.values()}))
-    found = sum(len(info.get("findings") or []) for info in reused.values())
+    found = sum(len(info.get("findings") or []) + len(info.get("outside") or [])
+                for info in reused.values())
     return f"{len(reused)} Dateien aus {runs}, {found} Funde"
 
 
@@ -4659,7 +4668,7 @@ def test_cp8_f2_report_names_notes_and_uncollected_language(tmp_path):
     kit = _kit()
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     assert sum(ln.startswith("- Hinweise:") for ln in template.splitlines()) == 1
-    assert "nicht gesammelt: Sprache" in template
+    assert kit.NO_COLLECTOR in template   # wörtlich wie im Kit (F4, zweite Runde)
     run, directory, row = _full_single_run(kit, tmp_path)
     text = _fill_template(template, directory, run, [], [row])
     [notes] = [ln for ln in text.splitlines() if ln.startswith("- Hinweise:")]
@@ -4764,3 +4773,157 @@ def test_cp8_f6_template_with_gap_and_full_single_run(tmp_path):
     assert len(text.splitlines()) <= 1 + kit.REPORT_BASE_LINES
     data = kit.audit(directory, _write_report(directory, text))
     assert data["report_mismatch"] == [] and data["complete"] is True, data
+
+
+# --- review_kit.py: Funde der zweiten Runde von Prüfpunkt 8 --------------------------------
+
+def test_cp8b_f5_payload_file_with_bom_is_accepted(tmp_path, monkeypatch):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(8)})
+    path = tmp_path / "bom.json"
+    path.write_bytes(b"\xef\xbb\xbf[]")
+    assert _cli_record(kit, root, run, "p1", path) == 0
+    data = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    assert data["findings"] == []
+    # Dieselben Bytes über stdin gehen ebenso.
+    *_, other = _single_run(kit, tmp_path, {"a.py": _lines(8)}, name="zwei")
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf[]")))
+    assert kit.record(other, "p1", "/code-review", "-")["findings"] == []
+
+
+def test_cp8b_f2_extract_pair_on_owning_dictionary_gets_owner_entry(tmp_path):
+    kit = _kit()
+    before = OWNER_PAS.replace("  T := nil;\n", "  T := nil;\n  FBag.Remove('x');\n")
+    for name in ("ExtractPair", "ExtractKey", "ExtractValue"):
+        after = before.replace("FBag.Remove('x')", f"FBag.{name}('x')")
+        (tmp_path / name).mkdir()
+        found = _delphi_found(kit, tmp_path / name,
+                              {"Tree.pas": TREE_PAS, "Many.pas": MANY_PAS, "src/Owner.pas": before},
+                              {"src/Owner.pas": after})
+        at = _line_no(after, f"FBag.{name}")
+        bag = _by_head(found)[f"### src/Owner.pas:{at} {name} auf FBag: TBag"]
+        assert bag[:2] == [
+            f"- Gegenstelle TBag [src/Owner.pas:{_line_no(OWNER_PAS, 'TBag = class')}]: "
+            "TBag = class(TObjectDictionary<string, TNode>)",
+            f"  inherited Create([doOwnsValues]) at src/Owner.pas:"
+            f"{_line_no(OWNER_PAS, 'inherited')}"], bag
+        assert bag[2].startswith("  Besitz (RTL): TObjectDictionary<…>")
+    # delphi.md nennt doOwnsKeys in der Gegenprobe: Remove gibt dann den Schlüssel frei.
+    doc = (REPO_ROOT / "skills" / "deep-review" / "references" / "delphi.md").read_text(
+        encoding="utf-8")
+    probe = doc[doc.index("Gegenprobe: Ohne `doOwnsValues`"):]
+    probe = probe[:probe.index("###")]
+    assert "doOwnsKeys" in probe and "ExtractPair" in probe, probe
+
+
+def test_cp8b_f4_skipped_source_file_named_and_no_collector_literal(tmp_path):
+    kit = _kit()
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    assert SOURCE_REASONS == (kit.REASON_SOURCE_NOT_UTF8,) and NOT_GATHERED == kit.NO_COLLECTOR
+    # Das Gerüst nennt das Literal des Kits und die Regel für Quelldateien.
+    row = next(ln for ln in template.splitlines() if ln.startswith("| <"))
+    assert kit.NO_COLLECTOR in row, row
+    assert "nicht gesammelt: " not in template
+    comments = " ".join(kit.REPORT_COMMENT_RE.findall(template)[1:])
+    assert kit.REASON_SOURCE_NOT_UTF8 in comments and kit.NO_COLLECTOR in comments, comments
+    [skipped] = [ln for ln in template.splitlines() if ln.startswith("- Nicht geprüft:")]
+    assert "(<datei>, …)" in skipped and "(<n>)" in skipped, skipped
+    assert "Nicht geprüft" in template and "unvollständig" in template
+
+    # Lauf: ein Paket nur aus TypeScript, app/caf\xe9.py übersprungen, dazu eine Doku-Datei.
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = os.fsdecode(b"app/caf\xe9.py")
+    _commit_repo(root, {"web/app.ts": ""}, {"web/app.ts": "export const a = 1;\n" * 5,
+                                            source: "a = 1\n", "README.md": "# r\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    assert plan["split"] is False
+    run, directory = plan["_meta"]["run"], _run_path(root, plan)
+    [item] = kit.write_counterparts(root, run)
+    assert kit.NO_COLLECTOR in (root / item["path"]).read_text(encoding="utf-8")
+    _record(kit, root, plan, "p1", [], tool="/code-review")
+    kit.merge(directory)
+    text = _fill_template(template, directory, run, [], [("p1", 1, 5, kit.NO_COLLECTOR, 0)])
+    [line] = [ln for ln in text.splitlines() if ln.startswith("- Nicht geprüft:")]
+    assert f"{kit.REASON_SOURCE_NOT_UTF8} (app/caf\\xe9.py)" in line, line
+    assert f"{kit.REASON_DOC} (1)" in line, line
+    assert "| p1 | 1 | 5 | Gegenstellen nicht gesammelt (Sprache) | 0 |" in text.splitlines()
+    assert len(text.splitlines()) <= 1 + kit.REPORT_BASE_LINES, len(text.splitlines())
+    data = kit.audit(directory, _write_report(directory, text))
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+
+
+def _swap_line(text, prefix, new):
+    """`text` mit der Zeile, die mit `prefix` beginnt, durch `new` ersetzt (None: entfernt)."""
+    lines = text.splitlines()
+    [at] = [i for i, ln in enumerate(lines) if ln.startswith(prefix)]
+    lines[at:at + 1] = [] if new is None else [new]
+    return "\n".join(lines) + "\n"
+
+
+def test_cp8b_f3_audit_checks_notes_reused_and_comment_lines(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    comments = " ".join(kit.REPORT_COMMENT_RE.findall(template)[1:])
+    assert "sonst keine" not in comments, comments
+    assert "nur aus einem HTML-Kommentar" in comments and "outside" in comments, comments
+
+    # Hinweis p1 target_not_head: „Hinweise: keine" und eine fehlende Zeile sind report_mismatch.
+    run, directory, row = _full_single_run(kit, tmp_path / "notes")
+    text = _fill_template(template, directory, run, [], [row])
+    assert kit.audit(directory, _write_report(directory, text))["report_mismatch"] == []
+    for new in ("- Hinweise: keine", "- Hinweise: target_not_head", None):
+        bad = _swap_line(text, "- Hinweise:", new)
+        mismatch = kit.audit(directory, _write_report(directory, bad))["report_mismatch"]
+        assert any("Hinweise" in m for m in mismatch), (new, mismatch)
+        assert all("Hinweise" in m for m in mismatch), (new, mismatch)
+    bad = _swap_line(text, "- Übernommen (--since):", None)
+    mismatch = kit.audit(directory, _write_report(directory, bad))["report_mismatch"]
+    assert len(mismatch) == 1 and "Übernommen" in mismatch[0], mismatch
+    bad = _swap_line(text, "- Übernommen (--since):", "- Übernommen (--since): 1 Dateien aus x, 0 Funde")
+    assert any("Übernommen" in m
+               for m in kit.audit(directory, _write_report(directory, bad))["report_mismatch"])
+
+    # --since: drei übernommene Dateien, zwei übernommene Funde, einer davon unter outside.
+    root = _fresh_repo(tmp_path / "since")
+    _commit_files(root, "basis", {"def.py": _lines(8, "d"), "README.md": "# x\n"})
+    git(root, "tag", "base")
+    _commit_files(root, "t1", {f"{n}.py": _lines(4, n) for n in "abc"})
+    git(root, "tag", "t1")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    id_a = run_a["_meta"]["run"]
+    _record(kit, root, run_a, "p1", [_finding("a.py", 2, "A"), _finding("def.py", 5, "Def")],
+            tool="/code-review")
+    plan_b = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    done = kit.plan_since(root, plan_b["_meta"]["run"], [id_a])
+    assert done["packets"] == []
+    assert len(done["file_keys"]["a.py"]["findings"]) == 1
+    assert len(done["file_keys"]["a.py"]["outside"]) == 1
+    run_b, dir_b = done["_meta"]["run"], _run_path(root, done)
+    merged = kit.merge(dir_b)["findings"]
+    text = _fill_template(template, dir_b, run_b, merged, [])
+    good = f"- Übernommen (--since): 3 Dateien aus {id_a}, 2 Funde"
+    assert good in text.splitlines()
+    data = kit.audit(dir_b, _write_report(dir_b, text))
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+    for new in (f"- Übernommen (--since): 3 Dateien aus {id_a}, 1 Funde",
+                f"- Übernommen (--since): 2 Dateien aus {id_a}, 2 Funde",
+                "- Übernommen (--since): keine"):
+        bad = _swap_line(text, "- Übernommen (--since):", new)
+        mismatch = kit.audit(dir_b, _write_report(dir_b, bad))["report_mismatch"]
+        assert len(mismatch) == 1 and "Übernommen" in mismatch[0], (new, mismatch)
+
+    # Zeilen nur aus einem HTML-Kommentar zählen nicht zur Grenze: zwei davon und 20 andere.
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(8)}, name="limit")
+    _record(kit, root, plan, "p1", [], tool="/code-review")
+    kit.merge(directory)
+    for fill, ok in ((13, True), (14, False)):
+        report = _report(directory, run, [], "1/1",
+                         extra=["<!-- eins -->", "  <!-- zwei -->  "]
+                         + [f"Zeile {i}" for i in range(fill)])
+        lines = report.read_text(encoding="utf-8").splitlines()
+        other = [ln for ln in lines[1:] if not re.fullmatch(r"\s*<!--.*?-->\s*", ln)]
+        assert len(other) == kit.REPORT_BASE_LINES + (not ok), len(other)
+        mismatch = kit.audit(directory, None)["report_mismatch"]
+        assert (mismatch == []) is ok, mismatch

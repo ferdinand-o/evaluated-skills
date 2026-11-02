@@ -1924,7 +1924,8 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
 # gleichnamigen Unit-Namen. Was der Scanner nicht sicher zuordnen kann, steht nicht im Block —
 # lieber keine Gegenstelle und gezählt als eine falsche.
 
-DELPHI_RELEASES = frozenset({"extract", "remove", "free", "freeandnil", "setcontentstream"})
+DELPHI_RELEASES = frozenset({"extract", "extractpair", "extractkey", "extractvalue", "remove",
+                             "free", "freeandnil", "setcontentstream"})
 CLASS_CHAIN_MAX = 4        # Klassen je Empfängertyp im Block (die Klasse und ihre Basisklassen)
 INHERITED_LINES_MAX = 4    # inherited-Zeilen je Klasse
 OWNERSHIP_RTL = {          # Besitz-Default der RTL je Basisklasse: (Name klein ohne <…>, generisch)
@@ -3358,7 +3359,8 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
                   unresolved: set) -> list:
     """Die Stellen einer Delphi-Datei nach der Sammelregel (Spec 26, Schritt 3): je Aufruf auf
     einer geänderten Zeile (`call`: `Name(`, `Obj.Name(`, `Name<T>(`, ohne Klammer `_parenless`),
-    je `Extract`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream` und je `inherited Create`
+    je `Extract`, `ExtractPair`, `ExtractKey`, `ExtractValue`, `Remove`, `Free`, `FreeAndNil`,
+    `SetContentStream` und je `inherited Create`
     im Konstruktor einer Klasse mit Besitz-Default der RTL (`owner`). Mehrere Einträge gleicher
     Art und gleichen Namens auf einer Zeile tragen die Spalte wie bei Python. Gezählt
     (`unresolved`) wird jeder Aufruf, für den `resolve_call` nichts statt einer Vermutung
@@ -4258,6 +4260,15 @@ REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 REPORT_COUNT_RE = re.compile(r"^[ \t>*_#-]*Funde:[ \t*_]*(\d+)", re.MULTILINE)
 REPORT_COVERAGE_RE = re.compile(r"^[ \t>*_#-]*Abdeckung:[ \t*_]*(\d+)[ \t]*/[ \t]*(\d+)(.*)$",
                                 re.MULTILINE)
+# Pflichtzeilen „- Hinweise: …" und „- Übernommen (--since): …", ohne Inhalt mit „keine"
+REPORT_NOTES_RE = re.compile(r"^[ \t>*_#-]*Hinweise:[ \t*_]*(.*)$", re.MULTILINE)
+REPORT_REUSED_RE = re.compile(r"^[ \t>*_#-]*Übernommen[ \t]*\(--since\):[ \t*_]*(.*)$",
+                              re.MULTILINE)
+REPORT_REUSED_COUNT_RE = re.compile(r"(?<!\d)(\d+)[ \t]+Datei(?:en)?\b.*?(?<!\d)(\d+)[ \t]+"
+                                    r"Funde?\b")
+REPORT_NONE_RE = re.compile(r"[ \t*_`]*keine[ \t*_`.]*", re.IGNORECASE)
+# Eine Zeile nur aus HTML-Kommentaren zählt nicht zur Längengrenze
+REPORT_COMMENT_LINE_RE = re.compile(r"[ \t]*(?:<!--.*?-->[ \t]*)+")
 # „vollständig" und seine Adjektiv-Endungen als ganzes Wort, nicht „Vollständigkeit"
 REPORT_CLAIM_RE = re.compile(r"\bvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
 # Verneinung vor der Behauptung: „nicht", „kein…" (auch „keineswegs") oder „un", mit höchstens
@@ -4368,9 +4379,10 @@ def _clean_finding(item, index: int, repo: Path) -> dict:
 
 def _read_payload(payload_path) -> list:
     """Die Liste der Funde aus `payload_path` (`-`: stdin): eine JSON-Liste oder ein Objekt
-    mit der Liste unter `findings`. stdin wird als UTF-8 gelesen, nicht in der Kodierung des
-    Systems, ein BOM am Anfang zählt nicht; kein UTF-8, kein stdin (`sys.stdin` None, etwa
-    unter pythonw) oder ein geschlossenes stdin ist ein KitError."""
+    mit der Liste unter `findings`. stdin und eine Datei werden als UTF-8 gelesen, nicht in
+    der Kodierung des Systems, ein BOM am Anfang zählt in beiden Fällen nicht; kein UTF-8,
+    kein stdin (`sys.stdin` None, etwa unter pythonw) oder ein geschlossenes stdin ist ein
+    KitError."""
     if str(payload_path) == "-":
         stdin = sys.stdin
         if stdin is None:
@@ -4386,7 +4398,7 @@ def _read_payload(payload_path) -> list:
             raise KitError(f"stdin nicht lesbar: {exc}") from None
     else:
         try:
-            text = Path(payload_path).read_text(encoding="utf-8")
+            text = Path(payload_path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
             raise KitError(f"Ergebnis {payload_path} nicht lesbar: {exc}") from None
     try:
@@ -4725,6 +4737,39 @@ def _lists_finding(where: str, path: str, line) -> bool:
     return where == f"{path}:{line}"
 
 
+def _notes_reused_mismatch(body: str, plan: dict) -> list:
+    """Was an den Pflichtzeilen `- Hinweise: …` und `- Übernommen (--since): …` (je die erste,
+    ohne Inhalt `keine`) nicht zum Plan passt: eine fehlt; Hinweise nennt nicht jedes Paar
+    `<paket> <kind>` aus `notes`; Übernommen nennt nicht `<n> Dateien …, <m> Funde` mit n =
+    Dateien mit `reused_from` in `file_keys` und m = deren übernommene Funde (`findings` und
+    `outside`, gezählt wie in `_sources`) — `keine` gilt nur ohne übernommene Datei."""
+    out = []
+    notes = REPORT_NOTES_RE.search(body)
+    if notes is None:
+        out.append("Hinweise fehlen (Zeile „- Hinweise: <paket> <kind> …“ oder „keine“)")
+    else:
+        pairs = dict.fromkeys((n["packet"], n["kind"]) for n in plan.get("notes") or [])
+        for pid, kind in pairs:
+            if not re.search(rf"(?<![\w-]){re.escape(pid)}[ \t:]+{re.escape(kind)}(?![\w-])",
+                             notes[1]):
+                out.append(f"Hinweise nennen {pid} {kind} nicht (notes in plan.json)")
+    keyed = plan.get("file_keys") or {}
+    files = sum(isinstance(info.get("reused_from"), str) for info in keyed.values())
+    found = len(_sources({}, keyed))
+    reused = REPORT_REUSED_RE.search(body)
+    if reused is None:
+        out.append("Übernommen fehlt (Zeile „- Übernommen (--since): <n> Dateien aus <Läufe>, "
+                   "<m> Funde“ oder „keine“)")
+        return out
+    count = REPORT_REUSED_COUNT_RE.search(reused[1])
+    said = (int(count[1]), int(count[2])) if count else \
+        (0, 0) if REPORT_NONE_RE.fullmatch(reused[1]) else None
+    if said != (files, found):
+        out.append(f"Übernommen (--since) nennt {reused[1].strip()!r}, der Plan hat {files} "
+                   f"übernommene Dateien und {found} übernommene Funde (findings und outside)")
+    return out
+
+
 def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings: list,
                      accepted: dict, gaps: bool) -> list:
     """Was am Bericht nicht zu den Daten passt (Spec 26, Contract „Bericht und Daten stimmen
@@ -4736,9 +4781,11 @@ def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings
     eine Zeile `datei:zeile — …` (ohne Zeile `datei — …`; der Pfad in Backticks darf
     Leerzeichen haben); bei einer Lücke kein „vollständig" außerhalb von HTML-Kommentaren und
     Fundzeilen (`_claims_complete`) — als Fundzeile zählt nur eine, deren `datei:zeile` ein
-    Fund aus `findings.json` ist (`_lists_finding`), nicht jede Zeile `Wort — …`; und im
-    Anti-Zeremonie-Fall (`split: false`, ein Paket über den Originalbereich) höchstens `REPORT_BASE_LINES` Zeilen plus eine je Fund, die Kopfzeile
-    nicht gezählt."""
+    Fund aus `findings.json` ist (`_lists_finding`), nicht jede Zeile `Wort — …`; die
+    Pflichtzeilen `- Hinweise: …` und `- Übernommen (--since): …` (`_notes_reused_mismatch`);
+    und im Anti-Zeremonie-Fall (`split: false`, ein Paket über den Originalbereich) höchstens
+    `REPORT_BASE_LINES` Zeilen plus eine je Fund, die Kopfzeile und Zeilen nur aus einem
+    HTML-Kommentar (`REPORT_COMMENT_LINE_RE`) nicht gezählt."""
     try:
         text = report.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -4749,12 +4796,16 @@ def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings
     lines = text.splitlines()
     tools = {result.tool for result in accepted.values()}
     out = _header_mismatch(_report_header(lines[0] if lines else ""), run_id, plan, tools)
-    allowed = 1 + REPORT_BASE_LINES + len(findings)
-    if plan.get("split") is False and len(lines) > allowed:
-        out.append(f"Bericht hat {len(lines)} Zeilen, erlaubt sind {allowed} (Kopfzeile, "
-                   f"{REPORT_BASE_LINES} Zeilen und eine je Fund; ein Paket, Anti-Zeremonie-Fall)")
+    counted = sum(not REPORT_COMMENT_LINE_RE.fullmatch(line) for line in lines[1:])
+    limit = REPORT_BASE_LINES + len(findings)
+    if plan.get("split") is False and counted > limit:
+        allowed = len(lines) - counted + limit
+        out.append(f"Bericht hat {len(lines)} Zeilen, erlaubt sind {allowed} (Kopfzeile und "
+                   f"Zeilen nur aus einem HTML-Kommentar nicht gezählt, {REPORT_BASE_LINES} "
+                   "Zeilen und eine je Fund; ein Paket, Anti-Zeremonie-Fall)")
     covered = len(accepted)
     body = REPORT_COMMENT_RE.sub("", text)
+    out += _notes_reused_mismatch(body, plan)
     count = REPORT_COUNT_RE.search(body)
     if count is None:
         out.append("Zahl der Funde fehlt (Zeile „Funde: <Zahl>“)")
