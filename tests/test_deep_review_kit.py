@@ -329,7 +329,11 @@ def test_f03_range_resolved_once(tmp_path, monkeypatch):
     real = kit._git
 
     def spy(repo, *args):
-        if args and args[0] == "rev-parse" and any(a.endswith("^{commit}") for a in args):
+        # Gezählt wird, was ein Name auflöst. Die Sammler der Datei-Schlüssel prüfen danach die
+        # schon aufgelösten SHAs des Plans noch einmal; ein SHA ändert sich nicht (Task 6).
+        if (args and args[0] == "rev-parse"
+                and any(a.endswith("^{commit}") and not re.fullmatch(r"[0-9a-f]{40,64}\^\{commit\}", a)
+                        for a in args)):
             calls.append(args)
         return real(repo, *args)
 
@@ -2839,3 +2843,200 @@ def test_p11_unbalanced_symlink_target_noted_once_and_scanned_once(tmp_path, mon
     root = _linked_repo(tmp_path / "scan", main.replace("  Compat;", "  Compat, Shared;"))
     kit.collect_delphi(root, "HEAD~1..HEAD", ["app/Main.pas"])
     assert sorted(scanned) == ["app/Main.pas", "lib/Shared.pas"]
+
+
+# --- review_kit.py: Datei-Schlüssel und --since (Task 6) ---------------------------------
+
+SINCE_C = 'def load(path):\n    if not path:\n        raise ValueError("leer")\n    return path\n'
+SINCE_C_CHANGED = SINCE_C.replace("    return path\n",
+                                  '    if path == "-":\n        raise KeyError(path)\n    return path\n')
+SINCE_A = "from c import load\n\n\ndef run(p):\n    return load(p)\n"
+SINCE_B = _lines(6, "b")
+
+
+def _tick(kit, monkeypatch):
+    """Die Uhr der Lauf-IDs läuft je Aufruf eine Sekunde weiter: spätere Läufe sortieren später."""
+    moment = [dt.datetime(2026, 11, 2, 9, 0, 0, tzinfo=dt.timezone.utc)]
+
+    def now():
+        moment[0] += dt.timedelta(seconds=1)
+        return moment[0]
+
+    monkeypatch.setattr(kit, "_now", now)
+
+
+def _commit_files(root, message, files):
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", message)
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def _since_repo(root):
+    """t0 (Tag base): c.py wirft. t1: a.py (ruft c.load) und b.py. t2: b.py ändert sich, c.py
+    nicht. Branch `gegenstelle` ab t1: b.py und c.py ändern sich (neue raise-Stelle in c.py)."""
+    root.mkdir(parents=True)
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    _commit_files(root, "basis", {"c.py": SINCE_C, "README.md": "# x\n"})
+    git(root, "tag", "base")
+    _commit_files(root, "t1", {"a.py": SINCE_A, "b.py": SINCE_B})
+    git(root, "tag", "t1")
+    git(root, "checkout", "--quiet", "-b", "gegenstelle")
+    _commit_files(root, "t2c", {"b.py": SINCE_B + "b_neu = 1\n", "c.py": SINCE_C_CHANGED})
+    git(root, "tag", "t2c")
+    git(root, "checkout", "--quiet", "main")
+    _commit_files(root, "t2", {"b.py": SINCE_B + "b_neu = 1\n"})
+    git(root, "tag", "t2")
+    return root
+
+
+def _record(kit, root, plan, packet, findings, tool="test"):
+    """Ergebnis eines früheren Laufs so ablegen, wie `record` es später tut."""
+    path = root / ".skills/cache/deep-review" / plan["_meta"]["run"] / "results" / f"{packet}.json"
+    kit.write_json(path, {"generated": "test", "packet": packet, "tool": tool},
+                   {"findings": findings})
+
+
+def _finding(path, line, summary):
+    return {"file": path, "line": line, "summary": summary, "failure_scenario": f"{summary}!"}
+
+
+def _run_path(root, plan):
+    return root / ".skills/cache/deep-review" / plan["_meta"]["run"]
+
+
+def test_since_per_file(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+
+    # Zwei frühere Läufe über t0..t1 mit derselben Datei; der zweite ist der jüngere.
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    run_a2 = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [_finding("a.py", 5, "alt A"), _finding("b.py", 1, "b alt")])
+    _record(kit, root, run_a2, "p1", [_finding("a.py", 5, "neu A2"), _finding("b.py", 2, "b A2")])
+    assert run_a["_meta"]["run"] < run_a2["_meta"]["run"]
+    keys_a = run_a["file_keys"]
+    assert list(keys_a) == ["a.py", "b.py"]
+    assert all(re.fullmatch(r"[0-9a-f]{64}", v["key"]) and v["reused_from"] is None
+               for v in keys_a.values())
+    assert keys_a["a.py"]["key"] != keys_a["b.py"]["key"]
+    assert [v["changed_lines"] for v in keys_a.values()] == [5, 6]
+    assert run_a2["file_keys"] == keys_a
+
+    # Lauf B über t0..t2: a.py gleich geblieben (Gegenstelle c.py auch), b.py geändert.
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    assert plan_b["file_keys"]["a.py"]["key"] == keys_a["a.py"]["key"]
+    assert plan_b["file_keys"]["b.py"]["key"] != keys_a["b.py"]["key"]
+    before = json.loads(json.dumps(plan_b))
+    dirs = [_run_path(root, run_a), _run_path(root, run_a2)]
+    for order in (dirs, dirs[::-1]):                    # die Reihenfolge der Läufe zählt nicht
+        applied = kit.apply_since(plan_b, order)
+        assert plan_b == before                          # die Eingabe bleibt, wie sie ist
+        assert applied["file_keys"]["a.py"] == {
+            "key": keys_a["a.py"]["key"], "changed_lines": 5,
+            "reused_from": run_a2["_meta"]["run"],       # der jüngere Lauf gilt
+            "findings": [_finding("a.py", 5, "neu A2")]}
+        assert applied["file_keys"]["b.py"] == {
+            "key": plan_b["file_keys"]["b.py"]["key"], "changed_lines": 7, "reused_from": None}
+        # b.py allein wird neu gepackt; ohne Hilfscommits baut erst `counterparts` den Bereich.
+        assert applied["packets"] == [{"id": "p1", "files": ["b.py"], "changed_lines": 7,
+                                       "range": None, "reused_from": None}]
+        assert applied["split"] is True and applied["changed_lines"] == plan_b["changed_lines"]
+        assert list(applied) == list(plan_b)
+
+    # Ein jüngerer Lauf ohne angenommenes Ergebnis verdeckt den älteren nicht, und ohne
+    # Ergebnisse wird nichts übernommen, obwohl die Schlüssel gleich sind.
+    run_x = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    assert run_x["_meta"]["run"] > run_a2["_meta"]["run"]
+    assert kit.apply_since(plan_b, [dirs[0], dirs[1], _run_path(root, run_x)])[
+        "file_keys"]["a.py"]["reused_from"] == run_a2["_meta"]["run"]
+    assert kit.apply_since(plan_b, [_run_path(root, run_x)]) == plan_b
+    (_run_path(root, run_a2) / "results" / "p1.json").write_text("{kaputt", encoding="utf-8")
+    assert kit.apply_since(plan_b, dirs)["file_keys"]["a.py"]["reused_from"] == run_a["_meta"]["run"]
+    _record(kit, root, run_a2, "p1", [_finding("a.py", 5, "neu A2")])
+
+    # Ein Lauf ohne Plan ist ein KitError, kein stilles Auslassen.
+    with pytest.raises(kit.KitError, match="keinen Plan"):
+        kit.apply_since(plan_b, [tmp_path / "2026-01-01-000000-abcdef0-zzzz"])
+
+    # c.py ändert sich (die Gegenstelle von a.py): a.py steht auch ohne eigene Änderung neu an.
+    plan_c = kit.build_plan(root, "base..t2c", "standard", "bugs", None, False)
+    assert plan_c["file_keys"]["a.py"]["key"] != keys_a["a.py"]["key"]
+    assert list(plan_c["file_keys"]) == ["a.py", "b.py", "c.py"]
+    applied_c = kit.apply_since(plan_c, dirs)
+    assert applied_c == plan_c                           # nichts übernommen, nichts umgepackt
+    assert all(v["reused_from"] is None for v in applied_c["file_keys"].values())
+
+    # Auf der Platte: plan_since schreibt den Plan zurück, mit dem Aufruf in _meta.generated.
+    done = kit.plan_since(root, plan_b["_meta"]["run"], [run_a["_meta"]["run"],
+                                                         run_a2["_meta"]["run"]])
+    on_disk = json.loads((_run_path(root, plan_b) / "plan.json").read_text(encoding="utf-8"))
+    assert on_disk == done and list(on_disk) == list(plan_b)
+    assert done["file_keys"]["a.py"]["reused_from"] == run_a2["_meta"]["run"]
+    assert done["_meta"]["generated"].endswith(
+        f" --since {run_a['_meta']['run']},{run_a2['_meta']['run']}")
+    assert git(root, "for-each-ref", "refs/deep-review/") == ""
+    with pytest.raises(kit.KitError, match="sich selbst"):
+        kit.plan_since(root, plan_b["_meta"]["run"], [plan_b["_meta"]["run"]])
+
+
+def test_since_chain_all_reused_and_focus(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A")])
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    done_b = kit.plan_since(root, plan_b["_meta"]["run"], [run_a["_meta"]["run"]])
+    _record(kit, root, done_b, "p1", [_finding("b.py", 3, "B")])
+
+    # Lauf C über denselben Stand: a.py liegt (mit seinen Funden) im Plan von B, b.py in
+    # dessen Ergebnis; nichts bleibt zu reviewen.
+    plan_c = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    applied = kit.apply_since(plan_c, [_run_path(root, done_b)])
+    assert applied["file_keys"]["a.py"]["reused_from"] == done_b["_meta"]["run"]
+    assert applied["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
+    assert applied["file_keys"]["b.py"]["findings"] == [_finding("b.py", 3, "B")]
+    assert applied["packets"] == [] and applied["split"] is True
+
+    # Anderer Fokus: andere Schlüssel (kein Gegenstellen-Teil bei quality) und kein Übernehmen.
+    quality = kit.build_plan(root, "base..t2", "standard", "quality", None, False)
+    assert quality["file_keys"]["a.py"]["key"] != plan_c["file_keys"]["a.py"]["key"]
+    assert kit.apply_since(quality, [_run_path(root, done_b)]) == quality
+    sec = kit.build_plan(root, "base..t2", "standard", "security", None, False)
+    assert kit.apply_since(sec, [_run_path(root, done_b)]) == sec
+
+
+def test_file_keys_content_and_counterparts(tmp_path):
+    kit = _kit()
+    root = _since_repo(tmp_path / "repo")
+    target = git(root, "rev-parse", "t1").strip()
+    entry = {"file": "a.py", "line": 5, "kind": "call",
+             "lines": ["### a.py:5 ruft load(...)", "- Gegenstelle load [c.py:1]: def load(path)",
+                       "  wirft: ValueError"]}
+    keys = kit.file_keys(root, target, ["b.py", "a.py"], [entry])
+    assert list(keys) == ["a.py", "b.py"]
+    assert all(re.fullmatch(r"[0-9a-f]{64}", v) for v in keys.values())
+    assert keys == kit.file_keys(root, target, ["a.py", "b.py"], [entry])      # reihenfolgefrei
+    # Die Gegenstellen-Zeilen der Datei gehen in den Schlüssel, die einer anderen Datei nicht.
+    moved = {**entry, "lines": [*entry["lines"][:2], "  wirft: KeyError"]}
+    other = {**entry, "file": "b.py"}
+    assert kit.file_keys(root, target, ["a.py"], [moved])["a.py"] != keys["a.py"]
+    both = kit.file_keys(root, target, ["a.py", "b.py"], [entry, other])
+    assert both["a.py"] == keys["a.py"] and both["b.py"] != keys["b.py"]
+    assert kit.file_keys(root, target, ["a.py"], [])["a.py"] != keys["a.py"]
+    # Der Inhalt am ZIEL zählt, nicht der Arbeitsbaum.
+    later = git(root, "rev-parse", "t2").strip()
+    assert (kit.file_keys(root, later, ["b.py"], [])["b.py"]
+            != kit.file_keys(root, target, ["b.py"], [])["b.py"])
+    assert kit.file_keys(root, later, ["a.py"], [entry])["a.py"] == keys["a.py"]
+    (root / "a.py").write_text("geändert\n", encoding="utf-8")
+    assert kit.file_keys(root, target, ["a.py"], [entry])["a.py"] == keys["a.py"]
+    # Eine Datei, die ZIEL nicht hat (gelöscht), bekommt einen eigenen Schlüssel.
+    gone = kit.file_keys(root, git(root, "rev-parse", "base").strip(), ["a.py"], [])["a.py"]
+    assert re.fullmatch(r"[0-9a-f]{64}", gone) and gone != keys["a.py"]
