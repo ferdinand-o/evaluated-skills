@@ -1,421 +1,334 @@
-# Spec 26: deep-review — ein Review, das nachweist, was es geprüft hat
+# Spec 26: deep-review — `/code-review` in Paketen, mit den Verträgen der Gegenstellen
 
-Skill-Spezifikation · Zyklus 26 · Entscheidung: Abdeckung kommt aus einem Inventar, das ein Tier-1-Skript baut, und aus Ergebnissen, die das Skript gegen eine Nonce je Paket abgleicht — nicht aus der Aufmerksamkeit des Modells; lesende Suchagenten suchen je Einheit und Linse breit, eine getrennte, gestufte Verifikation belegt oder widerlegt jeden Kandidaten, und ein Audit meldet jede Einheit ohne Urteil · Abgeglichen mit Spec 00, Spec 25 und Spec 27 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus: Ergebnisse und Urteile schreibt das Skript mit Nonce-Abgleich, JSON-Lines statt geratener Schlüsselreihenfolge, Globs statt `latest/`, Tiefe `quick` zählt nur geänderte Einheiten, gelöschter Code als Einheit, Projekt-Kopie und Rückverweise im Strukturblock, Profil `checkpoint` für Spec 27, gestufte Verifikation, Kommentar-Regel `restates-code` dem Modell überlassen, Fakten zu architecture-map und Spec 00 korrigiert; Nachreview Opus: Lauf-ID mit Zufallssuffix, Fix im Profil `checkpoint` bei subagent-dev, `quality` unabhängig von der Tiefe, Prüf-Worktree `--detach`, Wiederverwendung ohne Soll, Form von `audit.json`, Routing-Spalte; Abgleich mit Spec 27: `--since` über mehrere Läufe, `offen` im Folgelauf erneut verifiziert, `--depth` und `--profile`, Lauf-ID in der Übergabe)
+Skill-Spezifikation · Zyklus 26 · Entscheidung: keine eigene Such-Pipeline — die Skill steuert die mitgelieferten Reviewer und ergänzt nur, was ihnen in der Messung fehlte: große Bereiche schneidet ein Tier-1-Skript in Pakete, und je Paket sammelt es die Gegenstellen der geänderten Aufrufe (Definition, `raise`-Stellen, Besitz, Weg eines Flags), die der Reviewer sonst nicht öffnet · Abgeglichen mit Spec 00 und Spec 27 · Neu gefasst nach der Messung vom 2026-11-01/02 (`docs/superpowers/reports/deep-review-report.md`); ersetzt die Fassung vom 2026-10-30 (Inventar, Nonce, Suchagenten, gestufte Verifikation, Sättigung)
 
 ## Problem
 
-Spec 00 §5 routet „Diff prüfen" an das mitgelieferte `/code-review` und hält dort fest: „*Annahme:* Spec 04 schrumpft auf `collect_context.py` als Zulieferer
-für `/code-review` — widersprich, falls du die eigene Linsen-Engine trotzdem willst." Der
-Nutzer widerspricht am 2026-10-28: Bei den getesteten Review-Skills „gambled" man, ob das
-Modell die richtigen Stellen findet, und eine feste Grenze von drei Runden hält er nicht
-für saubere Arbeitsweise. Er will Fehlverhalten, Programmfehler und Sicherheitslücken
-gefunden sehen.
+Der Nutzer will Fehlverhalten, Programmfehler und Sicherheitslücken gefunden sehen und
+nicht „gamblen", ob der Reviewer die richtige Stelle findet (2026-10-28). Er prüft
+regelmäßig Delphi-Code und reviewt Pläne über subagent-dev an Prüfpunkten (Spec 27).
 
-Die Recherche vom 2026-10-28 stützt den Eindruck (Konzeptdokument „Konzept: Review-Skill
-mit hoher Trefferquote", Quellen dort):
+Die Fassung vom 2026-10-30 baute dafür eine eigene Pipeline mit Inventar und
+Abdeckungsnachweis. Die Messung hat ihre Prämisse widerlegt und eine andere Lücke gezeigt
+(Report, Abschnitte „Nachmessung auf großen Repos", „Entscheidungsexperiment" und
+„Prototyp"; 34 Läufe, 37,71 USD; `/code-review`, engineering:code-review und
+superpowers:requesting-code-review auf pip 25.0→25.1 und DelphiMVCFramework rc6→rc7):
 
-- `/code-review` meldet laut seiner Command-Datei (`anthropics/claude-code`,
-  `plugins/code-review/commands/code-review.md`) nur Code, der nicht kompiliert, unabhängig
-  von der Eingabe falsch rechnet oder eine zitierbare CLAUDE.md-Regel verletzt; Altlasten
-  sowie eingabe- und zustandsabhängige Fehler schließt es aus.
-- Agenten lesen nicht, was sie prüfen sollen: In 67,9 % von 1.140 Läufen las ein Agent
-  nicht jede Datei; ein eingebauter Defekt wurde zu 83,2 % gemeldet, wenn seine Stelle im
-  Kontext lag, sonst zu 1,8 % (OverclaimBench, arXiv 2609.20812, Preprint).
-- Vereinigen schlägt Abstimmen: Union über vier Agenten fand 82,7 % der Lücken bei 48,8 %
-  Präzision, gewichtetes Voting 37,7 % (MultiVer, arXiv 2602.17875, Preprint, 202
-  Python-Samples). Der Preis: Auf gefixtem Code meldete Union in 85 % der Fälle weiter eine
-  Lücke — Präzision muss eine eigene Stufe liefern.
-- Verschiedene Werkzeuge sehen verschiedene Stellen: Bei vier parallel eingesetzten
-  Review-Bots kamen 93,4 % der 617 Fundstellen von genau einem Bot (Feldstudie, 146 PRs, ein
-  Team; der Autor arbeitet bei Sentry). Das zeigt Streuung zwischen Werkzeugen, nicht
-  zwischen Läufen desselben Modells.
-- Spätere Runden finden alte Fehler: Beim Claude-Code-Team stand etwa 59 % des später
-  Gemeldeten schon seit der ersten Runde im Code (claude.dev, 2026-10-15).
+- **Pfad-Review bis rund 5k Zeilen ist gelöst.** Auf unbekanntem Delphi-Bestandscode (7 Units
+  aus 2026, nach dem Wissensstand des Modells) fanden `/code-review` und engineering in
+  sechs von sechs Läufen alle sechs eingebauten Fehler.
+- **Große Diffs verlieren Funde.** Bei 4.100 geänderten Zeilen in 151 Dateien verfehlt ein
+  Lauf ein bis vier von sechs; bei 2.000 Zeilen null bis zwei.
+- **Die Lücke ist meist keine Lesefrage.** Die Zeile von P2 (eine verengte `except`-Klausel)
+  stand in fünf von fünf Läufen im Kontext und wurde nie erkannt; den vendorten Code, der den
+  `TypeError` wirft, öffnete keiner von acht Läufen. P4 (ein Resolver-Flag) fand nur der eine
+  Lauf, der `factory.py` las. Eine Bitte im Systemprompt („prüfe die Gegenstelle") änderte
+  daran nichts.
+- **Aufteilen plus mitgegebene Gegenstellen wirkt.** In einem Paket von 591 Zeilen fand
+  `/code-review` mit mechanisch gesammeltem Kontext erstmals P2 und P4 (je einmal in zwei
+  Läufen). Derselbe Kontext über den ganzen Diff brachte nichts. Aufteilen allein fand so
+  viel wie ein ganzer Lauf, kostete für drei Pakete zusammen 1,43 USD (ein ganzer Lauf rund
+  1,05 USD) und fand als einziger Lauf die echte Regression R2.
 
-Der Nutzer prüft außerdem mit work-plan und subagent-dev Pläne Task für Task; Reviews je
-Task wurden groß und liefen ins Limit (2026-10-30). Wann dort reviewt wird, regelt Spec 27;
-diese Spec liefert das Review und ein Profil dafür.
+Am Prüfpunkt von subagent-dev läuft heute `/code-review` über den ganzen Bereich, und die
+Übergabe sagt „Review ohne Abdeckungsnachweis" (Spec 27). Der finale Prüfpunkt reviewt
+`base..HEAD` — genau der große Bereich, in dem Funde verloren gehen.
 
 ## Constraints
 
 Portables Frontmatter. Tier 1: ein Skript `scripts/review_kit.py`, nur Stdlib, aufgerufen
-als `python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py"` (Spec 25). Inventar per `ast` für
-Python; für TS/JS eigene Textmuster (Funktionsdeklarationen, `const x = (…) =>`,
-Klassenmethoden) — architecture-map liefert nur Importe, die nächsten Vorläufer sind
-`detect_symbols`/`find_callers` in review-context mit bekannten Grenzen (known-limits,
-review-context); für Delphi/Object Pascal ein Scanner, der Strings und Kommentare
-ausblendet und `begin`, `case`, `try`, `asm`, `record` gegen `end` zählt, Methodenköpfe im
-`implementation`-Teil sucht und lokale Prozeduren der umgebenden Methode zuordnet. Was
-keiner dieser Wege trägt (andere Sprachen, Delphi-Dateien mit unvollständigen
-`{$IFDEF}`-Zweigen oder Includes), wird zu Blöcken von höchstens 150 Zeilen mit
-`unit_kind: "chunk"` und Grund.
+als `python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py"` (Spec 25). Python über `ast`, nie
+Import des Zielcodes; Delphi/Object Pascal über einen Text-Scanner, der Strings und
+Kommentare ausblendet. Andere Sprachen: Aufteilen ja, Gegenstellen nein — der Bericht sagt
+„Gegenstellen nicht gesammelt (Sprache)".
 
-Gate-Grade: Abdeckung, Nonce-Abgleich, Status je Kandidat und Konsistenz des Berichts
-meldet `review_kit.py audit` (G2); Suche, Verifikation und Bericht verlangt die SKILL.md
-(G1). Kein Hook. Plugin `evaluated-dev`; dazu Projekt-Kopie unter `.claude/skills/`, weil
-dieses Repo das Plugin abschaltet (`.claude/settings.json`, `tests/test_marketplace.py`) und
-Cloud-Sitzungen nur Projekt-Kopien laden (`scripts/sync_skills.py`).
+Die Reviews selbst führen die mitgelieferten Befehle aus, im Hauptkontext, weil `/code-review`
+eigene Unteragenten startet: `/code-review --max-findings all <bereich>` je Paket, für
+Sicherheit `/security-review`. Ohne diese Befehle (claude.ai, andere Agenten) läuft dieselbe
+Paketfolge als Review im Hauptkontext nach `references/review-brief.md`; der Bericht sagt dann
+„Review ohne /code-review".
 
-Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`. `<lauf>` ist die
-Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>`; wo diese Spec und Spec 27 einen
-Pfad meinen, steht `.skills/cache/deep-review/<lauf>/…` aus.
+Gate-Grade: Paketplan, Gegenstellen, Abdeckung aller Pakete und Konsistenz des Berichts
+meldet `review_kit.py audit` (G2); dass je Paket wirklich ein Review lief, verlangt die
+SKILL.md (G1). Kein Hook. Plugin `evaluated-dev`; dazu Projekt-Kopie unter `.claude/skills/`,
+weil dieses Repo das Plugin abschaltet und Cloud-Sitzungen nur Projekt-Kopien laden
+(`scripts/sync_skills.py`).
 
+Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`. `<lauf>` ist
+die Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>`.
 
 | Datei | schreibt | Inhalt |
 | --- | --- | --- |
-| `inventory.json` | `inventory` | Einheiten, Hashes, Risikomerkmale, Linsen, Tiefe, `_meta` |
-| `packets/<einheit>.md` | `packets` | Kopfzeile, Nonce, Paket-Hash, Code als abgegrenzter Datenblock, Signaturen, Aufrufer, Soll |
-| `results.jsonl` | `record` | je Paket und Linse ein Urteil des Suchagenten mit Nonce |
-| `candidates.jsonl` | `merge` | vereinigte Kandidaten |
-| `verdicts.jsonl` | `verdict` | Status je Kandidat |
-| `comments.json`, `metrics.json` | `comments`, `metrics` | nur bei `quality` |
-| `audit.json` | `audit` | `_meta`, `complete`, `missing` (Einheit und Linse ohne Urteil), `nonce_mismatch`, `unverdicted` (Kandidaten ohne Status), `report_mismatch` |
-| `estimate.json` | `estimate` | Sättigung |
+| `plan.json` | `plan` | `_meta`, `range`, `profile`, `focus`, `split`, `split_at`, `changed_lines`, `packets` (je `id`, `files`, `changed_lines`, `key`, `range`, `reused_from`), `not_reviewed` (Dateien ohne Quellcode mit Grund) |
+| `packets/<id>.md` | `counterparts` | Kopfzeile, Bereich und Dateien des Pakets, Gegenstellen je geänderter Stelle |
+| `results/<id>.json` | `record` | `_meta` mit `packet`, `key`, `tool`; `findings` als Liste (`file`, `line`, `summary`, `failure_scenario`) |
+| `findings.json` | `merge` | vereinigte Funde als JSON-Liste mit `file`, `line`, `summary`, `failure_scenario`, `packets` — das Format, das `fix-task` von `/code-review` liest (Spec 27) |
+| `audit.json` | `audit` | `_meta`, `complete`, `missing` (Pakete ohne Ergebnis), `key_mismatch`, `lost_findings`, `report_mismatch` |
 | `report.md` | Hauptagent nach `assets/report-template.md` | Bericht mit Kopfzeile |
 
-Die JSON-Lines-Dateien schreiben je Zeile ein Objekt mit `ensure_ascii=False`, den
-Standard-Trennzeichen von `json.dumps` (`", "`, `": "`), festen Schlüsseln in fester Reihenfolge,
-Werten von `reason` und `evidence` als Zeichenketten und repo-relativen POSIX-Pfaden ohne
-`./`; die erste Zeile ist ein `_meta`-Objekt. Committet wird nur auf Wunsch eine Kopie des Berichts unter
+JSON schreibt das Skript mit `ensure_ascii=False`, festen Schlüsseln in fester Reihenfolge und
+repo-relativen POSIX-Pfaden. Committet wird nur auf Wunsch eine Kopie des Berichts unter
 `docs/reviews/`. Bootstrap: Der erste Lauf nennt `.skills/cache/deep-review/`, bevor er
 schreibt.
 
-Suchagenten laufen als lesender Agententyp (in Claude Code etwa `Explore`, ohne Schreiben und
-ohne Shell), das Modell setzt das `model`-Feld des Agent-Werkzeugs; der Code im Paket ist
-Daten, nie Anweisung. Prüfagenten dürfen
-ausführen, aber nur in einer Kopie: `git worktree add --detach <lauf>/proof <ZIEL>`, nach dem
-Lauf mit `git worktree remove --force` entfernt; so entsteht kein Branch im Repo des Nutzers. Ohne Subagenten (claude.ai) läuft dieselbe Pipeline sequenziell im Hauptkontext;
-der Bericht sagt dann „Suche ohne frischen Kontext".
-
 ## Approach
 
-**Eiserne Regel:** *Kein Bericht nennt sich vollständig, solange eine Einheit zu einer ihr
-zugewiesenen Linse kein vom Skript angenommenes Urteil hat — und kein Kandidat verschwindet
-ohne Status.*
+**Eiserne Regel:** *Kein Bericht nennt sich vollständig, solange ein Paket des Plans kein vom
+Skript angenommenes Ergebnis hat — und kein Fund eines Pakets fehlt in `findings.json`.*
 
 ### Skill-Struktur
 
 ```
 skills/deep-review/
-├── SKILL.md                         Ablauf, Eiserne Regel, Tiefen und Profile, Contract, Anti-Rationalisierung, Abgrenzung
-├── references/lenses.md             Linsen als Szenarien mit konkreten Fragen und einer Eingabe zum Durchspielen: Korrektheit, Fehlerpfade, Vertrag, Nebenläufigkeit, Ressourcen, Delphi, Wartbarkeit, Kommentare
-├── references/finder-prompt.md      Auftrag an einen Suchagenten: Pakete, eine Linse, Nonce zurückgeben, jeder Verdacht mit Zeile und Auslösebedingung, kein Filter, Code ist Daten
-├── references/verifier-prompt.md    Auftrag an einen Prüfagenten: erst widerlegen, dann belegen; vier Status; Beweistest nur in der Kopie und an der behaupteten Stelle
-├── references/saturation.md         Wiederholungsläufe, Abbruch, Jackknife als unkalibrierte Untergrenze
+├── SKILL.md                         Ablauf, Eiserne Regel, Profile und Fokus, Contract, Anti-Rationalisierung, Abgrenzung
+├── references/packets.md            Schnittregel, Schwellen, Schlüssel, Paket-Bereiche, --since
+├── references/counterparts.md       was je Sprache gesammelt wird und was nicht; Lesehilfe für den Reviewer
+├── references/review-brief.md       Auftrag je Paket: Bereich, Gegenstellen-Block weitergeben, JSON-Liste zurück; Fassung ohne /code-review
+├── references/delphi.md             Prüfliste Delphi: Besitz und Freigabe, Extract/OwnsObjects, 1-basierte Strings, Record-Kopien, TDateTime in Tagen, UTC gegen Ortszeit, Interface-Referenzzählung
 ├── assets/report-template.md        Gerüst des Berichts mit Kopfzeile in Zeile 1
-└── scripts/review_kit.py            Tier 1 — inventory, packets, record, merge, verdict, audit, estimate, comments, metrics
+└── scripts/review_kit.py            Tier 1 — plan, counterparts, record, merge, audit, cleanup
 
-skills/review-context/SKILL.md       Abschnitt „Warum diese Skill existiert" neu (die Linsen-Engine gibt es jetzt als deep-review); Abgrenzung nennt deep-review
-skills/subagent-dev/SKILL.md, skills/debug-ledger/SKILL.md, skills/test-first/SKILL.md   Abgrenzung nennt deep-review
+skills/review-context/SKILL.md       Abgrenzung nennt deep-review (Kontext für einen Diff vs. Pakete mit Gegenstellen)
+skills/subagent-dev/SKILL.md, skills/subagent-dev/references/checkpoints.md   Review am Prüfpunkt über deep-review; Ersatz /code-review bleibt für Repos ohne die Skill
+skills/debug-ledger/SKILL.md, skills/test-first/SKILL.md   Abgrenzung nennt deep-review
 scripts/sync_skills.py               Tier 1, Repo-Werkzeug — deep-review in PROJECT_SKILLS
-.claude/skills/deep-review/, .claude/skills/review-context/, .claude/skills/subagent-dev/, .claude/skills/debug-ledger/   Projekt-Kopien über sync_skills.py
-.claude-plugin/marketplace.json      deep-review in der skills-Liste von evaluated-dev; Beschreibung von evaluated-dev nennt Review
-specs/Spec 00 – skill-foundation.md  Routing: neue Zeile mit deep-review in der Spalte „zuständig" (Lint-Regel routing); Zeile „Diff prüfen" nennt deep-review unter „nicht"; Annahme zu Spec 04 mit Verweis auf Spec 26
-README.md                            Skill-Liste von evaluated-dev; neue Routing-Zeile mit deep-review in der Spalte „Responsible"; Zeile „review a diff" ohne „scope left open"
+.claude/skills/deep-review/, .claude/skills/review-context/, .claude/skills/subagent-dev/, .claude/skills/debug-ledger/, .claude/skills/test-first/   Projekt-Kopien über sync_skills.py
+.claude-plugin/marketplace.json      deep-review in der skills-Liste von evaluated-dev
+specs/Spec 00 – skill-foundation.md  Routing: neue Zeile „großen Bereich oder Prüfpunkt gründlich prüfen" mit deep-review in der Spalte „zuständig"; Zeile „Diff prüfen" nennt deep-review unter „nicht"
+README.md                            Skill-Liste von evaluated-dev; Routing-Zeile mit deep-review in der Spalte „Responsible"
 docs/known-limits.md                 Abschnitt deep-review
-docs/superpowers/reports/deep-review-report.md   Report mit „Was nicht gemessen wurde" und der Messmenge
-evals/deep-review/evals.json         fünf Evals, siehe unten
-evals/fixtures/dr-small/, dr-cross-file/, dr-comments/, dr-seeded/   je fixture.json mit "git": true
+docs/superpowers/reports/deep-review-report.md   Report: Messung bis Prototyp (steht), dazu Abnahme
+evals/deep-review/evals.json         sechs Evals, siehe unten
+evals/fixtures/dr-split/, dr-contract/, dr-delphi/   je fixture.json mit "git": true (dr-seeded besteht)
 tests/test_deep_review_kit.py        siehe Tests (Repo)
 ```
 
 ### Ablauf
 
-1. **Umfang.** Modus aus dem Auftrag: `diff` (Bereich `BASIS..ZIEL`, Standard der letzte
-   Commit), `path` (Einstiegspunkt `datei:funktion`), `repo` (Verzeichnis). Zuschaltbar:
-   `quality`, unabhängig von der Tiefe. Profil `checkpoint` für Aufrufe aus subagent-dev
-   (siehe unten); dort kann der Aufrufer mit `--soll-file <datei>` das Soll mitgeben.
-   `inventory --depth quick|standard|deep` überschreibt die Tiefe, `--profile checkpoint`
-   setzt das Profil; `inventory.json` trägt `depth` und `profile` (sonst `null`).
-2. **Inventar:** `review_kit.py inventory`; Pfade unter `.skills/` zählen nie. Im Modus `diff` sind Einheiten die geänderten
-   Funktionen, die direkten Aufrufer geänderter Funktionen (Linse Vertrag) und gelöschter
-   Code als Vorher-Einheit (Linse Vertrag: hing etwas daran?). Im Modus `path` die Glieder
-   der Aufrufkette ab dem Einstiegspunkt, transitiv bis zur Tiefe 4, plus ein Pfad-Paket über
-   die ganze Kette. Je Einheit Datei, Zeilen, Hash, Risikomerkmale (berührt Auth, SQL,
-   Dateisystem, Netz, Shell, Geld, Parsing; Länge; Änderungshäufigkeit aus `git log`),
-   zugewiesene Linsen, Tiefe des Laufs.
-3. **Ausführung zuerst**, falls vorhanden: der Verifikationsbefehl aus der CLAUDE.md-Zeile
-   `Verifikation:` und Linter oder Typprüfer, die das Repo konfiguriert hat. Rote Tests und
-   Meldungen werden Kandidaten mit Quelle `tool`. Fehlt ein Werkzeug, steht es unter „Nicht
-   geprüft".
-4. **Pakete:** `review_kit.py packets`. Je Einheit ein Paket mit Nonce, Paket-Hash (über
-   Code der Einheit, Signaturen der Aufgerufenen und Soll), Code als abgegrenztem
-   Datenblock, Aufrufern und Soll. Das Soll holt das Skript im Modus `diff` mit
-   `python "${CLAUDE_SKILL_DIR}/../review-context/scripts/collect_context.py" --range <bereich>`
-   (mit `--soll-file` zusätzlich `--pr-description-file <datei>`)
-   und liest `.skills/cache/review-context.json` nur, wenn dessen `range.raw` dem eigenen
-   Bereich entspricht; sonst „Soll ungeprüft". Ein Einheiten-Paket bleibt unter 8.000
-   Zeichen Code und wird sonst geteilt; ein Pfad-Paket enthält je Glied Signatur und die
-   Zeilen, die Werte weiterreichen, höchstens 16.000 Zeichen.
-5. **Suche:** je Linse lesende Suchagenten nach `references/finder-prompt.md`, mehrere
-   Pakete je Agent. Ihre Antwort gibt der Hauptagent an `review_kit.py record` weiter; das
-   Skript nimmt ein Urteil nur an, wenn Nonce und Paket-Hash zum Paket passen, und schreibt
-   es nach `results.jsonl`. Linsen für `quality` laufen in eigenen Durchläufen.
-6. **Vereinigen:** `review_kit.py merge` dedupliziert nach Datei, überlappendem
-   Zeilenbereich und Klasse (geschlossene Liste in `references/lenses.md`) und behält alle
-   Quellen. Abgestimmt wird nicht.
-7. **Verifizieren, gestuft:** Ein Sonnet-Prüfagent versucht zuerst, den Kandidaten zu
-   widerlegen; was übersteht, versucht er zu belegen. Kandidaten der Klassen Datenverlust
-   und Nebenläufigkeit, die den Widerlegungsversuch überstehen, prüft danach Opus.
-   `review_kit.py verdict` schreibt je Kandidat einen Status nach `verdicts.jsonl`:
-   `bestätigt` (ein Test oder eine Ausführung in der Kopie löst den Fehler an der
-   behaupteten Stelle aus), `plausibel` (Argument mit konkreter Eingabe, die durchgespielt
-   wurde), `widerlegt` (mit Grund) oder `offen`.
-8. **Sättigung**, nur in Tiefe `deep`: Suchläufe auf der oberen Risikogruppe (Einheiten mit
-   mindestens zwei Risikomerkmalen) wiederholen sich mit anderer Reihenfolge, einer davon
-   mit Opus. Abbruch, wenn zwei Läufe hintereinander keinen neuen `bestätigt`- oder
-   `plausibel`-Fund bringen, spätestens nach sechs Läufen. `review_kit.py estimate` schreibt
-   ab vier Läufen eine Jackknife-Schätzung als unkalibrierte Untergrenze, darunter
-   `ungeprüft`.
-9. **Bericht und Audit:** Bericht nach `assets/report-template.md`, dann
-   `review_kit.py audit <lauf>`. Übergabe: Lauf-ID, Pfad des Berichts, Funde je Status, Abdeckung
-   `<angenommen>/<zugewiesen>`, „Nicht geprüft". Meldet das Audit eine Lücke, sagt die
-   Übergabe „unvollständig" mit der Liste, nie „fertig". Im Profil `checkpoint` endet
-   deep-review hier; die Funde mit Status `bestätigt` oder `plausibel` behebt subagent-dev
-   über seinen Fix-Pfad (Spec 27). Sonst gehen bestätigte Funde mit unklarer Ursache an
-   debug-ledger, die übrigen behebt der Hauptagent, und der Beweistest wird über test-first
-   zum Regressionstest.
+1. **Bereich, Profil, Fokus.** Bereich `BASIS..ZIEL` aus dem Auftrag, Standard der letzte
+   Commit. Ein Pfad statt eines Bereichs geht direkt an `/code-review <pfad>` (Pfad-Review
+   ist gelöst, siehe Problem) und erzeugt keinen Plan. Profil `standard` (Standard) oder
+   `checkpoint` (Aufruf aus subagent-dev, nur Fokus `bugs`). Fokus `bugs` (Standard),
+   `security` oder `quality`, aus dem Auftrag oder `--focus`.
+2. **Plan:** `review_kit.py plan --range <bereich> [--profile …] [--focus …] [--split-at N]
+   [--since <lauf>[,<lauf>…]] [--soll-file <datei>]`. Gezählt werden hinzugefügte plus gelöschte
+   Zeilen (`git diff --numstat`), `.skills/` nie. Bis `split_at` (Standard 800) ein Paket über
+   den Originalbereich, `split: false`. Darüber schneidet das Skript nach Verzeichnis: Dateien
+   desselben Verzeichnisses bleiben zusammen, Pakete füllen bis 600 Zeilen, eine Datei über
+   600 Zeilen ist ein eigenes Paket, eine Datei wird nie geteilt. Testdateien (`test_*.py`,
+   `*_test.py`, `tests/`, `*Test*.pas`) bilden eigene Pakete nach dem Code. Dateien ohne
+   Quellcode (Markdown, `NEWS`, Bilder, `.dproj`, `.res`) stehen unter `not_reviewed` mit
+   Grund. Je Paket ein Schlüssel (Hash über die Inhalte seiner Dateien am Ziel) und ein
+   Paket-Bereich: zwei Hilfscommits unter `refs/deep-review/<lauf>/<id>/`, `von` = Zielstand
+   mit den Dateien des Pakets auf dem Basisstand, `bis` = Zielstand. So sieht der Reviewer den
+   vollen Code und als Änderung nur das Paket — wie im Entscheidungsexperiment (`mid..HEAD`).
+3. **Gegenstellen:** `review_kit.py counterparts --run <lauf>` schreibt je Paket
+   `packets/<id>.md`. Python (`ast`): je Aufruf auf einer geänderten Zeile die erreichte
+   Definition (aufgelöst über die Importe der Datei und voll qualifizierte Modulpfade, auch in
+   vendortem Code), ihre Signatur, die erste Docstring-Zeile und ihre `raise`-Stellen transitiv
+   im selben Modul (Tiefe 2); je geänderter `except`-Klausel die Ausnahmen aller Aufrufe im
+   `try`-Block; je geändertem Schlüsselwort-Argument sein Weg durch die Gegenstellen bis zu den
+   Bedingungen, die es prüfen (Tiefe 4). Ohne Importbezug und mit mehr als drei gleichnamigen
+   Definitionen: nichts statt Raten, aber gezählt. Delphi (Text): je Aufruf `Name(` oder
+   `Obj.Name(` auf einer geänderten Zeile die Implementierung `procedure|function|constructor
+   TKlasse.Name` aus den Units der `uses`-Listen, ihr Kopf aus dem `interface`-Teil mit
+   Default-Werten der Parameter und ihre `raise`-Zeilen; je geänderter Zeile mit `Extract`,
+   `Remove`, `Free`, `FreeAndNil` oder `SetContentStream` die Klassendeklaration des Empfängers
+   mit Basisklasse und dem `inherited Create(…)` ihres Konstruktors (Besitz über
+   `OwnsObjects`, `doOwnsValues`, `Create(True)`). Je Paket höchstens 30.000 Zeichen; Kappung
+   mit Zahl, nie still.
+4. **Review je Paket**, im Hauptkontext, in Plan-Reihenfolge:
+   - Fokus `bugs`: `/code-review --max-findings all <von>..<bis>` über den Paket-Bereich, mit
+     dem Inhalt von `packets/<id>.md` und dem Auftrag aus `references/review-brief.md`
+     (den Block jedem Unteragenten unverändert mitgeben); bei Delphi dazu
+     `references/delphi.md`. Im Profil `checkpoint` dazu das Soll aus `--soll-file`.
+   - Fokus `security`: `/security-review` einmal über den ganzen Bereich, die Gegenstellen
+     aller Pakete als Kontext; nicht aufgeteilt (siehe Open questions).
+   - Fokus `quality`: `/code-review` je Paket mit dem Auftrag, nur Wartbarkeit, Doppelung und
+     Vereinfachung zu melden, je mit Grundlage (Projektregel, Messwert oder konkreter
+     Lesefehler); `/simplify` nicht, weil es Änderungen schreibt.
 
-**Tiefen und Profile**, vom Inventar gesetzt und vom Nutzer überschreibbar:
+   Das Ergebnis — die JSON-Liste von `/code-review` oder die Liste aus dem Brief — gibt der
+   Hauptagent an `review_kit.py record --run <lauf> --packet <id> --key <schlüssel> <datei>`;
+   das Skript nimmt es nur an, wenn Schlüssel und Paket zum Plan passen. Ein Paket ohne Funde
+   bekommt eine leere Liste, kein Weglassen.
+5. **Vereinigen:** `review_kit.py merge --run <lauf>` legt Funde derselben Datei mit höchstens
+   drei Zeilen Abstand zusammen und behält alle Pakete; abgestimmt wird nicht.
+6. **Bericht und Audit:** Bericht nach `assets/report-template.md` (Kopfzeile mit Lauf-ID,
+   Bereich, Profil, Fokus, Werkzeug), Tabelle der Pakete mit Dateien, Zeilen, Zahl der
+   Gegenstellen und Funde, „Nicht geprüft" aus `not_reviewed`; dann `review_kit.py audit
+   --run <lauf>` und `review_kit.py cleanup --run <lauf>` (löscht die Hilfscommits). Übergabe:
+   Lauf-ID, Pfad des Berichts, Zahl der Funde, Abdeckung `<Pakete mit Ergebnis>/<Pakete>`.
+   Meldet das Audit eine Lücke, sagt die Übergabe „unvollständig" mit der Liste, nie „fertig".
+   Im Profil `checkpoint` endet deep-review hier; subagent-dev behebt die Funde aus
+   `findings.json` über `fix-task` (Spec 27). Sonst gehen Funde mit unklarer Ursache an
+   debug-ledger, die übrigen behebt der Hauptagent mit Regressionstest über test-first.
 
-| Tiefe/Profil | wann | Linsen | Wiederholungen | Verifikation |
+**Folgeläufe** (`--since <lauf>[,<lauf>…]`, Spec 27): Ein Paket, dessen Dateien am Ziel
+dieselben Inhalte haben wie in einem Paket eines früheren Laufs (gleicher Hash je Datei),
+übernimmt dessen Ergebnis mit `reused_from`; steht eine Datei in mehreren Läufen, gilt der
+jüngste. Geänderte Dateien werden neu geschnitten und reviewt. Am finalen Prüfpunkt
+(`base..HEAD` über alle Läufe aus `runs`) bleiben so nur die Dateien, die sich seit ihrem
+Review geändert haben.
+
+**Profile und Fokus:**
+
+| | wann | Werkzeug | Pakete | Gegenstellen |
 | --- | --- | --- | --- | --- |
-| `quick` | Modus `diff`, höchstens eine geänderte Einheit (Aufrufer nicht mitgezählt) mit höchstens 20 geänderten Zeilen, kein Risikomerkmal | Korrektheit (mit `quality` zusätzlich Wartbarkeit und Kommentare); Aufrufer nur als Kontext im Paket | keine | Sonnet |
-| `standard` | Normalfall, auch Modus `path` und `repo` | alle Fehlerlinsen der Einheit | keine | gestuft |
-| `deep` | nur auf ausdrücklichen Wunsch („Audit", „so gründlich wie möglich") | alle Fehlerlinsen | Sättigung wie in Schritt 8 | gestuft |
-| Profil `checkpoint` | Aufruf aus subagent-dev (Spec 27) | Korrektheit und Vertrag | keine | gestuft, höchstens 15 Verifikationen; der Rest bleibt `offen`, steht im Bericht und wird im nächsten Folgelauf ohne dieses Profil erneut verifiziert, in subagent-dev am finalen Prüfpunkt |
-
-**Folgeläufe** (`--since <lauf>[,<lauf>…]`) übernehmen die Urteile der Suchagenten und die
-Kandidaten samt Status von Einheiten, deren Wiederverwendungsschlüssel gleich geblieben ist —
-ein Hash über den Code der Einheit und die Signaturen der Aufgerufenen, ohne das Soll, das
-sich mit jedem Bereich ändert. Mehrere Läufe sind nötig, wenn ein Folgelauf einen größeren
-Bereich prüft als jeder frühere (finaler Prüfpunkt in Spec 27, der die Bereiche aller
-früheren Prüfpunkte umfasst); steht eine Einheit in mehreren, gilt der jüngste Lauf.
-Geänderte Einheiten und deren direkte Aufrufer prüfen sie neu; Linsen, die die früheren
-Läufe nicht hatten, laufen auf allen Einheiten. Übernommene Kandidaten mit Status `offen`
-gehen außerhalb des Profils `checkpoint` erneut in die Verifikation; im Profil `checkpoint`
-bleiben sie `offen` und zählen nicht gegen die Grenze von 15.
-
-### Wartbarkeit und Kommentare (`quality`)
-
-Wartbarkeitsfunde sind Hinweise mit eigener Stufe und eigenem Berichtsabschnitt. Jede
-Kritik nennt ihre Grundlage — eine Projektregel aus CLAUDE.md oder `.claude/rules/`, einen
-Messwert aus `review_kit.py metrics` (Funktionslänge, Verschachtelung, Verzweigungen, je
-gegen den Median des Repos) oder einen konkreten Lesefehler — und einen Umbauvorschlag.
-Ohne Grundlage wird sie nicht gemeldet.
-
-`review_kit.py comments` sortiert Kommentare vor; im Modus `diff` nur neue und geänderte:
-
-| Regel | erkennt mechanisch |
-| --- | --- |
-| `change-narration` | Erzählung der Änderung: `added`, `now`, `previously`, `updated`, `jetzt`, `neu:`, `geändert` |
-| `ticket-ref` | Verweis auf Ticket, PR oder Gespräch statt auf den Code |
-| `docstring-oversize` | Docstring länger als der Funktionskörper |
-| `commented-out-code` | Kommentarblock, der sich als Python parsen lässt (`ast`); andere Sprachen: Zeile endet auf `;` oder `)` und enthält einen Bezeichner des Moduls |
-| `comment-ratio` | Anteil Kommentarzeilen im Diff über dem Doppelten des Repo-Medians |
-
-Ob ein Kommentar nur die nächste Zeile wiederholt, entscheidet das Modell: `comments` legt
-jeden neuen Kommentar mit der folgenden Codezeile als Kandidaten vor, weil eine
-Wortüberlappung über Sprachen hinweg nicht trägt (`# erhöhe Zähler` über `count += 1`). Ein
-Kommentar, der dem Code widerspricht, ist ein Kandidat der Linse Vertrag und wird
-verifiziert wie ein Bug.
+| `standard`, Fokus `bugs` | Normalfall | `/code-review --max-findings all` | ab `split_at` | ja |
+| `checkpoint` | Prüfpunkt aus subagent-dev (Spec 27) | wie `standard`, `--soll-file` als Soll | ab `split_at` | ja |
+| Fokus `security` | „Sicherheit", „Sicherheitsreview" | `/security-review` | nein | ja, als Kontext |
+| Fokus `quality` | „Wartbarkeit", „Qualität", „Code-Hygiene" | `/code-review` mit Qualitätsauftrag | ab `split_at` | nein |
 
 ### Contract
 
-- **Abdeckung gegen das Inventar.** Der Code einer Einheit steht in ihrem Paket; `audit`
-  meldet jede Einheit-Linse-Kombination ohne angenommenes Urteil und jedes Urteil, dessen
-  Nonce oder Hash nicht passt (G2). Die Nonce erschwert ein erfundenes „geprüft", sie macht
-  es nicht unmöglich: Wer das Paket liest, kennt sie. Das steht im Bericht.
-- **Kein Kandidat verschwindet.** Jeder Kandidat in `candidates.jsonl` hat in
-  `verdicts.jsonl` einen Status; `widerlegt` steht mit Grund im Anhang. `audit` meldet
-  Kandidaten ohne Status.
-- **Bericht und Daten stimmen überein.** `audit` meldet einen Bericht, der „vollständig"
-  sagt, obwohl `audit.json` Lücken trägt, und Zahlen im Bericht, die nicht zu den Dateien
-  passen.
-- **Ausführung nur in der Kopie, Suche nur lesend.** Prüfagenten führen Code nur unter
-  `<lauf>/proof/` aus; Suchagenten haben keine Schreibwerkzeuge.
-- **Sättigung nur mit Zahl und Vorbehalt.** Eine Aussage über Restfehler steht nur mit
-  `estimate.json`, der Zahl der Läufe und dem Wort „unkalibriert".
-- **Anti-Zeremonie-Fall:** Ein Diff mit einer geänderten Einheit und höchstens 20 Zeilen ohne
-  Risikomerkmal läuft in Tiefe `quick`: eine Fehlerlinse, kein Opus, keine Wiederholung, ein
-  Bericht von höchstens 40 Zeilen.
+- **Abdeckung gegen den Plan.** `audit` meldet jedes Paket ohne angenommenes Ergebnis und
+  jedes Ergebnis, dessen Schlüssel nicht zum Plan passt (G2). Der Schlüssel verhindert ein
+  Ergebnis für einen veralteten Stand, nicht ein erfundenes: Dass je Paket ein Review lief,
+  bleibt Auskunft des Hauptagenten. Das steht im Bericht.
+- **Kein Fund verschwindet.** Jeder Fund in `results/*.json` steht in `findings.json`; `audit`
+  meldet die Differenz als `lost_findings`.
+- **Bericht und Daten stimmen überein.** `audit` meldet einen Bericht, der „vollständig" sagt,
+  obwohl `audit.json` Lücken trägt, und Zahlen im Bericht, die nicht zu den Dateien passen.
+- **Gegenstellen sind mechanisch.** `counterparts` wählt nicht nach Verdacht aus; es schreibt
+  jede geänderte Stelle, die es auflösen kann, und nennt die Zahl der nicht aufgelösten.
+- **Nichts wird ausgeführt.** Das Skript importiert und startet keinen Zielcode; die
+  Hilfscommits liegen nur unter `refs/deep-review/` und `cleanup` löscht sie.
+- **Anti-Zeremonie-Fall:** Ein Bereich bis `split_at` Zeilen ergibt ein Paket, einen Aufruf
+  von `/code-review` über den Originalbereich, keine Hilfscommits und einen Bericht von
+  höchstens 40 Zeilen.
 
 ### Abgrenzung
 
 | Anlass | zuständig | nicht |
 | --- | --- | --- |
-| schneller Check eines PR, wenige sichere Funde | `/code-review` (mitgeliefert) | deep-review — teurer, mit Abdeckungsnachweis |
-| Code gründlich prüfen und belegen, was geprüft wurde: Diff, Pfad, Modul, Prüfpunkt eines Plans | **deep-review** | `/code-review` — kein Inventar, keine Abdeckung |
-| Kontext und Soll für einen Diff sammeln | **review-context** | deep-review ruft es auf, baut es nicht nach |
+| kleinen Diff oder PR prüfen | `/code-review` (mitgeliefert) | deep-review — bringt bis `split_at` nur die Gegenstellen dazu |
+| großen Bereich, Branch oder Prüfpunkt eines Plans gründlich prüfen, mit Nachweis je Paket | **deep-review** | `/code-review` über alles — verliert in großen Bereichen Funde |
+| Pfad oder Modul ohne Diff prüfen | `/code-review <pfad>` | deep-review — reicht ihn nur durch |
+| Kontext und Soll für einen Diff sammeln | **review-context** | deep-review — sammelt Gegenstellen je Paket, kein Soll |
 | wann zwischen Tasks reviewt wird | **subagent-dev** (Spec 27) | deep-review prüft, plant keine Prüfpunkte |
-| Sicherheitsaudit | `/security-review`, trailofbits | deep-review hat in diesem Zyklus keine Security-Linse (siehe Open questions) |
+| Sicherheitsaudit eines ganzen Systems | `/security-review`, trailofbits | deep-review — reicht Fokus `security` an `/security-review` durch |
 | bestätigter Fund mit unklarer Ursache | **debug-ledger** | deep-review meldet, diagnostiziert nicht |
-| Beweistest eines bestätigten Funds wird Regressionstest | **test-first** | deep-review schreibt den Test nur in der Kopie |
+| Regressionstest zu einem Fund | **test-first** | deep-review schreibt keine Tests |
 
 Rückverweise beim Bau, je mit dem Wort deep-review: review-context, subagent-dev,
-debug-ledger, test-first (alle im Strukturblock oben). Das Register der Lint-Befunde in
-`tests/test_skills_lint.py` ist voll (79 von 79 Paaren); ein fehlender Rückverweis macht
-`test_no_finding_outside_the_register` rot.
+debug-ledger, test-first (alle im Strukturblock oben).
 
 ### Tests (Repo)
 
 | Test | Datei | prüft |
 | --- | --- | --- |
-| `test_inventory_python` | `tests/test_deep_review_kit.py` | Funktionen, Methoden, verschachtelte Funktionen; Hash ändert sich nur mit dem Inhalt; Modus diff: geänderte Einheiten, direkte Aufrufer, gelöschte Funktion als Vorher-Einheit |
-| `test_inventory_path_chain` | dito | Aufrufkette ab Einstiegspunkt transitiv bis Tiefe 4; Pfad-Paket enthält jedes Glied |
-| `test_inventory_ts` | dito | Funktionsdeklaration, Pfeilfunktion an `const`, Klassenmethode; Änderung im Rumpf erkannt |
-| `test_inventory_delphi_and_chunks` | dito | Methode mit lokaler Prozedur endet am eigenen `end;`; `case`, `try`, `record`, `asm` gezählt; varianter `record … case X of … end` schließt mit einem `end`; `forward;`- und `external`-Köpfe ohne Rumpf sind keine Einheit; `end` in String und Kommentar ignoriert; Deklaration im `interface`-Teil keine Einheit; unvollständiger `{$IFDEF}` → `chunk` mit Grund |
-| `test_depth_and_profiles` | dito | quick zählt keine Aufrufer; Risikomerkmal → standard; path → standard; deep nur mit Schalter; `--depth` überschreibt die gesetzte Tiefe; `--profile checkpoint` setzt Linsen und Grenze 15 |
-| `test_packets_and_nonce` | dito | Einheiten-Paket über 8.000 Zeichen wird geteilt; Pfad-Paket bis 16.000; Paket-Hash deckt Signaturen und Soll; review-context-Paket mit fremdem Bereich wird nicht gelesen |
-| `test_record_rejects_wrong_nonce` | dito | falsche Nonce oder alter Hash → abgewiesen, nichts in `results.jsonl` |
-| `test_merge_without_voting` | dito | gleiche Stelle und Klasse → ein Kandidat mit allen Quellen; andere Klasse → zwei; kein Kandidat fällt weg |
-| `test_jsonl_format` | dito | `_meta` in Zeile 1, feste Schlüsselreihenfolge, `ensure_ascii=False`, Trennzeichen `", "` und `": "`, `reason` und `evidence` als Zeichenketten, Pfade ohne `./` |
-| `test_audit` | dito | fehlendes Urteil (`missing`), Nonce-Abweichung (`nonce_mismatch`), fehlender Status (`unverdicted`), Bericht „vollständig" trotz Lücke oder abweichende Zahl (`report_mismatch`) → je ein Eintrag und `complete: false`; sauberer Lauf → `complete: true` |
-| `test_estimate` | dito | Jackknife erster Ordnung an bekannten Zahlen; unter vier Läufen `ungeprüft` |
-| `test_comment_rules` | dito | jede Regel der Tabelle trifft ihr Beispiel, nicht einen Warum-Kommentar; `comments` legt jeden neuen Kommentar mit Folgezeile vor |
-| `test_metrics_against_median` | dito | Länge, Verschachtelung, Verzweigungen je Funktion und Median des Repos |
-| `test_since_reuses_unchanged_verdicts` | dito | gleicher Schlüssel → Urteile und Kandidaten übernommen, auch bei anderem Soll; geänderte Signatur eines Aufgerufenen → neu geprüft; neue Linse → auf allen Einheiten; zwei Läufe mit disjunkten Bereichen in `--since` → Urteile aus beiden, bei derselben Einheit der jüngere; übernommener `offen`-Kandidat → in Tiefe `standard` erneut verifiziert, im Profil `checkpoint` unverändert |
-| `test_run_ids_do_not_collide` | dito | zwei Läufe in derselben Sekunde mit gleichem Commit → verschiedene Lauf-IDs dank Zufallssuffix |
+| `test_seeded_fixtures` | `tests/test_deep_review_kit.py` | besteht (Task 1 des Plans vom 2026-10-30) |
+| `test_plan_single_packet_below_threshold` | dito | bis `split_at` ein Paket mit Originalbereich, `split: false`, keine Refs; `.skills/` zählt nicht |
+| `test_plan_splits_by_directory` | dito | Verzeichnis bleibt zusammen, Pakete bis 600 Zeilen, große Datei eigenes Paket, Tests nach dem Code, Doku unter `not_reviewed` mit Grund |
+| `test_plan_packet_range_shows_only_the_packet` | dito | `von..bis` eines Pakets ändert genau seine Dateien, `bis` hat den Baum des Ziels; `cleanup` löscht alle Refs des Laufs |
+| `test_counterparts_python_except_and_raises` | dito | geänderte `except`-Klausel → Ausnahmen der Aufrufe im `try` samt `raise`-Zeilen im vendorten Modul |
+| `test_counterparts_python_flag_flow` | dito | geändertes Schlüsselwort-Argument → Weg über zwei Gegenstellen bis zur Bedingung; voll qualifizierter Modulpfad löst eindeutig auf |
+| `test_counterparts_python_no_guessing` | dito | Methode mit gängigem Namen ohne Importbezug → nicht aufgelöst, gezählt |
+| `test_counterparts_delphi` | dito | Aufruf → Implementierung aus einer `uses`-Unit, Kopf mit Default-Wert; `Extract` → Klassendeklaration mit `inherited Create(True)`; `end` in String und Kommentar ignoriert |
+| `test_counterparts_cap` | dito | über 30.000 Zeichen → gekappt mit Zahl |
+| `test_record_rejects_wrong_key` | dito | falscher Schlüssel oder unbekanntes Paket → abgewiesen, nichts geschrieben |
+| `test_merge_keeps_every_finding` | dito | gleiche Datei, Abstand ≤ 3 → ein Fund mit beiden Paketen; sonst zwei; `fix-task` liest `findings.json` |
+| `test_since_reuses_unchanged_packets` | dito | gleiche Dateiinhalte → `reused_from`; eine geänderte Datei → ihr Paket neu; zwei frühere Läufe → der jüngere |
+| `test_audit` | dito | fehlendes Ergebnis, falscher Schlüssel, Fund fehlt in `findings.json`, Bericht „vollständig" trotz Lücke → je ein Eintrag und `complete: false`; sauber → `true` |
+| `test_run_ids_do_not_collide` | dito | zwei Läufe in derselben Sekunde → verschiedene IDs |
 
 ### Evals
 
 | # | id | Klasse | Fixture | Assertions | Diskriminator |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `anti-ceremony-one-line-fix-stays-quick` | contract | `dr-small` | `file_matches` `.skills/cache/deep-review/*/inventory.json` auf `"depth":\s*"quick"`; `artifact_header` auf `.skills/cache/deep-review/*/report.md`; `file_max_lines` dort 40; `git_head_unchanged` | Inventar mit Tiefe und Bericht mit Kopfzeile schreibt nur die Skill |
-| 2 | `every-unit-gets-a-verdict` | contract | `dr-cross-file` | `file_matches` `.skills/cache/deep-review/*/audit.json` auf `"missing":\s*\[\]`, auf `"nonce_mismatch":\s*\[\]` und auf `"complete":\s*true`; `file_matches` `.skills/cache/deep-review/*/inventory.json` auf `app/orders\.py` und auf `app/report\.py` | `audit.json` schreibt nur `review_kit.py`; ohne Inventar gibt es keine Liste, gegen die etwas fehlen könnte |
-| 3 | `cross-file-none-bug-is-found` | contract | `dr-cross-file` | `file_matches` `.skills/cache/deep-review/*/verdicts.jsonl` auf `^\{"id":[^\n]*"path": "app/(report\|orders)\.py"[^\n]*"status": "(bestätigt\|plausibel)"` | `parse_order` gibt bei leerer Zeile `None` zurück, `summarize` greift ungeprüft auf `.total` zu; beide hängen an `main`, der Pfad-Modus nimmt beide als Einheiten; `verdicts.jsonl` entsteht nur in der Pipeline |
-| 4 | `comment-ballast-is-flagged` | contract | `dr-comments` | `file_matches` `.skills/cache/deep-review/*/comments.json` auf `"rule":\s*"change-narration"` und auf `"rule":\s*"commented-out-code"`; `file_matches` `.skills/cache/deep-review/*/report.md` auf `app/stats\.py:\d+` | `comments.json` schreibt nur `review_kit.py comments`; die Fixture fügt `# jetzt mit Cache` und `# old_total = sum(values)` hinzu |
-| 5 | `routing-thorough-check-without-skill-name` | contract | `dr-cross-file` | `file_exists` `.skills/cache/deep-review/*/inventory.json` | stochastisch: ein roter Lauf zeigt eine Kollision mit `/code-review` oder einer global installierten Review-Skill (known-limits, „Isolation"); ein grüner beweist nichts |
+| 1 | `anti-ceremony-small-range-one-packet` | contract | `dr-seeded` | `file_matches` `.skills/cache/deep-review/*/plan.json` auf `"split":\s*false`; `artifact_header` auf `.skills/cache/deep-review/*/report.md`; `file_max_lines` dort 40; `git_head_unchanged` | `plan.json` schreibt nur `review_kit.py` |
+| 2 | `large-range-is-split-and-covered` | contract | `dr-split` | `file_matches` `.skills/cache/deep-review/*/plan.json` auf `"id":\s*"p2"`; `file_matches` `.skills/cache/deep-review/*/audit.json` auf `"complete":\s*true` und auf `"missing":\s*\[\]` | Prompt nennt „teile ab 200 Zeilen"; ohne Skill gibt es weder Plan noch Audit |
+| 3 | `narrowed-except-gets-callee-raises` | contract | `dr-contract` | `file_matches` `.skills/cache/deep-review/*/packets/*.md` auf `wirft[^\n]*TypeError`; `file_matches` `.skills/cache/deep-review/*/findings.json` auf `app/groups\.py` | die Fixture verengt `except (ValueError, TypeError)` vor einem Aufruf in `vendor/grouplib.py`, der `TypeError` wirft; der Paketblock entsteht nur im Skript |
+| 4 | `delphi-extract-shows-ownership` | contract | `dr-delphi` | `file_matches` `.skills/cache/deep-review/*/packets/*.md` auf `inherited Create\(True\)`; `file_matches` `.skills/cache/deep-review/*/findings.json` auf `Query\.pas` | `TQueryTree = class(TObjectList<TNode>)` besitzt seine Knoten, der Diff ersetzt `Remove` durch `Extract` |
+| 5 | `security-focus-routes-to-security-review` | contract | `dr-contract` | `artifact_header` auf `.skills/cache/deep-review/*/report.md`; `file_matches` dort auf `^<!--[^\n]*focus: security` und auf `/security-review` | Kopfzeile schreibt nur die Skill nach ihrem Template |
+| 6 | `routing-large-branch-without-skill-name` | contract | `dr-split` | `file_exists` `.skills/cache/deep-review/*/plan.json` | stochastisch: ein roter Lauf zeigt eine Kollision mit `/code-review`; ein grüner beweist nichts |
 
-Die Pfade nutzen Globs (`evalkit/assertions.py`, `resolve_target`). In Eval 3 steht `\|`
-nur für die Tabelle; in `evals.json` ist es `|`. Das Muster bindet an eine Zeile von
-`verdicts.jsonl` mit der Schlüsselfolge `id`, `path`, `lines`, `class`, `status`, `reason`,
-`evidence`, `related` (weitere betroffene Dateien eines Funds über Dateigrenzen) und den
-Trennzeichen von `json.dumps` (`": "`).
-
-Prompts: 1 „Review den letzten Commit mit deep-review.", 2 und 3 „Prüf mit deep-review den
-Pfad ab `app/cli.py:main`.", 4 „Review den letzten Commit mit deep-review, inklusive
-quality.", 5 „Prüf den Ablauf ab `app/cli.py:main` auf Fehler und sag mir, ob wirklich jede
-Funktion angeschaut wurde." Die Fixtures sind Git-Repos mit einem Commit für den Diff;
-`dr-cross-file` bringt pytest und einen grünen Test mit, der den leeren Fall nicht abdeckt.
+Prompts: 1 „Review base..HEAD mit deep-review.", 2 „Prüf base..HEAD mit deep-review, teile ab
+200 Zeilen.", 3 und 4 „Review den letzten Commit mit deep-review.", 5 „Mach ein
+Sicherheitsreview von base..HEAD mit deep-review.", 6 „Der Branch ist groß, prüf base..HEAD
+gründlich auf Fehler und sag mir, ob jedes Stück angeschaut wurde." Die Fixtures sind
+Git-Repos mit Tag `base`; `dr-split` hat rund 450 geänderte Zeilen in zwei Verzeichnissen.
 Vor der Abnahme läuft jeder Eval einmal ohne Skill (Spec 18).
 
-### Messung der Trefferquote
+### Abnahme der Trefferquote
 
-Die Evals prüfen den Vertrag, nicht die Trefferquote. Die misst der Report vor der Abnahme
-an `dr-seeded`: eine Fixture mit fünf eingebauten Fehlern verschiedener Klassen (`None`
-über zwei Dateien, Grenzwert um eins daneben, Ressourcenleck nur im Fehlerpfad, verschluckte
-Exception, Kommentar widerspricht Code) und einer sauberen Fassung für die Präzision. Je drei
-Läufe von deep-review in Tiefe `standard`, von `/code-review` und von einem einzelnen
-Sonnet-Lauf ohne Inventar über denselben Bereich. *Annahme:* Abnahmeschwelle — deep-review
-findet im Mittel mindestens so viele der fünf wie die beiden anderen zusammen, bei höchstens
-zwei `plausibel`-Funden auf der sauberen Fassung. Jede Stufe, die gegenüber ihrer
-Abschaltung (Pfad-Pakete, Verifikation, Aufrufer als Einheiten) keinen messbaren Unterschied
-bringt, fliegt vor dem Bau des nächsten Zyklus raus.
+Die Evals prüfen den Vertrag. Die Trefferquote misst der Report mit
+`docs/superpowers/reports/review-bench/` auf `py-diff` (pip 25.0→25.1, 6 eingebaute + 2
+echte Fehler) und `dl-diff` (DelphiMVCFramework rc6→rc7, 6 eingebaute), je zwei Läufe
+deep-review im Profil `standard` gegen die gemessene Basislinie von `/code-review` über den
+ganzen Bereich (Mittel 4,5 bzw. 5,0 von 6). *Annahme:* Abnahme, wenn deep-review im Mittel
+mindestens so viele eingebaute Fehler findet wie die Basislinie, auf `py-diff` P2 oder P4 in
+mindestens einem Lauf, und je Lauf höchstens das Doppelte der Basislinie kostet (pip rund
+1,05 USD, Delphi rund 2,30 USD). Jede Stufe, die gegenüber ihrer Abschaltung (Pakete,
+Gegenstellen, Delphi-Prüfliste) keinen messbaren Unterschied bringt, fliegt raus.
 
 ## Alternatives considered
 
-**Bei `/code-review` bleiben und nur den Kontext verbessern** (Stand nach Spec 04).
-Verworfen: Das Plugin schließt eingabeabhängige Fehler und Altlasten aus und weist nicht
-aus, was es gelesen hat. Gewinnt, wenn `/code-review` in der Messung auf `dr-seeded`
-genauso viele Fehler findet.
+**Die Fassung vom 2026-10-30** (Inventar je Funktion, Nonce, lesende Suchagenten je Linse,
+gestufte Verifikation, Sättigung). Verworfen nach der Messung: Sie erzwingt Abdeckung, und
+Abdeckung war nicht das Problem — die übersehenen Zeilen standen im Kontext. Gewinnt, wenn
+das runlog aus Spec 27 Funde zeigt, die `/code-review` in kleinen Paketen mit Gegenstellen
+übersieht, obwohl ihre Gegenstelle im Paketblock stand.
 
-**Eine Abschrift des Codes als JSON durch Haiku, die Sonnet oder Opus statt des Codes
-liest** (erste Idee des Nutzers, 2026-10-28). Verworfen: Der Reviewer prüft dann Haikus
-Deutung, die Abschrift ist länger als der Code, und Fehler der ersten Stufe sind in der
-zweiten unsichtbar. Übernommen ist die Idee der Pfade vom Einstieg bis zum Endpunkt, als
-Pfad-Paket mit echtem Code.
+**Bei `/code-review` über den ganzen Bereich bleiben.** Verworfen: verliert in großen
+Bereichen ein bis vier von sechs Fehlern, und P2 in keinem von sieben Läufen.
 
-**Ein Skript dispatcht die Suche selbst** (`claude -p --bare` mit JSON-Schema). Dann wäre
-die Abdeckung nicht mehr Auskunft des Hauptagenten. Verworfen für diesen Zyklus: Tier 3
-(braucht die CLI), läuft nicht in claude.ai, und Kosten und Limit liegen außerhalb der
-Sitzung. Gewinnt, wenn das Audit zeigt, dass Hauptagenten Urteile ohne Dispatch eintragen.
+**Nur aufteilen, ohne Gegenstellen.** Billiger und einfacher. Verworfen als alleiniger Weg:
+fand P2 und P4 nicht; mit Gegenstellen je einmal in zwei Läufen.
 
-**Mehrheitsvotum über Suchläufe.** Verworfen nach MultiVer (Recall 37,7 % statt 82,7 %).
+**Nur ein Auftrag im Prompt („prüfe die Gegenstelle").** Verworfen: auf pip ohne Wirkung,
+kein Lauf öffnete den vendorten Code.
 
-**Feste Zahl von Runden.** Verworfen: Sie regelt den Kreislauf zwischen Autor und Reviewer,
-nicht die Restfehler. Ersetzt durch Abdeckung, Abbruch nach zwei fundlosen Läufen und
-Folgeläufe nur über geänderte Einheiten.
+**Pfadfilter statt Hilfscommits** (`/code-review <bereich> -- <dateien>`). Einfacher, aber
+nicht geprüft, ob `/code-review` ihn annimmt; die Hilfscommits sind die gemessene Form.
 
-**Sättigung ganz weglassen.** Erwogen, weil die Schätzung unkalibriert ist (Läufe desselben
-Modells sind korreliert, Fehlalarme blähen Einzelfunde auf). Behalten nur in `deep`, mit
-Abbruchregel als eigentlichem Mechanismus und der Schätzung als markierter Untergrenze.
+**Zwei Läufe vereinigen.** Bringt `py-diff` auf 5/6 zum doppelten Preis, ohne P2. Bleibt als
+Option für Nutzer, die mehr ausgeben wollen; nicht Teil der Skill.
 
-**Wartbarkeit als eigene Skill.** Verworfen: Inventar, Pakete, Audit und Bericht wären
-doppelt. Gewinnt, wenn `quality` die Trefferquote der Fehlerlinsen messbar senkt.
-
-**Modi `security`, `tests`, `migration`, `iac` gleich mitbauen** (Konzeptdokument).
-Verworfen für diesen Zyklus: Security routet Spec 00 an `/security-review`, Migrationen
-prüft sql-schema-architect, Tests plant testing-strategy, für IaC fehlt eine Messung.
+**Eine eigene Review-Skill je Fokus** (Sicherheit, Qualität). Verworfen: dieselben Pakete,
+derselbe Plan, dasselbe Audit wären dreifach; die Werkzeuge gibt es mitgeliefert.
 
 ## Out of scope
 
-Sicherheitsaudit und Security-Linse (siehe Open questions), Migrationen
-(sql-schema-architect), Teststrategie (testing-strategy), Fixes schreiben (Hauptagent),
-Pläne prüfen, Prüfpunkte zwischen Tasks planen (subagent-dev, Spec 27), Taint-Analyse mit
-CodeQL oder Semgrep (als Werkzeugmeldungen in Schritt 3 erlaubt, nicht gebaut),
-Testabdeckung als Karte (Tier 2), ein Parser über tree-sitter (Tier 2).
+Eigene Such- oder Verifikationsagenten, Abdeckung je Funktion, Sättigung und Schätzung von
+Restfehlern (Fassung vom 2026-10-30); Pfad-Review mit eigenem Plan (gelöst durch
+`/code-review <pfad>`); Gegenstellen für TypeScript, Java und andere Sprachen; Fixes
+schreiben (Hauptagent); Prüfpunkte planen (subagent-dev); Taint-Analyse; Ausführen von
+Zielcode.
 
 ## Open questions
 
-*Annahme:* Keine Security-Linse in diesem Zyklus, obwohl der Nutzer Sicherheitslücken
-gefunden sehen will — Spec 00 §5 routet Sicherheit an `/security-review` und trailofbits und
-nennt in der Spalte „nicht" alle eigenen Skills. Eine Security-Linse hieße, diese Zeile zu
-ändern; das ist eine Entscheidung des Nutzers — widersprich, falls sie in diesen Zyklus
-gehört. Risikomerkmale wie Auth oder SQL steuern bis dahin nur die Tiefe.
+*Annahme:* `split_at` 800 und Paketgröße 600 Zeilen. Gemessen ist nur: 591–651 Zeilen je
+Paket wirkten, 2.000 Zeilen am Stück verloren null bis zwei Funde, 4.100 Zeilen ein bis
+vier. Zwischen 800 und 2.000 ist nichts gemessen.
 
-*Annahme:* Name `deep-review`; Ablage nur im Cache, Bericht nach `docs/reviews/` nur auf
-Wunsch — widersprich, falls er immer committet werden soll.
+*Annahme:* Der Gegenstellen-Block erreicht die Unteragenten von `/code-review`, weil der
+Hauptagent ihn im Aufruf mitgibt. Im Prototyp ging er über `--append-system-prompt` mit der
+Bitte, ihn weiterzugeben; ob er im interaktiven Aufruf genauso ankommt, ist ungemessen.
 
-*Annahme:* Risikomerkmal Länge ab 80 Zeilen, Änderungshäufigkeit ab fünf Commits im letzten
-Jahr; Sättigung mit Jackknife erst ab vier Läufen und Abbruch nach zwei fundlosen Läufen.
-Grenzen `quick` bei einer geänderten Einheit und 20 Zeilen, Bericht höchstens 40
-Zeilen, Paket unter 8.000 und Pfad-Paket unter 16.000 Zeichen, Kette bis Tiefe 4, Chunk 150
-Zeilen, obere Risikogruppe ab zwei Merkmalen, Sättigung bis sechs Läufe, Profil
-`checkpoint` mit 15 Verifikationen, `comment-ratio` beim Doppelten des Medians. Keine ist
-gemessen; der Report nennt die Werte, mit denen die Evals liefen.
+*Annahme:* Der Delphi-Sammler (Text-Scanner) liefert auf DelphiMVCFramework brauchbare
+Gegenstellen; gemessen ist nur der Python-Sammler. D1 (Besitz bei `Extract`) fand ein Lauf
+mit Prompt-Auftrag, drei von fünf ohne ihn nicht — ein Lauf, kein Beleg.
 
-*Annahme:* Die Delphi-Linse (Besitz und Freigabe mit `try/finally` und Owner,
-Interface-Referenzzählung gemischt mit Objektreferenzen, VCL-Hauptthread, verschluckte
-Exceptions, String-Kodierung) stammt aus Praxiswissen, nicht aus einer Studie.
+*Annahme:* Fokus `security` wird nicht aufgeteilt, weil `/security-review` seinen Bereich
+selbst wählt (ausstehende Änderungen des Branches); ob es einen Bereich annimmt, ist nicht
+geprüft. Sicherheit und Qualität sind nicht gemessen — die eingebauten Sicherheitsfehler
+(doppelte Header, Payload-Grenze, Secure-Cookie, Refresh-Token, Zip-Slip) fand `/code-review`.
 
-*Annahme:* Die Linsen sind als Szenarien mit konkreten Fragen geschrieben, weil
-Szenario- und Perspektiven-Lesen bei Menschen besser abschnitt als Checklisten (Porter u. a.
-1995; Laitenberger u. a. 2000: 58 % gegen 43 %, 18 Praktiker; es gibt Gegenbefunde). Ob das
-für Modelle gilt, ist ungemessen.
+*Annahme:* Name `deep-review` bleibt, weil Spec 27 und subagent-dev ihn schon nennen; die
+Skill ist schmaler, als der Name sagt.
 
-Ob ein zusätzlicher Suchlauf mit Haiku über alle Einheiten Recall bringt oder nur
-Prüfaufwand, ist ungemessen und nicht Teil dieses Zyklus.
+Die Streuung bleibt: Mit Gegenstellen fand je Lauf einer von P2 und P4, nicht beide. Zwei
+Läufe je Zelle sind kein Mittelwert.
 
-Eval-Läufe enden nach 600 Sekunden (`evalkit/dispatch.py`, `DEFAULT_TIMEOUT`), ein Timeout
-wird nicht bewertet. Ob Tiefe `standard` auf `dr-cross-file` darunter bleibt, ist
-ungemessen; die Evals rufen deshalb keine Tiefe `deep` auf.
-
-Die Kosten sind geschätzt, nicht gemessen: ein PR mit 400 Zeilen in Tiefe `standard` unter
-1 $, ein Repo mit 20.000 Zeilen in Tiefe `deep` etwa 16 $ (Konzeptdokument). Der Report
-misst sie mit `total_cost_usd` aus `claude -p`.
-
-Ob ein Subagent, der deep-review aufruft, selbst Subagenten starten kann, ist ungemessen;
-Spec 27 ruft deep-review deshalb aus dem Hauptkontext auf.
-
-evaluated-dev ist immer an und hat das längste Listing; Spec 20 hat kurze Listings gemessen
-und vermutet, ohne es zu beweisen, dass dort Descriptions wegfallen. deep-review kommt mit
-einer weiteren Description dazu.
+evaluated-dev ist immer an und hat das längste Listing; deep-review kommt mit einer weiteren
+Description dazu (Spec 20).
 
 ## Next steps
 
-**Stand 2026-10-30: Bau pausiert.** Task 1 des Plans ist gebaut (`dr-seeded`,
-`dr-seeded-clean`, Basislinie im Report). Ergebnis: `/code-review` findet auf beiden Fassungen
-der Fixture in jedem Lauf alle fünf Fehler, auch die, die nur mit unverändertem Code aus
-`base` erkennbar sind; seine weiteren Funde auf der „sauberen" Fassung sind echte Fehler der
-Fixture, keine Fehlalarme. Damit trifft die Bedingung aus „Alternatives considered" zu, unter
-der „bei `/code-review` bleiben" gewinnt. Der Nutzer hat entschieden: Spec 27 zuerst, mit dem
-Ersatz `/code-review` an den Prüfpunkten. deep-review wird wieder aufgenommen, wenn sich im
-Einsatz eine Lücke von `/code-review` zeigt (große Diffs, Delphi; das runlog aus Spec 27 hält
-Funde je Prüfpunkt fest), dann in der schlanken Fassung: Python-Inventar mit Chunks,
-Delphi-Scanner, Pakete, record, merge/verdict, audit, Profil `checkpoint`, `--since`; ohne
-Sättigung, `quality`, TS-Muster und Pfad-Modus.
-
-Plan mit `impl-plan` (16); Bau nach `skill-forge` (17) Schritt 3 bis 7. Erste Aufgabe des
-Plans ist die Fixture `dr-seeded` mit der Messung aus „Messung der Trefferquote", damit die
-Abnahmeschwelle vor dem Ausbau steht. Danach Spec 27.
+Plan mit `impl-plan` (16) neu; der Plan vom 2026-10-30 (23 Tasks) wird ersetzt, Task 1
+(`dr-seeded`, `test_seeded_fixtures`, Basislinie) bleibt gebaut. Reihenfolge: `review_kit.py
+plan` und `counterparts` für Python mit Tests, dann die Delphi-Hälfte, dann `record`, `merge`,
+`audit`, dann SKILL.md und Nachbarn (subagent-dev ruft am Prüfpunkt deep-review), zuletzt
+Evals und Abnahme mit review-bench. Bau nach `skill-forge` (17) Schritt 3 bis 7.
