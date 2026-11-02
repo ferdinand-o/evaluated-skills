@@ -596,6 +596,49 @@ Kommentarzeilen zählen nicht zur Längengrenze. `DELPHI_RELEASES` kennt `Extrac
 `ExtractKey` und `ExtractValue`. 1.780 Tests grün. Zusätzlich offen: Ob `ExtractKey` und
 `ExtractValue` RTL-Methoden sind, ist ungeprüft. Sie greifen nur bei Besitz-Typen.
 
+### Task 12, Task 13 und Prüfpunkt 9 (C5)
+
+Task 12 hat sechs Evals und die Fixtures `dr-split` (469 Zeilen in drei Verzeichnissen),
+`dr-contract` und `dr-delphi` gebaut. `test_evals_and_fixtures` spielt jeden Eval mechanisch
+durch (plan, counterparts, record mit `[]`, merge, Bericht, audit, cleanup) und prüft die
+Assertions gegen die echte Ausgabe. Alle Muster der Spec treffen unverändert.
+
+Das Delphi-Formatbeispiel in `counterparts.md` zeigte genau das Muster von Eval 4. Ich habe es
+selbst auf `TObjectDictionary`/`ExtractPair` umgestellt (`dbd13b7`).
+
+Task 13 hat die Nachbarn eingepflegt: Spec 00, Spec 27, README, checkpoints.md und die
+Rückverweise in review-context, debug-ledger und test-first.
+
+Dabei kam ein Bruch der Schnittstelle zutage: `--since` übernahm nur aus Läufen mit gleichem
+Profil. Die Zwischen-Prüfpunkte laufen aber mit `checkpoint`, der finale meist mit `standard`.
+Der finale Prüfpunkt hätte also alles neu reviewt. **Entscheidung:** Nach Spec 26 ist
+`checkpoint` „wie standard, plus Soll“. Ein `standard`-Plan übernimmt daher aus `standard`
+und `checkpoint`, ein `checkpoint`-Plan nur aus `checkpoint`.
+
+`/code-review` über 521 Zeilen ergab 12 Funde. In Fix-Runde 1 kommen:
+
+- die Profil-Regel;
+- `ExtractKey`/`ExtractValue` werden wieder entfernt, sie sind keine belegten RTL-Methoden;
+- die Nachprüfung eines Fixes läuft ohne `--since` über die Fix-Commits, sonst kämen die Funde
+  unberührter Dateien zurück;
+- das Profil des finalen Prüfpunkts steht so, wie `checkpoint.json` es meldet;
+- der Ersatzweg `/code-review` in subagent-dev bekommt die richtige Eingabe für `fix-task`;
+- in Spec 27 standen unter „Next steps“ noch Sätze, die Spec 26 „pausiert“ nannten.
+
+Zwei Funde („deep-review ist installiert“ in README und Spec 27) erledigt Task 15. Ein Fund
+war schon behoben.
+
+Offen für known-limits:
+
+- `--since` kann Funde zurückbringen, deren Fix in einer anderen Datei landete. Der
+  Hauptagent gleicht übernommene Funde gegen die Fix-Runden ab.
+- `plan_to_tasks.py` liest `verdicts.jsonl` weiter, der Spec wollte es aus Docstring und
+  `--help` streichen (Spec-Nachzug).
+- `EVAL_RUNS` im Test doppelt den Fixture-Namen aus `evals.json`, und Fixtures werden mehrfach
+  gebaut.
+- Die Runlog-Zeile zu Prüfpunkt 8 zählt „5 von 18“ für Runde 2. Gemeint sind fünf Funde aus
+  dem Review des Fixes, das wieder 18 meldete.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
