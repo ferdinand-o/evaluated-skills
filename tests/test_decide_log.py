@@ -16,7 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import DECIDE_SESSION as SESSION
+from conftest import DECIDE_TAIL as TAIL
 from conftest import decide_add_small as add_small
+from conftest import decide_commit as commit
 from conftest import decide_log_file as log_file
 from conftest import decide_rows as rows
 from conftest import decide_script, git
@@ -1277,15 +1279,6 @@ def test_read_ledger_gives_keys_with_status_for_check(decide_repo):
         ("dependency:pyproject.toml#python-dateutil", "freigegeben"), ("migration:migrations/", "offen")]
 
 
-TAIL = "ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration"
-
-
-def commit(root, message="x"):
-    git(root, "add", "-A")
-    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "commit", "-q", "-m", message)
-    return git(root, "rev-parse", "HEAD").strip()
-
-
 def check_out(capsys, rev):
     """`main(["check", "--range=<rev>"])`; (exit, stdout, stderr). `=` lässt auch einen Bereich mit
     führendem `-` an argparse vorbei, damit check selbst ihn abweist."""
@@ -1315,6 +1308,15 @@ def test_glob_matcher():
     assert hits("docs/User Guides/*.md", "docs/User Guides/a.md")
     assert hits("a?c", "abc") and not hits("a?c", "a/c")
     assert hits("a.b", "a.b") and not hits("a.b", "axb")              # alles andere wörtlich
+    # `**/` am Ende eines Präfix-Musters: null oder mehr Ordner — direkte Kinder und tiefer
+    assert hits("migrations/**/", "migrations/0001.py") and hits("migrations/**/", "migrations/a/b.py")
+    assert not hits("migrations/**/", "migrations") and not hits("migrations/**/", "x/migrations/0001.py")
+    assert hits("**/", "a.py") and hits("**/", "a/b.py")
+    # die Übersetzung wird je Muster einmal gebaut (lru_cache), nicht bei jedem Vergleich
+    dl.glob_to_regex("db/**/*.sql")
+    hits_before = dl.glob_to_regex.cache_info().hits
+    assert dl.pattern_matches("db/**/*.sql", "db/a.sql") and dl.pattern_matches("db/**/*.sql", "db/b.sql")
+    assert dl.glob_to_regex.cache_info().hits == hits_before + 2
 
 
 def test_categories_from_reference():
@@ -1324,14 +1326,17 @@ def test_categories_from_reference():
     assert problem is None
     assert {name: c.grade for name, c in categories.items()} == {
         "api": "teilweise", "migration": "teilweise", "data-delete": "ungeprüft", "unsaved-work": "ungeprüft",
-        "push": "ungeprüft", "external": "ungeprüft", "permissions": "geprüft", "dependency": "geprüft",
+        "push": "ungeprüft", "external": "ungeprüft", "dependency": "teilweise", "permissions": "teilweise",
         "cost": "ungeprüft"}
+    assert list(categories) == ["api", "migration", "data-delete", "unsaved-work", "push", "external",
+                                "dependency", "permissions", "cost"]          # Reihenfolge der Schlusszeile
     assert "rule" not in categories                                 # rule vergleicht check nie
     assert categories["migration"].patterns == ("**/migrations/", "**/alembic/versions/", "db/**/*.sql")
-    assert categories["dependency"].patterns == ("pyproject.toml", "requirements*.txt", "package.json",
-                                                 "Cargo.toml", "go.mod", "Gemfile")
-    assert categories["permissions"].patterns == (".github/workflows/", "CODEOWNERS", ".github/CODEOWNERS",
-                                                  ".claude/settings.json")
+    assert categories["dependency"].patterns == (
+        "**/pyproject.toml", "**/requirements*.txt", "**/setup.py", "**/setup.cfg", "**/Pipfile", "**/package.json",
+        "**/Cargo.toml", "**/go.mod", "**/Gemfile", "**/poetry.lock", "**/uv.lock", "**/Pipfile.lock",
+        "**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/Cargo.lock", "**/go.sum", "**/Gemfile.lock")
+    assert categories["permissions"].patterns == (".github/workflows/", "**/CODEOWNERS", ".claude/settings.json")
     assert categories["api"].patterns == ("openapi.*", "api/openapi.*")
     assert all(c.patterns == () for c in categories.values() if c.grade == "ungeprüft")
     assert all(c.meaning and c.meaning != "—" for c in categories.values())
@@ -1412,6 +1417,15 @@ def test_check_untracked_and_hash_key(decide_repo, monkeypatch, tmp_path, capsys
     assert code == 1 and reported(out) == ["migrations/0003_x.py"], out
     code, out, _ = check_out(capsys, f"{after}..{after}")
     assert code == 0 and "Keine Stelle ohne Freigabe" in out and out.splitlines()[-1] == TAIL, out
+    # A^! und A^-<n> sind Bereiche (ein Commit gegen seine Eltern): ohne Arbeitsbaum und ohne
+    # unversionierte Dateien; pyproject.toml gibt dort „python-dateutil>=2“ frei
+    (root / "migrations" / "0005.py").write_text("def up(): pass\n", encoding="utf-8")
+    for rev in ("HEAD^!", "HEAD^-1", "HEAD^-"):
+        code, out, _ = check_out(capsys, rev)
+        assert code == 1 and reported(out) == ["migrations/0003_x.py"], (rev, out)
+    # eine einzelne Revision nimmt sie dazu
+    code, out, _ = check_out(capsys, after)
+    assert reported(out) == ["migrations/0004_y.py", "migrations/0005.py", "pyproject.toml"], out
 
     # ein Bereich, den Git nicht kennt, oder einer, der wie eine Option aussieht: Exit 2
     code, out, err = check_out(capsys, "gibtsnicht")
@@ -1487,3 +1501,184 @@ def test_check_key_matching(decide_repo, monkeypatch, capsys):
                  ledger_block(3, "freigegeben", "api:openapi.*"))
     code, out, _ = check_out(capsys, base)
     assert code == 0 and reported(out) == [] and out.splitlines()[-1] == TAIL, out
+
+    # leeres `#`: add weist es ab; von Hand in der Ablage gibt es nichts frei (nicht die ganze Datei)
+    assert big(*TWO, "--session", SESSION, key="dependency:pyproject.toml#  ") == 1
+    assert "leerer Text nach #" in capsys.readouterr().err
+    assert big(*TWO, "--session", SESSION, key="dependency:pyproject.toml#python-dateutil") == 0
+    capsys.readouterr()
+    (root / "pyproject.toml").write_text('[project]\ndependencies = ["requests"]\n', encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml#"),
+                 ledger_block(2, "freigegeben", "migration:evals/fixtures/"),
+                 ledger_block(3, "freigegeben", "permissions:.github/workflows/"),
+                 ledger_block(4, "freigegeben", "api:openapi.*"))
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "D-1" in out and "gibt nichts frei" in out, out
+
+
+def test_check_sees_spec_patterns(decide_repo, monkeypatch, capsys):
+    """Spec 28, check: Lockfiles, setup.py/setup.cfg/Pipfile, Manifeste in Unterordnern und
+    CODEOWNERS an jeder Stelle sind Stellen; `**/`-Präfix-Muster in Schlüsseln geben direkte Kinder frei."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    paths = ["poetry.lock", "setup.py", "setup.cfg", "Pipfile", "web/package.json", "web/package-lock.json",
+             "docs/CODEOWNERS", "svc/go.sum", "migrations/0001.py"]
+    for name in paths:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == sorted(paths), out
+    assert "- docs/CODEOWNERS — permissions (teilweise)" in out
+    assert "- poetry.lock — dependency (teilweise)" in out
+    write_ledger(root, ledger_block(1, "freigegeben", "migration:migrations/**/"),
+                 ledger_block(2, "freigegeben", "dependency:**/"),
+                 ledger_block(3, "freigegeben", "permissions:**/CODEOWNERS"))
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [] and out.splitlines()[-1] == TAIL, out
+
+
+def test_check_range_reads_ledger_from_end_revision(decide_repo, monkeypatch, capsys):
+    """`<a>..<b>` liest die Freigaben aus `<b>`, nicht aus der Arbeitskopie; fehlt die Ablage in
+    `<b>`, wie eine fehlende Ablage. Eine einzelne Revision liest die Arbeitskopie."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    git(root, "checkout", "-q", "-b", "feature")
+    (root / "pyproject.toml").write_text('[project]\ndependencies = ["x"]\n', encoding="utf-8")
+    feature = commit(root, "Abhängigkeit")
+
+    # Freigabe nur in der Arbeitskopie, nicht in <b>: gemeldet, mit Grund „fehlt in <b>“
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    code, out, _ = check_out(capsys, f"{base}..{feature}")
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert f"Freigaben nicht gelesen (docs/big-decisions.md fehlt in {feature})" in out, out
+    assert "kein Eintrag" not in out
+    # dieselbe Freigabe für eine einzelne Revision: aus der Arbeitskopie, frei
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
+
+    # Freigabe in <b> committet, in der Arbeitskopie gelöscht: frei, auch von einem anderen Branch aus
+    feature = commit(root, "Freigabe")
+    (root / "docs" / "big-decisions.md").unlink()
+    code, out, _ = check_out(capsys, f"{base}..{feature}")
+    assert code == 0 and reported(out) == [], out
+    git(root, "checkout", "-q", "-f", "-b", "anders", base)
+    write_ledger(root, ledger_block(1, "offen", "dependency:pyproject.toml"))
+    for rev in (f"{base}..{feature}", f"{base}...{feature}", f"{feature}^!"):
+        code, out, _ = check_out(capsys, rev)
+        assert code == 0 and reported(out) == [], (rev, out)
+    # in <b> offen, in der Arbeitskopie freigegeben: gemeldet mit dem Status aus <b>
+    (root / "docs" / "big-decisions.md").unlink()
+    git(root, "checkout", "-q", "feature")
+    write_ledger(root, ledger_block(1, "offen", "dependency:pyproject.toml"))
+    offen = commit(root, "wieder offen")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    code, out, _ = check_out(capsys, f"{base}..{offen}")
+    assert code == 1 and "D-1 dependency:pyproject.toml steht offen" in out, out
+
+
+def test_check_reason_when_ledger_not_read(decide_repo, monkeypatch, capsys):
+    """Fehlt, ist unlesbar oder übersprungen die Ablage, sagt jede Stelle „Freigaben nicht gelesen
+    (<Grund>)“ statt „kein Eintrag mit passendem Schlüssel“."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    line = next(line for line in out.splitlines() if line.startswith("- pyproject.toml"))
+    assert code == 1 and line.endswith("— Freigaben nicht gelesen (docs/big-decisions.md fehlt)"), out
+
+    head2 = "<!-- skill: decide | schema: 2 | generated: python decide_log.py add -->\n"
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"), head=head2)
+    code, out, _ = check_out(capsys, base)
+    line = next(line for line in out.splitlines() if line.startswith("- pyproject.toml"))
+    assert line.endswith("— Freigaben nicht gelesen (docs/big-decisions.md schema 1 erwartet, 2 gefunden)"), out
+    assert "kein Eintrag" not in out
+
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    real = dl.read_file
+
+    def deny(path):
+        if Path(path).name == "big-decisions.md":
+            raise dl.Unreadable(PermissionError(errno.EACCES, "Permission denied"))
+        return real(path)
+
+    monkeypatch.setattr(dl, "read_file", deny)
+    code, out, _ = check_out(capsys, base)
+    line = next(line for line in out.splitlines() if line.startswith("- pyproject.toml"))
+    assert line.endswith("— Freigaben nicht gelesen (docs/big-decisions.md nicht lesbar (Permission denied))"), out
+
+
+def test_check_git_timeout(decide_repo, monkeypatch, capsys):
+    """Antwortet git nicht in GIT_TIMEOUT Sekunden: Exit 2 mit eigener Meldung, nicht „kein Git“ —
+    auch wenn erst der Diff einer Datei für `#<text>` zu lange braucht."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml#python-dateutil"))
+    base = commit(root)
+    (root / "pyproject.toml").write_text('[project]\ndependencies = ["python-dateutil"]\n', encoding="utf-8")
+    real = subprocess.run
+
+    def slow(argv, *args, when=lambda argv: True, **kwargs):
+        if argv[:1] == ["git"] and when(argv):
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+        return real(argv, *args, **kwargs)
+
+    expected = f"ungeprüft — git antwortet nicht in {dl.GIT_TIMEOUT} s"
+    monkeypatch.setattr(dl.subprocess, "run", slow)
+    code, out, err = check_out(capsys, base)
+    assert code == 2 and expected in err and "kein Git" not in err and err.splitlines()[-1] == TAIL, err
+    monkeypatch.setattr(dl.subprocess, "run", lambda argv, *a, **k: slow(argv, *a, when=lambda v: "-U0" in v, **k))
+    code, out, err = check_out(capsys, base)
+    assert code == 2 and expected in err and out == "", (out, err)
+
+
+def test_check_goes_through_changed_files(decide_repo, monkeypatch, capsys):
+    """check holt die Stellen über `changed_files` — ein Einstieg, eine Quelle."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    calls, real = [], dl.changed_files
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(dl, "changed_files", spy)
+    files, problem = dl.changed_files(root, base)
+    assert problem is None and list(files) == ["pyproject.toml"]
+    calls.clear()
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"] and len(calls) == 1, (calls, out)
+
+
+def test_load_categories_cached_per_path_and_mtime(tmp_path, monkeypatch):
+    """Dieselbe Reference wird im Prozess einmal geparst; eine neue mtime liest sie neu."""
+    ref = tmp_path / "reversibility.md"
+    head = "| Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |\n| --- | --- | --- | --- | --- | --- |\n"
+    ref.write_text(head + "| `api` | x | y | teilweise | `openapi.*` | — |\n", encoding="utf-8")
+    reads, real = [], dl.read_file
+
+    def counting(path):
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(dl, "read_file", counting)
+    first, problem = dl.load_categories(ref)
+    again, _ = dl.load_categories(ref)
+    assert problem is None and list(first) == ["api"] and again == first and len(reads) == 1, reads
+    ref.write_text(head + "| `infra` | x | y | teilweise | `*.tf` | — |\n", encoding="utf-8")
+    stat = ref.stat()
+    os.utime(ref, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    changed, _ = dl.load_categories(ref)
+    assert list(changed) == ["infra"] and len(reads) == 2
+    ref.unlink()
+    assert dl.load_categories(ref) == ({}, f"{dl.reference_shown(ref)} fehlt")

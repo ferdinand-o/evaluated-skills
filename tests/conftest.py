@@ -91,3 +91,18 @@ def decide_add_small(topic, question, decision, evidence, *extra):
     """`decide_log.py add --class klein …` über `main`; gibt den Exit-Code zurück."""
     return decide_script().main(["add", "--class", "klein", "--topic", topic, "--question", question,
                                  "--decision", decision, "--evidence", evidence, *extra])
+
+
+# --- decide check: Commit-Helfer und Schlusszeile ------------------------------------------
+# Einmal hier statt in tests/test_decide_log.py und den beiden check-Stubs. DECIDE_TAIL ist
+# bewusst ein Literal (die Erwartung aus Spec 28, Abschnitt check), nicht aus dem Skript gelesen.
+
+DECIDE_TAIL = ("ungeprüft: data-delete, unsaved-work, push, external, cost; "
+               "teilweise: api, migration, dependency, permissions")
+
+
+def decide_commit(root: Path, message: str = "x") -> str:
+    """Alles im Repo committen (`git add -A`, feste Identität); gibt den Hash von HEAD zurück."""
+    git(root, "add", "-A")
+    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "commit", "-q", "-m", message)
+    return git(root, "rev-parse", "HEAD").strip()

@@ -7,17 +7,11 @@ When `decide_log.py check --range <bereich>` läuft
 Then meldet es beide Stellen mit Datei, Kategorie und Grund aus `reversibility.md`
 Then die Ausgabe nennt die ungeprüften Kategorien
 """
+from conftest import DECIDE_TAIL as TAIL
+from conftest import decide_commit as commit
 from conftest import decide_script, git
 
 dl = decide_script()
-TAIL = "ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration"
-
-
-def commit(root, message):
-    git(root, "add", "-A")
-    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "commit", "-q", "-m", message)
-
-
 def test_decide_teure_aenderung_ohne_freigabe_wird_gemeldet(decide_repo, monkeypatch, capsys):
     # Arrange
     root, _ = decide_repo
