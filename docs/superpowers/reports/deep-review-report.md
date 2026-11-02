@@ -569,6 +569,28 @@ der Container neu. Merge und Aufräumen waren schon durch; der wiederholte Lauf 
 Ein Fund (Runlog-Zeile für Task 11) war beim Review schon behoben. Die übrigen gehen
 zusammengefasst als F1–F12 in Fix-Runde 1.
 
+Fix-Runde 1 ergab 1.776 Tests grün. Die Vorlage hat jetzt eine Zeile für „Nicht geprüft“, eine
+für Hinweise und eine für übernommene Dateien; ohne Funde und bei `split: false` sind es 20
+Zeilen. Das Review des Fixes meldete 18 Funde. In Runde 2 kommen die mit falschem Ergebnis:
+
+- Der Scope-Abgleich für `/security-review` lag in beiden Richtungen falsch.
+- Der Sammler kennt `ExtractPair` nicht, und `doOwnsKeys` fehlte.
+- `audit` prüfte die Zeilen „Hinweise“ und „Übernommen“ nicht.
+- „Nicht geprüft“ verbarg übersprungene Quelldateien.
+- Eine Payload-Datei mit BOM wurde abgewiesen.
+
+Offen für known-limits:
+
+- Die Doku-Funde zu review-brief.md und delphi.md haben keine Tests, die alten Fehler könnten
+  unbemerkt zurückkommen.
+- Die Vorlage nennt die Grenzwerte (`SPLIT_AT`, `PACKET_SIZE`) nicht, obwohl packets.md das
+  verspricht.
+- Die Vorlage nennt `REPORT_BASE_LINES (20)` als Zahl, ohne dass ein Test sie gegen die
+  Konstante prüft.
+- Ein Test-Block wiederholt einen anderen, und in delphi.md sind zwei Zeilen falsch umbrochen.
+- Der Werkzeugname „Review ohne /security-review“ steht noch nicht im Spec; er wird beim
+  Nachziehen des Specs aufgenommen.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
