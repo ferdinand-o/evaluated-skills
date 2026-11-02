@@ -12,6 +12,8 @@ from conftest import decide_commit as commit
 from conftest import decide_script, git
 
 dl = decide_script()
+
+
 def test_decide_teure_aenderung_ohne_freigabe_wird_gemeldet(decide_repo, monkeypatch, capsys):
     # Arrange
     root, _ = decide_repo

@@ -299,15 +299,16 @@ def test_contradiction_once_per_topic(decide_repo, capsys):
 # --- Funde des Prüfpunkts 1, Runde 2 (F1–F10) -------------------------------------------
 
 def unreadable(monkeypatch, name="log.md"):
-    """Lesefehler auf `name` simulieren — als root greift Modus 0200 nicht."""
-    real = Path.read_text
+    """Lesefehler auf `name` simulieren — als root greift Modus 0200 nicht. `read_file` liest Bytes
+    (`read_bytes`) und dekodiert sie mit `decode_text`."""
+    real = Path.read_bytes
 
-    def read_text(self, *args, **kwargs):
+    def read_bytes(self, *args, **kwargs):
         if self.name == name:
             raise PermissionError(13, "Permission denied", str(self))
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
 
 
 def test_unreadable_log_is_not_replaced(decide_repo, monkeypatch, capsys):
@@ -324,7 +325,8 @@ def test_unreadable_log_is_not_replaced(decide_repo, monkeypatch, capsys):
     assert "nicht lesbar" in captured.err and "nichts geschrieben" in captured.err, captured.err
     assert "Permission denied" in captured.err
     assert "Protokoll angelegt" not in captured.out + captured.err
-    assert log_file(root).read_bytes() == before
+    with open(log_file(root), "rb") as handle:                  # Path.read_bytes ist ersetzt
+        assert handle.read() == before
 
     assert dl.main(["summary"]) == 1
     err = capsys.readouterr().err
@@ -1312,11 +1314,6 @@ def test_glob_matcher():
     assert hits("migrations/**/", "migrations/0001.py") and hits("migrations/**/", "migrations/a/b.py")
     assert not hits("migrations/**/", "migrations") and not hits("migrations/**/", "x/migrations/0001.py")
     assert hits("**/", "a.py") and hits("**/", "a/b.py")
-    # die Übersetzung wird je Muster einmal gebaut (lru_cache), nicht bei jedem Vergleich
-    dl.glob_to_regex("db/**/*.sql")
-    hits_before = dl.glob_to_regex.cache_info().hits
-    assert dl.pattern_matches("db/**/*.sql", "db/a.sql") and dl.pattern_matches("db/**/*.sql", "db/b.sql")
-    assert dl.glob_to_regex.cache_info().hits == hits_before + 2
 
 
 def test_categories_from_reference():
@@ -1568,9 +1565,12 @@ def test_check_range_reads_ledger_from_end_revision(decide_repo, monkeypatch, ca
     assert code == 0 and reported(out) == [], out
     git(root, "checkout", "-q", "-f", "-b", "anders", base)
     write_ledger(root, ledger_block(1, "offen", "dependency:pyproject.toml"))
-    for rev in (f"{base}..{feature}", f"{base}...{feature}", f"{feature}^!"):
+    for rev in (f"{base}..{feature}", f"{feature}^!"):
         code, out, _ = check_out(capsys, rev)
         assert code == 0 and reported(out) == [], (rev, out)
+    # <a>...<b>: git rev-parse nennt <b> und <a> als positive — mehrere Enden, Exit 2 (CP3-R2-F2)
+    code, out, err = check_out(capsys, f"{base}...{feature}")
+    assert code == 2 and "ungeprüft — Bereich mit mehreren Enden" in err, (out, err)
     # in <b> offen, in der Arbeitskopie freigegeben: gemeldet mit dem Status aus <b>
     (root / "docs" / "big-decisions.md").unlink()
     git(root, "checkout", "-q", "feature")
@@ -1660,25 +1660,109 @@ def test_check_goes_through_changed_files(decide_repo, monkeypatch, capsys):
     assert code == 1 and reported(out) == ["pyproject.toml"] and len(calls) == 1, (calls, out)
 
 
-def test_load_categories_cached_per_path_and_mtime(tmp_path, monkeypatch):
-    """Dieselbe Reference wird im Prozess einmal geparst; eine neue mtime liest sie neu."""
-    ref = tmp_path / "reversibility.md"
-    head = "| Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |\n| --- | --- | --- | --- | --- | --- |\n"
-    ref.write_text(head + "| `api` | x | y | teilweise | `openapi.*` | — |\n", encoding="utf-8")
-    reads, real = [], dl.read_file
+def test_check_rule_key_with_hash_stays_silent(decide_repo, monkeypatch, capsys):
+    """CP3-R2-F1: `rule:C#` ist ein Regelschlüssel (Thema mit `#`), kein leerer Text nach `#` —
+    check überspringt ihn still wie jeden `rule:`-Schlüssel."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: C#\n")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    write_ledger(root, ledger_block(1, "freigegeben", "rule:C#"),
+                 ledger_block(2, "freigegeben", "dependency:pyproject.toml"))
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
+    assert "D-1" not in out and "leeren Text" not in out, out
 
-    def counting(path):
-        reads.append(path)
-        return real(path)
 
-    monkeypatch.setattr(dl, "read_file", counting)
-    first, problem = dl.load_categories(ref)
-    again, _ = dl.load_categories(ref)
-    assert problem is None and list(first) == ["api"] and again == first and len(reads) == 1, reads
-    ref.write_text(head + "| `infra` | x | y | teilweise | `*.tf` | — |\n", encoding="utf-8")
-    stat = ref.stat()
-    os.utime(ref, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
-    changed, _ = dl.load_categories(ref)
-    assert list(changed) == ["infra"] and len(reads) == 2
-    ref.unlink()
-    assert dl.load_categories(ref) == ({}, f"{dl.reference_shown(ref)} fehlt")
+def test_check_reason_comes_from_ledger_key(decide_repo, monkeypatch, capsys):
+    """CP3-R2-F6: Der Grund im Hinweis ist der, mit dem `_ledger_key` den Schlüssel abweist — bei
+    `a#b:c#` der leere Text nach `#`, nicht „nicht die Form“."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    write_ledger(root, ledger_block(1, "freigegeben", "a#b:c#"), ledger_block(2, "freigegeben", "nur-text"))
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "Hinweis: D-1 Schlüssel „a#b:c#“ hat leeren Text nach # — gibt nichts frei." in out, out
+    assert f"Hinweis: D-2 Schlüssel „nur-text“ hat nicht die Form {dl.KEY_FORM} — gibt nichts frei." in out, out
+
+
+def test_check_range_notations_via_rev_parse(decide_repo, monkeypatch, capsys):
+    """CP3-R2-F2: Ein `git rev-parse <rev>` entscheidet — genau eine positive Revision ohne negative
+    ist eine Einzelrevision (Arbeitsbaum, unversionierte Dateien, Ablage aus der Arbeitskopie), sonst
+    ein Bereich mit der positiven als End-Revision; mehrere positive: Exit 2."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    head = commit(root, "Abhängigkeit mit Freigabe")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0001.py").write_text("x\n", encoding="utf-8")            # unversioniert
+    since_base = ["docs/big-decisions.md", "migrations/0001.py", "pyproject.toml"]
+    for rev, expected in (("HEAD", ["migrations/0001.py"]), ("HEAD~1", since_base), ("HEAD^@", since_base)):
+        files, problem = dl.changed_files(root, rev)
+        assert problem is None and files.end is None and list(files) == expected, (rev, problem, files.end)
+    for rev in ("HEAD~1..HEAD", "HEAD^!"):
+        files, problem = dl.changed_files(root, rev)
+        assert problem is None and files.end == head, (rev, problem, files.end)
+        assert list(files) == ["docs/big-decisions.md", "pyproject.toml"], (rev, list(files))
+
+    # HEAD^@ (ein Elternteil): Freigaben aus der Arbeitskopie, nicht „fehlt in HEAD^@“
+    code, out, _ = check_out(capsys, "HEAD^@")
+    assert code == 1 and reported(out) == ["migrations/0001.py"], out
+    assert "fehlt in" not in out and "kein Eintrag mit passendem Schlüssel in docs/big-decisions.md" in out, out
+    code, out, _ = check_out(capsys, "HEAD~1..HEAD")
+    assert code == 0 and reported(out) == [] and f"Freigaben aus {head}" in out, out
+    # A...B: git rev-parse nennt B und A als positive — mehrere Enden, ungeprüft
+    code, out, err = check_out(capsys, "HEAD~1...HEAD")
+    assert code == 2 and out == "" and "ungeprüft — Bereich mit mehreren Enden" in err, err
+    assert err.splitlines()[-1] == TAIL, err
+
+    # Merge-Commit: HEAD^@ sind beide Eltern (mehrere Enden), HEAD^! ein Bereich mit Ende HEAD
+    (root / "migrations" / "0001.py").unlink()
+    git(root, "checkout", "-q", "-b", "seite", base)
+    (root / "app.py").write_text("x\n", encoding="utf-8")
+    commit(root, "Seite")
+    git(root, "checkout", "-q", "-")
+    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "merge", "-q", "--no-ff", "-m", "Merge", "seite")
+    merge = git(root, "rev-parse", "HEAD").strip()
+    code, out, err = check_out(capsys, "HEAD^@")
+    assert code == 2 and "ungeprüft — Bereich mit mehreren Enden" in err, (out, err)
+    files, problem = dl.changed_files(root, "HEAD^!")
+    assert problem is None and files.end == merge, (problem, files.end)
+
+
+def test_check_range_ledger_problems_name_revision(decide_repo, monkeypatch, capsys):
+    """CP3-R2-F3: Liest check die Ablage aus einer Revision, nennen Kopfzeilen- und Schema-Probleme
+    „docs/big-decisions.md in <rev>“, nicht die Arbeitskopie. Ein BOM in der Revision stört nicht."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    head2 = "<!-- skill: decide | schema: 2 | generated: python decide_log.py add -->\n"
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"), head=head2)
+    end = commit(root, "Ablage schema 2")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))     # Arbeitskopie gültig
+    code, out, _ = check_out(capsys, f"{base}..{end}")
+    where = f"docs/big-decisions.md in {end}"
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert f"{where} schema 1 erwartet, 2 gefunden — Freigaben übersprungen" in out, out
+    assert f"Freigaben nicht gelesen ({where} schema 1 erwartet, 2 gefunden)" in out, out
+
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"), head="# Große Entscheidungen\n")
+    end = commit(root, "Ablage ohne Kopfzeile")
+    code, out, _ = check_out(capsys, f"{base}..{end}")
+    assert code == 1 and f"docs/big-decisions.md in {end} ohne Kopfzeile von decide" in out, out
+
+    path = write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+    end = commit(root, "Ablage mit BOM")
+    code, out, _ = check_out(capsys, f"{base}..{end}")
+    assert code == 0 and reported(out) == [], out

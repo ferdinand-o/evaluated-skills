@@ -69,7 +69,8 @@ Pflicht je Weg:
   `references/reversibility.md` (`load_categories`; fehlt sie oder parst sie nicht, Exit 1), oder
   `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft — sonst Exit 1.
 - `add --class gross --approved-by-request "<Zitat>"`: `--topic`, `--question`, `--key` wie oben
-  (auch `rule:<thema>` — konkreter Auftrag vor Regel); Status `freigegeben`, „Optionen: — (Auftrag)“.
+  (auch `rule:<thema>` — konkreter Auftrag vor Regel); Status `freigegeben`,
+  „Optionen: — (Auftrag)“.
 - `add --class klein`, von `immer fragen` hochgestuft: wie klein, dazu zwei bis vier `--option`
   (sonst Exit 1 „Regel immer fragen: <thema> trifft — zwei bis vier --option nötig“);
   `--decision` wird die Empfehlung, der Schlüssel `rule:<thema>`.
@@ -86,32 +87,33 @@ Weichen nur Optionen oder Empfehlung ab, Exit 1 „D-<n> steht offen mit anderen
 anderer Empfehlung — von Hand ändern oder mit resolve beantworten“, nichts geschrieben. Schlüssel:
 Leerraum um Kategorie und Pfadmuster fällt weg, Leerzeichen im Pfadmuster bleiben, Tab und
 Zeilenumbruch darin sind ein Fehler, ebenso ein `#` ohne Text (Exit 1 „leerer Text nach #“).
-`references/reversibility.md` wird je Pfad, mtime und Größe einmal im Prozess geparst. Steht ein Feld in einem Block doppelt, gilt das erste — beim
-Lesen wie für `resolve`. `resolve` ändert nur
-Blöcke mit Status `offen` (sonst Exit 1 mit Status und Quelle; von Hand bleibt es möglich), dort
-Überschrift-Status, Antwort und Quelle — Felder auch leer oder mit Leerraum vor dem `:` —, und
-lässt den Block stehen; schreibt es ohne Sperre, sagt es das wie `add`. `add` und `resolve`
-melden „.skills/cache/ steht nicht in der .gitignore“ genau dann, wenn der Ordner bei diesem Aufruf
-entstand, nicht ignoriert ist und der Aufruf etwas geschrieben hat. Die Ablage wird unter der
-Sperre `.skills/cache/decide/big-decisions.md.lock` (nicht neben der Datei, `docs/` wird
-committet) neu gelesen und per `write_atomic` ersetzt;
-gelesen wird mit `utf-8-sig` (ein BOM aus dem Editor stört nicht; ebenso bei Protokoll, Regeln
-und Vorlage), geschrieben ohne BOM.
+Steht ein Feld in einem Block doppelt, gilt das erste — beim Lesen wie für `resolve`. `resolve`
+ändert nur Blöcke mit Status `offen` (sonst Exit 1 mit Status und Quelle; von Hand bleibt es
+möglich), dort Überschrift-Status, Antwort und Quelle — Felder auch leer oder mit Leerraum vor
+dem `:` —, und lässt den Block stehen; schreibt es ohne Sperre, sagt es das wie `add`. `add` und
+`resolve` melden „.skills/cache/ steht nicht in der .gitignore“ genau dann, wenn der Ordner bei
+diesem Aufruf entstand, nicht ignoriert ist und der Aufruf etwas geschrieben hat. Die Ablage wird
+unter der Sperre `.skills/cache/decide/big-decisions.md.lock` (nicht neben der Datei, `docs/` wird
+committet) neu gelesen und per `write_atomic` ersetzt; gelesen wird mit `utf-8-sig` (ein BOM aus
+dem Editor stört nicht; ebenso bei Protokoll, Regeln und Vorlage), geschrieben ohne BOM.
 Konsumenten-Regel (docs/artifact-header.md): fehlt die Kopfzeile von decide oder ist `schema`
 höher als 1, überspringen `read_ledger` und `open` die Datei sichtbar („docs/big-decisions.md
 schema 1 erwartet, 2 gefunden — Freigaben übersprungen“), `add` und `resolve` schreiben nichts.
 
-`check --range <rev>` holt die Stellen über `changed_files`. Eine einzelne Revision — kein `..`,
-`^!` oder `^-`, und `git rev-parse --verify --quiet <rev>^{commit}` löst sie auf — liest
-`git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die unversionierten Dateien aus
-`git ls-files --others --exclude-standard`; die Freigaben kommen aus der Arbeitskopie von
-`docs/big-decisions.md`. Alles andere ist ein Bereich ohne Arbeitsbaum: `<a>..<b>`, `<a>...<b>`
-und `A^!`, `A^-<n>` (beide nimmt `git diff` als Bereich an) lassen Arbeitsbaum und unversionierte
-Dateien aus, und die Freigaben kommen aus der Ablage in der End-Revision (`<b>`, leer HEAD; `A`),
-gelesen wie `git show <b>:docs/big-decisions.md` (`rev-parse --verify`, dann `cat-file blob`);
-fehlt sie dort, gilt sie als fehlend. Git läuft über `subprocess` mit Argumentliste, nie über eine Shell;
-ein Bereich mit führendem `-` ist kein Bereich. Eine Stelle ist eine Datei im Diff (geändert, neu,
-gelöscht, unversioniert; Umbenennung als Löschen plus Neuanlage). Ihre Kategorien kommen aus den
+`check --range <rev>` holt die Stellen über `changed_files`. Ob `<rev>` eine einzelne Revision
+oder ein Bereich ist, sagt ein Aufruf `git rev-parse <rev> --`: Genau eine positive Revision ohne
+negative (`HEAD`, `HEAD~1`, `HEAD^@` bei einem Elternteil) ist eine einzelne Revision; check liest
+dann `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die unversionierten Dateien aus
+`git ls-files --others --exclude-standard`, die Freigaben aus der Arbeitskopie von
+`docs/big-decisions.md`. Sonst ist es ein Bereich ohne Arbeitsbaum (`<a>..<b>`, `A^!`, `A^-<n>`):
+Arbeitsbaum und unversionierte Dateien bleiben aus, die Freigaben kommen aus der Ablage in der
+End-Revision (der einen positiven), gelesen mit einem Aufruf `git cat-file blob <end>:<pfad>` und
+dekodiert wie die Arbeitskopie (`decode_text`). Fehlt sie dort, gilt sie als fehlend; Meldungen zu
+ihr nennen „docs/big-decisions.md in <end>“. Mehrere positive Revisionen (`<a>...<b>`, `HEAD^@`
+bei einem Merge) enden mit Exit 2 „ungeprüft — Bereich mit mehreren Enden“. Git läuft über
+`subprocess` mit Argumentliste, nie über eine Shell; ein Bereich mit führendem `-` ist kein
+Bereich. Eine Stelle ist eine Datei im Diff (geändert, neu, gelöscht, unversioniert; Umbenennung
+als Löschen plus Neuanlage). Ihre Kategorien kommen aus den
 Pfadmustern der Tabelle in `references/reversibility.md` — der einen Quelle für Kategorien, Grad
 und Muster. Muster mit `/` am Ende sind ein Präfix (`x/**/` wie `x/`: trifft `x/datei` und
 tiefer), sonst ein Glob, den `glob_to_regex` selbst übersetzt und je Muster zwischenspeichert (`*`
@@ -446,11 +448,17 @@ class Unreadable(Exception):
     """Protokoll oder Ablage besteht, lässt sich aber nicht lesen; `args[0]` ist der OSError."""
 
 
+def decode_text(data):
+    """Text aus Bytes wie beim Lesen einer Datei: `utf-8-sig` (ein BOM fällt weg), Zeilenenden als
+    `\n` — für `read_file` und für die Ablage aus einer Revision (`_ledger_at`)."""
+    return data.decode("utf-8-sig", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def read_file(path):
-    """Rohtext von `path` (`utf-8-sig`: ein BOM fällt weg); None, wenn die Datei fehlt. Jeder
-    andere Lesefehler wirft `Unreadable` — eine unlesbare Datei ist nicht fehlend."""
+    """Rohtext von `path` (`decode_text`); None, wenn die Datei fehlt. Jeder andere Lesefehler
+    wirft `Unreadable` — eine unlesbare Datei ist nicht fehlend."""
     try:
-        return Path(path).read_text(encoding="utf-8-sig", errors="replace")
+        return decode_text(Path(path).read_bytes())
     except FileNotFoundError:
         return None
     except OSError as error:
@@ -662,9 +670,10 @@ def read_ledger_text(root):
     return _blank_is_missing(read_file(ledger_path(root)))
 
 
-def ledger_problem(text, tail="Freigaben übersprungen"):
-    """Konsumenten-Regel für die Ablage: None, wenn die Kopfzeile passt, sonst der Grund."""
-    return header_problem(text, LEDGER_SHOWN, tail)
+def ledger_problem(text, tail="Freigaben übersprungen", shown_as=LEDGER_SHOWN):
+    """Konsumenten-Regel für die Ablage: None, wenn die Kopfzeile passt, sonst der Grund; `shown_as`
+    nennt die Ablage („docs/big-decisions.md in <rev>“, wenn aus einer Revision gelesen)."""
+    return header_problem(text, shown_as, tail)
 
 
 _FIELD_RE = re.compile(r"^\s*(?P<label>[^:]+?)\s*:(?P<value>.*)$")
@@ -735,12 +744,12 @@ def _read_ledger(root):
     return _ledger_from_text(text)
 
 
-def _ledger_from_text(text):
+def _ledger_from_text(text, shown_as=LEDGER_SHOWN):
     """(Blöcke, Problem, existiert) aus dem Rohtext der Ablage (None: fehlt) — für die Arbeitskopie
-    (`_read_ledger`) und für eine Revision (`_ledger_at`)."""
+    (`_read_ledger`) und für eine Revision (`_ledger_at`, dann nennt `shown_as` sie)."""
     if _blank_is_missing(text) is None:
         return [], None, text is not None
-    problem = ledger_problem(text)
+    problem = ledger_problem(text, shown_as=shown_as)
     return ([], problem, True) if problem else (parse_blocks(text), None, True)
 
 
@@ -1132,15 +1141,9 @@ def _patterns(text):
     return found, None
 
 
-_CATEGORIES = {}        # str(path) → ((mtime_ns, size), (Kategorien, Problem)) — load_categories
-
-
 def load_categories(path):
-    """(Kategorien, Problem) aus der Tabelle in `references/reversibility.md` (`path`).
-
-    Im Prozess je Pfad zwischengespeichert, solange mtime und Größe der Datei gleich bleiben —
-    `add --class gross` und check parsen dieselbe Tabelle nicht jedes Mal neu. Eine fehlende Datei
-    wird nicht gespeichert. Jeder Aufruf bekommt ein eigenes dict.
+    """(Kategorien, Problem) aus der Tabelle in `references/reversibility.md` (`path`), bei jedem
+    Aufruf neu gelesen.
 
     Kategorien: dict Name → `Category`, in Tabellenreihenfolge. Die Tabelle beginnt mit der
     Kopfzeile `| Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |` und der
@@ -1149,22 +1152,6 @@ def load_categories(path):
     `geprüft` und `teilweise` mit mindestens einem, `ungeprüft` mit keinem —, Bedeutung nicht leer.
     Problem: None, oder eine Zeile Grund („references/reversibility.md fehlt“, nicht lesbar,
     keine Tabelle, Zeile <n>: …); dann sind die Kategorien {}."""
-    try:
-        stat = os.stat(path)
-        stamp = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        stamp = None
-    cached = _CATEGORIES.get(str(path))
-    if stamp is None or cached is None or cached[0] != stamp:
-        cached = (stamp, _parse_categories(path))
-        if stamp is not None:
-            _CATEGORIES[str(path)] = cached
-    categories, problem = cached[1]
-    return dict(categories), problem
-
-
-def _parse_categories(path):
-    """Liest und parst die Tabelle — siehe `load_categories`."""
     where = reference_shown(path)
     try:
         text = read_file(path)
@@ -1278,16 +1265,22 @@ def timeout_problem():
     return f"git antwortet nicht in {GIT_TIMEOUT} s"
 
 
-def _git(cwd, *args):
+def _git(cwd, *args, raw=False):
     """Git mit Argumentliste in `cwd`, nie über eine Shell; `GitTimeout` nach `GIT_TIMEOUT`
-    Sekunden, `NoGit`, wenn es nicht startet."""
+    Sekunden, `NoGit`, wenn es nicht startet. `raw`: stdout als Bytes (zum Dekodieren mit
+    `decode_text`), stderr als Text unter `LC_ALL=C` (Meldungen von Git erkennbar englisch)."""
+    command = ["git", "-C", str(cwd), "--literal-pathspecs", *args]
     try:
-        return subprocess.run(["git", "-C", str(cwd), "--literal-pathspecs", *args], capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT)
+        if not raw:
+            return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  timeout=GIT_TIMEOUT)
+        result = subprocess.run(command, capture_output=True, timeout=GIT_TIMEOUT, env={**os.environ, "LC_ALL": "C"})
     except subprocess.TimeoutExpired as error:
         raise GitTimeout(str(error)) from error
     except (OSError, subprocess.SubprocessError) as error:
         raise NoGit(str(error)) from error
+    result.stderr = result.stderr.decode("utf-8", errors="replace")
+    return result
 
 
 def _git_error(result):
@@ -1304,37 +1297,35 @@ class Changes(list):
         self.top, self.untracked, self.end = top, set(untracked), end
 
 
-def _single_revision(top, rev):
-    """Ob `rev` eine einzelne Revision ist (dann mit Arbeitsbaum): kein `..`, `^!` oder `^-` und
-    `git rev-parse --verify --quiet <rev>^{commit}` löst ihn auf. `A^!` und `A^-<n>` nimmt
-    `git diff` als Bereich an — wie `<a>..<b>` ohne Arbeitsbaum."""
-    if any(mark in rev for mark in ("..", "^!", "^-")):
-        return False
-    return _git(top, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").returncode == 0
-
-
-def _range_end(rev):
-    """Die End-Revision eines Bereichs: `<b>` aus `<a>..<b>` und `<a>...<b>` (leer: HEAD), `A` aus
-    `A^!` und `A^-<n>`."""
-    for mark in ("...", ".."):
-        if mark in rev:
-            return rev.split(mark, 1)[1] or "HEAD"
-    if rev.endswith("^!"):
-        return rev[:-2]
-    if "^-" in rev:
-        return rev.split("^-", 1)[0]
-    return rev
+def _revision_ends(top, rev):
+    """(einzeln, Ende, Problem) aus einem Aufruf `git rev-parse <rev> --`: genau eine positive
+    Revision ohne negative ist eine einzelne Revision (`HEAD`, `HEAD~1`, `HEAD^@` bei einem
+    Elternteil; Ende None — mit Arbeitsbaum); sonst ein Bereich, Ende die eine positive Revision
+    (`<a>..<b>`, `A^!`, `A^-<n>`). Mehrere positive (`<a>...<b>`, `HEAD^@` bei einem Merge) oder
+    keine: Problem."""
+    result = _git(top, "rev-parse", rev, "--")
+    if result.returncode != 0:
+        return False, None, f"git rev-parse {rev} fehlgeschlagen: {_git_error(result)}"
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip() and line.strip() != "--"]
+    positive = [name for name in names if not name.startswith("^")]
+    if len(positive) > 1:
+        return False, None, f"Bereich mit mehreren Enden ({rev})"
+    if not positive:
+        return False, None, f"Bereich „{rev}“ ohne End-Revision"
+    if len(names) == 1:
+        return True, None, None
+    return False, positive[0], None
 
 
 def changed_files(root, rev):
     """(Dateien, Problem): die Stellen des Bereichs als `Changes` — eine Liste der Pfade relativ
     zur Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked` und `end`. Die eine Quelle für check.
-    Eine einzelne Revision (`_single_revision`): `git diff <rev>` (Commits seit `<rev>` und
-    Arbeitsbaum) plus `git ls-files --others --exclude-standard`, Ablage aus der Arbeitskopie
-    (`end` None). Sonst — `<a>..<b>`, `<a>...<b>`, `A^!`, `A^-<n>` — nur `git diff`, `end` ist die
-    End-Revision (`_range_end`). Problem: None, „kein Git“ (kein `git` oder kein Repo), „git
-    antwortet nicht in <n> s“, ein ungültiger Bereich (leer, mit Leerraum oder führendem `-`) oder
-    der Grund, mit dem Git abbricht; dann sind die Dateien leer."""
+    Einzelne Revision oder Bereich sagt `_revision_ends`. Eine einzelne Revision: `git diff <rev>`
+    (Commits seit `<rev>` und Arbeitsbaum) plus `git ls-files --others --exclude-standard`, Ablage
+    aus der Arbeitskopie (`end` None). Ein Bereich: nur `git diff`, `end` ist seine End-Revision.
+    Problem: None, „kein Git“ (kein `git` oder kein Repo), „git antwortet nicht in <n> s“, ein
+    ungültiger Bereich (leer, mit Leerraum oder führendem `-`), einer mit mehreren Enden oder der
+    Grund, mit dem Git abbricht; dann sind die Dateien leer."""
     rev = (rev or "").strip()
     if not rev or rev.startswith("-") or re.search(r"\s", rev):
         return Changes(), f"Bereich „{rev}“ ungültig — erwartet <rev> oder <a>..<b>"
@@ -1343,7 +1334,9 @@ def changed_files(root, rev):
         if top.returncode != 0 or not top.stdout.strip():
             return Changes(), "kein Git"
         top = Path(top.stdout.strip())
-        single = _single_revision(top, rev)
+        single, end, problem = _revision_ends(top, rev)
+        if problem:
+            return Changes(top=top), problem
         diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", rev, "--")
         if diff.returncode != 0:
             return Changes(top=top), f"git diff {rev} fehlgeschlagen: {_git_error(diff)}"
@@ -1358,7 +1351,7 @@ def changed_files(root, rev):
         return Changes(), timeout_problem()
     except NoGit:
         return Changes(), "kein Git"
-    return Changes(sorted(files | untracked), top, untracked, None if single else _range_end(rev)), None
+    return Changes(sorted(files | untracked), top, untracked, end), None
 
 
 def added_lines(top, rev, path, untracked):
@@ -1391,26 +1384,33 @@ def added_lines(top, rev, path, untracked):
 
 def _ledger_at(top, rev):
     """Wie `_read_ledger`, aber aus `<rev>:docs/big-decisions.md` (für einen Bereich ohne
-    Arbeitsbaum); fehlt sie in `rev`, ist das ([], None, False)."""
-    found = _git(top, "rev-parse", "--verify", "--quiet", f"{rev}:{LEDGER_SHOWN}")
-    if found.returncode != 0 or not found.stdout.strip():
-        return [], None, False
-    blob = _git(top, "cat-file", "blob", found.stdout.strip())
+    Arbeitsbaum) mit einem Aufruf `git cat-file blob`, dekodiert mit `decode_text`; fehlt sie in
+    `rev`, ist das ([], None, False). Meldungen nennen „docs/big-decisions.md in <rev>“."""
+    shown_as = f"{LEDGER_SHOWN} in {rev}"
+    blob = _git(top, "cat-file", "blob", f"{rev}:{LEDGER_SHOWN}", raw=True)
     if blob.returncode != 0:
-        return [], f"{LEDGER_SHOWN} in {rev} nicht lesbar ({_git_error(blob)}){SKIPPED}", True
-    text = blob.stdout[1:] if blob.stdout.startswith("\ufeff") else blob.stdout
-    return _ledger_from_text(text)
+        if re.search(r"does not exist in|exists on disk, but not in", blob.stderr):
+            return [], None, False
+        return [], f"{shown_as} nicht lesbar ({_git_error(blob)}){SKIPPED}", True
+    return _ledger_from_text(decode_text(blob.stdout), shown_as)
 
 
 def _ledger_key(key):
-    """(Kategorie, Muster, Text) eines Schlüssels aus der Ablage; None, wenn er die Form nicht hat
-    (auch bei `#` ohne Text — der gäbe sonst die ganze Datei frei)."""
+    """((Kategorie, Muster, Text), None) eines Schlüssels aus der Ablage, oder (None, Grund), wenn
+    er die Form nicht hat — auch bei `#` ohne Text (der gäbe sonst die ganze Datei frei). Bei
+    `rule:<thema>` ist alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`); check
+    überspringt solche Schlüssel."""
     category, sep, rest = (key or "").partition(":")
+    category = category.strip()
+    if category == RULE_CATEGORY and sep and rest.strip():
+        return (category, rest.strip(), ""), None
     pattern, hash_, text = rest.partition("#")
-    category, pattern = category.strip(), pattern.strip()
-    if not sep or not category or not pattern or (hash_ and not text.strip()):
-        return None
-    return category, pattern, " ".join(text.split())
+    pattern = pattern.strip()
+    if not sep or not category or not pattern:
+        return None, f"hat nicht die Form {KEY_FORM}"
+    if hash_ and not text.strip():
+        return None, "hat leeren Text nach #"
+    return (category, pattern, " ".join(text.split())), None
 
 
 def check(root, rev):
@@ -1456,13 +1456,11 @@ def _check(changes, rev, categories, tail):
         notes.append(f"{unread} — keine Freigaben.")
     entries = []
     for block in blocks:
-        parsed = _ledger_key(block["key"])
+        parsed, why_not = _ledger_key(block["key"])
         if parsed is None:
             if block["status"] == "freigegeben":
-                empty = "#" in (block["key"] or "") and not block["key"].partition("#")[2].strip()
-                notes.append(f"Hinweis: {block['id']} Schlüssel „{block['key'] or NONE}“ "
-                             + ("hat leeren Text nach #" if empty else f"hat nicht die Form {KEY_FORM}")
-                             + " — gibt nichts frei.")
+                notes.append(f"Hinweis: {block['id']} Schlüssel „{block['key'] or NONE}“ {why_not} — "
+                             "gibt nichts frei.")
             continue
         if parsed[0] == RULE_CATEGORY:
             continue                                    # rule:<thema> vergleicht check nie

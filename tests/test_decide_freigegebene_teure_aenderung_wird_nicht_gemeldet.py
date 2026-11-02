@@ -12,6 +12,8 @@ from conftest import decide_commit as commit
 from conftest import decide_script, git
 
 dl = decide_script()
+
+
 def approve(key, quote):
     assert dl.main(["add", "--class", "gross", "--topic", "Teuer", "--question", f"{key}?", "--key", key,
                     "--approved-by-request", quote]) == 0
