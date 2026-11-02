@@ -3,7 +3,7 @@
 
 Given `.skills/decide/rules.md` enthält `immer fragen: UI-Texte`
 When `decide_log.py add` eine kleine Entscheidung mit Thema `UI-Texte` erhält
-Then schreibt es sie als große offene Frage nach `docs/open-decisions.md`
+Then legt es sie als große Frage mit Status offen in `docs/big-decisions.md` ab
 Then das Protokoll nennt die Regel als Grund
 """
 import pytest

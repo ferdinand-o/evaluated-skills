@@ -2,9 +2,10 @@
 """Stub für Akzeptanzkriterium "Freigegebene teure Änderung wird nicht gemeldet" aus docs/specs/wip/decide.md.
 
 Given derselbe Diff
-Given `docs/open-decisions.md` führt beide Fragen mit Antwort des Nutzers als freigegeben
+Given `docs/big-decisions.md` führt beide Schlüssel mit Status freigegeben
 When `decide_log.py check --range <bereich>` läuft
-Then meldet es nichts
+Then meldet es keine Stelle
+Then die Ausgabe nennt weiter die ungeprüften Kategorien
 """
 import pytest
 

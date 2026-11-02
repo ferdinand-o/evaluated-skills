@@ -1,9 +1,9 @@
 # spec-stub: offene-grosse-fragen-ueberleben-die-sitzung
 """Stub für Akzeptanzkriterium "Offene große Fragen überleben die Sitzung" aus docs/specs/wip/decide.md.
 
-Given eine große Frage wurde in einer früheren Sitzung abgelegt und nicht beantwortet
+Given `docs/big-decisions.md` hat einen offenen Block aus einer früheren Sitzung und einen freigegebenen
 When `decide_log.py open` in einer neuen Sitzung läuft
-Then nennt es die Frage mit Datum, Optionen und Empfehlung aus `docs/open-decisions.md`
+Then nennt es genau den offenen Block mit Datum, Optionen und Empfehlung
 """
 import pytest
 
