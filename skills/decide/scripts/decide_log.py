@@ -19,7 +19,8 @@ offenen Datei `log.md.lock` (`fcntl.flock` unter POSIX, `msvcrt.locking` unter W
 spätestens mit dem Prozess) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt.
 Ist sie belegt, versucht `add` es bis `LOCK_WAIT` Sekunden lang erneut und endet dann mit 1
 „Protokoll gesperrt“ und dem Pfad. Die Sperrdatei bleibt liegen und wird nie gelöscht. Fehlen
-beide Module, schreibt `add` ohne Sperre und sagt das. Scheitert das Schreiben, endet `add` mit 1
+beide Module oder kann das Dateisystem nicht sperren (`ENOLCK`, `EOPNOTSUPP`, `ENOSYS`), schreibt
+`add` ohne Sperre und sagt das mit der Ursache. Scheitert das Schreiben, endet `add` mit 1
 und einer Zeile Grund.
 
 Belegzeile `--evidence`: `gesucht: <ort> — Treffer: <datei:zeile>` oder
@@ -47,6 +48,7 @@ Stand Task 1 des Plans: Die Ablage großer Fragen (`docs/big-decisions.md`) fehl
 Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
 """
 import argparse
+import errno
 import os
 import re
 import subprocess
@@ -81,6 +83,8 @@ NONE = "—"
 LOCK_WAIT = 2.0          # Sekunden, die add auf eine belegte Sperre wartet
 LOCK_POLL = 0.05         # Schlaf zwischen den Versuchen
 WRITE_ATTEMPTS = 3
+NO_LOCK_ERRNOS = {getattr(errno, name) for name in ("ENOLCK", "EOPNOTSUPP", "ENOTSUP", "ENOSYS")
+                  if hasattr(errno, name)}   # das Dateisystem kann nicht sperren: wie fehlende Module
 BIG_FLAGS = (("options", "--option"), ("recommendation", "--recommendation"), ("key", "--key"),
              ("approved_by_request", "--approved-by-request"))
 
@@ -403,45 +407,59 @@ def _try_lock(fd):
 def log_lock(path):
     """Sperre des Betriebssystems auf der offenen Datei `<log>.lock`; das Betriebssystem gibt sie
     mit dem Schließen frei, spätestens mit dem Ende des Prozesses. Ist sie belegt, neuer Versuch
-    alle `LOCK_POLL` Sekunden bis `LOCK_WAIT`, dann `LockBusy`. Die Datei bleibt liegen. Ohne
-    `fcntl` und `msvcrt` gibt es keine Sperre; das meldet `add_small`."""
+    alle `LOCK_POLL` Sekunden bis `LOCK_WAIT`, dann `LockBusy`. Die Datei bleibt liegen. Liefert
+    None, wenn gesperrt wurde, sonst die Ursache, warum ohne Sperre geschrieben wird (ohne `fcntl`
+    und `msvcrt` oder bei `NO_LOCK_ERRNOS`); das meldet `add_small`."""
     lock = path.with_name(path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
     if fcntl is None and msvcrt is None:
-        yield
+        yield "weder fcntl noch msvcrt verfügbar"
         return
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    locked, unlocked = False, None
     try:
         deadline = time.monotonic() + LOCK_WAIT
         while True:
             try:
                 _try_lock(fd)
+                locked = True
                 break
             except (BlockingIOError, PermissionError) as error:     # belegt: EAGAIN bzw. EACCES
                 if time.monotonic() >= deadline:
                     raise LockBusy(lock) from error
                 time.sleep(LOCK_POLL)
-        yield
+            except OSError as error:
+                if error.errno not in NO_LOCK_ERRNOS:
+                    raise
+                unlocked = error.strerror or str(error)
+                break
+        yield unlocked
     finally:
+        if locked and fcntl is None:                    # msvcrt: Bereich vor dem Schließen freigeben
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
         os.close(fd)
 
 
 def append_row(root, session, values):
     """Hängt eine Zeile an; liest das Protokoll unter der Sperre unmittelbar davor neu.
-    (angelegt, Problem). Wirft `LockBusy` oder OSError, wenn nicht geschrieben werden kann,
-    `LogUnreadable`, wenn das vorhandene Protokoll nicht lesbar ist."""
+    (angelegt, Problem, ohne Sperre: None oder Ursache). Wirft `LockBusy` oder OSError, wenn nicht
+    geschrieben werden kann, `LogUnreadable`, wenn das vorhandene Protokoll nicht lesbar ist."""
     path = log_path(root, session)
-    with log_lock(path):
+    with log_lock(path) as unlocked:
         text = read_log(root, session)
         if text is not None:
             problem = header_problem(text, shown(path, root))
             if problem:
-                return False, problem.replace("übersprungen", "nichts geschrieben")
+                return False, problem.replace("übersprungen", "nichts geschrieben"), unlocked
         row = "| " + " | ".join(cell(values.get(c)) for c in COLUMNS) + " |"
         created = text is None
         body = f"{LOG_HEADER}\n\n{TABLE_HEAD}\n" if created else text.rstrip("\n") + "\n"
         write_atomic(path, body + row + "\n")
-    return created, None
+    return created, None, unlocked
 
 
 def unversioned_notice(root):
@@ -507,7 +525,7 @@ def add_small(root, session, args):
               "regel": rule_label(never[0]) if never else NONE}
     path_shown = shown(log_path(root, session), root)
     try:
-        created, problem = append_row(root, session, values)
+        created, problem, unlocked = append_row(root, session, values)
     except LockBusy as busy:
         return 1, (f"Protokoll gesperrt: {shown(busy.args[0], root)} — nach {LOCK_WAIT:g} s aufgegeben "
                    "(läuft ein zweites add?); nichts geschrieben.")
@@ -522,9 +540,9 @@ def add_small(root, session, args):
     lines = notes + [f"Eingetragen {what}: {cell(topic)} — {cell(args.decision)} ({path_shown})"]
     if never:
         lines.append(f"Regel {rule_ref(never[0])} trifft — der Eintrag erscheint nicht in summary.")
-    if fcntl is None and msvcrt is None:
-        lines.append("Hinweis: weder fcntl noch msvcrt verfügbar — ohne Sperre geschrieben; ein "
-                     "gleichzeitiges add kann eine Zeile überschreiben.")
+    if unlocked:
+        lines.append(f"Hinweis: ohne Sperre geschrieben ({unlocked}); ein gleichzeitiges add kann "
+                     "eine Zeile überschreiben.")
     if created:
         lines.append(f"Protokoll angelegt: {path_shown}")
         notice = unversioned_notice(root)

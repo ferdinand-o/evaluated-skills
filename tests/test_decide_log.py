@@ -1,11 +1,14 @@
 """Tests für skills/decide/scripts/decide_log.py (Spec 28, Task 1): Wurzel und Sitzung,
 Form der Belegzeile, Tabellenzeichen und Umlaute, Regeln aus Repo- und Nutzerdatei."""
 
+import errno
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -453,12 +456,27 @@ def script_path():
     return str(Path(dl.__file__).resolve())
 
 
+HOLD_TIMEOUT = 10                       # Sekunden, die hold_lock auf „gesperrt“ wartet
+
+
+@contextmanager
 def hold_lock(root):
-    """Kindprozess, der die Sperre des Protokolls hält, bis er beendet wird."""
+    """Kindprozess, der die Sperre des Protokolls hält, solange der Block läuft. Meldet er nicht
+    binnen `HOLD_TIMEOUT` Sekunden „gesperrt“, scheitert die Prüfung; beendet wird er in jedem Fall."""
     child = subprocess.Popen([sys.executable, "-c", HOLDER, script_path(), str(log_file(root))],
                              stdout=subprocess.PIPE, text=True)
-    assert child.stdout.readline().strip() == "gesperrt"
-    return child
+    lines = []
+    reader = threading.Thread(target=lambda: lines.append(child.stdout.readline()), daemon=True)
+    try:
+        reader.start()
+        reader.join(HOLD_TIMEOUT)
+        assert lines and lines[0].strip() == "gesperrt", f"Kind meldet nicht „gesperrt“ binnen {HOLD_TIMEOUT} s"
+        yield child
+    finally:
+        child.kill()
+        child.wait()
+        reader.join(5)
+        child.stdout.close()
 
 
 def test_concurrent_add_in_processes_keeps_every_row(decide_repo):
@@ -478,15 +496,11 @@ def test_held_lock_ends_with_exit_1_after_wait(decide_repo, monkeypatch, capsys)
     root, _ = decide_repo
     assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
     monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
-    child = hold_lock(root)
-    try:
+    with hold_lock(root):
         capsys.readouterr()
         started = time.monotonic()
         assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
         waited = time.monotonic() - started
-    finally:
-        child.kill()
-        child.wait()
     err = capsys.readouterr().err
     assert waited >= 0.3, waited
     assert "Protokoll gesperrt" in err and f".skills/cache/decide/{SESSION}/log.md.lock" in err, err
@@ -498,9 +512,9 @@ def test_process_end_releases_lock(decide_repo, monkeypatch, capsys):
     """R3-F1: Endet der Prozess, der die Sperre hält (hier per kill), ist sie frei; die Datei bleibt."""
     root, _ = decide_repo
     monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
-    child = hold_lock(root)
-    child.kill()
-    child.wait()
+    with hold_lock(root) as child:
+        child.kill()
+        child.wait()
     lock = log_file(root).with_name("log.md.lock")
     assert lock.exists()
     assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
@@ -567,3 +581,68 @@ def test_write_atomic_keeps_original_error(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "unlink", unlink_fails)
     with pytest.raises(PermissionError, match="replace verweigert"):
         dl.write_atomic(tmp_path / "log.md", "x\n")
+
+
+# --- Funde des Prüfpunkts 1, Mini-Runde 4 (F1–F4) ---------------------------------------
+
+@pytest.mark.parametrize("name", ["ENOLCK", "EOPNOTSUPP", "ENOSYS"])
+def test_filesystem_without_flock_writes_visibly(decide_repo, monkeypatch, capsys, name):
+    """R4-F1/F4: Kann das Dateisystem nicht sperren (z. B. CIFS: flock → ENOLCK), schreibt add
+    ohne Sperre und nennt die Ursache — statt mit „nicht schreibbar“ zu scheitern."""
+    root, _ = decide_repo
+    code = getattr(errno, name)
+
+    def no_flock(fd):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(dl, "_try_lock", no_flock)
+    assert add_small("CLI", "Kurzoption?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    out = capsys.readouterr().out
+    assert f"ohne Sperre geschrieben ({os.strerror(code)})" in out, out
+    assert [r[3] for r in rows(root)] == ["Kurzoption?"]
+
+
+def test_msvcrt_lock_is_released_before_close(decide_repo, monkeypatch):
+    """R4-F2: Unter Windows wird der gesperrte Bereich vor os.close mit LK_UNLCK an Offset 0 freigegeben."""
+    root, _ = decide_repo
+    calls = []
+    real_close = os.close
+
+    def locking(fd, mode, nbytes):
+        calls.append(("locking", mode, nbytes, os.lseek(fd, 0, os.SEEK_CUR)))
+
+    def close(fd):
+        calls.append(("close", fd))
+        real_close(fd)
+
+    monkeypatch.setattr(dl, "fcntl", None)
+    monkeypatch.setattr(dl, "msvcrt", SimpleNamespace(LK_NBLCK="NB", LK_UNLCK="UN", locking=locking))
+    monkeypatch.setattr(dl.os, "close", close)
+    with dl.log_lock(log_file(root)):
+        assert calls == [("locking", "NB", 1, 0)]
+    assert [c[0] for c in calls] == ["locking", "locking", "close"], calls
+    assert calls[1] == ("locking", "UN", 1, 0), calls
+
+
+SILENT = "import time\ntime.sleep(4)\n"
+
+
+def test_hold_lock_gives_up_and_ends_child(decide_repo, monkeypatch):
+    """R4-F3: Schreibt das Kind nie „gesperrt“, scheitert hold_lock nach der Zeitgrenze, und das Kind ist beendet."""
+    root, _ = decide_repo
+    started = []
+
+    class Recording(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            started.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", Recording)
+    monkeypatch.setitem(globals(), "HOLDER", SILENT)
+    monkeypatch.setitem(globals(), "HOLD_TIMEOUT", 0.5)
+    begin = time.monotonic()
+    with pytest.raises(AssertionError):
+        with hold_lock(root):
+            pass
+    assert time.monotonic() - begin < 3
+    assert len(started) == 1 and started[0].poll() is not None
