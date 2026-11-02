@@ -184,7 +184,7 @@ Status ist `offen`, `freigegeben` oder `abgelehnt`; Quelle der Antwort ist `Nutz
 | Weg | Pflicht | Optionen | Schlüssel |
 | --- | --- | --- | --- |
 | `add --class gross` | `--topic`, `--question`, `--key`, `--recommendation` | zwei bis vier `--option`, sonst Exit 1 | Kategorie aus `reversibility.md`, oder `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft — sonst Exit 1 |
-| `add --class gross --approved-by-request` | `--topic`, `--question`, `--key`, Zitat | keine; der Block nennt „Optionen: — (Auftrag)" | Kategorie aus `reversibility.md` |
+| `add --class gross --approved-by-request` | `--topic`, `--question`, `--key`, Zitat | keine; der Block nennt „Optionen: — (Auftrag)" | Kategorie aus `reversibility.md`, oder `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft (konkreter Auftrag vor Regel, Ablauf 2) |
 | `add --class klein`, von `immer fragen` hochgestuft | `--topic`, `--question`, `--decision`, `--evidence` | zwei bis vier `--option`, sonst Exit 1 mit „Regel immer fragen: <thema> trifft — zwei bis vier --option nötig"; `--decision` wird die Empfehlung | `rule:<thema>`, von `check` nie verglichen |
 
 Der Kopf von `brief-<n>.md` und der Ablage zählt nicht zu den Feldern und nicht zu den 25 Zeilen
