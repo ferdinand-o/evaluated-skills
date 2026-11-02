@@ -90,5 +90,7 @@ Exit-Code in der Antwort nennen, und die Übergabe sagt „ungeprüft — kein L
   Implementieren, Grün sehen) laufen über test-first.
 - **subagent-dev** — liest das Log dieser Skill bei `verify` nur als Hinweis
   (`sofort-grün`, fehlendes Log); das Verdikt der Abnahme ändert es nicht.
+- **deep-review** — meldet Funde eines Reviews und schreibt keine Tests. Der Regressionstest
+  zu einem Fund läuft hier: rot vor dem Fix, grün danach.
 - feature-spec erzeugt Test-Stubs aus Given/When/Then; setup-repo hält das Turn-Ende an,
   solange der ganze Verifikationsbefehl rot ist — test-first prüft einzelne Tests.
