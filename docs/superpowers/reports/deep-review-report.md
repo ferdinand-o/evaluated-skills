@@ -271,6 +271,33 @@ Varianten, nur `/code-review --max-findings all`, 6 Läufe, 5,01 USD.
   ausführlich — der einzige Lauf, der P4 fand. Die Lücke ist eine nicht geöffnete
   Gegenstelle, und eine Bitte im Prompt öffnet sie nicht.
 
+### Prototyp: Gegenstellen mechanisch sammeln (2026-11-02)
+
+`review-bench/counterparts.py` (Stdlib, `ast`, ohne Import des Zielcodes) geht über jede
+geänderte Zeile des Bereichs und schreibt je Stelle: die erreichte Definition (auch in
+`_vendor`, aufgelöst über die Importe der Datei und voll qualifizierte Modulpfade), die
+`raise`-Stellen der Definition transitiv im selben Modul (Tiefe 2); für eine geänderte
+`except`-Klausel die Ausnahmen aller Aufrufe im `try`-Block; für ein geändertes
+Schlüsselwort-Argument seinen Weg durch die Gegenstellen bis zu den Bedingungen, die es
+prüfen (Tiefe 4). Keine Auswahl nach Verdacht: Paket 1 ergibt 38 Stellen, 28,7 KB; der
+ganze `py-diff` 87 Stellen, 49 KB. Für P2 steht dort `except (ValueError, LookupError)`
+neben „`DependencyGroupResolver.resolve` wirft … TypeError" mit Zeilen im vendorten Code,
+für P4 der Weg `make_resolver → Resolver → Factory → factory.py:127: if not ignore_installed`.
+Übergabe als `--append-system-prompt` mit dem Auftrag, den Block an jeden Unteragenten
+weiterzugeben. 4 Läufe, 3,27 USD.
+
+| Bereich | ohne Kontext | mit Kontext, Lauf 1 | mit Kontext, Lauf 2 |
+| --- | --- | --- | --- |
+| Paket 1 (`cli+commands+req`, 591 Zeilen; enthält P2, P4, P5) | P5 | **P2**, P5 | **P4**, P5 |
+| ganzer `py-diff` (4.097 Zeilen) | 2–5 von 6 in 7 Läufen, P2 nie, P4 einmal | 4/6 (P2, P4 fehlen) | 4/6 (P2, P4 fehlen) |
+
+- **Paket plus Gegenstellen** findet erstmals P2 (zuvor 0 von 8 Läufen auf diesem Code) und P4; die beiden
+  Läufe zusammen finden alle drei Fehler des Pakets. Je Lauf einer von beiden — die
+  Streuung bleibt, zwei Läufe sind kein Mittelwert.
+- **Ganzer Diff plus Gegenstellen** bringt nichts: Bei 87 Stellen und 4.100 Zeilen geht der
+  Hinweis unter. Der Kontext wirkt nur, wenn der Bereich klein genug ist.
+- Nur Python; für Delphi gibt es den Sammler nicht.
+
 ### Was das für Spec 26 heißt
 
 - **Pfad-Review bis rund 5k Zeilen ist kein Problem der etablierten Werkzeuge.** Auf
@@ -287,8 +314,9 @@ Varianten, nur `/code-review --max-findings all`, 6 Läufe, 5,01 USD.
   große Bereiche in Pakete schneiden und `/code-review` je Paket laufen lassen (billiger,
   fand R2), und die Gegenstellen der geänderten Aufrufe — Definitionen der aufgerufenen
   Funktionen samt vendortem Code, ihre `raise`-Stellen, Besitz- und Flag-Verträge — per
-  Skript sammeln und dem Review mitgeben, statt darum zu bitten. Ob das P2 und P4 schließt,
-  ist nicht gemessen. Für Spec 27 stützt die Messung kleine Prüfpunkt-Bereiche.
+  Skript sammeln und dem Review mitgeben, statt darum zu bitten. Der Prototyp zeigt: Erst
+  beides zusammen — Paket und Gegenstellen — findet P2 und P4 (je einmal in zwei Läufen).
+  Für Spec 27 stützt die Messung kleine Prüfpunkt-Bereiche.
 
 ## Was nicht gemessen wurde
 

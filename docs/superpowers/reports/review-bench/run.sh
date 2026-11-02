@@ -1,7 +1,8 @@
 #!/bin/bash
-# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|eng|sp
+# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|eng|sp
 set -uo pipefail
 B=${BENCH:?BENCH auf das Arbeitsverzeichnis setzen}
+HERE=$(dirname "$(readlink -f "$0")")
 REPO=$1; TOOL=$2; N=$3
 NAME=$REPO-$TOOL-$N
 EXTRA=()
@@ -22,6 +23,11 @@ case $TOOL in
   cr)  PROMPT="/code-review --max-findings all $TARGET" ;;
   crc) PROMPT="/code-review --max-findings all $TARGET"
        EXTRA=(--append-system-prompt "In every review, for each changed line, look up the counterpart it calls or that calls it - including vendored libraries, base classes and framework code outside the diff - and check the contract the change relies on: which exceptions the callee raises, what it returns for edge cases (empty, None, zero), who owns and frees objects, and what a flag or parameter does downstream. Report a finding when the changed code violates that contract.") ;;
+  crx) PROMPT="/code-review --max-findings all $TARGET"
+       python3 -I $HERE/counterparts.py $W $TARGET --root src --max-bytes 60000 > $OUT/$NAME.ctx.md
+       EXTRA=(--append-system-prompt "Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on.
+
+$(cat $OUT/$NAME.ctx.md)") ;;
   eng) PROMPT="/engineering:code-review $TARGET" ;;
   sp)
     mkdir -p $W/.claude/skills

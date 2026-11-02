@@ -8,7 +8,8 @@ baut sie aus Upstream-Tags neu.
 seeds.py     Fehler-Einbauten je Szenario (genaue Ersetzung, muss genau einmal passen)
 truth.json   Grundwahrheit: eingebaute (P, Q, D, E) und echte (R) Fehler mit Datei und Zeile
 build.sh     baut py-diff, py-path, dl-diff, dl-path und die Pakete py-c1..c3 unter $BENCH/repos
-run.sh       ein Lauf: run.sh <repo> <cr|crc|eng|sp> <nr> (crc: cr plus Auftrag „Gegenstelle prüfen"), Ergebnis in $BENCH/out/<repo>-<tool>-<nr>.json
+run.sh       ein Lauf: run.sh <repo> <cr|crc|eng|sp> <nr> (crc: cr plus Auftrag „Gegenstelle prüfen"; crx: cr plus Ausgabe von counterparts.py), Ergebnis in $BENCH/out/<repo>-<tool>-<nr>.json
+counterparts.py  Prototyp: Gegenstellen der geaenderten Python-Zeilen (ast) fuer tool crx
 match.py     Vorauswahl der Treffer je Lauf (Datei plus Stichwort); jeder Treffer wird am Text nachgeprüft
 ```
 
