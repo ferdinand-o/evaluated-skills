@@ -4469,3 +4469,95 @@ def test_cp6b_f6_merge_joins_findings_inside_a_members_span():
     # 42 liegt hinter dem Ende jedes Glieds und mehr als MERGE_LINE_GAP nach 10.
     assert [[s["line"] for s in f["sources"]] for f in merged(10, "11-40", 40, 42)] == [
         [10, "11-40", 40], [42]]
+
+
+# --- assets/report-template.md (Task 11) ---------------------------------------------------
+
+TEMPLATE_PATH = REPO_ROOT / "skills" / "deep-review" / "assets" / "report-template.md"
+PLACEHOLDER_RE = re.compile(r"<(?!!--)[^<>\n]*>")
+
+
+def _fill_template(template, directory, run, findings, packets, not_reviewed):
+    """Das Gerüst für einen Lauf ausfüllen, wie es der Hauptagent tut: jede Platzhalterzeile
+    wird ersetzt, die Zeile für Funde je Fund wiederholt (ohne Funde entfällt sie)."""
+    plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    swap = {"<lauf>": run, "<base-sha>..<target-sha>": plan["range"], "<profil>": plan["profile"],
+            "<fokus>": plan["focus"], "<werkzeug>": "/code-review", "<N>": str(len(findings)),
+            "<a>/<b>": f"{len(packets)}/{len(plan['packets'])}",
+            "<vollständig|unvollständig>": "vollständig"}
+    out = []
+    for line in template.splitlines():
+        if line.startswith("| <"):
+            out.extend(f"| {pid} | {files} | {lines} | 0 | {n} | – |"
+                       for pid, files, lines, n in packets)
+        elif line.startswith("- `<datei>:<zeile>`"):
+            out.extend(f"- `{f['file']}:{f['line']}` — {f['summary']}" for f in findings)
+        elif line.startswith("- <Grund"):
+            out.append(f"- {not_reviewed}" if not_reviewed else "- keine")
+        else:
+            for token, value in swap.items():
+                line = line.replace(token, value)
+            out.append(line)
+    text = "\n".join(out) + "\n"
+    assert not PLACEHOLDER_RE.search(text), PLACEHOLDER_RE.search(text)[0]
+    return text
+
+
+def test_report_template(tmp_path):
+    from evalkit.assertions import ARTIFACT_HEADER_RE
+
+    kit = _kit()
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    lines = template.splitlines()
+
+    # Kopfzeile in Zeile 1, passend auf die Regel der Artefakt-Kopfzeile, mit allen Pflichtfeldern.
+    assert ARTIFACT_HEADER_RE.match(lines[0]), lines[0]
+    head = kit._report_header(lines[0])
+    assert head is not None and list(head)[:3] == ["skill", "schema", "generated"]
+    assert head["skill"] == "deep-review" and head["schema"] == "1"
+    assert all(head.get(key) for key in kit.REPORT_HEADER_NEEDS)
+    # Ohne Funde nicht länger als der Anti-Zeremonie-Rahmen, Kopfzeile eingerechnet.
+    assert len(lines) <= kit.REPORT_BASE_LINES, len(lines)
+    # Tokens für die SKILL.md (Task 15) und die Spalten der Pakettabelle.
+    assert "Nicht geprüft" in template and "unvollständig" in template
+    table = next(line for line in lines if line.startswith("| Paket"))
+    assert [c.strip() for c in table.strip("|").split("|")] == [
+        "Paket", "Dateien", "Zeilen", "Gegenstellen", "Funde", "reused_from"]
+    assert "--max-findings all" in template and "Auskunft" in template and "kein Beleg" in template
+    # „vollständig" steht nur in der Abdeckungszeile oder in Kommentaren: sonst gälte erklärender
+    # Text bei einer Lücke als Behauptung.
+    prose = "\n".join(ln for ln in kit.REPORT_COMMENT_RE.sub("", template).splitlines()
+                      if not ln.startswith("Abdeckung:"))
+    assert not kit._claims_complete(prose), prose
+
+    # Sauberer Lauf: ein Paket, kein Fund; der ausgefüllte Bericht besteht `audit`.
+    root = tmp_path / "repo"
+    root.mkdir()
+    _commit_repo(root, {"a.py": ""}, {"a.py": _lines(8)})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    assert plan["split"] is False
+    run, directory = plan["_meta"]["run"], _run_path(root, plan)
+    _record(kit, root, plan, "p1", [], tool="/code-review")
+    kit.merge(directory)
+    report = directory / "report.md"
+    text = _fill_template(template, directory, run, [], [("p1", 1, 8, 0)], "")
+    report.write_text(text, encoding="utf-8")
+    assert len(text.splitlines()) <= 1 + kit.REPORT_BASE_LINES
+    data = kit.audit(directory, report)
+    assert data["report_mismatch"] == [], data["report_mismatch"]
+    assert data["complete"] is True
+
+    # Zweiter Fall: ein Fund, Zeile als Bereich wie in findings.json, eine Zeile mehr.
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run, directory = plan["_meta"]["run"], _run_path(root, plan)
+    _record(kit, root, plan, "p1", [_finding("a.py", "L3 bis L5", "Grenze falsch")],
+            tool="/code-review")
+    merged = kit.merge(directory)["findings"]
+    assert [f["line"] for f in merged] == ["3-5"]
+    report = directory / "report.md"
+    text = _fill_template(template, directory, run, merged, [("p1", 1, 8, 1)], "")
+    report.write_text(text, encoding="utf-8")
+    assert len(text.splitlines()) <= 1 + kit.REPORT_BASE_LINES + len(merged)
+    data = kit.audit(directory, report)
+    assert data["report_mismatch"] == [], data["report_mismatch"]
+    assert data["complete"] is True
