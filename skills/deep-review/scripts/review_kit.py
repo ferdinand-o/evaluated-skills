@@ -24,9 +24,11 @@ import contextlib
 import datetime as dt
 import fnmatch
 import functools
+import io
 import json
 import math
 import os
+import posixpath
 import re
 import secrets
 import shlex
@@ -36,6 +38,7 @@ import string
 import subprocess
 import tempfile
 import time
+import tokenize
 import warnings
 from pathlib import Path, PurePath, PurePosixPath
 from typing import NamedTuple
@@ -1170,6 +1173,11 @@ DOC_CHARS = 240            # erste Docstring-Zeile höchstens so lang
 INDEX_CACHE_SIZE = 1       # Definitions-Indizes so vieler (Repo, ZIEL) je Prozess
 NO_COLLECTOR = "Gegenstellen nicht gesammelt (Sprache)"
 NOT_IN_TARGET = "nicht als Datei im Baum des ZIELS"
+SKIP_SYNTAX = "Syntaxfehler"
+SKIP_SYMLINK = "Symlink"
+SKIP_NOT_UTF8 = "Pfad nicht UTF-8"
+SKIP_GITLINK = "Submodul (gitlink), keine Datei"
+QUALITY_INTRO = "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n"
 HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _C_ESCAPES = {ord(k): ord(v) for k, v in
               {"a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
@@ -1183,14 +1191,16 @@ class Collected(NamedTuple):
 
     `entries`: je Stelle, die die Sammelregel trifft, ein Dict `{"file", "line", "kind",
     "lines"}` — `kind` `call` oder `except`, `lines[0]` die Überschrift
-    `### <datei>:<zeile> …`, danach die Zeilen `- Gegenstelle <Name> [<datei>:<zeile>]:
+    `### <datei>:<zeile> …` (`### <datei>:<zeile>:<spalte> …`, wenn eine Zeile mehrere
+    Einträge für denselben Namen hat), danach die Zeilen `- Gegenstelle <Name> [<datei>:<zeile>]:
     <Signatur>`, `  Doc: …`, `  wirft: <Typen>`, `    raise <Typ> at <datei>:<zeile>`,
     `  geändert: <arg>=<wert>; Weg:` mit eingerückten Wegzeilen; sortiert nach Datei, Zeile,
     Art. `unresolved`: Aufrufe ohne Importbezug mit mehr als `AMBIGUOUS_MAX` gleichnamigen
     Definitionen — auch Weitergaben eines geänderten Arguments, deren Weg dort endet — nicht
     im Block, aber gezählt. `unparsed`: Paare `(datei, grund)` der eigenen Dateien (aus
     `files`), die der Sammler am ZIEL nicht lesen konnte (Python: `Syntaxfehler`,
-    `Symlink`), sortiert — übersprungen, im Paketblock genannt und gezählt."""
+    `Symlink`, `Pfad nicht UTF-8`, `Submodul (gitlink), keine Datei`; sonst
+    `NOT_IN_TARGET`), sortiert — übersprungen, im Paketblock genannt und gezählt."""
     entries: list
     unresolved: int
     unparsed: list
@@ -1259,34 +1269,59 @@ def _is_python(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() == ".py"
 
 
-def _python_sources(repo: Path, target: str) -> tuple[dict, dict]:
+def _link_dest(path: str, raw: bytes):
+    """Ziel eines Symlinks `path` im Repo (normalisiert, relativ zur Wurzel) oder None, wenn es
+    absolut ist oder aus dem Repo hinausführt."""
+    dest = raw.decode("utf-8", errors="surrogateescape")
+    if not dest or dest.startswith("/"):
+        return None
+    joined = posixpath.normpath(posixpath.join(posixpath.dirname(path), dest))
+    return None if joined == ".." or joined.startswith("../") else joined
+
+
+def _python_sources(repo: Path, target: str, links: dict | None = None) -> tuple[dict, dict]:
     """(Pfad → Bytes aller Python-Blobs am ZIEL, Pfad → Grund der übersprungenen), gelesen aus
-    Git (`ls-tree`, `cat-file --batch` als Bytes), nie aus dem Arbeitsbaum. Ohne `.skills/`
-    und Pfade, die kein UTF-8 sind; Symlinks stehen mit Grund `Symlink` im zweiten Dict."""
+    Git (`ls-tree`, `cat-file --batch` als Bytes), nie aus dem Arbeitsbaum. Ohne `.skills/`;
+    im zweiten Dict stehen Einträge, die im Baum liegen, aber nicht gelesen werden: Symlinks
+    (`SKIP_SYMLINK`), Pfade, die kein UTF-8 sind (`SKIP_NOT_UTF8`), und Submodule mit
+    `.py`-Namen (`SKIP_GITLINK`). Ein übergebenes Dict `links` bekommt je Symlink sein Ziel
+    im Repo (`_link_dest`, None ohne)."""
     blobs, skipped = [], {}
     for record in _git(repo, "ls-tree", "-r", "-z", "--full-tree", target).split("\0"):
         if not record:
             continue
         info, path = record.split("\t", 1)
         mode, kind, sha = info.split()
-        if kind != "blob" or not _is_python(path) or not _is_utf8(path) or _under_skills(path):
+        if not _is_python(path) or _under_skills(path):
             continue
-        if mode == "120000":
-            skipped[path] = "Symlink"
+        if kind == "commit":
+            skipped[path] = SKIP_GITLINK
+        elif kind != "blob":
+            continue
+        elif not _is_utf8(path):
+            skipped[path] = SKIP_NOT_UTF8
+        elif mode == "120000":
+            skipped[path] = SKIP_SYMLINK
+            if links is not None:
+                blobs.append((path, sha, True))
         else:
-            blobs.append((path, sha))
+            blobs.append((path, sha, False))
     if not blobs:
         return {}, skipped
-    feed = "".join(f"{sha}\n" for _, sha in blobs).encode("ascii")
+    feed = "".join(f"{sha}\n" for _, sha, _link in blobs).encode("ascii")
     data = _git_bytes(repo, "cat-file", "--batch", stdin=feed)
     sources, pos = {}, 0
-    for path, _sha in blobs:
+    for path, _sha, is_link in blobs:
         end = data.index(b"\n", pos)
         fields = data[pos:end].split()
         if len(fields) != 3:
             raise KitError(f"git cat-file: unerwartete Antwort für {path}: {data[pos:end]!r}")
         size = int(fields[2])
-        sources[path] = data[end + 1:end + 1 + size]
+        content = data[end + 1:end + 1 + size]
+        if is_link:
+            links[path] = _link_dest(path, content)
+        else:
+            sources[path] = content
         pos = end + 1 + size + 1
     return sources, skipped
 
@@ -1304,14 +1339,17 @@ def _walk_defs(tree):
 
 class _PyIndex:
     """Alle Definitionen am ZIEL: Name → [(datei, qualname, knoten)]; Bäume je Datei;
-    Python-Dateien ohne Baum in `unreadable` (Pfad → Grund: `Syntaxfehler`, `Symlink`) —
-    übersprungen und gezählt. `raises_memo` hält die raise-Stellen je Definition, `source`
-    die Bytes je Datei für Zeilen aus dem Quelltext."""
+    Python-Dateien ohne Baum in `unreadable` (Pfad → Grund: `Syntaxfehler`, `Symlink`,
+    `Pfad nicht UTF-8`, Submodul) — übersprungen und gezählt. `links` hält je Symlink sein
+    Ziel im Repo (None: keins), `raises_memo` die raise-Stellen je Definition, `source` die
+    Bytes je Datei für Zeilen aus dem Quelltext."""
 
-    def __init__(self, sources: dict, skipped: dict | None = None) -> None:
+    def __init__(self, sources: dict, skipped: dict | None = None,
+                 links: dict | None = None) -> None:
         self.trees: dict[str, ast.Module] = {}
         self.defs: dict[str, list] = {}
         self.unreadable: dict[str, str] = dict(skipped or {})
+        self.links: dict[str, str | None] = dict(links or {})
         self.raises_memo: dict[tuple, list] = {}
         self.source: dict[str, bytes] = {}
         self._lines: dict[str, list] = {}
@@ -1322,7 +1360,7 @@ class _PyIndex:
                     warnings.simplefilter("ignore")
                     tree = ast.parse(sources[rel], filename=rel)
             except (SyntaxError, ValueError, RecursionError, MemoryError):
-                self.unreadable[rel] = "Syntaxfehler"
+                self.unreadable[rel] = SKIP_SYNTAX
                 continue
             self.trees[rel] = tree
             self.source[rel] = sources[rel]
@@ -1330,18 +1368,65 @@ class _PyIndex:
                 qual = f"{cls}.{node.name}" if cls else node.name
                 self.defs.setdefault(node.name, []).append((rel, qual, node))
 
+    def not_indexed(self) -> dict:
+        """Python-Dateien am ZIEL, in denen keine Gegenstelle gesucht wird (Pfad → Grund):
+        `unreadable` ohne Submodule (keine Python-Dateien) und ohne Symlinks, deren Ziel —
+        auch über weitere Symlinks — im Index steht; deren Definitionen sind unter dem Ziel
+        schon gesucht."""
+        out = {}
+        for rel, reason in self.unreadable.items():
+            if reason == SKIP_GITLINK:
+                continue
+            if reason == SKIP_SYMLINK and self._link_target(rel) in self.trees:
+                continue
+            out[rel] = reason
+        return out
+
+    def _link_target(self, rel: str):
+        """Endziel eines Symlinks im Repo; None bei Zyklus oder Ziel außerhalb."""
+        seen = set()
+        while rel in self.links:
+            if rel in seen:
+                return None
+            seen.add(rel)
+            rel = self.links[rel]
+            if rel is None:
+                return None
+        return rel
+
+    def _utf8_lines(self, rel: str) -> list:
+        """Zeilen einer Datei als UTF-8-Bytes, so wie `ast` sie misst: dekodiert nach
+        Coding-Cookie bzw. BOM (`tokenize.detect_encoding`, `utf-8-sig` ohne BOM) und neu als
+        UTF-8 kodiert — die Spalten der Knoten sind UTF-8-Offsets in der dekodierten Zeile.
+        Getrennt nur an `\\n`, `\\r\\n`, `\\r` wie im Parser."""
+        lines = self._lines.get(rel)
+        if lines is None:
+            raw = self.source.get(rel, b"")
+            try:
+                encoding = tokenize.detect_encoding(io.BytesIO(raw).readline)[0]
+                text = raw.decode(encoding)
+            except (SyntaxError, LookupError, UnicodeDecodeError):
+                text = raw.decode("utf-8", errors="replace")
+            lines = self._lines[rel] = text.encode("utf-8", errors="replace").splitlines()
+        return lines
+
     def segment(self, rel: str, node) -> str:
         """Erste Zeile von `node` aus dem Quelltext, ab seiner Spalte (bei einzeiligen Knoten
         bis zu ihrem Ende), höchstens `DOC_CHARS` Zeichen — ohne `ast.unparse` des Knotens."""
-        lines = self._lines.get(rel)
-        if lines is None:
-            lines = self._lines[rel] = self.source.get(rel, b"").splitlines()
+        lines = self._utf8_lines(rel)
         if not 0 < node.lineno <= len(lines):
             return ""
         raw = lines[node.lineno - 1]
         end = node.end_col_offset if node.end_lineno == node.lineno else None
         text = raw[node.col_offset:end].decode("utf-8", errors="replace").strip()
         return text if len(text) <= DOC_CHARS else text[:DOC_CHARS] + "…"
+
+    def column(self, rel: str, node) -> int:
+        """Spalte von `node` in Zeichen, 1-basiert (wie `datei:zeile:spalte` in Compilern)."""
+        lines = self._utf8_lines(rel)
+        if not 0 < node.lineno <= len(lines):
+            return node.col_offset + 1
+        return len(lines[node.lineno - 1][:node.col_offset].decode("utf-8", errors="replace")) + 1
 
     def module_file(self, module):
         """Datei zu einem Modulpfad `a.b.c` (auch unter `src/`), sonst None."""
@@ -1454,7 +1539,9 @@ def _dotted(node):
 def _python_index(repo: Path, target: str) -> _PyIndex:
     """Definitions-Index am ZIEL, je (Repo, SHA) einmal gebaut — `target` ist ein SHA, der
     Index also unveränderlich."""
-    return _PyIndex(*_python_sources(repo, target))
+    links: dict = {}
+    sources, skipped = _python_sources(repo, target, links)
+    return _PyIndex(sources, skipped, links)
 
 
 def _target_def(node):
@@ -1564,9 +1651,12 @@ def _handler_span(handler: ast.ExceptHandler) -> tuple[int, int]:
 def _python_sites(index: _PyIndex, rel: str, tree, lines: set, unresolved: set) -> list:
     """Die Stellen einer Datei nach der Sammelregel (Spec 26, Schritt 3). Je Aufruf ein
     Eintrag (zwei Aufrufe derselben Funktion auf einer Zeile behalten je ihre geänderten
-    Argumente); ein Eintrag, der einem früheren derselben Zeile gleicht, entfällt."""
+    Argumente); ein Eintrag, der einem früheren derselben Zeile gleicht, entfällt. Bleiben auf
+    einer Zeile mehrere Einträge für denselben Namen, trägt ihre Überschrift die Spalte des
+    Aufrufs: `### <datei>:<zeile>:<spalte> ruft <name>(...)` (Zeichen, 1-basiert)."""
     entries = []
     shown = set()
+    calls: dict[tuple, list] = {}
     changed = sorted(lines)
     for node in ast.walk(tree):
         # geänderte except-Klausel: was können die Aufrufe im try-Block werfen?
@@ -1617,11 +1707,17 @@ def _python_sites(index: _PyIndex, rel: str, tree, lines: set, unresolved: set) 
                 if flow:
                     body.append(f"  geändert: {kw.arg}={ast.unparse(kw.value)}; Weg:")
                     body += [f"    {x}" for x in flow[:FLOW_LINES_MAX]]
-        lines_out = (f"### {rel}:{node.lineno} ruft {name}(...)", *body)
-        if (changed_kw or throws) and lines_out not in shown:
-            shown.add(lines_out)
-            entries.append({"file": rel, "line": node.lineno, "kind": "call",
-                            "lines": list(lines_out)})
+        key = (node.lineno, name, tuple(body))
+        if (changed_kw or throws) and key not in shown:
+            shown.add(key)
+            entry = {"file": rel, "line": node.lineno, "kind": "call",
+                     "lines": [f"### {rel}:{node.lineno} ruft {name}(...)", *body]}
+            entries.append(entry)
+            calls.setdefault((node.lineno, name), []).append((entry, index.column(rel, node)))
+    for (line, name), group in calls.items():
+        if len(group) > 1:
+            for entry, col in group:
+                entry["lines"][0] = f"### {rel}:{line}:{col} ruft {name}(...)"
     return entries
 
 
@@ -1668,19 +1764,37 @@ def _file_line(path: str, unreadable: dict) -> str:
     return f"- `{path}`\n"
 
 
-def _render(packet, entries, unresolved, cap, unreadable=None, notes="",
-            intro=None) -> tuple[str, int]:
-    """`render_block` mit der Zahl der Stellen, die im Block stehen. `unreadable` (Pfad →
-    Grund) markiert eigene Dateien ohne lesbaren Stand in der Dateiliste und zählt sie,
-    `notes` steht am Ende, `intro` ersetzt den Anfang des Abschnitts `## Gegenstellen`; alles
-    zählt gegen `cap`."""
+def _packet_extras(packet) -> tuple[dict, str, str | None]:
+    """Die optionalen Schlüssel eines Pakets für `render_block`, geprüft: (Pfad → Grund aus
+    `unreadable`, `notes` als Text fürs Ende, `intro` oder None). Falsche Form: KitError."""
+    pairs = packet.get("unreadable") or []
+    if not isinstance(pairs, (list, tuple)):
+        raise KitError(f"unreadable muss eine Liste von Paaren (datei, grund) sein, "
+                       f"nicht {pairs!r}")
+    unreadable = {}
+    for pair in pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2 or not isinstance(pair[1], str):
+            raise KitError(f"unreadable: Paar (datei, grund) erwartet, nicht {pair!r}")
+        unreadable[str(pair[0])] = pair[1]
+    notes = packet.get("notes") or []
+    if not isinstance(notes, (list, tuple)) or not all(isinstance(n, str) for n in notes):
+        raise KitError(f"notes muss eine Liste von Texten sein, nicht {notes!r}")
+    intro = packet.get("intro")
+    if intro is not None and not isinstance(intro, str):
+        raise KitError(f"intro muss ein Text sein, nicht {intro!r}")
+    return unreadable, "".join(f"\n{note}\n" for note in notes), intro
+
+
+def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
+    """`render_block` mit der Zahl der Stellen, die im Block stehen — dieselben vier
+    Parameter, alles Weitere aus den optionalen Schlüsseln des Pakets."""
     cap = BLOCK_MAX_CHARS if cap is None else cap
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
         raise KitError(f"cap muss eine positive Zahl sein, nicht {cap!r}")
     if not isinstance(unresolved, int) or isinstance(unresolved, bool) or unresolved < 0:
         raise KitError(f"unresolved muss eine Zahl ≥ 0 sein, nicht {unresolved!r}")
-    unreadable = dict(unreadable or {})
-    files = packet.get("files") or []
+    unreadable, notes, intro = _packet_extras(packet)
+    files = [str(f) for f in packet.get("files") or []]  # einmal als Text, für Zeilen und Zahl
     rng = packet.get("range")
     title = (f"# Paket {packet.get('id')}\n\n"
              + (f"Bereich: `{rng}`" if rng else "Bereich: noch nicht gebaut")
@@ -1696,7 +1810,7 @@ def _render(packet, entries, unresolved, cap, unreadable=None, notes="",
                       "Dateiliste genannt).\n")
     else:
         intro = "\n" + intro
-    rows = [_file_line(str(f), unreadable) for f in files]
+    rows = [_file_line(f, unreadable) for f in files]
     blocks = ["\n" + "\n".join(e["lines"]) + "\n" for e in entries]
     fixed = len(title) + len(intro) + len(notes)
     rows_size, blocks_size = sum(map(len, rows)), sum(map(len, blocks))
@@ -1746,7 +1860,23 @@ def render_block(packet, entries, unresolved, cap):
     und `(gekappt: <weggelassen> von <alle> Stellen nicht im Block — …)` — nie still. Ein
     `cap`, in den nicht einmal Überschriften und Hinweise passen, ist ein KitError. Die
     Kopfzeile des Artefakts (E3) setzt `write_counterparts` davor und zieht sie vom `cap`
-    ab."""
+    ab.
+
+    Neben `id`, `range` und `files` liest der Block optionale Schlüssel des Pakets — jeder
+    Sammler (Python, Delphi) erreicht alles, was ein Block zeigen kann, über diese vier
+    Parameter; eine falsche Form ist ein KitError:
+
+    - `unreadable`: Liste von Paaren `(datei, grund)` (Tupel oder JSON-Listen, etwa
+      `Collected.unparsed`) — die Datei steht in der Dateiliste mit „Datei am ZIEL nicht
+      lesbar: <grund>", die Zahl der betroffenen Paketdateien unter `## Gegenstellen`.
+    - `notes`: Liste von Texten, je einer als eigener Absatz am Ende des Blocks (etwa die
+      Zahl der nicht lesbaren Dateien außerhalb des Pakets).
+    - `intro`: Text, der den Anfang des Abschnitts ab `## Gegenstellen` samt Zählzeilen
+      ersetzt (etwa „Gegenstellen nicht gesammelt (Fokus quality).").
+
+    Dateien und die Pfade in `unreadable` zählen als Text (`str`), auch als `Path`. Kopf,
+    Hinweise und `notes` zählen gegen `cap` und werden nie gekappt.
+    `write_counterparts` rendert über denselben Weg mit diesen Schlüsseln."""
     return _render(packet, entries, unresolved, cap)[0]
 
 
@@ -1758,11 +1888,15 @@ def write_counterparts(repo, run_id):
     die Paketdateien — dieselben geänderten Zeilen wie im Paket-Bereich, der Code aber am
     ZIEL des Plans (`bis^{tree}` weicht bei einer Datei/Ordner-Kollision ab). Die Datei
     beginnt mit der Kopfzeile `<!-- skill: deep-review | schema: 1 | generated: … | packet:
-    <id> -->`, dann `render_block`; eigene Dateien ohne lesbaren Stand am ZIEL stehen mit
-    Grund in der Dateiliste, die übrigen nicht lesbaren Python-Dateien des Repos (im Index
-    übersprungen) als eine Zahl am Ende eines Python-Pakets. Höchstens `BLOCK_MAX_CHARS`
-    Zeichen je Datei, Kopfzeile eingeschlossen. Fokus `quality` sammelt keine Gegenstellen
-    und sagt das. Schreibt atomar, überschreibt einen früheren Block. Rückgabe: je Paket in
+    <id> -->`, dann der Block von `render_block` (über `_render`, dieselben vier Parameter,
+    für die Zahl der gezeigten Stellen) für eine Kopie des Pakets mit den optionalen
+    Schlüsseln: `unreadable` = `Collected.unparsed` (eigene Dateien ohne lesbaren Stand am
+    ZIEL, mit Grund in der Dateiliste), `notes` = die übrigen nicht durchsuchten
+    Python-Dateien des Repos als eine Zahl mit den vorkommenden Gründen
+    (`_PyIndex.not_indexed`: ohne Submodule und ohne Symlinks auf indexierte Dateien) am Ende
+    eines Python-Pakets, bei Fokus `quality` statt Gegenstellen `intro` = `QUALITY_INTRO`.
+    Höchstens `BLOCK_MAX_CHARS` Zeichen je Datei, Kopfzeile eingeschlossen. Schreibt atomar,
+    überschreibt einen früheren Block. Rückgabe: je Paket in
     Plan-Reihenfolge `{"packet", "path" (repo-relativ), "counterparts", "shown",
     "unresolved"}`."""
     repo = _toplevel(repo)
@@ -1781,23 +1915,24 @@ def write_counterparts(repo, run_id):
                   f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
         cap = BLOCK_MAX_CHARS - len(header)
         if plan.get("focus") == "quality":
-            body, _shown = _render(shown_packet, [], 0, cap, intro=(
-                "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n"))
+            shown_packet["intro"] = QUALITY_INTRO
+            body, _shown = _render(shown_packet, [], 0, cap)
             total = shown = unresolved = 0
         else:
             found = collect_python(repo, plan_range, packet["files"])
             own = {str(f) for f in packet["files"] if _is_python(str(f))}
-            notes = ""
+            notes = []
             if own:
                 if repo_unreadable is None:
                     target = split_range(repo, plan_range).target
-                    repo_unreadable = set(_python_index(repo, target).unreadable)
-                others = len(repo_unreadable - own)
+                    repo_unreadable = _python_index(repo, target).not_indexed()
+                others = {p: r for p, r in repo_unreadable.items() if p not in own}
                 if others:
-                    notes = (f"\n{others} Python-Datei(en) außerhalb des Pakets am ZIEL nicht "
-                             "lesbar (Syntaxfehler, Symlink) — dort keine Gegenstellen gesucht.\n")
-            body, shown = _render(shown_packet, found.entries, found.unresolved, cap,
-                                  unreadable=dict(found.unparsed), notes=notes)
+                    reasons = ", ".join(sorted(set(others.values())))
+                    notes = [f"{len(others)} Python-Datei(en) außerhalb des Pakets am ZIEL nicht "
+                             f"lesbar ({reasons}) — dort keine Gegenstellen gesucht."]
+            shown_packet.update(unreadable=found.unparsed, notes=notes)
+            body, shown = _render(shown_packet, found.entries, found.unresolved, cap)
             total, unresolved = len(found.entries), found.unresolved
         rel = CACHE_DIR / run_id / "packets" / f"{pid}.md"
         _write_text(repo / rel, header + body)

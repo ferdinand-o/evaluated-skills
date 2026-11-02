@@ -7,6 +7,7 @@ Fehler hängt an einer Stelle in `base`, die der Diff nicht berührt."""
 import datetime as dt
 import difflib
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -125,7 +126,8 @@ def _lines(n, tag="x"):
 
 
 def _commit_repo(root, before, after):
-    """Repo mit zwei Commits, Tag `base` auf dem ersten. Ein Wert None löscht die Datei."""
+    """Repo mit zwei Commits, Tag `base` auf dem ersten. Ein Wert None löscht die Datei,
+    Bytes werden so geschrieben, wie sie sind."""
     git(root, "init", "--quiet", "--initial-branch=main")
     git(root, "config", "user.email", "t@example.invalid")
     git(root, "config", "user.name", "Test")
@@ -136,7 +138,10 @@ def _commit_repo(root, before, after):
                 path.unlink()
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            if isinstance(text, bytes):
+                path.write_bytes(text)
+            else:
+                path.write_text(text, encoding="utf-8")
         git(root, "add", "-A")
         git(root, "commit", "--quiet", "-m", message)
         if message == "basis":
@@ -1780,3 +1785,176 @@ def test_l11_raises_memoized_per_definition(tmp_path, monkeypatch):
     assert len([e for e in found.entries if e["kind"] == "call"]) == 60
     assert [e["kind"] for e in found.entries].count("except") == 1
     assert top == [("lib.py", 1)]
+
+
+# --- Prüfpunkt nach Task 4, zweite Runde: Funde M1–M7 ------------------------------------
+
+def test_m1_segment_of_a_latin1_file_uses_the_decoded_line(tmp_path):
+    kit = _kit()
+    lib = ("# -*- coding: latin-1 -*-\n"
+           "def f(x, strict=True):\n"
+           "    if not strict or x == 'üü': foo()\n"
+           "    raise ValueError(x)\n").encode("latin-1")
+    caller = "from lib import f\n\n\ndef run():\n    return f(1, strict=True)\n"
+    root = _commit_repo(tmp_path, {"lib.py": lib, "app/c.py": caller},
+                        {"app/c.py": caller.replace("strict=True", "strict=False")})
+    _plan, found, _block = _collect_block(kit, root)
+    flow = [x for e in found.entries for x in e["lines"] if x.startswith("    lib.py:3: ")]
+    assert flow == ["    lib.py:3: if not strict or x == 'üü': foo()"]
+
+
+def test_m2_segment_after_a_bom_on_line_one():
+    kit = _kit()
+    index = kit._PyIndex({"a.py": b"\xef\xbb\xbfif x: foo(1)\n",
+                          "b.py": b"\xef\xbb\xbf# coding: utf-8\nif x: foo(2)\n"})
+    stmt = index.trees["a.py"].body[0]
+    assert index.segment("a.py", stmt) == "if x: foo(1)"
+    assert index.segment("a.py", stmt.body[0]) == "foo(1)"
+    assert index.segment("b.py", index.trees["b.py"].body[0].body[0]) == "foo(2)"
+
+
+QUALITY_INTRO = "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n"
+
+
+def test_m3_render_block_reads_optional_packet_keys(tmp_path):
+    kit = _kit()
+    # Delphi ruft nur render_block: alles, was ein Block zeigen kann, steht im Paket-Dict.
+    assert list(inspect.signature(kit._render).parameters) == [
+        "packet", "entries", "unresolved", "cap"]
+    for key in ("unreadable", "notes", "intro"):
+        assert f"`{key}`" in kit.render_block.__doc__
+    packet = {"id": "p1", "range": "a..b", "files": ["app/x.py", "app/y.py"],
+              "unreadable": [("app/x.py", "Syntaxfehler")], "notes": ["Hinweis eins", "zwei"]}
+    text = kit.render_block(packet, [], 0, None)
+    assert "- `app/x.py` — Datei am ZIEL nicht lesbar: Syntaxfehler\n" in text
+    assert "- `app/y.py`\n" in text
+    assert "1 Paketdatei(en) am ZIEL nicht lesbar" in text
+    assert text.endswith("\nHinweis eins\n\nzwei\n")
+    # JSON-Form (Listen statt Tupel) gleich
+    as_json = {**packet, "unreadable": [["app/x.py", "Syntaxfehler"]]}
+    assert kit.render_block(as_json, [], 0, None) == text
+    quality = kit.render_block({**packet, "intro": QUALITY_INTRO}, [], 0, None)
+    assert "\n## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n" in quality
+    assert "nach der Sammelregel" not in quality
+    # Hinweise zählen gegen cap und bleiben beim Kappen stehen.
+    entries = [{"file": "app/x.py", "line": i, "kind": "call",
+                "lines": [f"### app/x.py:{i} ruft f(...)", "- Gegenstelle f [l.py:1]: def f()"]}
+               for i in range(1, 200)]
+    capped = kit.render_block(packet, entries, 0, 1500)
+    assert len(capped) <= 1500 and "gekappt:" in capped
+    assert capped.endswith("\nHinweis eins\n\nzwei\n")
+    for bad in ({"notes": "Hinweis"}, {"notes": [1]}, {"unreadable": [("a.py",)]},
+                {"unreadable": "a.py"}, {"intro": ["x"]}):
+        with pytest.raises(kit.KitError):
+            kit.render_block({**packet, **bad}, [], 0, None)
+
+    # write_counterparts schreibt genau render_block mit den Schlüsseln (Fokus quality).
+    root = _commit_repo(tmp_path, {"a.py": "x = 1\n"}, {"a.py": "x = 2\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "quality", None, False)
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    md = (kit.run_dir(root, run) / "packets" / "p1.md").read_text(encoding="utf-8")
+    header, body = md.split("\n", 1)
+    rng = re.search(r"Bereich: `([^`]+)`", body).group(1)
+    shown = {**plan["packets"][0], "range": rng, "intro": QUALITY_INTRO}
+    assert body == kit.render_block(shown, [], 0, kit.BLOCK_MAX_CHARS - len(header) - 1)
+
+
+def _link_commit(root, links, message="links"):
+    for rel, dest in links.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(dest, root / rel)
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", message)
+
+
+def _counterparts_md(kit, root, rng):
+    plan = kit.build_plan(root, rng, "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    return (kit.run_dir(root, run) / "packets" / "p1.md").read_text(encoding="utf-8")
+
+
+def test_m4_symlinks_to_indexed_files_are_not_counted(tmp_path):
+    kit = _kit()
+    caller = "from lib import f\n\n\ndef run():\n    return f(1)\n"
+    before = {"lib.py": LIB_STRICT, "app/c.py": caller, "tools/broken.py": "def kaputt(:\n"}
+    root = _commit_repo(tmp_path, before, {"lib.py": LIB_STRICT + "\n"})
+    links = {f"compat/m{i}.py": "../lib.py" for i in range(30)}
+    links["compat/chain.py"] = "m0.py"
+    _link_commit(root, links)
+    (root / "app" / "c.py").write_text(caller.replace("f(1)", "f(2)"), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "aufruf")
+    md = _counterparts_md(kit, root, "HEAD~1..HEAD")
+    assert ("\n1 Python-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar (Syntaxfehler) — "
+            "dort keine Gegenstellen gesucht.\n") in md
+    assert "Symlink" not in md
+
+    (tmp_path / "b").mkdir()
+    other = _commit_repo(tmp_path / "b", {"lib.py": LIB_STRICT, "app/c.py": caller},
+                         {"lib.py": LIB_STRICT + "\n"})
+    _link_commit(other, {"compat/m.py": "../lib.py", "compat/lost.py": "../nirgends.py",
+                         "compat/out.py": "../../draussen.py"})
+    (other / "app" / "c.py").write_text(caller.replace("f(1)", "f(2)"), encoding="utf-8")
+    git(other, "commit", "--quiet", "-am", "aufruf")
+    md = _counterparts_md(kit, other, "HEAD~1..HEAD")
+    assert "\n2 Python-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar (Symlink) — " in md
+    assert "Syntaxfehler" not in md
+
+
+def test_m5_skipped_tree_entries_have_their_own_reason(tmp_path):
+    kit = _kit()
+    odd = os.fsdecode(b"app/\xff.py")
+    root = _commit_repo(tmp_path, {"lib.py": LIB_STRICT, odd: "a = 1\n"}, {odd: "a = 2\n"})
+    head = _rev(root, "HEAD")
+    git(root, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/tool.py")
+    git(root, "commit", "--quiet", "-m", "submodul")
+    found = kit.collect_python(root, "base..HEAD", [odd, "vendor/tool.py"])
+    assert found.unparsed == [(odd, kit.SKIP_NOT_UTF8), ("vendor/tool.py", kit.SKIP_GITLINK)]
+    assert kit.SKIP_NOT_UTF8 != kit.NOT_IN_TARGET != kit.SKIP_GITLINK
+    # Ein Submodul ist keine Python-Datei: nicht in der Zahl am Ende eines anderen Pakets.
+    index = kit._PyIndex(*kit._python_sources(root, _rev(root, "HEAD")))
+    assert index.not_indexed() == {odd: kit.SKIP_NOT_UTF8}
+
+
+def test_m6_packet_files_as_paths_are_counted_like_strings():
+    kit = _kit()
+    packet = {"id": "p1", "range": "a..b", "files": [PurePosixPath("app/x.py"), "app/y.py"],
+              "unreadable": [(PurePosixPath("app/y.py"), "Symlink"), ("app/x.py", "Syntaxfehler")]}
+    text = kit.render_block(packet, [], 0, None)
+    assert "- `app/x.py` — Datei am ZIEL nicht lesbar: Syntaxfehler\n" in text
+    assert "- `app/y.py` — Datei am ZIEL nicht lesbar: Symlink\n" in text
+    assert "2 Paketdatei(en) am ZIEL nicht lesbar" in text
+
+
+def test_m7_two_calls_of_one_name_on_a_line_get_columns(tmp_path):
+    kit = _kit()
+    caller = ("from lib import f, wrap\n\n\n"
+              "def run(x):\n    return f(1, strict=True) and f(2, strict=True)\n\n\n"
+              "def dup(x):\n    return f(5) + f(6)\n\n\n"
+              "def nest(x):\n    return wrap(wrap(x, strict=True))\n\n\n"
+              "def uml(x):\n    return 'ä' + f(3, strict=True)\n")
+    after = (caller.replace("f(1, strict=True)", "f(1, strict=False)")
+             .replace("f(2, strict=True)", "f(2, strict=None)")
+             .replace("f(5) + f(6)", "f(7) + f(8)").replace("x, strict=True", "x, strict=False")
+             .replace("f(3, strict=True)", "f(3, strict=False)"))
+    root = _commit_repo(tmp_path, {"lib.py": LIB_STRICT, "app/c.py": caller}, {"app/c.py": after})
+    _plan, found, block = _collect_block(kit, root)
+    heads = [e["lines"][0] for e in found.entries]
+    assert len(heads) == len(set(heads)), heads
+    line5 = after.splitlines()[4]
+    cols = [line5.index("f(1"), line5.index("f(2")]
+    at5 = _entries_at(found, "app/c.py", 5)
+    assert [e["lines"][0] for e in at5] == [f"### app/c.py:5:{c + 1} ruft f(...)" for c in cols]
+    assert "  geändert: strict=False; Weg:" in at5[0]["lines"]
+    assert "  geändert: strict=None; Weg:" in at5[1]["lines"]
+    # Gleiche Einträge fallen weiter zusammen; ein Eintrag je Name und Zeile ohne Spalte.
+    assert [e["lines"][0] for e in _entries_at(found, "app/c.py", 9)] == [
+        "### app/c.py:9 ruft f(...)"]
+    line13 = after.splitlines()[12]
+    assert sorted(e["lines"][0] for e in _entries_at(found, "app/c.py", 13)) == sorted(
+        f"### app/c.py:13:{line13.index(s) + 1} ruft wrap(...)" for s in ("wrap(w", "wrap(x"))
+    assert [e["lines"][0] for e in _entries_at(found, "app/c.py", 17)] == [
+        "### app/c.py:17 ruft f(...)"]
+    assert all(set(e) == {"file", "line", "kind", "lines"} for e in found.entries)
+    assert block.count("### app/c.py:5:") == 2
