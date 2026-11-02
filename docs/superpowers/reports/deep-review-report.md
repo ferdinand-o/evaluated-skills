@@ -485,6 +485,16 @@ Ebenfalls offen für known-limits:
   gleich.
 - `_line_span` parst die normalisierte Zeile ein zweites Mal. `_checked_plan` gibt
   `file_keys` doppelt zurück.
+- Funde zu Dateien außerhalb des Pakets aus Plänen vor Runde 2 werden nicht weitergegeben,
+  weil ihr Datei-Stand fehlt. Das betrifft nur Läufe aus dem Bau.
+
+Fix-Runde 2 behob die sechs. Die neue Form: übernommene Einträge tragen `outside` mit
+`{finding, packet_files, file_blob}` und werden bei jedem Hop neu geprüft. 1.759 Tests grün.
+
+**Lesson für test-first/subagent-dev:** `tdd_log.py green` nimmt nur einen Test an, der vorher
+rot war. Den Lauf der vollen Suite nach allen Zyklen kann man daher nicht als `green`
+protokollieren. Der Agent wich auf `refactor` aus. Deshalb meldete die Vertragsprüfung von
+Task 7 „volle Suite fehlt“. Der Step „Grün sehen: volle Suite“ und das Log passen nicht zusammen.
 
 ## Was nicht gemessen wurde
 
