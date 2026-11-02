@@ -4927,3 +4927,114 @@ def test_cp8b_f3_audit_checks_notes_reused_and_comment_lines(tmp_path, monkeypat
         assert len(other) == kit.REPORT_BASE_LINES + (not ok), len(other)
         mismatch = kit.audit(directory, None)["report_mismatch"]
         assert (mismatch == []) is ok, mismatch
+
+
+# --- Evals und Fixtures (Task 12) ---------------------------------------------------------
+
+EVALS_PATH = REPO_ROOT / "evals" / "deep-review" / "evals.json"
+EVAL_IDS = ["anti-ceremony-small-range-one-packet", "large-range-is-split-and-covered",
+            "narrowed-except-gets-callee-raises", "delphi-extract-shows-ownership",
+            "security-focus-is-one-packet", "routing-large-branch-without-skill-name"]
+# Je Eval: Fixture, Argumente von `plan` und Werkzeug — so, wie der Prompt es dem Hauptagenten
+# sagt ("letzter Commit" ohne --range, "teile ab 200 Zeilen" als --split-at 200; Sicherheit im
+# Workspace ohne origin/HEAD, also im Hauptkontext). Der Review selbst liefert hier keine Funde.
+EVAL_RUNS = {
+    "anti-ceremony-small-range-one-packet": ("dr-seeded", ["--range", "base..HEAD"], "/code-review"),
+    "large-range-is-split-and-covered": ("dr-split", ["--range", "base..HEAD", "--split-at", "200"],
+                                         "/code-review"),
+    "narrowed-except-gets-callee-raises": ("dr-contract", [], "/code-review"),
+    "delphi-extract-shows-ownership": ("dr-delphi", [], "/code-review"),
+    "security-focus-is-one-packet": ("dr-contract", ["--range", "base..HEAD", "--focus", "security"],
+                                     "Review ohne /security-review"),
+    "routing-large-branch-without-skill-name": ("dr-split", ["--range", "base..HEAD"], "/code-review"),
+}
+NEW_FIXTURES = {"dr-split": (400, 500), "dr-contract": (1, 99), "dr-delphi": (1, 99)}
+COUNT_RE = re.compile(r"^(\w+): .* · (\d+) Gegenstellen, ", re.MULTILINE)
+
+
+def _eval_flow(kit, root, plan_args, tool, capsys):
+    """Was die Skill im Workspace mechanisch tut, über `main`: plan, counterparts, je Paket ein
+    leeres Ergebnis, merge, Bericht nach dem Gerüst, audit, cleanup. Die Lauf-ID steht in der
+    ersten Ausgabezeile von plan. Rückgabe: Laufordner und Plan."""
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", *plan_args) == 0
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first.startswith("Lauf: "), first
+    run = first.removeprefix("Lauf: ")
+    directory = root / ".skills/cache/deep-review" / run
+    assert _cli(kit, root, "counterparts", "--run", run) == 0
+    counted = dict(COUNT_RE.findall(capsys.readouterr().out))
+    plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    rows = []
+    for packet in plan["packets"]:
+        payload = root.parent / f"{root.name}-{packet['id']}.json"
+        payload.write_text("[]", encoding="utf-8")
+        assert _cli_record(kit, root, run, packet["id"], payload, tool=tool) == 0
+        rows.append((packet["id"], len(packet["files"]), packet["changed_lines"],
+                     counted[packet["id"]], 0))
+    assert _cli(kit, root, "merge", "--run", run) == 0
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    _write_report(directory, _fill_template(template, directory, run, [], rows, tool=tool))
+    assert _cli(kit, root, "audit", "--run", run) == 0, capsys.readouterr().out
+    assert _cli(kit, root, "cleanup", "--run", run) == 0
+    capsys.readouterr()
+    return directory, plan
+
+
+def test_evals_and_fixtures(tmp_path, capsys):
+    from evalkit.assertions import check
+    from evalkit.schema import load_evals
+
+    kit = _kit()
+    evals = load_evals(EVALS_PATH)
+    assert [ev.id for ev in evals] == EVAL_IDS
+    for ev in evals:
+        assert ev.eval_class == "contract" and ev.fixture == EVAL_RUNS[ev.id][0], ev.id
+        assert "Diskriminator" in ev.notes, ev.id
+    assert "stochastisch" in evals[-1].notes
+    assert "deep-review" not in evals[-1].prompt
+
+    # Die drei neuen Fixtures: Git mit Tag base, README.md, Größe und Verzeichnisse wie in Spec 26.
+    for name, (low, high) in NEW_FIXTURES.items():
+        fixture = FIXTURES / name
+        meta = _manifest(fixture)
+        assert meta["git"] is True and len(meta["commits"]) == 2, name
+        assert meta["commits"][0]["tag"] == "base" and "tag" not in meta["commits"][1], name
+        assert sorted(p.name for p in fixture.iterdir()) == ["README.md", "fixture.json"], name
+        ws = prepare(tmp_path / "bau" / name, None, fixture)
+        counts = [line.split("\t") for line in
+                  git(ws.root, "diff", "--numstat", "base..HEAD").splitlines()]
+        changed = sum(int(a) + int(d) for a, d, _ in counts)
+        assert low <= changed <= high, (name, changed)
+        if name == "dr-split":
+            assert {path.split("/")[0] for _, _, path in counts} == {"export", "fahrten", "kosten"}
+            # Mit --split-at 200 passen keine zwei Verzeichnisse in ein Paket: p1 bis p3.
+            plan = kit.build_plan(ws.root, "base..HEAD", "standard", "bugs", 200, False)
+            assert [p["id"] for p in plan["packets"]] == ["p1", "p2", "p3"]
+            assert [{f.split("/")[0] for f in p["files"]} for p in plan["packets"]] == [
+                {"export"}, {"fahrten"}, {"kosten"}]
+
+    # Je Eval der mechanische Teil des Laufs im Workspace der Fixture; dann die Assertions
+    # aus evals.json gegen die echte Ausgabe.
+    for ev in evals:
+        name, plan_args, tool = EVAL_RUNS[ev.id]
+        ws = prepare(tmp_path / ev.id / "ws", None, FIXTURES / name)
+        directory, plan = _eval_flow(kit, ws.root, plan_args, tool, capsys)
+        for assertion in ev.must:
+            result = check(assertion, ws.root, ws.baseline)
+            assert result.ok, (ev.id, assertion, result.detail)
+        if ev.id in ("narrowed-except-gets-callee-raises", "delphi-extract-shows-ownership"):
+            assert plan["split"] is False and [p["id"] for p in plan["packets"]] == ["p1"]
+            block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
+            assert kit.SKIP_UNBALANCED not in block and kit.SKIP_SYNTAX not in block, block
+            diff = git(ws.root, "diff", "HEAD^..HEAD")
+        if ev.id == "narrowed-except-gets-callee-raises":
+            # TypeError und vendor/grouplib.py kennt nur der Sammler, nicht der Diff.
+            assert "vendor/grouplib.py" not in diff and "raise TypeError" not in diff
+            assert re.search(r"^- Gegenstelle group_by \[vendor/grouplib\.py:\d+\]", block, re.M)
+        if ev.id == "delphi-extract-shows-ownership":
+            # Basisklasse und Konstruktor stehen nur im Besitz-Eintrag, nicht im Diff.
+            assert "inherited Create(True)" not in diff and "TObjectList" not in diff
+            assert re.search(r"^### Query\.pas:\d+ Extract auf ATree: TQueryTree$", block, re.M)
+        if ev.id == "routing-large-branch-without-skill-name":
+            assert plan["split"] is False and len(plan["packets"]) == 1

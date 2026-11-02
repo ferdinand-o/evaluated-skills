@@ -1,0 +1,21 @@
+{
+  "git": true,
+  "description": "Kontraktfixture fuer deep-review (Spec 26, Eval delphi-extract-shows-ownership): kleiner Filterbaum in Delphi bei Tag base, darauf ein Commit, der in `Query.pas` (DropEmpty) `ATree.Remove` durch `ATree.Extract` ersetzt. ATree ist ein Parameter vom Typ TQueryTree; `Tree.pas` deklariert `TQueryTree = class(TObjectList<TNode>)`, und ihr Konstruktor ruft `inherited Create(True)` — die Liste besitzt ihre Knoten. Remove gab den leeren Knoten frei, Extract nimmt ihn nur heraus, und DropEmpty verwirft das Ergebnis: jeder leere Knoten leckt. Der Diff allein zeigt weder Basisklasse noch Konstruktor; beides steht nur im Besitz-Eintrag des Paketblocks packets/p1.md.",
+  "commits": [
+    {
+      "message": "Filterbaum 1.2: Bedingungen sammeln und als Filter ausgeben",
+      "touch": {
+        "Query.pas": "unit Query;\n\ninterface\n\nuses\n  Tree;\n\nprocedure DropEmpty(ATree: TQueryTree);\nfunction BuildFilter(ATree: TQueryTree): string;\n\nimplementation\n\nprocedure DropEmpty(ATree: TQueryTree);\nvar\n  I: Integer;\nbegin\n  for I := ATree.Count - 1 downto 0 do\n    if ATree[I].IsEmpty then\n      ATree.Remove(ATree[I]);\nend;\n\nfunction BuildFilter(ATree: TQueryTree): string;\nbegin\n  DropEmpty(ATree);\n  Result := ATree.ToFilter;\nend;\n\nend.\n",
+        "QueryDemo.dpr": "program QueryDemo;\n\n{$APPTYPE CONSOLE}\n\nuses\n  System.SysUtils,\n  Tree in 'Tree.pas',\n  Query in 'Query.pas';\n\nvar\n  Conditions: TQueryTree;\nbegin\n  Conditions := TQueryTree.Create;\n  try\n    Conditions.AddCondition('Ort', 'Bremen');\n    Conditions.AddCondition('Kunde', '');\n    Writeln(BuildFilter(Conditions));\n  finally\n    Conditions.Free;\n  end;\nend.\n",
+        "Tree.pas": "unit Tree;\n\ninterface\n\nuses\n  System.Generics.Collections, System.SysUtils;\n\ntype\n  TNode = class\n  private\n    FField: string;\n    FValue: string;\n  public\n    constructor Create(const AField, AValue: string);\n    function IsEmpty: Boolean;\n    property Field: string read FField;\n    property Value: string read FValue;\n  end;\n\n  TQueryTree = class(TObjectList<TNode>)\n  public\n    constructor Create;\n    function AddCondition(const AField, AValue: string): TNode;\n    function ToFilter: string;\n  end;\n\nimplementation\n\nconstructor TNode.Create(const AField, AValue: string);\nbegin\n  inherited Create;\n  FField := AField;\n  FValue := AValue;\nend;\n\nfunction TNode.IsEmpty: Boolean;\nbegin\n  Result := Trim(FValue) = '';\nend;\n\nconstructor TQueryTree.Create;\nbegin\n  inherited Create(True);\nend;\n\nfunction TQueryTree.AddCondition(const AField, AValue: string): TNode;\nbegin\n  Result := TNode.Create(AField, AValue);\n  Add(Result);\nend;\n\nfunction TQueryTree.ToFilter: string;\nvar\n  Node: TNode;\nbegin\n  Result := '';\n  for Node in Self do\n  begin\n    if Result <> '' then\n      Result := Result + ' AND ';\n    Result := Result + Node.Field + ' = ' + QuotedStr(Node.Value);\n  end;\nend;\n\nend.\n"
+      },
+      "tag": "base"
+    },
+    {
+      "message": "Query: DropEmpty liest jeden Knoten einmal und entnimmt leere Bedingungen",
+      "touch": {
+        "Query.pas": "unit Query;\n\ninterface\n\nuses\n  Tree;\n\nprocedure DropEmpty(ATree: TQueryTree);\nfunction BuildFilter(ATree: TQueryTree): string;\n\nimplementation\n\nprocedure DropEmpty(ATree: TQueryTree);\nvar\n  I: Integer;\n  Node: TNode;\nbegin\n  for I := ATree.Count - 1 downto 0 do\n  begin\n    Node := ATree[I];\n    if Node.IsEmpty then\n      ATree.Extract(Node);\n  end;\nend;\n\nfunction BuildFilter(ATree: TQueryTree): string;\nbegin\n  DropEmpty(ATree);\n  Result := ATree.ToFilter;\nend;\n\nend.\n"
+      }
+    }
+  ]
+}
