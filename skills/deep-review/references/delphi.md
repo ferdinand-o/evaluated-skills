@@ -72,21 +72,26 @@ Exception?
 
 ### `Extract` gegen `OwnsObjects`
 
-- **Frage:** Ist die Liste besitzend (`inherited Create(True)`, oder der Besitz-Default der RTL
-  im Block), und wechselt die Stelle zwischen `Remove`/`Delete`/`Clear` und `Extract`? Bei
-  `OwnsObjects` gleich wahr geben `Remove`, `Delete` und `Clear` das Element frei, `Extract`
-  nicht. `TObjectDictionary` besitzt nur, was `Ownerships` nennt.
+- **Frage:** Ist der Container besitzend (`inherited Create(True)`, `Ownerships` mit
+  `doOwnsKeys` oder `doOwnsValues`, oder der Besitz-Default der RTL im Block), und wechselt die
+  Stelle zwischen den freigebenden Aufrufen (`Remove`, `Delete`, `Clear`) und den
+  herausnehmenden (`Extract`, `ExtractPair`)? Bei `OwnsObjects` gleich wahr gibt eine Liste mit
+  `Remove`, `Delete` und `Clear` das Element frei, mit `Extract` nicht. `TObjectDictionary`
+  besitzt nur, was `Ownerships` nennt, und gibt es bei `Remove` und `Clear` frei, bei
+  `ExtractPair` nicht.
 - **Eingabe:**
 
   ```pascal
-  // FJobs: TObjectList<TJob> mit Create(True)
-  Job := FJobs.Extract(Done);         // vorher: FJobs.Remove(Done)
-  Archive.Push(Job);                  // Archive.Push speichert nur, es gibt nichts frei
+  // FCache: TObjectDictionary<string, TReport>, Create([doOwnsValues])
+  Pair := FCache.ExtractPair(Key);    // vorher: FCache.Remove(Key)
+  Outbox.Add(Pair.Value);             // Outbox.Add speichert nur, es gibt nichts frei
   ```
 
-  Mit `Remove` war `Done` nach der Zeile zerstört. Mit `Extract` lebt es weiter und gehört
-  jetzt niemandem: Wer ruft `Job.Free`, wenn `Archive` es nicht tut? Umgekehrt: Bleibt nach
-  dem Wechsel auf `Remove` ein `Job.Free` stehen, ist es eine doppelte Freigabe.
+  Mit `Remove` war der Bericht nach der Zeile zerstört. Mit `ExtractPair` lebt er weiter und
+  gehört jetzt niemandem: Wer ruft `Pair.Value.Free`, wenn `Outbox` es nicht tut? Umgekehrt:
+  Bleibt nach dem Wechsel auf `Remove` ein `Free` auf dem Wert stehen, ist es eine doppelte
+  Freigabe. Gegenprobe: Ohne `doOwnsValues` gibt auch `Remove` nichts frei, dann ändert der
+  Wechsel am Besitz nichts.
 
 ### Besitzübergabe an Antwort-Objekte
 
@@ -115,8 +120,8 @@ Exception?
 
 - **Frage:** Wird ein `string` mit 0 oder mit 1 als erstem Index angesprochen, und stimmt das
   mit der Funktion daneben überein? `S[…]`, `Copy`, `Pos`, `Delete`, `Insert` zählen ab 1;
-  `string`-Helfer (`Substring`, `IndexOf`) und `TStringBuilder`, `TStringList.Items`
-  zählen ab 0. `{$ZEROBASEDSTRINGS}` dreht das für `S[…]`.
+  `string`-Helfer (`Substring`, `IndexOf`), `TStringBuilder` und die Standard-Eigenschaft
+  `TStringList.Strings[…]` (geschrieben auch `List[i]`) zählen ab 0. `{$ZEROBASEDSTRINGS}` dreht das für `S[…]`.
 - **Eingabe:**
 
   ```pascal
@@ -165,8 +170,9 @@ Exception?
 ## UTC gegen Ortszeit
 
 - **Frage:** In welcher Zeitzone liegen die beiden Seiten einer Rechnung oder eines
-  Vergleichs: `Now` (Ortszeit), `TTimeZone.Local.ToUniversalTime(…)`, `UTCNow`,
-  ein gespeicherter Wert aus der Datenbank oder einem Token? Wird zwischen den Zonen
+  Vergleichs: `Now` (Ortszeit), UTC aus `TTimeZone.Local.ToUniversalTime(Now)` oder
+  `TDateTime.NowUTC` (beide `System.DateUtils`), ein gespeicherter Wert aus der Datenbank oder
+  einem Token? Wird zwischen den Zonen
   umgerechnet, und liegt die Stelle über eine Sommerzeitgrenze?
 - **Eingabe:**
 
@@ -186,19 +192,33 @@ Exception?
 - **Frage:** Wird dieselbe Instanz einer Klasse mit Referenzzählung (`TInterfacedObject`) über
   eine Objektvariable **und** eine Interface-Variable gehalten? Dann zerstört der Zähler die
   Instanz, sobald die letzte Interface-Referenz geht, auch wenn die Objektvariable sie noch
-  nutzt.
+  nutzt. Wann das ist, entscheidet oft eine Referenz, die im Code nicht steht: Das Ergebnis
+  von `Obj as IIntf` (ebenso eine Interface-Rückgabe, die keiner Variablen zugewiesen wird)
+  hält der Compiler in einer versteckten Temporären. Sie gibt ihre Referenz erst im Epilog der
+  umschließenden Routine ab, also an deren `end`, nicht nach dem Aufruf.
 - **Eingabe:**
 
   ```pascal
-  Worker := TWorker.Create;           // Worker: TWorker (Objektreferenz), Zähler 0
-  Run(Worker as IWorker);             // Parameter hält kurz eine Referenz: Zähler 1, danach 0
-  Worker.Reset;                       // Instanz ist schon zerstört
+  procedure TJobs.Start;              // FWorker: TWorker (Objektreferenz)
+  begin
+    FWorker := TWorker.Create;        // Zähler 0
+    Run(FWorker as IWorker);          // versteckte Temporäre: Zähler 1
+    FWorker.Reset;                    // geht noch, die Temporäre lebt bis zum Epilog
+  end;                                // Epilog: Temporäre gibt ab, Zähler 0, Instanz zerstört
+
+  procedure TJobs.Stop;
+  begin
+    FWorker.Reset;                    // Instanz seit dem Ende von Start zerstört
+    FWorker.Free;                     // zweite Freigabe
+  end;
   ```
 
-  Nach `Run` fällt der Zähler auf 0, die Instanz wird freigegeben, `Worker` zeigt ins Leere.
-  Dasselbe passiert bei `Worker.Free`, wenn zuvor noch eine Interface-Referenz lebte. Richtig
-  ist eine einzige Art: durchgängig Interface-Variablen, oder eine Klasse, die nicht
-  mitzählt, oder die Objektreferenz hält zusätzlich eine eigene Interface-Referenz.
+  Innerhalb von `Start` geht alles gut, auch die Zeile nach `Run`. Freigegeben wird die
+  Instanz im Epilog von `Start`. Was danach kommt, scheitert: `Stop` ruft eine Methode auf
+  freigegebenem Speicher auf, und `FWorker.Free` gibt ein zweites Mal frei. Spiele daher den
+  Weg über das Ende der Routine hinaus durch: Feld, Liste, Rückgabewert. Richtig ist eine
+  einzige Art: durchgängig Interface-Variablen, oder eine Klasse, die nicht mitzählt, oder die
+  Objektreferenz hält zusätzlich eine eigene Interface-Referenz.
 
 ## Verschluckte Exceptions
 

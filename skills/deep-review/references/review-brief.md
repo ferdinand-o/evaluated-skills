@@ -9,8 +9,9 @@ sagst und in welcher Form das Ergebnis zurückkommt, in drei Fassungen:
 | [Fokus `quality`](#fassung-2-fokus-quality) | „Wartbarkeit“, „Qualität“, „Code-Hygiene“ |
 | [Review ohne /code-review](#review-ohne-code-review) | `/code-review` ist nicht verfügbar (claude.ai, andere Agenten) |
 
-Fokus `security` ruft `/security-review` einmal für das Paket `s1` auf, mit den Gegenstellen
-aller Dateien als Kontext. Es gilt dasselbe [Rückgabeformat](#rückgabeformat).
+Fokus `security` hat ein Paket `s1`. Ob `/security-review` es prüfen kann, hängt am Bereich
+des Plans; die zwei Fälle stehen unter [Fokus `security`](#fokus-security). Es gilt dasselbe
+[Rückgabeformat](#rückgabeformat).
 
 Wie `packets/<id>.md` aufgebaut ist und wie ein Reviewer es liest, steht in
 [counterparts.md](counterparts.md): [Zeilenformat des Paketblocks](counterparts.md#zeilenformat-des-paketblocks)
@@ -26,8 +27,10 @@ Je Paket in Plan-Reihenfolge ein Aufruf:
 /code-review --max-findings all <von>..<bis>
 ```
 
-- `<von>..<bis>` ist das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
-  (`<id>: <bereich> · …`). Bei `split: false` ist das der Originalbereich.
+- `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
+  (`<id>: <bereich> · …`). Den Originalbereich setzt du nicht selbst ein: Er ist es nur bei
+  `split: false` ohne Wurzel-Commit. Beim Wurzel-Commit (`root: true`) und nach `--since`
+  bekommt auch ein einzelnes Paket Hilfscommits, und dann ist es deren `<von>..<bis>`.
 - Den Inhalt von `packets/<id>.md` gibst du **jedem Unteragenten unverändert** mit: nicht
   gekürzt, nicht umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht
   aufgelösten Stellen und eine Kappung bleiben stehen.
@@ -91,6 +94,28 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 >
 > `<Inhalt von packets/<id>.md, unverändert>`
 
+## Fokus `security`
+
+`/security-review` wählt seinen Bereich selbst: die ausstehenden Änderungen des aktuellen
+Branches. Einen Bereich nimmt es nicht an. Darum prüfst du zuerst, ob sich dieser Umfang mit
+dem Bereich des Plans deckt:
+
+- ZIEL ist HEAD: `target` aus `plan.json` gleich `git rev-parse HEAD`, unter `notes` kein
+  `target_not_head`.
+- BASIS ist die Merge-Basis des aktuellen Branches mit seinem Upstream oder, ohne Upstream,
+  mit dem Default-Branch: `base` aus `plan.json` gleich `git merge-base HEAD @{upstream}`
+  (sonst `git merge-base HEAD origin/HEAD`).
+- Unter `notes` steht kein `worktree_differs` und kein `worktree_unknown`. Sonst sieht
+  `/security-review` andere Dateistände als der Plan.
+
+| Fall | Beispiel | Review | `--tool` |
+| --- | --- | --- | --- |
+| Umfang deckt sich | Feature-Branch mit ausstehenden Änderungen, Bereich `main..HEAD` | `/security-review` einmal für `s1`, die Gegenstellen aller Dateien als Kontext | `/security-review` |
+| Umfang deckt sich nicht | Bereich `v1.2..v1.3` auf einem anderen Branch, ein älterer Commit, ZIEL nicht HEAD | im Hauptkontext über den Bereich des Plans, Ablauf wie [Review ohne /code-review](#review-ohne-code-review), Prüfblick auf Eingaben von außen, Rechte, Geheimnisse und Injektion | `"Review ohne /security-review"` |
+
+Im zweiten Fall nennt der Bericht das Werkzeug wörtlich „Review ohne /security-review“ in der
+Kopfzeile und in der Übergabe, wie beim Review ohne /code-review.
+
 ## Review ohne /code-review
 
 Ohne `/code-review` läuft dieselbe Paketfolge im Hauptkontext. Die Pakete, die Gegenstellen
@@ -101,10 +126,14 @@ Leser weiß, dass hier kein eigener Unteragent und kein zweiter Blick gelesen ha
 Je Paket, in Plan-Reihenfolge, eines nach dem anderen:
 
 1. Lies `packets/<id>.md` ganz.
-2. Lies die Änderung mit `git diff <von>..<bis>` (nur die Paketdateien). Das Soll steht in
-   `git log <von>..<bis>`, im Profil `checkpoint` in der Datei von `--soll-file`.
-3. Der Reviewer liest den Arbeitsbaum, nicht ZIEL. Nennt der Plan unter `notes`
-   `worktree_differs` oder `target_not_head`, lies den Stand mit `git show <ziel>:<datei>`.
+2. Lies die Änderung mit `git diff <von>..<bis>` (nur die Paketdateien). `<von>..<bis>` ist
+   immer der Bereich, den `counterparts` für das Paket ausgegeben hat, auch bei `split: false`:
+   Beim Wurzel-Commit und nach `--since` sind es Hilfscommits, nicht der Originalbereich. Das
+   Soll steht in `git log <von>..<bis>`, im Profil `checkpoint` in der Datei von `--soll-file`.
+3. Ein Review liest sonst den Arbeitsbaum, nicht ZIEL. Nennt der Plan unter `notes`
+   `target_not_head`, `worktree_differs` oder `worktree_unknown` (Index fehlt, Arbeitsbaum
+   nicht geprüft), lies jede Paketdatei mit `git show <ziel>:<datei>`, nicht aus dem
+   Arbeitsbaum.
 4. Gehe die Einträge unter „Gegenstellen“ der Reihe nach durch und prüfe den Vertrag wie in
    Fassung 1, Punkt 1. Öffne die genannte Stelle, bevor du einen Fund schreibst.
 5. Gehe danach die geänderten Zeilen durch: Logik, Randwerte, Fehlerpfade, Aufrufer außerhalb
@@ -121,10 +150,11 @@ Regeln:
   Übergabe, nicht in die Liste.
 - Fokus `quality`: der Auftrag aus Fassung 2 gilt unverändert, ebenfalls ohne Vergleich der
   Gegenstellen.
-- Fokus `security` ohne `/security-review`: ein Paket `s1`, derselbe Ablauf, Prüfblick auf
-  Eingaben von außen, Rechte, Geheimnisse und Injektion. Der Bericht nennt den Ausfall des
-  Werkzeugs ebenso.
-- `--tool` ist dann `"Review ohne /code-review"`.
+- Fokus `security`, wenn sich der Umfang von `/security-review` nicht mit dem Bereich des
+  Plans deckt oder `/security-review` fehlt ([Fokus `security`](#fokus-security)): ein Paket
+  `s1`, derselbe Ablauf über dessen Bereich, Prüfblick auf Eingaben von außen, Rechte,
+  Geheimnisse und Injektion. `--tool` ist dann `"Review ohne /security-review"`.
+- Sonst ist `--tool` `"Review ohne /code-review"`.
 
 ## Rückgabeformat
 
@@ -133,7 +163,7 @@ Die Antwort ist eine JSON-Liste. Je Fund ein Objekt mit genau diesen Feldern, di
 
 | Feld | Inhalt |
 | --- | --- |
-| `file` | Pfad im Repo, Pflicht. `/` als Trenner; ein absoluter Pfad im Repo wird relativ gemacht, `..` und Pfade außerhalb werden abgewiesen |
+| `file` | Pfad im Repo als Text, Pflicht |
 | `line` | eine Zahl, ein Bereich `"a-b"` oder `null`, wenn keine einzelne Zeile gemeint ist |
 | `summary` | Text, Pflicht: was falsch ist, in einem Satz |
 | `failure_scenario` | Text mit dem Ablauf, der scheitert, oder `null` |
@@ -151,9 +181,23 @@ Die Antwort ist eine JSON-Liste. Je Fund ein Objekt mit genau diesen Feldern, di
 
 - Ein Paket ohne Funde liefert `[]`. Weglassen des Ergebnisses ist kein Ergebnis; `audit`
   meldet das Paket dann unter `missing`.
-- Weitere Felder fallen weg. Fehlt `summary` oder `file`, ist die ganze Liste ungültig; es
-  wird nichts geschrieben.
 - Ein Objekt mit der Liste unter `findings` geht auch, die reine Liste ist der Normalfall.
+- Weitere Felder fallen weg.
+
+`record` prüft jeden Fund so, und **ein** ungültiger Fund macht die ganze Liste ungültig; es
+wird nichts geschrieben:
+
+| Prüfung | angenommen | abgewiesen |
+| --- | --- | --- |
+| Antwort | JSON-Liste, oder Objekt mit Liste unter `findings`; über stdin UTF-8 | kein JSON, anderes JSON, stdin kein UTF-8 |
+| Fund | ein Objekt | alles andere, etwa ein Text oder eine Liste |
+| `file` | nicht leerer Text; `\` wird `/`, `./` fällt weg, ein absoluter Pfad im Repo wird relativ | fehlt, leer oder kein Text; ein Glied `..`; ein absoluter Pfad außerhalb des Repos |
+| `line` | ganze Zahl ≥ 0; Text `12`, `L12`, `12-14`, `12 - 14`, `12–14`, `L12-L14`, `12 bis 14` (vertauschte Enden werden sortiert, `12-12` wird 12); `null`, fehlt oder leerer Text wird `null` | negative Zahl, Kommazahl, `true`/`false`, Objekt, Liste; Text ohne diese Form, etwa `"near 40"`, `"ca. 12"` oder `"12, 15"` |
+| `summary` | nicht leerer Text | fehlt, leer oder kein Text |
+| `failure_scenario` | Text (leer wird `null`), `null` oder fehlt | Zahl, Objekt, Liste, `true`/`false` |
+
+Steht keine einzelne Zeile fest, ist `line` `null`, nicht eine Umschreibung wie `"near 40"`. Der
+Ablauf in `failure_scenario` ist ein Satz als Text, kein Objekt mit Feldern.
 
 Übergabe an das Skript, ohne Skriptpfad hier (der steht in der SKILL.md):
 
@@ -161,7 +205,9 @@ Die Antwort ist eine JSON-Liste. Je Fund ein Objekt mit genau diesen Feldern, di
 review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->
 ```
 
-- `<werkzeug>` ist das, was lief: `/code-review`, `/security-review` oder
+- `<werkzeug>` ist das, was lief: `/code-review`; `/security-review`, wenn sich sein Umfang
+  mit dem Bereich des Plans deckt; `"Review ohne /security-review"` für ein Sicherheitsreview
+  im Hauptkontext, wenn er sich nicht deckt ([Fokus `security`](#fokus-security)); sonst
   `"Review ohne /code-review"`. Der Bericht übernimmt es.
 - `-` liest die Liste von stdin als UTF-8.
 - Angenommen wird nur, wenn das Paket im Plan steht und noch kein Ergebnis hat. Ein zweites
