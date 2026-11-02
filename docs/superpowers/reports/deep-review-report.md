@@ -421,6 +421,21 @@ Offen für known-limits:
   `counterparts` sammelt je Paket erneut. Damit kostet das Sammeln etwa doppelt, und ein
   Sammelfehler bricht schon `plan` ab.
 
+Review des Fixes: 11 Funde. In Runde 2 kommen drei mit falschem Ergebnis: Eine Kette aus mehreren Läufen verlor
+die Funde der älteren Glieder. Ein Symlink über ein Verzeichnis-Symlink löste nicht auf. Ohne
+Dateimodus galten Symlink und Datei mit gleichem Inhalt als gleich. Ebenfalls offen für known-limits:
+
+- Ein früherer Plan wird vor dem Fokus- und Profilfilter streng geprüft. Ein kaputter oder alter
+  Plan in `--since` bricht deshalb den ganzen Folgelauf ab, auch wenn er ohnehin übergangen würde.
+  Das ist ein lauter Fehler, kein stilles Ergebnis.
+- `apply_since` nimmt `PACKET_SIZE`, wenn dem Plan `packet_size` fehlt. Das trifft nur
+  handbearbeitete Pläne, denn `build_plan` schreibt das Feld immer.
+- `_check_fresh` erkennt einen schon angewandten `--since` am Text in `_meta.generated`. Sauberer
+  wäre ein eigenes Feld.
+- Doppelte Arbeit: `ls-tree` am ZIEL läuft für Schlüssel und Blobs zweimal. Die Prüfung
+  „kann nicht auf sich selbst folgen“ steht zweimal, die Blob-Prüfung in `apply_since` doppelt.
+  `split_range` reicht einen fertigen `Span` durch.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
