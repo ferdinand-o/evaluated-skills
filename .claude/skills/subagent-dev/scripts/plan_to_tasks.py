@@ -1446,20 +1446,48 @@ def _loc(path: str, lines: object) -> str:
     return f"{path}:{lines}" if lines not in (None, "") else path
 
 
-def _is_line(value: object) -> bool:
-    return value is None or isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+def _clean_line(value: object, where: str, key: str = "line"):
+    """`line` eines Funds in fester Form wie `_clean_line` in review_kit.py: eine Zahl ≥ 0, ein
+    Bereich `"a-b"` (`12-14`, `12 - 14`, `L12-L14`, `12 bis 14`, Halbgeviertstrich; vertauschte
+    Enden werden sortiert, `12-12` ist 12) oder None (null, leerer Text). Alles andere ist ein
+    PlanParseError mit `where`."""
+    if isinstance(value, bool) or not (value is None or isinstance(value, (int, str))):
+        raise PlanParseError(f"{where}: {key} muss eine ganze Zahl, ein Text oder null sein ({value!r})")
+    if isinstance(value, int):
+        if value < 0:
+            raise PlanParseError(f"{where}: {key} {value} ist negativ")
+        return value
+    if value is None or not value.strip():
+        return None
+    match = FIX_LINE_RE.fullmatch(value)
+    if not match:
+        raise PlanParseError(f"{where}: {key} {value!r} ist keine Zeilenangabe (erwartet eine Zahl oder "
+                             "einen Bereich wie 12-14, L12-L14 oder 12 bis 14)")
+    first, last = sorted((int(match[1]), int(match[2] or match[1])))
+    return first if first == last else f"{first}-{last}"
 
 
 def _repo_path(value: object, where: str) -> str:
-    """Ein Repo-relativer POSIX-Pfad (Backslashes werden zu `/`) oder PlanParseError — kein
-    leerer, absoluter (auch `C:`, `//server`) oder mit `..` aus dem Repo führender Pfad."""
+    """Ein Repo-relativer POSIX-Pfad einer Datei oder PlanParseError. `\\` wird `/`, `./` und
+    doppelte `/` fallen weg (`./src/a.py` und `src/a.py` sind ein Eintrag). Abgelehnt: leer, `.`,
+    absolut (`/…`, `C:/…`, `C:`; `a:notes.md` ist ein Dateiname), `..`, Glob-Zeichen `*?[` und
+    ein Pfad, der im Arbeitsverzeichnis (dem Repo) ein Verzeichnis ist — eine Allowlist nennt
+    Dateien, keinen Teilbaum."""
     if not isinstance(value, str) or not value.strip():
         raise PlanParseError(f"{where} ist kein nicht-leerer Text ({value!r})")
-    path = value.strip().replace("\\", "/")
-    if path.startswith("/") or re.match(r"[A-Za-z]:", path):
+    text = value.strip().replace("\\", "/")
+    if text.startswith("/") or re.match(r"[A-Za-z]:(/|$)", text):
         raise PlanParseError(f"{where} ist absolut ({value!r}), erwartet ein Pfad relativ zum Repo")
-    if ".." in path.split("/"):
+    pure = PurePosixPath(text)
+    if not pure.parts:
+        raise PlanParseError(f"{where} ist leer oder `.` ({value!r}), erwartet eine Datei im Repo")
+    if ".." in pure.parts:
         raise PlanParseError(f"{where} enthält `..` ({value!r}), erwartet ein Pfad im Repo")
+    if any(c in text for c in "*?["):
+        raise PlanParseError(f"{where} enthält Glob-Zeichen ({value!r}), erwartet eine Datei, kein Muster")
+    path = pure.as_posix()
+    if text.endswith("/") or Path(path).is_dir():
+        raise PlanParseError(f"{where} ist ein Verzeichnis ({value!r}), erwartet eine Datei")
     return path
 
 
@@ -1471,26 +1499,27 @@ def _checked_finding(n: int, f: object) -> dict:
     if not isinstance(f, dict):
         raise PlanParseError(f"{where}: ist kein Objekt ({f!r})")
     path = _repo_path(f.get("file"), f"{where}: `file`")
-    if not isinstance(f.get("summary"), str):
-        raise PlanParseError(f"{where}: `summary` ist kein Text ({f.get('summary')!r})")
-    if not isinstance(f.get("failure_scenario"), (str, type(None))):
-        raise PlanParseError(f"{where}: `failure_scenario` ist weder Text noch null ({f.get('failure_scenario')!r})")
-    if not _is_line(f.get("line")):
-        raise PlanParseError(f"{where}: `line` ist weder Zahl noch Text noch null ({f.get('line')!r})")
+    for key in ("summary", "failure_scenario"):
+        if not isinstance(f.get(key), (str, type(None))):
+            raise PlanParseError(f"{where}: `{key}` ist weder Text noch null ({f.get(key)!r})")
+    if not any(isinstance(f.get(key), str) and f[key].strip() for key in ("summary", "failure_scenario")):
+        raise PlanParseError(f"{where}: weder `summary` noch `failure_scenario` ist ein Text")
+    line = _clean_line(f.get("line"), where)
     sources = f.get("sources")
     if sources is None:
         sources = []
     if not isinstance(sources, list):
         raise PlanParseError(f"{where}: `sources` ist keine Liste ({sources!r})")
-    for m, s in enumerate(sources, 1):
-        if not isinstance(s, dict):
-            raise PlanParseError(f"{where}: Quelle {m} ist kein Objekt ({s!r})")
-        if not _is_line(s.get("line")):
-            raise PlanParseError(f"{where}: Quelle {m}: `line` ist weder Zahl noch Text noch null ({s.get('line')!r})")
+    cleaned = []
+    for m, src in enumerate(sources, 1):
+        if not isinstance(src, dict):
+            raise PlanParseError(f"{where}: Quelle {m} ist kein Objekt ({src!r})")
+        src_line = _clean_line(src.get("line"), f"{where}: Quelle {m}")
         for key in ("summary", "failure_scenario"):
-            if not isinstance(s.get(key), (str, type(None))):
-                raise PlanParseError(f"{where}: Quelle {m}: `{key}` ist weder Text noch null ({s.get(key)!r})")
-    return {**f, "file": path, "sources": sources}
+            if not isinstance(src.get(key), (str, type(None))):
+                raise PlanParseError(f"{where}: Quelle {m}: `{key}` ist weder Text noch null ({src.get(key)!r})")
+        cleaned.append({**src, "line": src_line})
+    return {**f, "file": path, "line": line, "sources": cleaned}
 
 
 def _line_span(line: object) -> tuple[int, int] | None:
@@ -1545,28 +1574,46 @@ def _deep_review_findings(path: Path, whole: dict) -> list[dict]:
     if "packet" in meta:
         raise PlanParseError(f"{path}: ist ein Paket-Ergebnis, nicht findings.json (`_meta.packet` = "
                              f"{meta['packet']!r}); erst `review_kit.py merge --run <lauf>`, dann dessen findings.json")
+    return _findings_list(path, whole, "findings.json")
+
+
+def _findings_list(path: Path, whole: dict, what: str) -> list[dict]:
+    """Die Liste unter `findings` eines Objekts; `what` nennt das Format in der Meldung „ohne Funde“."""
     if not isinstance(whole["findings"], list):
         raise PlanParseError(f"{path}: `findings` ist keine Liste")
     if not whole["findings"]:
-        raise PlanParseError(f"{path}: findings.json ohne Funde")
+        raise PlanParseError(f"{path}: {what} ohne Funde")
     return _list_findings(whole["findings"])
 
 
-def _verdict_findings(path: Path, rows: list) -> list[dict]:
-    """Zeilen von `verdicts.jsonl`: ohne die `_meta`-Zeile, nur Status `bestätigt`/`plausibel`;
-    `path` und `related` müssen Repo-Pfade sein."""
-    if not all(isinstance(r, dict) for r in rows):
+def _verdict_findings(path: Path, rows: list[tuple[int, object]]) -> list[dict]:
+    """Zeilen von `verdicts.jsonl` als `(Dateizeile, Zeile)`: ohne die `_meta`-Zeile, nur Status
+    `bestätigt`/`plausibel`. Jede davon braucht `id` (nicht leerer Text), `path` und `related`
+    (Repo-Pfade), `reason` (Text oder null, sonst leer) und `lines` (`_clean_line`); jede
+    Meldung nennt die Zeile über ihre Dateizeile und, wenn lesbar, über die id."""
+    if not all(isinstance(r, dict) for _, r in rows):
         raise PlanParseError(f"{path}: Format nicht erkannt — verdicts.jsonl braucht je Zeile ein Objekt")
-    kept = [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
+    kept = [(n, r) for n, r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
     if not kept:
         raise PlanParseError(f"{path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
     out = []
-    for n, r in enumerate(kept, 1):
+    for lineno, r in kept:
+        fid = r.get("id")
+        if fid is None or (isinstance(fid, str) and not fid.strip()):
+            raise PlanParseError(f"Zeile {lineno}: id fehlt")
+        if not isinstance(fid, str):
+            raise PlanParseError(f"Zeile {lineno}: id ist kein nicht-leerer Text ({fid!r})")
+        where = f"{fid.strip()} (Zeile {lineno})"
+        reason = r.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            raise PlanParseError(f"{where}: `reason` ist weder Text noch null ({reason!r})")
         related = r.get("related") or []
         if not isinstance(related, list):
-            raise PlanParseError(f"Fund {n}: `related` ist keine Liste ({related!r})")
-        out.append({**r, "path": _repo_path(r.get("path"), f"Fund {n}: `path`"),
-                    "related": [_repo_path(p, f"Fund {n}: `related`") for p in related]})
+            raise PlanParseError(f"{where}: `related` ist keine Liste ({related!r})")
+        out.append({**r, "id": fid.strip(), "reason": reason or "",
+                    "path": _repo_path(r.get("path"), f"{where}: `path`"),
+                    "lines": _clean_line(r.get("lines"), where, "lines"),
+                    "related": [_repo_path(p, f"{where}: `related`") for p in related]})
     return out
 
 
@@ -1585,7 +1632,7 @@ def _read_findings(path: Path) -> list[dict]:
         whole = json.loads(text)
     except json.JSONDecodeError:
         try:
-            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+            rows = [(n, json.loads(line)) for n, line in enumerate(text.split("\n"), 1) if line.strip()]
         except json.JSONDecodeError as exc:
             raise PlanParseError(f"{path}: Format nicht erkannt — weder JSON noch verdicts.jsonl ({exc})") from None
         return _verdict_findings(path, rows)
@@ -1594,9 +1641,12 @@ def _read_findings(path: Path) -> list[dict]:
             raise PlanParseError(f"{path}: /code-review-Liste ohne Funde")
         return _list_findings(whole)
     if isinstance(whole, dict) and "findings" in whole:
+        if "_meta" not in whole:  # wie die /code-review-Liste, nur in `findings` verpackt
+            return _findings_list(path, whole, "`findings`")
         return _deep_review_findings(path, whole)
     if isinstance(whole, dict) and ("status" in whole or set(whole) == {"_meta"}):
-        return _verdict_findings(path, [whole])  # verdicts.jsonl mit einer Zeile
+        first = next(n for n, line in enumerate(text.split("\n"), 1) if line.strip())
+        return _verdict_findings(path, [(first, whole)])  # verdicts.jsonl mit einer Zeile
     keys = ", ".join(map(str, whole)) if isinstance(whole, dict) else type(whole).__name__
     raise PlanParseError(f"{path}: Format nicht erkannt ({keys}) — erwartet findings.json von deep-review "
                          "(Objekt mit `_meta` und `findings`), verdicts.jsonl oder eine /code-review-Liste")
