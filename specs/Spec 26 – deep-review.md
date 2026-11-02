@@ -61,7 +61,7 @@ und der Bootstrap nennt beide Orte.
 
 | Datei | schreibt | Inhalt |
 | --- | --- | --- |
-| `plan.json` | `plan` | `_meta`, `range` (aufgelöst, `<base>..<target>`, beim Wurzel-Commit nur `<target>`), `base` (gezählte Basis: Merge-Basis, beim Wurzel-Commit der leere Baum), `target`, `log_base` (aufgelöste BASIS für die Commit-Messages), `profile`, `focus`, `split`, `split_at`, `packet_size`, `changed_lines`, `packets` (je `id`, `files`, `changed_lines`, `range`, `reused_from`), `file_keys` (je Datei ein Schlüssel), `not_reviewed` (Dateien mit Grund) |
+| `plan.json` | `plan` | `_meta`, `range` (aufgelöst, `<base>..<target>`, beim Wurzel-Commit nur `<target>`), `base` (gezählte Basis: Merge-Basis, beim Wurzel-Commit der leere Baum), `target`, `log_base` (aufgelöste BASIS für die Commit-Messages, beim Wurzel-Commit `null`), `root` (Wurzel-Commit: jedes Paket hat `range: null` und bekommt Hilfscommits mit leerer Basis), `profile`, `focus`, `split`, `split_at`, `packet_size`, `changed_lines`, `packets` (je `id`, `files`, `changed_lines`, `range`, `reused_from`), `file_keys` (je Datei ein Schlüssel), `not_reviewed` (Dateien mit Grund) |
 | `packets/<id>.md` | `counterparts` | Kopfzeile, Bereich und Dateien des Pakets, Gegenstellen je geänderter Stelle, Zahl der nicht aufgelösten |
 | `results/<id>.json` | `record` | `_meta` mit `packet`, `tool`; `findings` als Liste (`file`, `line`, `summary`, `failure_scenario`) |
 | `findings.json` | `merge` | `_meta`, `findings` als Liste mit `file`, `line`, `summary`, `failure_scenario`, `packets` — die Felder, die `fix-task` von `/code-review` liest (Spec 27) |
@@ -121,8 +121,8 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    - Nicht reviewt, mit Grund unter `not_reviewed`: Dateien ohne Quellcode (Markdown, `NEWS`,
      Bilder, `.dproj`, `.res`) und Testdateien (`test_*.py`, `*_test.py`, unter `tests/` oder
      `unittests/` ohne Rücksicht auf Groß/Klein, Delphi-Units mit einem Namenssegment
-     `Test` oder `Tests` — getrennt an `.`, `_` und Großbuchstaben, also `App.Tests.Core.pas`
-     ja, `Testament.pas` nein), Tests nur mit `--with-tests` — so lief die Messung.
+     `Test` oder `Tests` — getrennt an `.`, `_`, Wortgrenzen und Ziffern, also
+     `App.Tests.Core.pas` und `HTMLTest.pas` ja, `Testament.pas` nein), Tests nur mit `--with-tests` — so lief die Messung.
    - Bis `split_at` (Standard 800) geänderte Zeilen, oder wenn der Schnitt nur ein Paket ergibt:
      ein Paket `p1` über den Bereich, `split: false`. Gezählt wird ab der Merge-Basis
      (`git diff <merge-base> ZIEL`), die Commit-Messages kommen aus `git log BASIS..ZIEL`. Darüber `split: true` und `packet_size` = kleiner von 600 und `split_at`.

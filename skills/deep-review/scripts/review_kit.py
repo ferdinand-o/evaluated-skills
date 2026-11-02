@@ -60,20 +60,22 @@ SHORT_SHA_LEN = 7
 
 # Einordnung (Spec 26, Ablauf Schritt 2): Dateien ohne Quellcode werden nie reviewt,
 # Testdateien nur mit --with-tests. Die Python-Muster und die Testordner gelten ohne
-# Rücksicht auf Groß/Klein; die Delphi-Regel steht bei TEST_PAS_SPLIT.
+# Rücksicht auf Groß/Klein; die Delphi-Regel steht bei TEST_PAS_WORD.
 DOC_SUFFIXES = frozenset({".md", ".markdown", ".rst"})
 DOC_NAMES = frozenset({"NEWS", "CHANGES", "CHANGELOG", "AUTHORS", "LICENSE", "COPYING"})
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
                             ".tif", ".tiff"})
 PROJECT_SUFFIXES = frozenset({".dproj", ".res"})
 TEST_NAME_PATTERNS = ("test_*.py", "*_test.py")
-# `.pas` nach Gliedern, auf den Namen ohne Endung: Er wird an `.`, `_` und CamelCase-Grenzen
-# geteilt — ein Großbuchstabe nach einem Kleinbuchstaben beginnt ein Glied, eine Folge von
-# Großbuchstaben bleibt ein Glied (`DUnitX` → `DUnit`, `X`). Eine Testdatei ist es, wenn ein
+# `.pas` nach Gliedern, auf den Namen ohne Endung: Er wird an `.` und `_` geteilt, jedes Stück
+# in Wörter — ein großgeschriebenes Wort (`Test`), eine Folge von Großbuchstaben, die vor einem
+# solchen Wort endet (`HTMLTest` → `HTML`, `Test`), sonst die ganze Folge (`FooTEST` → `Foo`,
+# `TEST`), und Ziffern für sich (`MyTest2` → `My`, `Test`, `2`). Eine Testdatei ist es, wenn ein
 # Glied `Test` oder `Tests` heißt, Groß/Klein egal: `MyApp.Tests.Utils`, `App.Test.Core`,
-# `Foo_Test_Helpers`, `MyTestsUnit`, `FooTEST`, `Test`. Sonst nicht — `Testament`,
+# `Foo_Test_Helpers`, `MyTestsUnit`, `FooTEST`, `HTMLTest`, `Test`. Sonst nicht — `Testament`,
 # `TestimonialService`, `Testing`, `LATEST`, `CONTEST`, `Latest` sind keine Testdateien.
-TEST_PAS_SPLIT = re.compile(r"[._]|(?<=[a-z])(?=[A-Z])")
+TEST_PAS_SPLIT = re.compile(r"[._]")
+TEST_PAS_WORD = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
 TEST_PAS_SEGMENTS = frozenset({"test", "tests"})
 TEST_DIRS = frozenset({"tests", "unittests"})
 
@@ -257,7 +259,7 @@ def classify(path, with_tests):
     ohne Endung), Bilder, `.dproj`, `.res`. Tests nur mit `with_tests` — so lief die
     Messung: `test_*.py`, `*_test.py` und Dateien unter `tests/` oder `unittests/` ohne
     Rücksicht auf Groß/Klein; `.pas`, wenn ein Glied des Namens (geteilt an `.`, `_` und
-    CamelCase-Grenzen, Regel bei `TEST_PAS_SPLIT`) `Test` oder `Tests` heißt
+    Wortgrenzen, Regel bei `TEST_PAS_WORD`) `Test` oder `Tests` heißt
     (`MyApp.Tests.Utils.pas`, `FooTEST.pas` ja, `Testament.pas`, `LATEST.pas` nein)."""
     pure = PurePosixPath(path)
     suffix = pure.suffix.lower()
@@ -272,8 +274,9 @@ def classify(path, with_tests):
     name = pure.name.lower()
     is_test = (
         any(fnmatch.fnmatchcase(name, pattern) for pattern in TEST_NAME_PATTERNS)
-        or (suffix == ".pas" and any(segment.lower() in TEST_PAS_SEGMENTS
-                                     for segment in TEST_PAS_SPLIT.split(pure.stem)))
+        or (suffix == ".pas" and any(word.lower() in TEST_PAS_SEGMENTS
+                                     for piece in TEST_PAS_SPLIT.split(pure.stem)
+                                     for word in TEST_PAS_WORD.findall(piece)))
         or any(part.lower() in TEST_DIRS for part in pure.parts[:-1])
     )
     return REASON_TEST if is_test else None

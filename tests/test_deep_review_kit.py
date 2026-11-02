@@ -537,14 +537,14 @@ def _root_repo(root, files):
 
 def test_g01_pas_test_rule_uses_word_boundaries():
     kit = _kit()
-    # Angepasst an die Segmentregel (H1): `FooTEST` ist jetzt Foo + TEST, also ein Test;
-    # `testfoo`, `TESTUNIT` und `MyTest2` haben kein Glied `Test`/`Tests` und sind keine.
+    # Angepasst an die Segmentregel (H1, H4): `FooTEST` ist Foo + TEST, `MyTest2` My + Test + 2,
+    # also Tests; `testfoo` und `TESTUNIT` haben kein Glied `Test`/`Tests` und sind keine.
     for path in ("src/AppTest.pas", "src/FooTests.pas", "src/TestUtils.pas", "src/FooTEST.pas",
-                 "src/MyTestUnit.pas"):
+                 "src/MyTestUnit.pas", "src/MyTest2.pas"):
         assert kit.classify(path, False) == kit.REASON_TEST, path
     for path in ("src/LATEST.pas", "src/CONTEST.pas", "src/ATTEST.pas", "src/GREATEST.pas",
                  "src/mytestunit.pas", "src/Latest.pas", "src/Contests.pas", "src/testfoo.pas",
-                 "src/TESTUNIT.pas", "src/MyTest2.pas"):
+                 "src/TESTUNIT.pas"):
         assert kit.classify(path, False) is None, path
 
 
@@ -747,3 +747,11 @@ def test_h03_non_utf8_source_file_has_its_own_reason(tmp_path):
     with pytest.raises(kit.KitError, match=r"nichts zu reviewen.*app/caf\\xe9\.py"):
         kit.build_plan(only, "base..HEAD", "standard", "bugs", None, False)
     assert _runs(only) == []
+
+
+def test_h04_pas_segments_split_capital_runs_and_digits():
+    kit = _kit()
+    for name in ("HTMLTest", "MyTest2", "XMLTests.Helper"):
+        assert kit.classify(f"src/{name}.pas", False) == kit.REASON_TEST, name
+    for name in ("HTMLTestament", "TESTUNIT", "Contest2"):
+        assert kit.classify(f"src/{name}.pas", False) is None, name
