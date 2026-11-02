@@ -342,6 +342,24 @@ offen und gehen nach known-limits:
 - `test_f15` prüft nur UTC-Eingaben, nicht mehr die Sommerzeit-Reihenfolge.
 - `new_run_id` lehnt eine korrekte Ortszeit mit Offset ab, statt sie nach UTC umzurechnen.
 
+### Prüfpunkt 2 (nach Task 3, C5)
+
+`/code-review` über Task 3 und Spec-Nachträge (437 Zeilen): 12 Funde, Fix-Runde 1 behob alle
+(Datei/Ordner-Kollision über Paketgrenzen, Sperre für `plan.json`, Bereich nach `cleanup`,
+Arbeitsbaum-Vergleich über git statt Eigenbau). Review des Fixes: 12 Funde; nach der Linie
+aus Prüfpunkt 1 kamen nur die sechs, die hängen oder falsch melden, in Runde 2 (verwaiste
+Sperre, HEAD-Cache, Index-Kopie mit frischem mtime, fehlender Index, unhashbare Notiz); offen
+für known-limits:
+
+- Die Sperre umfasst die ganze Git-Arbeit eines Pakets; parallele Vorbereitung vieler Pakete
+  eines Laufs läuft nacheinander und kann `LOCK_WAIT` (600 s) erreichen. deep-review bereitet
+  Pakete nacheinander im Hauptkontext vor.
+- Dateien mit `assume-unchanged` oder `skip-worktree` (Sparse-Checkout) meldet der
+  Arbeitsbaum-Vergleich nicht als abweichend.
+- `_tree_entries` prüft Mitgliedschaft in einer Liste (O(n·m)).
+- `_refs_hold` und `cleanup` lesen Refs mit doppeltem Code.
+- `ARG_CHUNK_CHARS` rechnet feste Argumente, Quoting und UTF-16-Länge unter Windows nicht ein.
+
 **Lessons für subagent-dev:** (1) Agent-Worktrees starten auf `main`, nicht auf dem
 Arbeitsbranch; jeder Agent musste die Basis selbst zurücksetzen — der Dispatch nennt sie seither
 ausdrücklich. (2) `fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die
