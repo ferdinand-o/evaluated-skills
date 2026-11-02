@@ -4,6 +4,7 @@ Form der Belegzeile, Tabellenzeichen und Umlaute, Regeln aus Repo- und Nutzerdat
 import errno
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -727,9 +728,9 @@ def test_option_count(decide_repo, capsys):
     block = text[text.index("## D-2"):]
     assert "\nOptionen: — (Auftrag)\n" in block
     assert re.search(r"(?m)^## D-2 · .* · freigegeben$", text)
-    # mit Auftrag keine rule:-Schlüssel
-    assert big("--approved-by-request", "ändere den Text", topic="UI-Texte", key="rule:UI-Texte") == 1
-    assert "reversibility.md" in capsys.readouterr().err
+    # mit Auftrag rule:<thema> nur, wenn eine Regel immer fragen das Thema trifft (CP2-F15)
+    assert big("--approved-by-request", "ändere den Text", topic="X", key="rule:X") == 1
+    assert "immer fragen" in capsys.readouterr().err
 
 
 def test_big_entry_is_log_row(decide_repo, capsys):
@@ -822,3 +823,198 @@ def test_consumer_rule_ledger(decide_repo, capsys, head, reason):
 def test_open_without_ledger(decide_repo, capsys):
     assert dl.main(["open"]) == 0
     assert "Keine offenen großen Fragen" in capsys.readouterr().out
+
+
+# --- Funde des Prüfpunkts 2 (F1–F15) ----------------------------------------------------
+
+def blocks_in(root):
+    return re.findall(r"(?m)^## (D-\d+) ", ledger_text(root))
+
+
+def test_big_retry_after_log_failure_keeps_one_block(decide_repo, monkeypatch, capsys):
+    """CP2-F1: Scheitert die Protokollzeile, legt ein Wiederholungsaufruf keinen zweiten Block an,
+    sondern nennt „D-1 steht schon“ und holt nur die Protokollzeile nach."""
+    root, _ = decide_repo
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
+    with hold_lock(root):
+        assert big(*TWO) == 1
+    assert "Protokollzeile für D-1 fehlt" in capsys.readouterr().err
+    assert blocks_in(root) == ["D-1"]
+    for _ in range(2):
+        assert big(*TWO) == 0
+        out = capsys.readouterr().out
+        assert "D-1 steht schon" in out, out
+        assert blocks_in(root) == ["D-1"]
+        assert [r[4] for r in rows(root)] == ["D-1"]
+    # eine andere Frage ist ein neuer Block, ebenso dieselbe Frage nach der Antwort
+    assert big(*TWO, question="Andere Frage?") == 0
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    assert big(*TWO) == 0
+    assert blocks_in(root) == ["D-1", "D-2", "D-3"]
+    # per Auftrag: derselbe Auftrag ein zweites Mal legt ebenfalls keinen Block an
+    capsys.readouterr()
+    assert big("--approved-by-request", "nimm python-dateutil auf", question="Auftrag?") == 0
+    assert big("--approved-by-request", "nimm python-dateutil auf", question="Auftrag?") == 0
+    assert "D-4 steht schon" in capsys.readouterr().out
+    assert blocks_in(root) == ["D-1", "D-2", "D-3", "D-4"]
+    assert [r[4] for r in rows(root)] == ["D-1", "D-2", "D-3", "D-4"]
+
+
+def test_resolve_finds_empty_and_spaced_fields(decide_repo):
+    """CP2-F2: Ein von Hand geleertes „Antwort:“ oder „Quelle der Antwort :“ wird gefunden und
+    ersetzt, statt eine zweite Zeile anzulegen."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    path = root / "docs" / "big-decisions.md"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("\nQuelle der Antwort: —\n", "\nQuelle der Antwort :  \n")
+    text = text.replace("\nAntwort: —\n", "\nAntwort:\n")
+    path.write_text(text, encoding="utf-8")
+    assert dl.read_ledger(root)[0][0]["answer"] == ""
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    text = ledger_text(root)
+    assert re.findall(r"(?m)^\s*Antwort\s*:.*$", text) == ["Antwort: B"], text
+    assert re.findall(r"(?m)^\s*Quelle der Antwort\s*:.*$", text) == ["Quelle der Antwort: Nutzer in Sitzung"], text
+
+
+def test_resolve_only_open_blocks(decide_repo, capsys):
+    """CP2-F3: resolve ändert nur offene Blöcke; sonst Exit 1 mit Status und Quelle, nichts geschrieben."""
+    root, _ = decide_repo
+    assert big("--approved-by-request", "nimm python-dateutil auf") == 0
+    before = ledger_text(root)
+    capsys.readouterr()
+    assert dl.main(["resolve", "D-1", "--reject"]) == 1
+    err = capsys.readouterr().err
+    assert "freigegeben" in err and "Auftrag: „nimm python-dateutil auf“" in err, err
+    assert "nichts geschrieben" in err, err
+    assert ledger_text(root) == before
+    assert big(*TWO, question="Zweite?") == 0
+    assert dl.main(["resolve", "D-2", "--answer", "B"]) == 0
+    before = ledger_text(root)
+    capsys.readouterr()
+    assert dl.main(["resolve", "D-2", "--reject"]) == 1
+    err = capsys.readouterr().err
+    assert "freigegeben" in err and "Nutzer in Sitzung" in err, err
+    assert ledger_text(root) == before
+
+
+def test_key_category_and_pattern_trimmed(decide_repo, capsys):
+    """CP2-F4: Leerraum um Kategorie und Pfadmuster fällt weg; Leerraum im Muster wird abgewiesen."""
+    root, _ = decide_repo
+    assert big(*TWO, key="dependency: pyproject.toml") == 0
+    assert big(*TWO, question="Zweite?", key="dependency :pyproject.toml #python-dateutil") == 0
+    assert [b["key"] for b in dl.read_ledger(root)[0]] == [
+        "dependency:pyproject.toml", "dependency:pyproject.toml#python-dateutil"]
+    capsys.readouterr()
+    assert big(*TWO, question="Dritte?", key="dependency:pyproject .toml") == 1
+    assert "Leerraum" in capsys.readouterr().err
+    assert blocks_in(root) == ["D-1", "D-2"]
+
+
+def test_resolve_notes_unversioned_cache(decide_repo, capsys):
+    """CP2-F5: Legt resolve .skills/cache/ an (frischer Clone), kommt derselbe Hinweis wie bei add."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert big(*TWO, question="Zweite?") == 0
+    shutil.rmtree(root / ".skills")
+    capsys.readouterr()
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    assert ".skills/cache/ steht nicht in der .gitignore" in capsys.readouterr().out
+    (root / ".gitignore").write_text(".skills/cache/\n", encoding="utf-8")
+    shutil.rmtree(root / ".skills")
+    assert dl.main(["resolve", "D-2", "--answer", "B"]) == 0
+    assert ".gitignore" not in capsys.readouterr().out
+
+
+def test_resolve_without_lock_says_so(decide_repo, monkeypatch, capsys):
+    """CP2-F6: Schreibt resolve ohne Sperre, nennt die Meldung die Ursache wie add."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+
+    def no_flock(fd):
+        raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+
+    monkeypatch.setattr(dl, "_try_lock", no_flock)
+    capsys.readouterr()
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    out = capsys.readouterr().out
+    assert f"ohne Sperre geschrieben ({os.strerror(errno.ENOLCK)})" in out, out
+
+
+def test_ledger_with_bom(decide_repo, capsys):
+    """CP2-F7: Eine mit BOM gespeicherte Ablage wird gelesen; geschrieben wird ohne BOM."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    path = root / "docs" / "big-decisions.md"
+    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+    assert dl.read_ledger(root)[1] is None
+    capsys.readouterr()
+    assert dl.main(["open"]) == 0
+    assert "D-1" in capsys.readouterr().out
+    assert big(*TWO, question="Zweite?") == 0
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    assert not path.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert blocks_in(root) == ["D-1", "D-2"]
+
+
+def test_header_problem_keeps_path(decide_repo, capsys):
+    """CP2-F8: Das Satzende kommt aus header_problem; ein Pfad mit „übersprungen“ bleibt, wie er ist."""
+    root, _ = decide_repo
+    session = "x-übersprungen"
+    path = log_file(root, session)
+    path.parent.mkdir(parents=True)
+    path.write_text("# kein Kopf\n", encoding="utf-8")
+    want = f".skills/cache/decide/{session}/log.md ohne Kopfzeile von decide — nichts geschrieben"
+    assert add_small("CLI", "Kurzoption?", "kurz", "gesucht: cli.py — Treffer: cli.py:3", "--session", session) == 1
+    assert want in capsys.readouterr().err
+    assert big(*TWO, "--session", session) == 1
+    assert want in capsys.readouterr().err
+    assert dl.main(["summary", "--session", session]) == 1
+    assert f".skills/cache/decide/{session}/log.md ohne Kopfzeile von decide — übersprungen" in capsys.readouterr().err
+
+
+def test_big_reports_contradiction(decide_repo, capsys):
+    """CP2-F9: add_big meldet den Widerspruch immer/nie fragen, die Spalte regel nennt die geltende Regel."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: Migrationen\n")
+    write_rules(home / ".skills" / "decide" / "rules.md", "nie fragen: Migrationen\n")
+    assert big(*TWO, topic="migrationen", question="Spalte weg?", key="migration:migrations/") == 0
+    out = capsys.readouterr().out
+    assert ("Widerspruch: immer fragen: Migrationen (.skills/decide/rules.md) und nie fragen: Migrationen "
+            "(~/.skills/decide/rules.md) — immer fragen gilt.") in out, out
+    [row] = rows(root)
+    assert row[6] == "immer fragen: Migrationen"
+
+
+def test_ignored_flags_warning_follows_upgrade(decide_repo, monkeypatch, capsys):
+    """CP2-F13: Die Warnung zu ignorierten Angaben nennt die Hochstufung genau dann, wenn add_small
+    hochgestuft hat — auch wenn sich die Regeln zwischen zwei Lesevorgängen ändern würden."""
+    root, home = decide_repo
+    flags = ("--option", "A: kurz", "--option", "B: lang", "--recommendation", "A")
+    assert add_small("UI-Texte", "Text?", "A", "gesucht: a.py — Treffer: a.py:1", *flags) == 0
+    err = capsys.readouterr().err
+    assert "bei einer kleinen Entscheidung ignoriert" in err and "--option" in err, err
+
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    assert add_small("UI-Texte", "Text 2?", "A", "gesucht: a.py — Treffer: a.py:1", *flags) == 0
+    err = capsys.readouterr().err
+    assert "per Regel hochgestuften Frage" in err and "--option" not in err, err
+
+    rules = dl.load_rules(root, home)
+    answers = [rules, []]                    # zweiter Lesevorgang sähe die Regel nicht mehr
+    monkeypatch.setattr(dl, "load_rules", lambda *_: answers.pop(0) if answers else [])
+    assert add_small("UI-Texte", "Text 3?", "A", "gesucht: a.py — Treffer: a.py:1", *flags) == 0
+    err = capsys.readouterr().err
+    assert "per Regel hochgestuften Frage" in err and "--option" not in err, err
+
+
+def test_approved_request_with_rule_key(decide_repo, capsys):
+    """CP2-F15: Ein konkreter Auftrag zu einem Thema einer Regel immer fragen wird mit rule:<thema>
+    als freigegeben abgelegt (konkreter Auftrag vor Regel)."""
+    root, _ = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    assert big("--approved-by-request", "ändere die Meldung auf „Datei fehlt“", topic="ui-texte",
+               question="Text der Fehlermeldung?", key="rule:ui-texte") == 0, capsys.readouterr().err
+    [block] = dl.read_ledger(root)[0]
+    assert (block["status"], block["key"], block["topic"]) == ("freigegeben", "rule:UI-Texte", "UI-Texte")
+    assert block["source"] == "Auftrag: „ändere die Meldung auf „Datei fehlt““"
