@@ -593,8 +593,8 @@ Offen für known-limits:
 
 Fix-Runde 2 behob die fünf. `audit` prüft jetzt die Zeilen Hinweise und Übernommen. Reine
 Kommentarzeilen zählen nicht zur Längengrenze. `DELPHI_RELEASES` kennt `ExtractPair`,
-`ExtractKey` und `ExtractValue`. 1.780 Tests grün. Zusätzlich offen: Ob `ExtractKey` und
-`ExtractValue` RTL-Methoden sind, ist ungeprüft. Sie greifen nur bei Besitz-Typen.
+`ExtractKey` und `ExtractValue`. 1.780 Tests grün. (`ExtractKey`/`ExtractValue` sind in
+Prüfpunkt 9 wieder entfernt worden, weil sie keine belegten RTL-Methoden sind.)
 
 ### Task 12, Task 13 und Prüfpunkt 9 (C5)
 
@@ -638,6 +638,13 @@ Offen für known-limits:
   gebaut.
 - Die Runlog-Zeile zu Prüfpunkt 8 zählt „5 von 18“ für Runde 2. Gemeint sind fünf Funde aus
   dem Review des Fixes, das wieder 18 meldete.
+
+Fix-Runde 1 ergab 1.781 Tests grün; `sync --check` und lint-spec waren sauber. Die Regel für
+das Profil: `SINCE_PROFILES`. Bei der Doku zeigte sich: Der finale Prüfpunkt meldet immer
+`standard`, auch wenn C5 oder rote Tests auf ihn fallen, denn `PROFILES` ist geordnet und
+`standard` steht oben. Er übernimmt trotzdem aus den `checkpoint`-Läufen. Der Fix-Pfad ruft
+`mark` je Lauf auf, erst für den Prüfpunkt, dann für die Nachprüfung, damit sich die Kette am
+finalen Prüfpunkt schließt.
 
 ## Was nicht gemessen wurde
 
