@@ -5,6 +5,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -29,3 +31,52 @@ def git(root: Path, *args: str) -> str:
     """Git im gegebenen Ordner, mit check=True — für Tests, die ein Repo aufbauen."""
     import subprocess
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout
+
+
+# --- decide (Spec 28): Repo, Protokoll, add --class klein ---------------------------------
+# Einmal hier statt wortgleich in jeder tests/test_decide_*.py: eine Format-Änderung am
+# Protokoll wird an einer Stelle nachgezogen.
+
+DECIDE_SCRIPT = "skills/decide/scripts/decide_log.py"
+DECIDE_SESSION = "sitzung-1"
+_decide_module = None
+
+
+def decide_script():
+    """decide_log.py als Modul, einmal geladen und von allen decide-Tests geteilt."""
+    global _decide_module
+    if _decide_module is None:
+        _decide_module = load_script(DECIDE_SCRIPT)
+    return _decide_module
+
+
+@pytest.fixture
+def decide_repo(tmp_path, monkeypatch):
+    """Git-Repo als Wurzel, eigenes HOME, Sitzung aus der Umgebung; (root, home)."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-q")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", DECIDE_SESSION)
+    monkeypatch.chdir(root)
+    return root, home
+
+
+def decide_log_file(root: Path, session: str = DECIDE_SESSION) -> Path:
+    return root / ".skills" / "cache" / "decide" / session / "log.md"
+
+
+def decide_rows(root: Path, session: str = DECIDE_SESSION):
+    """Zellen der Tabellenzeilen ohne Kopf: [zeit, thema, klasse, frage, entscheidung, beleg, regel]."""
+    lines = decide_log_file(root, session).read_text(encoding="utf-8").splitlines()
+    return [[c.strip() for c in line.strip()[1:-1].split("|")]
+            for line in lines
+            if line.startswith("| ") and not line.startswith(("| zeit ", "| ---"))]
+
+
+def decide_add_small(topic, question, decision, evidence, *extra):
+    """`decide_log.py add --class klein …` über `main`; gibt den Exit-Code zurück."""
+    return decide_script().main(["add", "--class", "klein", "--topic", topic, "--question", question,
+                                 "--decision", decision, "--evidence", evidence, *extra])

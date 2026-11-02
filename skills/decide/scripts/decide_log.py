@@ -12,20 +12,28 @@ mit Exit 1 und nennen `--session`.
 
 Protokoll `.skills/cache/decide/<session>/log.md`: Kopfzeile, dann die Tabelle
 `| zeit | thema | klasse | frage | entscheidung | beleg | regel |` mit `klasse` aus `klein`,
-`annahme` (Belegzeile „nichts gefunden"), `gross`. `|` in Werten wird `¦`. Das Protokoll wird
-vor jedem Schreiben neu gelesen und atomar per `os.replace` ersetzt.
+`annahme` (Belegzeile „nichts gefunden"), `gross`. `|` in Werten wird `¦`. Ein leeres
+Protokoll gilt als fehlend. Unter der Sperrdatei `log.md.lock` (höchstens `LOCK_WAIT` Sekunden
+Wartezeit, danach Exit 1) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt;
+scheitert das Schreiben, endet `add` mit 1 und einer Zeile Grund.
 
 Belegzeile `--evidence`: `gesucht: <ort> — Treffer: <datei:zeile>` oder
-`gesucht: <ort> — nichts gefunden`. ` - ` und ` -- ` werden ` — `, ein führendes `./` und ein
-absoluter Pfad unter der Wurzel werden relativ; danach prüft das Skript die Form. Fehlt sie:
-„Keine Belegzeile", Exit 1, nichts geschrieben. Ob die Fundstelle stimmt, prüft es nicht.
+`gesucht: <ort> — nichts gefunden`. `.`, `,`, `;` und `)` am Ende fallen weg; nur der Trenner
+vor dem Ergebnis wird aus ` - `, ` -- ` oder ` – ` zu ` — `. Pfade mit `./` oder `../` gelten
+relativ zum Arbeitsverzeichnis, absolute Pfade (auch über Symlinks) unter der Wurzel werden
+relativ zur Wurzel; andere Pfade bleiben, wie sie stehen. Danach prüft das Skript die Form.
+Fehlt sie: „Keine Belegzeile", Exit 1, nichts geschrieben. Ob die Fundstelle stimmt, prüft es
+nicht.
 
 Regeln `.skills/decide/rules.md` (Repo) und `~/.skills/decide/rules.md` (Nutzer): je Zeile
 `immer fragen: <thema>` oder `nie fragen: <thema>`; `#` am Zeilenanfang oder nach Leerraum
-beginnt einen Kommentar. Ein Thema trifft, wenn es nach Kleinschreibung und Trimmen gleich
-`--topic` ist — dann gilt die Schreibweise der Regel; enthält eines das andere, ist es nur ein
+beginnt einen Kommentar. Ein Thema trifft, wenn es nach Kleinschreibung, Trimmen und
+Zusammenziehen von Leerraum (`|` als `¦`, wie in der Tabelle) gleich `--topic` ist — dann gilt
+die Schreibweise der Regel; enthält eines das andere ab einem Wortanfang, ist es nur ein
 Hinweis. `immer fragen` geht vor `nie fragen` und stuft eine kleine Frage zur großen hoch;
-`nie fragen` nimmt kleine Einträge aus `summary`.
+`nie fragen` nimmt kleine Einträge aus `summary`. `rules` meldet je Thema einen Widerspruch.
+`--option`, `--recommendation`, `--key` und `--approved-by-request` bei einer kleinen
+Entscheidung meldet `add` als ignoriert (stderr, Exit bleibt 0).
 
 Stand Task 1 des Plans: Die Ablage großer Fragen (`docs/big-decisions.md`) fehlt noch.
 `add --class gross` und eine Hochstufung per `immer fragen` schreiben nichts und enden mit 1.
@@ -37,6 +45,7 @@ import re
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -53,6 +62,11 @@ RULE_FILE = Path(".skills") / "decide" / "rules.md"
 RULE_KINDS = ("immer fragen", "nie fragen")
 SUMMARY_LIMIT = 10
 NONE = "—"
+LOCK_WAIT = 2.0          # Sekunden, die add auf eine fremde Sperrdatei wartet
+LOCK_POLL = 0.05         # Abstand der Versuche
+WRITE_ATTEMPTS = 3
+BIG_FLAGS = (("options", "--option"), ("recommendation", "--recommendation"), ("key", "--key"),
+             ("approved_by_request", "--approved-by-request"))
 
 
 class Rule(NamedTuple):
@@ -155,19 +169,26 @@ def load_rules(root, home):
 
 
 def _norm(topic):
-    return (topic or "").strip().lower()
+    """Thema zum Vergleich, so wie es in der Tabellenzelle steht (`|` → `¦`, Leerraum
+    zusammengezogen), klein geschrieben — add und summary vergleichen damit gleich."""
+    return " ".join((topic or "").replace("|", "¦").split()).lower()
+
+
+def _at_word_start(longer, shorter):
+    """`shorter` steht in `longer` und beginnt dort einen Wort (`UI` in `UI-Texte`, nicht in `Build`)."""
+    return re.search(r"(?<!\w)" + re.escape(shorter), longer) is not None
 
 
 def match_rules(rules, topic):
-    """(Treffer, Hinweise): Treffer sind gleich nach Kleinschreibung und Trimmen, Hinweise
-    enthalten das Thema oder sind darin enthalten."""
+    """(Treffer, Hinweise): Treffer sind gleich nach `_norm`, Hinweise enthalten das Thema oder
+    sind darin enthalten, jeweils ab einem Wortanfang."""
     wanted = _norm(topic)
     hits, hints = [], []
     for rule in rules:
         have = _norm(rule.topic)
         if have == wanted:
             hits.append(rule)
-        elif wanted and (have in wanted or wanted in have):
+        elif wanted and have and (_at_word_start(wanted, have) or _at_word_start(have, wanted)):
             hints.append(rule)
     return hits, hints
 
@@ -180,38 +201,60 @@ def rule_ref(rule):
     return f"{rule_label(rule)} ({rule.source})"
 
 
+def contradiction(always, never):
+    """Eine Zeile für ein Thema mit Regeln beider Arten; jede Datei je Seite einmal."""
+    def side(rules):
+        return f"{rule_label(rules[0])} ({', '.join(dict.fromkeys(r.source for r in rules))})"
+    return f"Widerspruch: {side(always)} und {side(never)} — immer fragen gilt."
+
+
 # --- Belegzeile -------------------------------------------------------------------------
 
 _LINE_SUFFIX = re.compile(r"((?::\d+)+)$")
+_RESULT_RE = re.compile(r"^(?P<head>.*) (?:--|-|–|—) (?P<result>Treffer: \S+|nichts gefunden)$")
+_TRAILING = " .,;)"
+
+
+def _under_root(path, root):
+    """Absoluter Pfad relativ zur Wurzel, wo er darunter liegt — erst wörtlich, dann mit
+    aufgelösten Symlinks auf beiden Seiten; sonst `path` unverändert."""
+    root = Path(root)
+    try:
+        return Path(os.path.normpath(path)).relative_to(root).as_posix()
+    except ValueError:
+        pass
+    try:
+        return Path(path).resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError, RuntimeError):
+        return path
 
 
 def _norm_path(token, root):
-    """Ein Token: führendes `./` weg, absoluter Pfad unter der Wurzel relativ; `:zeile` und ein
-    Komma oder Semikolon am Ende bleiben stehen."""
+    """Ein Token: `./…`/`../…` gegen das Arbeitsverzeichnis, ein absoluter Pfad unter der Wurzel
+    relativ zur Wurzel; `:zeile` und ein Komma oder Semikolon am Ende bleiben stehen."""
     core, trail = re.match(r"^(.*?)([,;]*)$", token).groups()
     match = _LINE_SUFFIX.search(core)
     suffix = match.group(1) if match else ""
     path = core[: len(core) - len(suffix)]
-    if path.startswith("./"):
-        while path.startswith("./"):
-            path = path[2:]
-        path = path or "."
+    if path == ".." or path.startswith(("./", "../")):
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            cwd = Path(root)
+        path = _under_root(os.path.normpath(os.path.join(cwd, path)), root)
     elif os.path.isabs(path):
-        for base in (Path(root), Path(root).resolve()):
-            try:
-                path = Path(path).relative_to(base).as_posix() or "."
-                break
-            except ValueError:
-                continue
+        path = _under_root(path, root)
     return path + suffix + trail
 
 
 def normalize_evidence(text, root):
-    """Belegzeile in Normalform: ` - `/` -- `/` – ` → ` — `, Pfade relativ zur Wurzel. Prüft
-    die Form nicht — das macht `EVIDENCE_RE`."""
-    text = " ".join((text or "").split())
-    for dash in (" -- ", " - ", " – "):
-        text = text.replace(dash, " — ")
+    """Belegzeile in Normalform: `.`/`,`/`;`/`)` am Ende weg, der Trenner vor dem Ergebnis
+    (` - `, ` -- `, ` – `) wird ` — `, Pfade relativ zur Wurzel. Prüft die Form nicht — das
+    macht `EVIDENCE_RE`."""
+    text = " ".join((text or "").split()).rstrip(_TRAILING)
+    match = _RESULT_RE.match(text)
+    if match:
+        text = f"{match.group('head')} — {match.group('result')}"
     return " ".join(_norm_path(token, root) for token in text.split(" "))
 
 
@@ -240,10 +283,12 @@ def cell(text):
 
 
 def read_log(root, session):
+    """Text des Protokolls; None, wenn es fehlt, nicht lesbar ist oder nur Leerraum enthält."""
     try:
-        return log_path(root, session).read_text(encoding="utf-8", errors="replace")
+        text = log_path(root, session).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+    return text if text.strip() else None
 
 
 def header_problem(text, path_shown):
@@ -281,31 +326,73 @@ def log_entries(root, session):
 
 
 def write_atomic(path, text):
+    """Schreibt über eine Nachbardatei und `os.replace`; wartet nur zwischen den Versuchen.
+    Wirft OSError, wenn alle Versuche scheitern."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    for attempt in range(3):
-        try:
-            os.replace(tmp, path)
-            return
-        except OSError:
-            time.sleep(0.05 * (attempt + 1))
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        for attempt in range(WRITE_ATTEMPTS):
+            if attempt:
+                time.sleep(0.05 * attempt)
+            try:
+                os.replace(tmp, path)
+                return
+            except OSError:
+                continue
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     tmp.unlink(missing_ok=True)
     raise OSError(f"{path}: nicht schreibbar")
 
 
+class LockBusy(Exception):
+    """Die Sperrdatei bestand länger als `LOCK_WAIT` Sekunden; `args[0]` ist ihr Pfad."""
+
+
+@contextmanager
+def log_lock(path):
+    """Sperrdatei `<log>.lock` neben dem Protokoll (`O_CREAT|O_EXCL`); wartet bis `LOCK_WAIT`
+    Sekunden in Schritten von `LOCK_POLL`, dann `LockBusy`. Entfernt nur die eigene Sperre."""
+    lock = path.with_name(path.name + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise LockBusy(lock) from None
+            time.sleep(LOCK_POLL)
+    try:
+        try:
+            os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+        yield
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
 def append_row(root, session, values):
-    """Hängt eine Zeile an; liest das Protokoll unmittelbar davor neu. (angelegt, Problem)."""
+    """Hängt eine Zeile an; liest das Protokoll unter der Sperre unmittelbar davor neu.
+    (angelegt, Problem). Wirft `LockBusy` oder OSError, wenn nicht geschrieben werden kann."""
     path = log_path(root, session)
-    text = read_log(root, session)
-    if text is not None:
-        problem = header_problem(text, shown(path, root))
-        if problem:
-            return False, problem.replace("übersprungen", "nichts geschrieben")
-    row = "| " + " | ".join(cell(values.get(c)) for c in COLUMNS) + " |"
-    created = text is None
-    body = f"{LOG_HEADER}\n\n{TABLE_HEAD}\n" if created else text.rstrip("\n") + "\n"
-    write_atomic(path, body + row + "\n")
+    with log_lock(path):
+        text = read_log(root, session)
+        if text is not None:
+            problem = header_problem(text, shown(path, root))
+            if problem:
+                return False, problem.replace("übersprungen", "nichts geschrieben")
+        row = "| " + " | ".join(cell(values.get(c)) for c in COLUMNS) + " |"
+        created = text is None
+        body = f"{LOG_HEADER}\n\n{TABLE_HEAD}\n" if created else text.rstrip("\n") + "\n"
+        write_atomic(path, body + row + "\n")
     return created, None
 
 
@@ -355,7 +442,7 @@ def add_small(root, session, args):
         rule = always[0]
         lines = []
         if never:
-            lines.append(f"Widerspruch: {rule_ref(rule)} und {rule_ref(never[0])} — immer fragen gilt.")
+            lines.append(contradiction(always, never))
         options = [o for o in (getattr(args, "options", None) or []) if (o or "").strip()]
         if not 2 <= len(options) <= 4:
             lines.append(f"Regel immer fragen: {rule.topic} trifft — zwei bis vier --option nötig; "
@@ -370,11 +457,17 @@ def add_small(root, session, args):
     values = {"zeit": datetime.now().isoformat(timespec="seconds"), "thema": topic, "klasse": klasse,
               "frage": args.question, "entscheidung": args.decision, "beleg": evidence,
               "regel": rule_label(never[0]) if never else NONE}
-    created, problem = append_row(root, session, values)
+    path_shown = shown(log_path(root, session), root)
+    try:
+        created, problem = append_row(root, session, values)
+    except LockBusy as busy:
+        return 1, (f"Protokoll gesperrt: {shown(busy.args[0], root)} besteht seit über {LOCK_WAIT:g} s — "
+                   "läuft ein zweites add? Sonst die Sperrdatei löschen; nichts geschrieben.")
+    except OSError as error:
+        return 1, f"Protokoll {path_shown} nicht schreibbar ({error.strerror or error}); nichts geschrieben."
     if problem:
         return 1, problem
 
-    path_shown = shown(log_path(root, session), root)
     what = "als Annahme (nichts gefunden)" if klasse == "annahme" else "als kleine Entscheidung"
     lines = notes + [f"Eingetragen {what}: {cell(topic)} — {cell(args.decision)} ({path_shown})"]
     if never:
@@ -427,12 +520,14 @@ def list_rules(root, home):
         lines = [f"Keine Regeln (gesucht: {', '.join(s for _, s in _rule_files(root, home))})."]
     else:
         lines = [f"{rule_label(r)} — {r.source}:{r.line}" for r in rules]
+        by_topic = {}
         for rule in rules:
-            if rule.kind != "immer fragen":
-                continue
-            for other in rules:
-                if other.kind == "nie fragen" and _norm(other.topic) == _norm(rule.topic):
-                    lines.append(f"Widerspruch: {rule_ref(rule)} und {rule_ref(other)} — immer fragen gilt.")
+            by_topic.setdefault(_norm(rule.topic), []).append(rule)
+        for group in by_topic.values():
+            always = [r for r in group if r.kind == "immer fragen"]
+            never = [r for r in group if r.kind == "nie fragen"]
+            if always and never:
+                lines.append(contradiction(always, never))
     lines += [f"ignoriert: {line}" for line in ignored]
     return 0, "\n".join(lines)
 
@@ -466,6 +561,7 @@ def main(argv):
     root = repo_root(Path.cwd())
     home = home_dir()
 
+    warning = None
     if args.action == "rules":
         code, message = list_rules(root, home)
     else:
@@ -483,7 +579,14 @@ def main(argv):
         else:
             args.home = home
             code, message = add_small(root, session, args)
+            ignored = [flag for attr, flag in BIG_FLAGS if getattr(args, attr, None)]
+            if code == 0 and ignored:
+                warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
+                           "--class gross — bei einer kleinen Entscheidung ignoriert; ist die Frage groß, "
+                           "mit --class gross eintragen.")
     print(message, file=sys.stdout if code == 0 else sys.stderr)
+    if warning:
+        print(warning, file=sys.stderr)
     return code
 
 

@@ -5,45 +5,17 @@ Given das Protokoll der laufenden Sitzung hat zwölf Einträge
 When `decide_log.py summary` läuft
 Then nennt es die zehn jüngsten und den Pfad des Protokolls
 """
-from conftest import git, load_script
+from conftest import DECIDE_SESSION as SESSION
+from conftest import decide_add_small as add_small
+from conftest import decide_rows as rows
+from conftest import decide_script
 
-dl = load_script("skills/decide/scripts/decide_log.py")
-SESSION = "sitzung-1"
-
-
-def repo(tmp_path, monkeypatch):
-    """Git-Repo als Wurzel, eigenes HOME, Sitzung aus der Umgebung."""
-    root = tmp_path / "repo"
-    root.mkdir()
-    git(root, "init", "-q")
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SESSION)
-    monkeypatch.chdir(root)
-    return root, home
+dl = decide_script()
 
 
-def log_file(root, session=SESSION):
-    return root / ".skills" / "cache" / "decide" / session / "log.md"
-
-
-def rows(root, session=SESSION):
-    """Zellen der Tabellenzeilen ohne Kopf: [zeit, thema, klasse, frage, entscheidung, beleg, regel]."""
-    lines = log_file(root, session).read_text(encoding="utf-8").splitlines()
-    return [[c.strip() for c in line.strip()[1:-1].split("|")]
-            for line in lines
-            if line.startswith("| ") and not line.startswith(("| zeit ", "| ---"))]
-
-
-def add_small(topic, question, decision, evidence, *extra):
-    return dl.main(["add", "--class", "klein", "--topic", topic, "--question", question,
-                    "--decision", decision, "--evidence", evidence, *extra])
-
-
-def test_decide_zusammenfassung_kuerzt_ab_zehn_eintraegen(tmp_path, monkeypatch, capsys):
+def test_decide_zusammenfassung_kuerzt_ab_zehn_eintraegen(decide_repo, capsys):
     # Arrange
-    root, _ = repo(tmp_path, monkeypatch)
+    root, _ = decide_repo
     for n in range(1, 13):
         assert add_small("CLI", f"Frage {n:02d}?", "ja", f"gesucht: cli.py — Treffer: cli.py:{n}") == 0
     capsys.readouterr()
