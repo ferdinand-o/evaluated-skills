@@ -646,6 +646,27 @@ das Profil: `SINCE_PROFILES`. Bei der Doku zeigte sich: Der finale Prüfpunkt me
 `mark` je Lauf auf, erst für den Prüfpunkt, dann für die Nachprüfung, damit sich die Kette am
 finalen Prüfpunkt schließt.
 
+Das Review des Fixes meldete 11 Funde. Fünf davon gehen in Runde 2:
+
+- Die Nachprüfung ohne `--since` übersah den Aufrufer, der den Fund trug. Ein Fix nur an Tests
+  ließ `plan` scheitern, ohne Lauf-ID für `mark`. Der Bereich geht deshalb zurück auf
+  `<Basis>..HEAD` mit `--since`. Funde, die laut `fix-task.md` behoben sind, verwirft der
+  Hauptagent.
+- `findings.json` nannte bei übernommenen Funden nur den jüngsten Lauf, nicht den, der sie
+  meldete.
+- Das Profil `checkpoint` lief auch ohne `--soll-file`, und packets.md nannte es fälschlich
+  eine „Obermenge“.
+- Für das Soll der Nachprüfung galten zwei Regeln, und `fix-task.md` wird jede Runde
+  überschrieben.
+- `DELPHI_RELEASES` fehlten `Delete`, `Clear`, `ExtractItem`, `Dequeue` und `Pop`.
+
+Offen für known-limits:
+
+- Der Test der gemischten Kette prüft nur `reused_chain`, nicht die vereinigten Funde.
+- Der F2-Test prüft nicht, dass `ExtractKey` weiter als gewöhnlicher Aufruf gesammelt wird.
+- `ExtractAt` ist nicht aufgenommen, weil unbelegt ist, ab welcher RTL-Version es die Methode
+  gibt.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
