@@ -14,7 +14,7 @@ manuell und „wenn Claude Fragen hat".
 - Kein Hook auf `AskUserQuestion`: Eine Frage zu stellen ist die ungefährliche Handlung; ein Hook dort hielte das Falsche an (Spec 00 §4: G3 nur bei irreversiblem Schaden).
 - Kein Hook am teuren Schritt selbst in diesem Zyklus; Migrationen bewacht schon `migration_gate.py` von sql-schema-architect.
 - Kein Subagent für Entscheidungen, deren Beleg der Hauptagent mit einer Suche findet.
-- Kein Protokoll für Wahlen ohne zweite Lesart: Benennung nach vorhandenem Muster, Formatierung, Reihenfolge von Importen und Ähnliches fällt Claude wie bisher, ohne Eintrag.
+- Kein Protokoll für Wahlen, die außerhalb der geänderten Stelle niemand merkt: Reihenfolge von Funktionen in einer Datei, lokale Variablennamen, Formatierung, Reihenfolge von Importen fällt Claude wie bisher, ohne Eintrag (Spec 28, Ablauf 1).
 - Kein Ersatz für die `Annahme:`-Zeilen von feature-spec und work-plan; was dort als Annahme steht, protokolliert decide nicht noch einmal.
 - Kein Generator für Architektur-Entscheidungsdokumente (ADR), kein Schreiben in `docs/decisions.md` (das erntet feature-spec).
 - Keine Änderung an der Regel `communication.md` von setup-user: Sie liegt in einem anderen Plugin, schon installierte Kopien bekämen den Verweis nicht.
@@ -68,7 +68,7 @@ manuell und „wenn Claude Fragen hat".
 - Annahme: Ein Tier-1-Skript `decide_log.py` mit `add`, `resolve`, `summary`, `check`, `open` und `brief` trägt Protokoll und Ablage; `check --range <bereich>` meldet Änderungen im Diff, die zu einer Kategorie aus `reversibility.md` gehören, aber keinen Eintrag mit passendem Schlüssel und Status freigegeben haben (G2).
 - Annahme: `references/reversibility.md` kennzeichnet jede Kategorie als „geprüft" (im Diff sichtbar: Abhängigkeit, Migration, Berechtigungs- und CI-Dateien) oder „ungeprüft" (nicht im Diff: Force-Push, `git reset --hard`, `git clean`, Deploy, Mail, Zahlung, Datenlöschung). `check` nennt die ungeprüften Kategorien in jeder Ausgabe — Sichtbarkeits-Regel aus Spec 00 §3.
 - Annahme: Plugin `evaluated-dev`, portables Frontmatter ohne `disable-model-invocation`.
-- Annahme: Die zentralen Weichen (Umkehrbarkeit als Achse, Subagent nur bei Recherchebedarf, kein Hook auf der Frage, Auftrag als Freigabe, eine Ablage für alle großen Fragen) stammen aus dem Gespräch vom 2026-11-02 und zwei Reviews dieses Entwurfs; bestätigt hat der Nutzer sie noch nicht.
+- Annahme: Die zentralen Weichen (Umkehrbarkeit als Achse, Subagent nur bei Recherchebedarf, kein Hook auf der Frage, Auftrag als Freigabe, eine Ablage für alle großen Fragen) stammen aus dem Gespräch vom 2026-11-02 und zwei Reviews dieses Entwurfs; der Nutzer hat sie am 2026-11-02 bestätigt („Passt, fahre fort"). Verbindlich ist ab da `specs/Spec 28 – decide.md`.
 
 ## Ansatz
 Die Skill entsteht nach dem Hausprozess (skill-forge, Spec 17): Aus diesem Entwurf wird eine
