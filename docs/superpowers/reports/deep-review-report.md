@@ -377,6 +377,25 @@ offen für known-limits:
 - `write_counterparts` löst den Bereich und den Index ein zweites Mal auf.
 - `_render` hat einen Sonderzweig für den Qualitätsfokus.
 
+### Prüfpunkt 4 (nach Task 5, C5: Delphi-Scanner)
+
+`/code-review` über Task 5 (1.345 Zeilen): 20 Funde, Fix-Runde 1 behob alle (`&End` als
+Schlüsselwort, `<T: record>` als Record, klammerlose Aufrufe, Sichtbarkeit geschachtelter
+Routinen, Unit-qualifizierte RTL-Aufrufe, Überladungen, `{$IFDEF}`, `TObjectQueue/Stack`,
+Sammler-Tabelle). Review des Fixes: 14 Funde; elf mit falschem oder stillem Ergebnis in Runde 2;
+offen für known-limits:
+
+- `enclosing()` sucht linear über alle Routinen und läuft je Kandidat — in großen Units etwa
+  quadratisch.
+- `inherited Create` ruft `_ownership` doppelt.
+- `COUNTERPART_SUFFIXES` ist tot, `_is_python`/`_is_delphi` doppeln `COLLECTORS`, `local_type`
+  hat einen ungenutzten Default.
+
+Was der Scanner bewusst nicht kann (Bericht der Fix-Runde 1): kein Parser, keine Defines (immer
+der erste Zweig, `{$I}` nicht gelesen); keine Typinferenz für Ausdrücke, Funktionsergebnisse,
+`with`, Indexer; Überladungen nicht nach Argumenttypen; `raise` nur innerhalb der Unit; RTL nur
+über die feste Tabelle `OWNERSHIP_RTL`.
+
 **Lessons für subagent-dev:** (1) Agent-Worktrees starten auf `main`, nicht auf dem
 Arbeitsbranch; jeder Agent musste die Basis selbst zurücksetzen — der Dispatch nennt sie seither
 ausdrücklich. (2) `fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die
