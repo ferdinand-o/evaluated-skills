@@ -529,6 +529,25 @@ zusammengelegten Funden nur die erste Zeile und mischte die Szenarien. Jedes Obj
 Allowlist-Eintrag. Den Report-Fund (Zählung in Prüfpunkt 6) habe ich selbst berichtigt. Die
 übrigen sieben gehen in Fix-Runde 1.
 
+Fix-Runde 1 ergab 1.766 Tests grün. Das Review des Fixes meldete 12 Funde. In Runde 2 kommen
+die mit Absturz oder falschem Ergebnis:
+
+- Eine verdicts-Zeile mit `reason: null` oder ohne `id` führte zu Traceback bzw. unklarer
+  Meldung.
+- `./src/a.py`, `src` oder `src/*` erweiterten die Allowlist.
+- Ein bloßes `{"findings": …}` und `summary: null` wurden neu abgewiesen.
+- Zeilenangaben wie `abc` oder `-5` landeten ungeprüft in der Task-Datei.
+
+Offen für known-limits:
+
+- Hat ein eingerücktes `findings.json` einen Syntaxfehler, nennt die Meldung die Position aus
+  dem jsonl-Versuch (Zeile 1), nicht die echte.
+- `fix-task` kopiert Zeilen- und Pfadregeln aus `review_kit.py` (`FIX_LINE_RE`, `_line_span`,
+  `_repo_path`). Zwei Tier-1-Skripte aus verschiedenen Skills teilen keinen Code. Die Kopien
+  können auseinanderlaufen.
+- Ein Fund aus `findings.json` mit nur einer Quelle wird auch in der Quellenform dargestellt,
+  die Zeile steht dann doppelt.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
