@@ -61,6 +61,68 @@
       ],
       "must_not": [],
       "notes": "Spec 09, Eval 4. class 'behavior', weil das eigentliche Ziel ('bleibt der Hauptkontext schlank') nur teilweise mechanisch prüfbar ist — die Struktur- und Inhalts-Assertions (Findings/Beleg/Konfidenz, Zeilenobergrenze, der gefundene login.py-Treffer) hängen an dem Artefakt, das nur diese Skill in diesem Format erzeugt; der Judge-Claim deckt die Prosa-Flut-Frage ab, die kein Regex fangen kann (bekannte Grenze, docs/known-limits.md)."
+    },
+    {
+      "id": "anti-ceremony-mini-plan-gets-only-final-checkpoint",
+      "class": "contract",
+      "fixture": "plan-mini-two-tasks",
+      "prompt": "Ich habe einen Plan unter docs/superpowers/plans/mini-two-tasks.md. Nutze subagent-dev: Gate, Modell je Task und Prüfpunkte.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"kind\":\\s*\"final\""}
+      ],
+      "must_not": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"kind\":\\s*\"(before|after|group)\""},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"model\":\\s*\"opus\""}
+      ],
+      "notes": "Spec 27, Eval 1 — der Anti-Zeremonie-Fall der Prüfpunkte (E5): zwei Tasks ohne Vorleistung und ohne Risikopfad bekommen sonnet für beide und nur den finalen Prüfpunkt, kein Review je Task. Diskriminator: checkpoints und model schreibt nur generate; ohne Skill entsteht kein gate.json."
+    },
+    {
+      "id": "fanout-producer-gets-opus-and-checkpoint",
+      "class": "contract",
+      "fixture": "plan-fanout",
+      "prompt": "Ich habe einen Plan unter docs/plans/fanout.md. Nutze subagent-dev: Gate, Modell je Task und Prüfpunkte.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"id\":\\s*1,[^{}]*\"model\":\\s*\"opus\",\\s*\"model_reason\":\\s*\"Vorleistung"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"kind\":\\s*\"before\",\\s*\"task\":\\s*3"}
+      ],
+      "must_not": [],
+      "notes": "Spec 27, Eval 2. Diskriminator: Task 1 liefert parse_order, das Task 3 und 4 verwenden; Task 2 ist unabhängig, Task 5 heißt Verifikation und zählt nicht als Abnehmer — nur M1 (opus ab zwei Abnehmern) und C1 (Prüfpunkt vor dem ersten Abnehmer) ergeben genau diese Einträge. [^{}]* hält das Muster im Objekt von Task 1."
+    },
+    {
+      "id": "plan-model-line-overrides-rules",
+      "class": "contract",
+      "fixture": "plan-fanout-override",
+      "prompt": "Ich habe einen Plan unter docs/plans/fanout.md. Nutze subagent-dev: Gate, Modell je Task und Prüfpunkte.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/gate.json", "pattern": "\"id\":\\s*1,[^{}]*\"model\":\\s*\"sonnet\",\\s*\"model_reason\":\\s*\"Plan\""}
+      ],
+      "must_not": [],
+      "notes": "Spec 27, Eval 3. Diskriminator: wie plan-fanout, aber Task 1 trägt unter dem Titel **Modell:** sonnet; ohne M0 stünde dort opus mit model_reason Vorleistung."
+    },
+    {
+      "id": "consumer-check-catches-arity-drift",
+      "class": "contract",
+      "fixture": "plan-fanout-dispatched",
+      "prompt": "Task 1 aus docs/plans/fanout.md wurde dispatcht und liegt im letzten Commit, Basis ist der Tag base. Nutze subagent-dev und prüf Task 1 mit verify, Ergebnis nach .skills/cache/tasks/verify-task-1.json.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/verify-task-1.json", "pattern": "\"consumer_check\""},
+        {"type": "file_matches", "path": ".skills/cache/tasks/verify-task-1.json", "pattern": "\"status\":\\s*\"arity_mismatch\""},
+        {"type": "file_matches", "path": ".skills/cache/tasks/verify-task-1.json", "pattern": "\"verdict\":\\s*\"fail\""}
+      ],
+      "must_not": [],
+      "notes": "Spec 27, Eval 4. Diskriminator: Task 1 liefert parse_order(line, strict) ohne Default, Task 3 erwartet fn:parse_order(line); die Produces-Zeile von Task 1 nennt keine Arity, der bisherige verify meldet pass (im Review mit .gitignore gemessen) — nur der Abnehmer-Check aus dem Maschinenblock fängt die Abweichung."
+    },
+    {
+      "id": "checkpoint-due-by-size",
+      "class": "contract",
+      "fixture": "cp-size",
+      "prompt": "Task 3 aus docs/plans/fanout.md ist gemergt. Prüf mit subagent-dev, ob jetzt ein Review fällig ist.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/tasks/checkpoint.json", "pattern": "\"due\":\\s*true"},
+        {"type": "file_matches", "path": ".skills/cache/tasks/checkpoint.json", "pattern": "\"changed_lines\":\\s*430"}
+      ],
+      "must_not": [],
+      "notes": "Spec 27, Eval 5. Diskriminator: review-state.json zeigt auf den Tag reviewed, danach kamen genau 430 Zeilen dazu, ohne geplanten Prüfpunkt nach Task 3 in gate.json; nur checkpoint status zählt das (C5, ab 400 Zeilen)."
     }
   ]
 }

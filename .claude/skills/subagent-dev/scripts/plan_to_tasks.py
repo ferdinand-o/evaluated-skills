@@ -14,6 +14,9 @@ statisch gelesen (Vorab-Entscheidung A3).
 als Abhängigkeit (Vorab-Entscheidung B2) — ein übersehener Konflikt zerstört
 Arbeitsstand, eine überflüssige Serialisierung kostet nur Zeit.
 
+`checkpoint` führt den Review-Stand zwischen den Merges (`review-state.json`) und
+sagt nach jedem Merge, ob ein Prüfpunkt fällig ist (`checkpoint.json`, Spec 27).
+
 `lint` prüft einen Plan auf das Format, das `generate` liest; `lint-spec` prüft
 die Skill-Spec davor (Kopfzeile mit Review-Vermerk, sieben Abschnitte, Eval-Tabelle,
 Skill-Struktur, Tier, Abgrenzung) mit demselben Parser — der Konsument des Formats
@@ -27,14 +30,23 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 SCHEMA_VERSION = 1
 PARALLEL_THRESHOLD = 3
+# Modellwahl (E8, Spec 27 M1–M3): Grenzwerte und Risikowörter als Konstanten.
+BREADTH_MIN_FILES = 5
+CONSUMERS_FOR_OPUS = 2
+# C5 (Spec 27): ab so vielen geänderten Zeilen seit dem letzten Review ist ein Prüfpunkt fällig.
+SIZE_TRIGGER_LINES = 400
+MODELS = ("opus", "sonnet")
+RISK_WORDS = ("auth", "login", "session", "security", "crypto", "permission",
+              "migration", "migrations", "payment", "billing")
 
 TASK_HEADER_RE = re.compile(r"^### Task (\d+):\s*(.+?)\s*$", re.MULTILINE)
-FILE_LINE_RE = re.compile(r"^-\s*(?:Create|Modify|Test|Delete):\s*`([^`]+)`", re.MULTILINE)
+FILE_LINE_RE = re.compile(r"^-\s*(Create|Modify|Test|Delete):\s*`([^`]+)`", re.MULTILINE)
 RENAME_LINE_RE = re.compile(r"^-\s*Rename:\s*`([^`]+)`\s*->\s*`([^`]+)`", re.MULTILINE)
 # Jede Bullet-Zeile im Files:-Block — dient als Sicherheitsnetz: Was hier eine
 # Zeile mehr zählt als FILE_LINE_RE/RENAME_LINE_RE zusammen erkannt haben, ist
@@ -42,6 +54,8 @@ RENAME_LINE_RE = re.compile(r"^-\s*Rename:\s*`([^`]+)`\s*->\s*`([^`]+)`", re.MUL
 BULLET_LINE_RE = re.compile(r"^-\s*.+$", re.MULTILINE)
 LINE_RANGE_RE = re.compile(r"^(?P<path>.+?)(?::\d+(?:-\d+)?)?$")
 STEP_RE = re.compile(r"^-\s*\[[ xX]\]\s*\*\*(Step \d+:[^*]*)\*\*", re.MULTILINE)
+# Wie STEP_RE, aber zeilenweise und mit dem Rest der Zeile — der Anfang des Step-Texts.
+STEP_LINE_RE = re.compile(r"^-\s*\[[ xX]\]\s*\*\*(Step \d+:[^*]*)\*\*(.*)$")
 # Backtick-Symbol mit Klammern (Funktion/Methode) — Name vor der ersten "(".
 CALLABLE_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)\(([^)]*)\)")
 # Backtick-Symbol ohne Klammern (Klasse/Konstante) — nur, falls es kein
@@ -59,6 +73,13 @@ PREFIXED_SYMBOL_RE = re.compile(r"`(fn|token|file):([^`]+)`")
 PLAN_HEADER_RE = re.compile(r"^<!--\s*skill:\s*(impl-plan|work-plan)\s*\|\s*schema:\s*\d+\s*\|\s*generated:\s*.+?\s*-->$")
 # Pfad-Segmente, die ein Glob-Muster statt eines konkreten Pfads markieren.
 GLOB_CHARS = frozenset("*?[")
+# Pflicht-Titel (E8): solche Tasks konsumieren laut Plan alle Produces und zählen
+# nicht als Abnehmer.
+MANDATORY_TITLES = ("Verifikation", "Evals", "Nachbarn", "known-limits", "Report")
+# Prüfpunkte (Spec 27 C1–C4): Profile vom niedrigeren zum höheren; fallen zwei auf
+# dieselbe Stelle, bleibt die Art, die hier weiter hinten steht.
+PROFILES = ("checkpoint", "standard")
+CHECKPOINT_KINDS = ("before", "after", "group", "final")
 
 
 class PlanParseError(ValueError):
@@ -69,6 +90,7 @@ class PlanParseError(ValueError):
 class FileRef:
     raw: str
     path: str
+    verb: str = ""
 
 
 @dataclass(frozen=True)
@@ -81,9 +103,13 @@ class PlanTask:
     produces: str
     interfaces_unknown: bool
     steps: list[str]
+    # (Titel, Text) je Step — `steps` bleibt der reine Titel für den Lint.
+    step_texts: list[tuple[str, str]] = field(default_factory=list)
     # `file:`-Konsumpfade aus Consumes (Spec 16) — fließen in die Pfad-Überlappung
     # des Gates ein, nicht in den Symbolabgleich.
     consumed_files: list[str] = field(default_factory=list)
+    # Wert hinter `**Modell:**` unter dem Titel (M0), roh; None = keine Zeile.
+    model_line: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,16 +184,16 @@ def _parse_files(block: str) -> tuple[list[FileRef], bool]:
     refs: list[FileRef] = []
     matched_lines = 0
 
-    for raw in FILE_LINE_RE.findall(files_text):
-        refs.append(FileRef(raw=raw, path=_strip_range(raw)))
+    for verb, raw in FILE_LINE_RE.findall(files_text):
+        refs.append(FileRef(raw=raw, path=_strip_range(raw), verb=verb))
         matched_lines += 1
 
     for old_raw, new_raw in RENAME_LINE_RE.findall(files_text):
         # Ein Rename betrifft zwei Pfade — beide gehören in die Allowlist und
         # in die Überlappungsprüfung; wer die alte ODER die neue Datei anfasst,
         # kollidiert mit diesem Task.
-        refs.append(FileRef(raw=old_raw, path=_strip_range(old_raw)))
-        refs.append(FileRef(raw=new_raw, path=_strip_range(new_raw)))
+        refs.append(FileRef(raw=old_raw, path=_strip_range(old_raw), verb="Rename"))
+        refs.append(FileRef(raw=new_raw, path=_strip_range(new_raw), verb="Rename"))
         matched_lines += 1
 
     total_lines = len(BULLET_LINE_RE.findall(files_text))
@@ -257,6 +283,44 @@ def _parse_steps(block: str) -> list[str]:
     return [m.strip() for m in STEP_RE.findall(block)]
 
 
+def parse_step_texts(block: str) -> list[tuple[str, str]]:
+    """Je Step `(Titel, Text)`: der Text ist der Rest der Step-Zeile plus alle
+    eingerückten Folgezeilen bis zum nächsten Step (Leerzeilen zählen mit, wenn
+    danach wieder eingerückt weitergeht). Ein Step ohne Text liefert `""`. Die gemeinsame
+    Einrückung der Folgezeilen entfällt, relative Einrückung und innere Leerzeilen
+    bleiben. Die Step-Grenzen stehen am maskierten Block (ein Zaun im Step verdeckt
+    keine Grenze), der Text kommt aus dem unmaskierten.
+    """
+    steps: list[tuple[str, str, list[str]]] = []
+    open_step = False
+    for line, masked in zip(block.split("\n"), _mask_fenced_blocks(block).split("\n")):
+        match = STEP_LINE_RE.match(masked)
+        if match:
+            # Trenner zwischen Titel und Text („ — “, „, “) gehört nicht zum Text.
+            steps.append((match.group(1).strip(), match.group(2).lstrip(" \t—–,:").strip(), []))
+            open_step = True
+        elif open_step and (not masked.strip() or masked[0] in " \t"):
+            steps[-1][2].append(line)
+        else:
+            open_step = False
+    result = []
+    for title, first, rest in steps:
+        body = textwrap.dedent("\n".join(rest)).rstrip()
+        result.append((title, f"{first}\n{body}" if first and body else first or body.lstrip("\n")))
+    return result
+
+
+MODEL_LINE_RE = re.compile(r"^\*\*Modell:\*\*[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+
+
+def _parse_model_line(block: str) -> str | None:
+    """Wert der `**Modell:**`-Zeile zwischen Titel und `**Files:**` (M0); eine Zeile
+    weiter unten, etwa in einem Step, zählt nicht."""
+    head = re.split(r"\*\*Files:\*\*|\n- \[[ xX]\]", block, maxsplit=1)[0]
+    match = MODEL_LINE_RE.search(head)
+    return match.group(1) if match else None
+
+
 def parse_plan(text: str) -> PlanDoc:
     """Parse einen impl-plan- oder work-plan-Plan in `PlanDoc`.
 
@@ -267,7 +331,7 @@ def parse_plan(text: str) -> PlanDoc:
     Zitierte Beispiel-Pläne in ```-Codeblöcken (wie in diesem Plan selbst)
     werden vor jeder Struktur-Erkennung ausmaskiert — siehe `_mask_fenced_blocks`.
     """
-    text = _mask_fenced_blocks(text)
+    raw, text = text, _mask_fenced_blocks(text)
     headers = list(TASK_HEADER_RE.finditer(text))
     if not headers:
         raise PlanParseError(
@@ -298,11 +362,13 @@ def parse_plan(text: str) -> PlanDoc:
         files, files_unknown = _parse_files(block)
         consumes, produces, interfaces_unknown = _parse_interfaces(block)
         steps = _parse_steps(block)
+        step_texts = parse_step_texts(raw[block_start:block_end])
         consumed_files = [name for kind, name, _ in extract_symbols(consumes) if kind == "file"]
         tasks.append(PlanTask(
             id=task_id, title=title, files=files, files_unknown=files_unknown,
             consumes=consumes, produces=produces, interfaces_unknown=interfaces_unknown,
-            steps=steps, consumed_files=consumed_files,
+            steps=steps, step_texts=step_texts, consumed_files=consumed_files,
+            model_line=_parse_model_line(block),
         ))
 
     seen: set[int] = set()
@@ -417,14 +483,139 @@ def _symbol_pattern(name: str) -> str:
     return rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])"
 
 
-def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
-    """Name des Symbols, falls `consumer` etwas konsumiert, das `producer` produziert."""
+def _dependency_kinds(producer: PlanTask, consumer: PlanTask) -> list[tuple[str, str]]:
+    """(kind, Name) aller Symbole, die `consumer` konsumiert und `producer` produziert."""
+    found: list[tuple[str, str]] = []
     for kind, name, _ in extract_symbols(producer.produces):
         if kind == "file":
             continue  # Pfad-Überlappung, siehe build_overlap_graph
         if re.search(_symbol_pattern(name), consumer.consumes):
-            return name
-    return None
+            found.append((kind, name))
+    return found
+
+
+def _dependency_symbols(producer: PlanTask, consumer: PlanTask) -> list[str]:
+    """Namen aller Symbole, die `consumer` konsumiert und `producer` produziert."""
+    return [name for _, name in _dependency_kinds(producer, consumer)]
+
+
+def _interface_dependency(producer: PlanTask, consumer: PlanTask) -> str | None:
+    """Name des Symbols, falls `consumer` etwas konsumiert, das `producer` produziert."""
+    names = _dependency_symbols(producer, consumer)
+    return names[0] if names else None
+
+
+def title_is(title: str, word: str) -> bool:
+    """Heißt die Task genau `word` oder `word — …`?"""
+    return title == word or title.startswith(word + " —")
+
+
+def is_mandatory_title(title: str) -> bool:
+    """Ist das eine Pflicht-Task (genau der Titel oder `<Titel> — …`)? Sie konsumiert
+    laut Plan alle `Produces` und zählt deshalb nicht als Abnehmer."""
+    return any(title_is(title, word) for word in MANDATORY_TITLES)
+
+
+def consumers_of(tasks: list[PlanTask]) -> dict[int, list[dict]]:
+    """Task-ID -> Abnehmer: spätere Tasks, deren Consumes ein Produces-Symbol nennt.
+
+    Je Abnehmer `{"task": id, "symbols": [...]}`; ein Symbol trägt seine Art als Präfix wie
+    im Plan: `fn:name(arity)` (Arity aus dem Consumes des Abnehmers), `token:Name`; ein
+    Symbol ohne Arity steht nackt als `name`. Pflicht-Tasks
+    sind keine Abnehmer; eine Task mit `interfaces_unknown` hat keine erkennbaren.
+    """
+    result: dict[int, list[dict]] = {t.id: [] for t in tasks}
+    for i, producer in enumerate(tasks):
+        if producer.interfaces_unknown:
+            continue
+        for consumer in tasks[i + 1:]:
+            if is_mandatory_title(consumer.title):
+                continue
+            found = _dependency_kinds(producer, consumer)
+            if not found:
+                continue
+            arity = {n: a for k, n, a in extract_symbols(consumer.consumes) if k == "fn"}
+            result[producer.id].append({
+                "task": consumer.id,
+                "symbols": [
+                    f"token:{n}" if k == "token" else n if arity.get(n) is None else f"fn:{n}({arity[n]})"
+                    for k, n in found
+                ],
+            })
+    return result
+
+
+def risk_words(path: str) -> list[str]:
+    """Risikowörter (M2) im Pfad: zerlegt an `/`, `_`, `-`, `.` und vor jedem Großbuchstaben,
+    ohne Groß-/Kleinschreibung verglichen; `.sql` am Ende zählt als eigener Treffer."""
+    parts = re.split(r"[/_\-.]", re.sub(r"(?=[A-Z])", "_", path))
+    found = [w.lower() for w in parts if w.lower() in RISK_WORDS]
+    return found + [".sql"] if path.lower().endswith(".sql") else found
+
+
+def _risk_path(task: PlanTask) -> str | None:
+    """Erster Pfad unter `Files:` mit Risikowort (Bedingung von M2), sonst None."""
+    return next((ref.path for ref in task.files if risk_words(ref.path)), None)
+
+
+def choose_model(task: PlanTask, consumers: list[dict]) -> tuple[str, str]:
+    """(model, model_reason) nach M0–M3; die erste Regel, die greift. `consumers` ist
+    die Abnehmer-Liste dieser Task aus `consumers_of`. Ein ungültiger M0-Wert gilt
+    nicht (der Lint meldet ihn), dann zählen M1 bis M3."""
+    if task.model_line is not None and task.model_line.lower() in MODELS:
+        return task.model_line.lower(), "Plan"
+    if len(consumers) >= CONSUMERS_FOR_OPUS:
+        return "opus", "Vorleistung für Task " + ", ".join(str(c["task"]) for c in consumers)
+    risky = _risk_path(task)
+    if risky:
+        return "opus", f"Risikopfad {risky}"
+    breadth = len({r.path for r in task.files if r.verb in ("Create", "Modify")})
+    if breadth >= BREADTH_MIN_FILES:
+        return "opus", f"Breite: {breadth} Dateien"
+    return "sonnet", "Standard"
+
+
+def place_checkpoints(tasks: list[PlanTask], consumers: dict[int, list[dict]], gate: GateResult) -> list[dict]:
+    """Prüfpunkte nach C1–C4 über den ganzen Plan, in Plan-Reihenfolge.
+
+    Je Prüfpunkt `kind`, `task`, `profile`, `reasons`. Die Bedingungen von M1/M2 gelten
+    unabhängig von M0. Ein Prüfpunkt sitzt hinter einer Task (`before N` hinter der
+    Task vor N); fallen zwei auf dieselbe Stelle, bleibt einer mit allen Gründen, dem
+    höheren Profil und der Art, die in CHECKPOINT_KINDS weiter hinten steht. Läge ein
+    Prüfpunkt hinter `final` (Parallel-Gruppe mit der Verifikation), wird er dort eingelegt.
+    """
+    pos = {t.id: i for i, t in enumerate(tasks)}
+    raw: list[tuple[int, str, int | None, str, str]] = []  # (Stelle, kind, task, profile, Grund)
+    for t in tasks:
+        users, risky = consumers.get(t.id, []), _risk_path(t)
+        if users and (len(users) >= CONSUMERS_FOR_OPUS or risky):
+            first = users[0]["task"]
+            why = ", ".join(
+                ([f"{len(users)} Abnehmer"] if len(users) >= CONSUMERS_FOR_OPUS else [])
+                + ([f"Risikopfad {risky}"] if risky else [])
+            )
+            raw.append((pos[first] - 1, "before", first, "checkpoint",
+                        f"C1: Task {t.id} ({why}) vor dem ersten Abnehmer Task {first}"))
+        if risky:
+            raw.append((pos[t.id], "after", t.id, "standard", f"C2: Task {t.id} mit Risikopfad {risky}"))
+    if gate.verdict == "parallel" and gate.parallel_group:
+        last = max(gate.parallel_group)
+        raw.append((pos[last], "group", last, "checkpoint",
+                    "C3: nach dem Merge der Parallel-Gruppe " + ", ".join(map(str, sorted(gate.parallel_group)))))
+    work = [t for t in tasks if not title_is(t.title, "Verifikation")]
+    final_slot = pos[(work or tasks)[-1].id]
+    raw.append((final_slot, "final", None, "standard", "C4: finaler Prüfpunkt"))
+
+    merged: dict[int, dict] = {}
+    for slot, kind, task_id, profile, reason in raw:
+        slot = min(slot, final_slot)  # hinter `final` gibt es nichts mehr zu prüfen: dort zusammenlegen
+        cp = merged.setdefault(slot, {"kind": kind, "task": task_id, "profile": profile, "reasons": []})
+        if CHECKPOINT_KINDS.index(kind) > CHECKPOINT_KINDS.index(cp["kind"]):
+            cp["kind"], cp["task"] = kind, task_id
+        if PROFILES.index(profile) > PROFILES.index(cp["profile"]):
+            cp["profile"] = profile
+        cp["reasons"].append(reason)
+    return [merged[slot] for slot in sorted(merged)]
 
 
 def build_overlap_graph(tasks: list[PlanTask]) -> dict[int, set[int]]:
@@ -570,7 +761,12 @@ def _header(command: str) -> str:
     return f"<!-- skill: subagent-dev | schema: {SCHEMA_VERSION} | generated: {command} -->"
 
 
-def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
+def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str,
+                     consumers: list[dict], model: tuple[str, str], command: str | None = None) -> str:
+    """`consumers`: Abnehmer dieser Task, `model`: `(model, model_reason)` — beides aus
+    dem ganzen Plan (`write_tasks`); `doc` kann gefiltert sein und taugt dafür nicht.
+    `command` ersetzt den Aufruf in der Kopfzeile (Fix-Task)."""
+    model, model_reason = model
     allowlist = [f.path for f in task.files]
     produces = [s for s in extract_symbols(task.produces) if s[0] != "file"]
     others = [f"Task {t.id} – {t.title}" for t in doc.tasks if t.id != task.id]
@@ -578,18 +774,27 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
     allowlist_md = "\n".join(f"- `{p}`" for p in allowlist) if allowlist else (
         "- (keine geparst — Allowlist unklar, gilt als leer und damit als riskant)"
     )
-    steps_md = "\n".join(f"- {s}" for s in task.steps) if task.steps else "- (keine Steps im Plan gefunden)"
+    # Titel als Listenpunkt, der Text eingerückt darunter — ein Step ohne Text bleibt eine Zeile.
+    steps_md = "\n".join(
+        f"- {title}" + "".join(f"\n  {l}" if l else "\n" for l in text.split("\n") if text)
+        for title, text in task.step_texts
+    ) if task.step_texts else "- (keine Steps im Plan gefunden)"
     others_md = "\n".join(f"- {o}" for o in others) if others else "- (keine weiteren Tasks in diesem Plan)"
+    consumers_md = ", ".join(
+        f"Task {c['task']} (" + ", ".join(f"`{s}`" for s in c["symbols"]) + ")" for c in consumers
+    ) or "keine"
 
     machine_block = {
         "task_id": task.id,
         "plan": plan_path,
         "allowlist": allowlist,
         "produces": [{"kind": k, "name": n, "arity": a} for k, n, a in produces],
+        "model": model,
+        "consumers": consumers,
     }
 
     return (
-        f"{_header(f'python skills/subagent-dev/scripts/plan_to_tasks.py generate {plan_path}')}\n\n"
+        f"{_header(command or f'python skills/subagent-dev/scripts/plan_to_tasks.py generate {plan_path}')}\n\n"
         f"# Task {task.id}: {task.title}\n\n"
         f"## Ziel\n\n{task.title}\n\n"
         f"## Datei-Allowlist\n\n"
@@ -597,6 +802,9 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str) -> str:
         f"## Interfaces\n\n"
         f"- Consumes: {task.consumes or '(nichts Neues)'}\n"
         f"- Produces: {task.produces or '(nichts Neues)'}\n\n"
+        f"## Modell und Abnehmer\n\n"
+        f"- Modell: `{model}` — {model_reason}\n"
+        f"- Abnehmer: {consumers_md}\n\n"
         f"## Akzeptanzkriterien\n\n{steps_md}\n\n"
         f"## Global Constraints\n\n{doc.global_constraints or '(keine im Plan gefunden)'}\n\n"
         f"## Nicht-Ziele\n\n"
@@ -613,14 +821,26 @@ def parse_task_machine_block(text: str) -> dict:
     return json.loads(match.group(1))
 
 
-def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
+def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path, only: set[int] | None = None) -> dict:
+    """Abnehmer, Modell und Prüfpunkte rechnen über den ganzen Plan (C3 mit dem Gate über
+    den ganzen Plan); erst danach filtert `only` (`--tasks`). Die bisherigen Gate-Schlüssel
+    gelten wie bisher für die gefilterte Menge."""
     out_dir = Path(out_dir)
     if not out_dir.exists():
         print(f"Lege {out_dir} an (erster Lauf)")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    consumers = consumers_of(doc.tasks)
+    models = {t.id: choose_model(t, consumers[t.id]) for t in doc.tasks}
     overlap = build_overlap_graph(doc.tasks)
     gate = gate_verdict(doc.tasks, overlap)
+    checkpoints = place_checkpoints(doc.tasks, consumers, gate)
+    # Reihenfolge des ganzen Plans für `checkpoint status` — auch wenn `tasks` gefiltert ist.
+    plan_order = [{"id": t.id, "title": t.title} for t in doc.tasks]
+    if only is not None:
+        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in only])
+        overlap = build_overlap_graph(doc.tasks)
+        gate = gate_verdict(doc.tasks, overlap)
 
     gate_payload = {
         "_meta": {
@@ -633,6 +853,7 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
             {
                 "id": t.id, "title": t.title, "files": [f.path for f in t.files],
                 "files_unknown": t.files_unknown, "interfaces_unknown": t.interfaces_unknown,
+                "model": models[t.id][0], "model_reason": models[t.id][1], "consumers": consumers[t.id],
             }
             for t in doc.tasks
         ],
@@ -641,17 +862,19 @@ def write_tasks(doc: PlanDoc, plan_path: str, out_dir: Path) -> dict:
         "parallel_group": gate.parallel_group,
         "reasoning": gate.reasoning,
         "components": gate.components,
+        "checkpoints": checkpoints,
+        "plan_order": plan_order,
     }
     (out_dir / "gate.json").write_text(json.dumps(gate_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     task_files: dict[int, Path] = {}
     for task in doc.tasks:
-        rendered = render_task_file(task, doc, plan_path)
+        rendered = render_task_file(task, doc, plan_path, consumers[task.id], models[task.id])
         target = out_dir / f"task-{task.id}-{_slug(task.title)}.md"
         target.write_text(rendered, encoding="utf-8")
         task_files[task.id] = target
 
-    return {"gate": gate, "task_files": task_files}
+    return {"gate": gate, "task_files": task_files, "models": models, "checkpoints": checkpoints}
 
 
 # --------------------------------------------------------------------------
@@ -700,14 +923,46 @@ def check_allowlist(worktree: Path, base_ref: str, allowlist: list[str]) -> list
     return [path for path in changed if not any(_paths_overlap(path, allowed) for allowed in allowlist)]
 
 
+def _positional(node: ast.AST) -> list[ast.arg]:
+    args = [*node.args.posonlyargs, *node.args.args]
+    return args[1:] if args and args[0].arg in ("self", "cls") else args
+
+
+def arity_matches(node: ast.AST, expected: int | None) -> bool:
+    """Eine Arity-Regel für `Produces`- und Abnehmer-Check (Spec 27): passend, wenn
+    `expected` zwischen den positionalen Pflichtparametern und allen positionalen
+    Parametern (posonly eingeschlossen, `self`/`cls` nicht) liegt — mit `*args` ohne
+    Obergrenze. Ein kwonly-Parameter ohne Default macht jede Arity unpassend. Ohne
+    `expected` und bei einer Klasse zählt nur die Präsenz."""
+    if expected is None or isinstance(node, ast.ClassDef):
+        return True
+    if any(default is None for default in node.args.kw_defaults):
+        return False
+    positional = _positional(node)
+    required = max(0, len(positional) - len(node.args.defaults))
+    return required <= expected and (expected <= len(positional) or node.args.vararg is not None)
+
+
+def _arity_text(node: ast.AST) -> str:
+    """Lesbare Arity einer Definition für `detail`: `2`, `1–2`, `1+`, ggf. mit kwonly."""
+    if isinstance(node, ast.ClassDef):
+        return "Klasse"
+    positional = _positional(node)
+    required = max(0, len(positional) - len(node.args.defaults))
+    text = f"{required}+" if node.args.vararg else (
+        str(required) if required == len(positional) else f"{required}–{len(positional)}")
+    kwonly = [a.arg for a, d in zip(node.args.kwonlyargs, node.args.kw_defaults) if d is None]
+    return text + (f" (kwonly ohne Default: {', '.join(kwonly)})" if kwonly else "")
+
+
 def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) -> list[dict]:
     """Prüfe deklarierte Produces-Symbole gegen die Allowlist-Dateien, nach kind.
 
-    `fn` per `ast` (Name + Arity), `token` per Textsuche des Namens in den
-    Allowlist-Dateien — ein Doktrin-Token steht in einer SKILL.md, nicht in einem
-    Funktionskopf, und `ast` würde ihn für jeden Doktrin-Task als `missing`
-    melden (Spec-16-Review). Einträge dürfen (name, arity) oder (kind, name,
-    arity) sein; ohne kind gilt `fn`.
+    `fn` per `ast` (Name + Arity nach `arity_matches`), `token` per Textsuche des
+    Namens in den Allowlist-Dateien — ein Doktrin-Token steht in einer SKILL.md,
+    nicht in einem Funktionskopf, und `ast` würde ihn für jeden Doktrin-Task als
+    `missing` melden (Spec-16-Review). Einträge dürfen (name, arity) oder (kind,
+    name, arity) sein; ohne kind gilt `fn`.
 
     Nie ein Import — fremder Code aus einem gerade dispatchten Agenten wird
     ausschließlich statisch gelesen (Vorab-Entscheidung A3).
@@ -716,12 +971,12 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
     Definitionen (Top-Level-Funktion + verschachtelte Hilfsfunktion, oder
     gleichnamige Methoden zweier Klassen) sind über den ganzen Baum hinweg
     nicht unterscheidbar. Statt die zuletzt gefundene Definition stillschweigend
-    gewinnen zu lassen (L2), werden alle Arities gesammelt: Passt mindestens
-    eine zur erwarteten, gilt das Symbol als vorhanden; passt keine, aber es
+    gewinnen zu lassen (L2), werden alle Definitionen gesammelt: Passt mindestens
+    eine zur erwarteten Arity, gilt das Symbol als vorhanden; passt keine, aber es
     gibt mehrere unterschiedliche Definitionen, ist das Ergebnis `ambiguous`
     statt eines geratenen PASS oder FAIL.
     """
-    found: dict[str, list[int]] = {}
+    found: dict[str, list[ast.AST]] = {}
     for relpath in allowlist:
         path = worktree / relpath
         if not path.is_file():
@@ -731,13 +986,8 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
         except SyntaxError:
             continue
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                args = node.args.args
-                if args and args[0].arg in ("self", "cls"):
-                    args = args[1:]
-                found.setdefault(node.name, []).append(len(args))
-            elif isinstance(node, ast.ClassDef):
-                found.setdefault(node.name, []).append(-1)  # -1: keine Arity, nur Präsenz
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.setdefault(node.name, []).append(node)
 
     normalized: list[tuple[str, str, int | None]] = [
         (entry[0], entry[1], entry[2]) if len(entry) == 3 else ("fn", entry[0], entry[1]) for entry in produces
@@ -764,22 +1014,22 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
         if name not in found:
             results.append({"name": name, "status": "missing", "detail": "in keiner Allowlist-Datei gefunden"})
             continue
-        arities = found[name]
-        distinct = sorted(set(arities))
-        if expected_arity is None or -1 in distinct:
+        nodes = found[name]
+        distinct = sorted({_arity_text(n) for n in nodes})
+        if expected_arity is None or any(isinstance(n, ast.ClassDef) for n in nodes):
             results.append({"name": name, "status": "present", "detail": "gefunden (Arity ungeprüft)"})
-        elif expected_arity in distinct:
+        elif any(arity_matches(n, expected_arity) for n in nodes):
             note = "" if len(distinct) == 1 else f"; weitere Definitionen mit Arities {distinct}"
             results.append({
                 "name": name, "status": "present",
-                "detail": f"gefunden mit {expected_arity} Parametern{note}",
+                "detail": f"gefunden, passt zu {expected_arity} Parametern{note}",
             })
         elif len(distinct) > 1:
             results.append({
                 "name": name, "status": "ambiguous",
                 "detail": (
                     f"{len(distinct)} unterschiedliche Definitionen mit den Arities {distinct} "
-                    f"gefunden, keine davon {expected_arity} — nicht eindeutig, welche maßgeblich "
+                    f"gefunden, keine passt zu {expected_arity} — nicht eindeutig, welche maßgeblich "
                     "ist (kein Scope-Abgleich ohne Import, Vorab-Entscheidung A3)"
                 ),
             })
@@ -789,6 +1039,123 @@ def check_produces(worktree: Path, allowlist: list[str], produces: list[tuple]) 
                 "detail": f"erwartet {expected_arity} Parameter, gefunden {distinct[0]}",
             })
     return results
+
+
+CONSUMER_SYMBOL_RE = re.compile(r"^(?:(fn|token):)?(.+?)(?:\((\d+)\))?$")
+CONSUMER_BROKEN = ("missing", "arity_mismatch", "ambiguous")
+
+
+def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] | None) -> list[dict]:
+    """Abnehmer-Check (Spec 27): die Symbole, die spätere Tasks laut Maschinenblock
+    erwarten (`name`, `fn:name(arity)` oder `token:Name`; ohne Präfix gilt `fn`, ein
+    Nicht-Bezeichner ein Token — so lesen sich auch Task-Dateien von früher), mit derselben Regel wie
+    `check_produces` — je Symbol `task`, `name`, `status`, `detail`.
+
+    `consumers` ist None für eine Task-Datei von vor Spec 27: dann `unchecked`, nie
+    `present`. Liegt keine Python-Datei in der Allowlist (Delphi, TS), bleibt jedes
+    `fn`-Symbol `unchecked` mit Grund; Tokens gehen per Textsuche wie im `Produces`-Check.
+    """
+    if consumers is None:
+        return [{"task": None, "name": None, "status": "unchecked",
+                 "detail": "Task-Datei ohne consumers (vor Spec 27 erzeugt) — Abnehmer ungeprüft"}]
+    python = any(PurePosixPath(p).suffix == ".py" for p in allowlist)
+    entries: list[tuple[int, str, str, int | None]] = []
+    for consumer in consumers:
+        for symbol in consumer["symbols"]:
+            prefix, name, arity = CONSUMER_SYMBOL_RE.match(symbol).groups()
+            kind = prefix or ("fn" if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", name) else "token")
+            entries.append((consumer["task"], kind, name, None if arity is None else int(arity)))
+    checked = iter(check_produces(worktree, allowlist, [(k, n, a) for _, k, n, a in entries if python or k == "token"]))
+    results: list[dict] = []
+    for task, kind, name, _ in entries:
+        if kind == "fn" and not python:
+            results.append({"task": task, "name": name, "status": "unchecked",
+                            "detail": "keine Python-Datei in der Allowlist — per ast nicht prüfbar"})
+        else:
+            results.append({"task": task, **next(checked)})
+    return results
+
+
+HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+DIFF_ARGS = ("-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff",
+             "--src-prefix=a/", "--dst-prefix=b/")  # fest, unabhängig von diff.mnemonicPrefix
+DEBUG_RE = re.compile(r"\b(?:print|console\.log|(?i:writeln)|(?i:outputdebugstring))\(")
+TDD_LOG_PATH = Path(".skills") / "cache" / "test-first" / "log.md"
+
+
+def _added_lines(diff: str) -> list[tuple[str, int, str]]:
+    """(Pfad, Zeilennummer, Text) der hinzugefügten Zeilen eines `git diff -U0`.
+
+    Ein `+++ `-Kopf gilt nur direkt nach einer `--- `-Zeile und außerhalb eines Hunks; die
+    Zeilenzahlen im `@@`-Kopf sagen, wo der Hunk endet (eine hinzugefügte Zeile `++ x`
+    sieht sonst wie ein Kopf aus). Git hängt bei Pfaden mit Leerzeichen einen Tab an.
+    """
+    added: list[tuple[str, int, str]] = []
+    path, line, old_left, new_left, after_old_header = None, 0, 0, 0, False
+    for raw in diff.splitlines():
+        if old_left or new_left:
+            if raw.startswith("+"):
+                new_left -= 1
+                if path:
+                    added.append((path, line, raw[1:]))
+                line += 1
+            elif raw.startswith("-"):
+                old_left -= 1
+            continue
+        if raw.startswith("+++ ") and after_old_header:
+            path = raw[4:].rstrip("\t").removeprefix("b/") if raw.rstrip("\t") != "+++ /dev/null" else None
+        elif (hunk := HUNK_RE.match(raw)):
+            old_count, line, new_count = hunk.group(1), int(hunk.group(2)), hunk.group(3)
+            old_left = 1 if old_count is None else int(old_count)
+            new_left = 1 if new_count is None else int(new_count)
+        after_old_header = raw.startswith("--- ")
+    return added
+
+
+def _log_hints(worktree: Path) -> list[dict]:
+    """Hinweise aus dem Log von test-first (letzter Abschnitt): Tests, die sofort grün liefen."""
+    log = worktree / TDD_LOG_PATH
+    where = TDD_LOG_PATH.as_posix()
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [{"kind": "log-fehlt", "path": where, "line": None,
+                 "text": "kein test-first-Log im Worktree — Test-Zyklus ungeprüft"}]
+    phases: dict[str, list[str]] = {}
+    for row in text.rsplit("\n## Abschnitt ", 1)[-1].splitlines():
+        cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        if row.startswith("| ") and len(cells) >= 2 and cells[0] != "Test" and not row.startswith("| ---"):
+            phases.setdefault(cells[0], []).append(cells[1])
+    # Ein späteres `red` desselben Tests heißt: geschärft — dann meldet er nichts mehr.
+    return [{"kind": "sofort-grün", "path": where, "line": None, "text": test}
+            for test, seq in phases.items() if "sofort-grün" in seq[max(i for i, ph in enumerate(seq) if ph == "red") + 1 if "red" in seq else 0:]]
+
+
+def collect_hints(worktree: Path, base: str | None) -> list[dict]:
+    """Hinweise (Spec 27), je `{kind, path, line, text}` — sie ändern das Verdikt nie.
+
+    In den hinzugefügten Zeilen seit `base` (und uncommittet): Platzhalter (`PLACEHOLDER_RE`
+    des Plan-Lints) und Debug-Ausgaben. Ohne `base` gibt es keinen Diff — das meldet ein
+    Hinweis `diff-ungeprüft`, kein stiller Erfolg. Dazu das test-first-Log im Worktree.
+    """
+    hints: list[dict] = []
+    if not base:
+        hints.append({"kind": "diff-ungeprüft", "path": None, "line": None,
+                      "text": "--base fehlt — Platzhalter und Debug-Ausgaben im Diff ungeprüft"})
+    else:
+        diff = _git(worktree, *DIFF_ARGS, f"{base}...HEAD") + _git(worktree, *DIFF_ARGS, "HEAD")
+        added = _added_lines(diff)
+        # Untracked Dateien stehen in keinem Diff: sie zählen ganz als hinzugefügt (ohne `.skills/`).
+        for rel in filter(None, _git(worktree, "-c", "core.quotepath=off", "ls-files", "-z", "--others",
+                                     "--exclude-standard").split("\0")):
+            if PurePosixPath(rel).parts[0] != ".skills" and (worktree / rel).is_file():
+                body = (worktree / rel).read_text(encoding="utf-8", errors="replace").splitlines()
+                added += [(rel, n, text) for n, text in enumerate(body, 1)]
+        for path, line, text in added:
+            for kind, pattern in (("platzhalter", PLACEHOLDER_RE), ("debug-ausgabe", DEBUG_RE)):
+                if pattern.search(text):
+                    hints.append({"kind": kind, "path": path, "line": line, "text": text.strip()[:200]})
+    return hints + _log_hints(worktree)
 
 
 # --------------------------------------------------------------------------
@@ -809,20 +1176,25 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         print(f"Plan nicht parsbar: {exc}", file=sys.stderr)
         return 1
 
+    wanted = None
     if args.tasks:
         wanted = {int(x) for x in args.tasks.split(",")}
-        doc = PlanDoc(global_constraints=doc.global_constraints, tasks=[t for t in doc.tasks if t.id in wanted])
-        if not doc.tasks:
+        if not any(t.id in wanted for t in doc.tasks):
             print("Keine der angegebenen Task-IDs im Plan gefunden.", file=sys.stderr)
             return 1
 
-    result = write_tasks(doc, str(plan_path), Path(args.out_dir))
+    result = write_tasks(doc, str(plan_path), Path(args.out_dir), wanted)
     gate: GateResult = result["gate"]
-    print(f"{len(doc.tasks)} Task(s) verarbeitet -> {args.out_dir}")
+    print(f"{len(result['task_files'])} Task(s) verarbeitet -> {args.out_dir}")
     print(f"Gate-Urteil: {gate.verdict}")
     print(gate.reasoning)
     if gate.parallel_group:
         print(f"Parallel-Gruppe: Tasks {gate.parallel_group}")
+    for tid in result["task_files"]:
+        print(f"Task {tid}: {result['models'][tid][0]} ({result['models'][tid][1]})")
+    for cp in result["checkpoints"]:
+        print(f"Prüfpunkt {cp['kind']} {cp['task'] if cp['task'] is not None else '-'} [{cp['profile']}]: "
+              + "; ".join(cp["reasons"]))
     return 0
 
 
@@ -849,10 +1221,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     violations = check_allowlist(worktree, args.base, allowlist) if allowlist_checked else []
     produce_results = check_produces(worktree, allowlist, produces)
     produces_ok = all(r["status"] == "present" for r in produce_results)
+    consumer_results = check_consumers(worktree, allowlist, block.get("consumers"))
+    consumers_broken = any(r["status"] in CONSUMER_BROKEN for r in consumer_results)
+    consumers_unchecked = any(r["status"] == "unchecked" for r in consumer_results)
+    hints = collect_hints(worktree, args.base)
 
-    if violations or not produces_ok:
+    if violations or not produces_ok or consumers_broken:
         verdict = "fail"
-    elif not allowlist_checked:
+    elif not allowlist_checked or consumers_unchecked:
         verdict = "unverified"
     else:
         verdict = "pass"
@@ -866,6 +1242,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("Allowlist-Prüfung: ÜBERSPRUNGEN (--base fehlt) — nicht geprüft, nicht bestanden")
     for r in produce_results:
         print(f"  {r['name']}: {r['status']} — {r['detail']}")
+    for r in consumer_results:
+        print(f"  Abnehmer Task {r['task'] if r['task'] is not None else '?'}, "
+              f"{r['name'] or '-'}: {r['status']} — {r['detail']}")
+    for h in hints:
+        print(f"  Hinweis {h['kind']}: {h['path'] or '-'}{':' + str(h['line']) if h['line'] else ''} — {h['text']}")
     print(f"Verdikt: {verdict.upper()}")
 
     if args.out:
@@ -886,6 +1267,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "allowlist_checked": allowlist_checked,
             "allowlist_violations": violations,
             "produces": produce_results,
+            "consumer_check": consumer_results,
+            "hints": hints,
             "verdict": verdict,
             "ok": ok,
         }
@@ -894,6 +1277,251 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     return 0 if ok else 1
 
+
+
+# --------------------------------------------------------------------------
+# checkpoint — Review-Stand zwischen den Merges (Spec 27)
+# --------------------------------------------------------------------------
+
+TASKS_DIR = Path(".skills") / "cache" / "tasks"
+REVIEW_STATE_MISSING = "review-state fehlt — Basis unbekannt"
+
+
+def _checkpoint_meta(repo: Path, command: str) -> dict:
+    cmd = f"python skills/subagent-dev/scripts/plan_to_tasks.py checkpoint {command}"
+    if str(repo) != ".":
+        cmd += f" --repo {shlex.quote(str(repo))}"
+    return {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}
+
+
+def _read_json(path: Path) -> dict | None:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _rev(repo: Path, ref: str) -> str:
+    """Jede Git-Ref als Commit-SHA — ein annotierter Tag zeigt auf seinen Commit."""
+    return _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+
+def changed_lines(repo: Path, since: str) -> tuple[int, list[str]]:
+    """Hinzugefügte plus gelöschte Zeilen in `since..HEAD` und die Binärdateien darin
+    (sie zählen 0). `.skills/` zählt nicht, damit das committete runlog keinen
+    Prüfpunkt auslöst."""
+    out = _git(repo, "diff", "--numstat", "-z", "--no-renames", f"{since}..HEAD", "--", ".", ":(exclude).skills")
+    total, binary = 0, []
+    for record in filter(None, out.split("\0")):
+        added, deleted, path = record.split("\t", 2)
+        if added == "-":
+            binary.append(path)
+        else:
+            total += int(added) + int(deleted)
+    return total, binary
+
+
+def _checkpoint_after(cp: dict, tasks: list[dict]) -> int | None:
+    """Die Task, nach deren Merge der Prüfpunkt fällig ist — aus der Plan-Reihenfolge in
+    `gate.json`, nie als ID + 1: IDs können Lücken haben, und ein zusammengelegter
+    Prüfpunkt heißt `after N` statt `before <nächste>`."""
+    ids = [t["id"] for t in tasks]
+    if cp["kind"] == "final":
+        work = [t["id"] for t in tasks if not title_is(t["title"], "Verifikation")]
+        return (work or ids or [None])[-1]
+    if cp["kind"] == "before":
+        i = ids.index(cp["task"]) if cp["task"] in ids else 0
+        return ids[i - 1] if i > 0 else None
+    return cp["task"]  # after; group: höchste ID der Gruppe
+
+
+def checkpoint_init(repo: Path, base: str) -> dict:
+    """Schreibt `review-state.json`: `base` und `last_reviewed` = aufgelöster SHA von `base`."""
+    repo = Path(repo)
+    sha = _rev(repo, base)
+    gate = _read_json(repo / TASKS_DIR / "gate.json") or {}
+    state = {
+        "_meta": _checkpoint_meta(repo, f"init --base {shlex.quote(base)}"),
+        "plan": gate.get("plan"), "base": sha, "last_reviewed": sha, "runs": [], "reviewed_tasks": [],
+    }
+    _write_json(repo / TASKS_DIR / "review-state.json", state)
+    return state
+
+
+def checkpoint_status(repo: Path, after_task: int, tests_red: bool) -> dict:
+    """Ist nach dem Merge von Task `after_task` ein Prüfpunkt fällig (C1–C5)? Schreibt
+    `checkpoint.json`. Ohne `review-state.json` ist er fällig, ohne Bereich (E7)."""
+    repo = Path(repo)
+    gate = _read_json(repo / TASKS_DIR / "gate.json")
+    if gate is None:
+        raise PlanParseError(f"{TASKS_DIR / 'gate.json'} fehlt — erst generate")
+    state = _read_json(repo / TASKS_DIR / "review-state.json")
+    order = gate.get("plan_order") or gate["tasks"]
+    if after_task not in [t["id"] for t in order]:
+        raise PlanParseError(f"Task {after_task} steht nicht im Plan von gate.json "
+                             f"(bekannt: {', '.join(str(t['id']) for t in order)})")
+    planned = [cp for cp in gate.get("checkpoints", []) if _checkpoint_after(cp, order) == after_task]
+    reasons = [r for cp in planned for r in cp["reasons"]]
+    profiles = [cp["profile"] for cp in planned]
+    final = any(cp["kind"] == "final" for cp in planned)
+    span, lines, binary, since_runs = None, None, [], []
+    if state is None:
+        reasons.append(REVIEW_STATE_MISSING)
+        profiles.append("checkpoint")
+    else:
+        last, head = _rev(repo, state["last_reviewed"]), _rev(repo, "HEAD")
+        lines, binary = changed_lines(repo, last)
+        if lines >= SIZE_TRIGGER_LINES:
+            reasons.append(f"C5: {lines} geänderte Zeilen seit {last[:12]} (ab {SIZE_TRIGGER_LINES})")
+            profiles.append("checkpoint")
+        span = f"{_rev(repo, state['base']) if final else last}..{head}"
+        since_runs = list(state["runs"]) if final else []
+    if tests_red:
+        reasons.append("C5: Gesamttests rot nach dem Merge")
+        profiles.append("checkpoint")
+    payload = {
+        "_meta": _checkpoint_meta(repo, f"status --after-task {after_task}" + (" --tests-red" if tests_red else "")),
+        "due": bool(reasons), "reasons": reasons, "range": span, "changed_lines": lines,
+        "binary_files": binary, "profile": max(profiles, key=PROFILES.index) if profiles else None,
+        "since_runs": since_runs,
+    }
+    _write_json(repo / TASKS_DIR / "checkpoint.json", payload)
+    return payload
+
+
+def checkpoint_mark(repo: Path, commit: str, run: str, tasks: list[int]) -> dict:
+    """Nach Review und Nachprüfung: `last_reviewed` = aufgelöster `commit`, Lauf-ID an
+    `runs` (`none` hängt nichts an), `tasks` an `reviewed_tasks`."""
+    repo = Path(repo)
+    path = repo / TASKS_DIR / "review-state.json"
+    state = _read_json(path)
+    if state is None:
+        raise PlanParseError(f"{path} fehlt — erst checkpoint init")
+    state["last_reviewed"] = _rev(repo, commit)
+    if run != "none":
+        state["runs"].append(run)
+    for tid in tasks:
+        if tid not in state["reviewed_tasks"]:
+            state["reviewed_tasks"].append(tid)
+    _write_json(path, state)
+    return state
+
+
+def _cmd_checkpoint(args: argparse.Namespace) -> int:
+    try:
+        if args.action == "init":
+            state = checkpoint_init(args.repo, args.base)
+            print(f"review-state.json: base = last_reviewed = {state['base']}")
+        elif args.action == "status":
+            cp = checkpoint_status(args.repo, args.after_task, args.tests_red)
+            print(f"Prüfpunkt nach Task {args.after_task}: {'FÄLLIG' if cp['due'] else 'nicht fällig'}"
+                  + (f" [{cp['profile']}]" if cp["due"] else ""))
+            for reason in cp["reasons"]:
+                print(f"  {reason}")
+            print(f"Bereich: {cp['range'] or '-'}; geänderte Zeilen: {cp['changed_lines']}")
+        else:
+            tasks = [int(x) for x in args.tasks.split(",") if x.strip()]
+            state = checkpoint_mark(args.repo, args.commit, args.run, tasks)
+            print(f"last_reviewed = {state['last_reviewed']}; Läufe: {len(state['runs'])}")
+    except (PlanParseError, ValueError, KeyError) as exc:  # ValueError: auch int() und JSON
+        reason = f"Schlüssel {exc} fehlt in gate.json/review-state.json" if isinstance(exc, KeyError) else exc
+        print(f"checkpoint {args.action}: {reason}", file=sys.stderr)
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------
+# fix-task — Funde eines Prüfpunkts als Task-Datei (Spec 27, Fix-Pfad)
+# --------------------------------------------------------------------------
+
+FIX_STATUSES = ("bestätigt", "plausibel")
+FIX_TASK_NAME = "fix-task.md"
+
+
+def _read_findings(path: Path) -> list[dict]:
+    """Funde aus `verdicts.jsonl` (Spec 26: `_meta` in Zeile 1, Status je Fund; nur
+    `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von `/code-review`
+    (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund)."""
+    text = path.read_text(encoding="utf-8")
+    if text.lstrip().startswith("["):
+        return [{"id": f"F{i}", "path": f["file"], "lines": str(f["line"]), "related": [],
+                 "reason": "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)}
+                for i, f in enumerate(json.loads(text), 1)]
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
+
+
+def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Path:
+    """Schreibt `fix-task.md` nach `out_dir`: Allowlist aus `path` und `related` der Funde,
+    Akzeptanz je Fund „behoben und mit Test belegt", Modell das höchste der Tasks aus
+    `gate.json`, deren Dateien die Funde berühren (sonst `opus`)."""
+    verdicts_path, out_dir = Path(verdicts_path), Path(out_dir)
+    findings = _read_findings(verdicts_path)
+    if not findings:
+        raise PlanParseError(f"{verdicts_path}: keine Funde mit Status {'/'.join(FIX_STATUSES)}")
+    paths = list(dict.fromkeys(p for f in findings for p in [f["path"], *f.get("related", [])]))
+    gate = _read_json(out_dir / "gate.json") or {}
+    hit = [t["model"] for t in gate.get("tasks", [])
+           if t.get("model") in MODELS and any(_paths_overlap(f, p) for f in t.get("files", []) for p in paths)]
+    # MODELS steht stärkstes Modell zuerst — min ist das höchste.
+    model = (min(hit, key=MODELS.index), "höchstes Modell der betroffenen Tasks") if hit else ("opus", "keine betroffene Task in gate.json")
+    task = PlanTask(
+        id=0, title="Funde des Prüfpunkts beheben", files=[FileRef(raw=p, path=p) for p in paths],
+        files_unknown=False, consumes="", produces="", interfaces_unknown=False, steps=[],
+        step_texts=[(f"Fund {f['id']} ({f['path']}:{f['lines']}): behoben und mit Test belegt", f.get("reason", ""))
+                    for f in findings],
+    )
+    doc = PlanDoc(global_constraints="- Je Fund zuerst ein Test, der rot ist; Änderungen nur in der Allowlist.", tasks=[task])
+    command = f"python skills/subagent-dev/scripts/plan_to_tasks.py fix-task --verdicts {shlex.quote(str(verdicts_path))}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / FIX_TASK_NAME
+    target.write_text(render_task_file(task, doc, str(verdicts_path), [], model, command), encoding="utf-8")
+    return target
+
+
+def _cmd_fix_task(args: argparse.Namespace) -> int:
+    try:
+        target = fix_task_from_verdicts(args.verdicts, args.out_dir)
+    except (OSError, PlanParseError, KeyError, json.JSONDecodeError) as exc:
+        print(f"fix-task: {exc}", file=sys.stderr)
+        return 1
+    print(f"Fix-Task geschrieben -> {target}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# log — je Runde und je Prüfpunkt eine Zeile (Spec 27, runlog)
+# --------------------------------------------------------------------------
+
+RUNLOG_PATH = Path(".skills") / "subagent-dev" / "runlog.jsonl"
+RUNLOG_KEYS = ("plan", "task", "checkpoint", "model", "reason", "verdicts",
+               "subagent_tokens", "findings", "finding_task")
+
+
+def append_log(path: Path | str, entry: dict) -> None:
+    """Hängt eine Zeile mit festen Schlüsseln an; fehlende Felder sind `null`. `_meta`
+    steht nur in Zeile 1, also nur, wenn die Datei neu ist."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    if not path.exists() or path.stat().st_size == 0:
+        cmd = "python skills/subagent-dev/scripts/plan_to_tasks.py log"
+        lines.append(json.dumps({"_meta": {"skill": "subagent-dev", "schema": SCHEMA_VERSION, "generated": cmd}},
+                                ensure_ascii=False))
+    lines.append(json.dumps({k: entry.get(k) for k in RUNLOG_KEYS}, ensure_ascii=False))
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _cmd_log(args: argparse.Namespace) -> int:
+    append_log(args.repo / RUNLOG_PATH, {
+        "plan": args.plan, "task": args.task, "checkpoint": args.checkpoint, "model": args.model,
+        "reason": args.reason, "verdicts": args.verdict, "subagent_tokens": args.subagent_tokens,
+        "findings": args.findings, "finding_task": args.finding_task})
+    print(f"runlog: Zeile angehängt -> {args.repo / RUNLOG_PATH}")
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -1244,6 +1872,8 @@ def lint_report(
             findings.extend(LintFinding(task_id, r) for r in _explain_files(block))
         for r in _explain_interfaces(block):
             findings.append(LintFinding(task_id, r))
+        if task.model_line is not None and task.model_line.lower() not in MODELS:
+            findings.append(LintFinding(task_id, f"**Modell:** {task.model_line!r} ist weder opus noch sonnet — die Zeile gilt nicht, das Skript wählt nach M1–M3"))
         if not task.steps:
             findings.append(LintFinding(task_id, "keine Steps im Format `- [ ] **Step N: …**`"))
     return LintReport(findings, coverage)
@@ -1665,7 +2295,7 @@ def main(argv: list[str] | None = None) -> int:
     gen = sub.add_parser("generate", help="Plan parsen, Gate fällen, Task-Dateien schreiben")
     gen.add_argument("plan", help="Pfad zum impl-plan- oder work-plan-Plan")
     gen.add_argument("--tasks", help="Kommagetrennte Task-IDs, sonst alle")
-    gen.add_argument("--out-dir", default=str(Path(".skills") / "cache" / "tasks"))
+    gen.add_argument("--out-dir", default=str(TASKS_DIR))
     gen.set_defaults(func=_cmd_generate)
 
     lint = sub.add_parser("lint", help="Plan prüfen: warum ist eine Task unsicher, wo stehen Platzhalter, fehlt etwas im Kopf")
@@ -1688,6 +2318,40 @@ def main(argv: list[str] | None = None) -> int:
     )
     ver.add_argument("--out", help="Verify-Ergebnis zusätzlich als JSON-Artefakt schreiben (z. B. .skills/cache/tasks/verify-task-1.json)")
     ver.set_defaults(func=_cmd_verify)
+
+    repo_arg = argparse.ArgumentParser(add_help=False)
+    repo_arg.add_argument("--repo", default=".", help="Repo-Wurzel; Ablage unter .skills/cache/tasks/")
+    cp = sub.add_parser("checkpoint", help="Review-Stand führen: init nach generate, status nach jedem Merge, mark nach einem Review")
+    cp_sub = cp.add_subparsers(dest="action", required=True)
+    cp_init = cp_sub.add_parser("init", parents=[repo_arg], help="review-state.json mit base = last_reviewed anlegen")
+    cp_init.add_argument("--base", required=True, help="Git-Ref vor der ersten Task")
+    cp_status = cp_sub.add_parser("status", parents=[repo_arg], help="checkpoint.json: ist ein Prüfpunkt fällig?")
+    cp_status.add_argument("--after-task", type=int, required=True, help="ID der zuletzt gemergten Task")
+    cp_status.add_argument("--tests-red", action="store_true", help="Gesamttests nach dem Merge rot")
+    cp_mark = cp_sub.add_parser("mark", parents=[repo_arg], help="last_reviewed setzen, Lauf an runs anhängen")
+    cp_mark.add_argument("--commit", required=True, help="Git-Ref nach dem Fix")
+    cp_mark.add_argument("--run", required=True, help="Lauf-ID der Nachprüfung; none hängt nichts an")
+    cp_mark.add_argument("--tasks", required=True, help="Kommagetrennte Task-IDs des Bereichs")
+    cp.set_defaults(func=_cmd_checkpoint)
+
+    fix = sub.add_parser("fix-task", help="Funde eines Prüfpunkts (verdicts.jsonl oder /code-review-Liste) als Fix-Task-Datei schreiben")
+    fix.add_argument("--verdicts", required=True, help="verdicts.jsonl (Spec 26) oder JSON-Liste von /code-review-Funden")
+    fix.add_argument("--out-dir", default=str(TASKS_DIR))
+    fix.set_defaults(func=_cmd_fix_task)
+
+    log = sub.add_parser("log", help="Eine Zeile je Runde oder Prüfpunkt an .skills/subagent-dev/runlog.jsonl anhängen")
+    log.add_argument("--repo", type=Path, default=Path("."), help="Repo-Wurzel; Ablage unter .skills/subagent-dev/")
+    log.add_argument("--plan", required=True)
+    target = log.add_mutually_exclusive_group(required=True)
+    target.add_argument("--task", type=int, help="Task der Runde")
+    target.add_argument("--checkpoint", help="Prüfpunkt (before, after, group, final)")
+    log.add_argument("--model", required=True)
+    log.add_argument("--reason", required=True)
+    log.add_argument("--verdict", action="append", default=[], help="Verdikt; mehrfach angebbar")
+    log.add_argument("--subagent-tokens", type=int, default=None, help="aus der Rückmeldung des Agent-Werkzeugs; fehlt -> null")
+    log.add_argument("--findings", type=int, default=None, help="Funde des Prüfpunkts")
+    log.add_argument("--finding-task", type=int, default=None, help="Task, deren Dateien die Funde betreffen")
+    log.set_defaults(func=_cmd_log)
 
     args = parser.parse_args(argv)
     return args.func(args)

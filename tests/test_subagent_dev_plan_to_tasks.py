@@ -1,7 +1,11 @@
 import json
 import subprocess
+import sys
 
-from conftest import load_script
+from conftest import REPO_ROOT, load_script
+from evalkit.runner import grade
+from evalkit.schema import load_evals
+from evalkit.workspace import prepare
 
 ptt = load_script("skills/subagent-dev/scripts/plan_to_tasks.py")
 
@@ -238,7 +242,7 @@ def test_gate_verdict_at_least_three_singletons_is_parallel():
 def test_render_task_file_contains_required_sections():
     doc = ptt.parse_plan(SAMPLE_PLAN)
     task1 = doc.tasks[0]
-    rendered = ptt.render_task_file(task1, doc, "docs/superpowers/plans/x.md")
+    rendered = _render(task1, doc)
     assert rendered.startswith("<!-- skill: subagent-dev | schema: 1 | generated:")
     for heading in ("## Ziel", "## Datei-Allowlist", "## Interfaces", "## Akzeptanzkriterien", "## Global Constraints", "## Nicht-Ziele"):
         assert heading in rendered
@@ -1294,3 +1298,1105 @@ def test_work_plan_coverage_against_feature_spec_criteria(tmp_path):
     plain.write_text("# Irgendeine Spec\n\n## Akzeptanzkriterien\n\n### X\n", encoding="utf-8")
     report = ptt.lint_report(_wp_plan(source="**Spec:** `../specs/plain.md`"), plan_path=plan_path)
     assert report.coverage["status"] == "unchecked" and "feature-spec" in report.coverage["reason"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 1: Step-Text in der Task-Datei
+# --------------------------------------------------------------------------
+
+STEP_TEXT_PLAN = """### Task 1: Mit Text
+
+**Files:**
+- Create: `src/a.py`
+
+**Interfaces:**
+- Consumes: nichts Neues
+- Produces: nichts Neues
+
+- [ ] **Step 1: Test schreiben** — `test_a`: erste Zeile
+      zweite Zeile, eingerückt
+        dritte Zeile, tiefer.
+- [ ] **Step 2: Rot sehen**
+- [ ] **Step 3: Grün sehen**, volle Suite.
+- [ ] **Step 4: Commit.**
+"""
+
+
+def test_task_file_keeps_step_text():
+    doc = ptt.parse_plan(STEP_TEXT_PLAN)
+    task = doc.tasks[0]
+    assert ptt.parse_step_texts(STEP_TEXT_PLAN) == [
+        ("Step 1: Test schreiben", "`test_a`: erste Zeile\nzweite Zeile, eingerückt\n  dritte Zeile, tiefer."),
+        ("Step 2: Rot sehen", ""),
+        ("Step 3: Grün sehen", "volle Suite."),
+        ("Step 4: Commit.", ""),
+    ]
+    assert task.steps == ["Step 1: Test schreiben", "Step 2: Rot sehen", "Step 3: Grün sehen", "Step 4: Commit."]
+    rendered = _render(task, doc)
+    criteria = _criteria(rendered)
+    assert criteria == (
+        "- Step 1: Test schreiben\n"
+        "  `test_a`: erste Zeile\n"
+        "  zweite Zeile, eingerückt\n"
+        "    dritte Zeile, tiefer.\n"
+        "- Step 2: Rot sehen\n"
+        "- Step 3: Grün sehen\n"
+        "  volle Suite.\n"
+        "- Step 4: Commit."
+    )
+    block = ptt.parse_task_machine_block(rendered)
+    assert set(block) == {"task_id", "plan", "allowlist", "produces", "model", "consumers"}
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 3: Abnehmer
+# --------------------------------------------------------------------------
+
+
+def _consumer_task(n, title, files, consumes, produces="nichts Neues"):
+    return (
+        f"### Task {n}: {title}\n\n**Files:**\n- Create: `{files}`\n\n**Interfaces:**\n"
+        f"- Consumes: {consumes}\n- Produces: {produces}\n\n- [ ] **Step 1: Bauen**\n"
+    )
+
+
+def test_consumers_exclude_mandatory_tasks():
+    plan = "\n".join([
+        _consumer_task(1, "Parser", "src/a.py", "nichts Neues", "`fn:parse_order(line)`, `Token`"),
+        _consumer_task(2, "CLI", "src/b.py", "`fn:parse_order(line)` aus Task 1"),
+        _consumer_task(3, "Zahlen", "src/c.py", "`Token` aus Task 1"),
+        _consumer_task(4, "Report und Runner-CLI", "src/d.py", "`fn:parse_order(line)`, `Token`"),
+        _consumer_task(5, "Evals", "e.json", "`fn:parse_order(line)`"),
+        _consumer_task(6, "Nachbarn", "n.md", "`fn:parse_order(line)`"),
+        _consumer_task(7, "known-limits", "k.md", "`fn:parse_order(line)`"),
+        _consumer_task(8, "Report", "r.md", "`fn:parse_order(line)`"),
+        _consumer_task(9, "Report — Basislinie", "r2.md", "`fn:parse_order(line)`"),
+        _consumer_task(10, "Verifikation", "v.md", "`fn:parse_order(line)`"),
+        _consumer_task(11, "Prosa", "src/p.py", "nichts Neues", "Parser mit Vorgabe"),
+        _consumer_task(12, "Späte Prosa", "src/q.py", "`fn:parse_order(line)`"),
+    ])
+    tasks = ptt.parse_plan(plan).tasks
+    assert tasks[10].interfaces_unknown
+    got = ptt.consumers_of(tasks)
+    assert [e["task"] for e in got[1]] == [2, 3, 4, 12]
+    assert got[1][0]["symbols"] == ["fn:parse_order(1)"]
+    assert got[1][1]["symbols"] == ["Token"]  # nackter Bezeichner bleibt nackt
+    assert got[1][2]["symbols"] == ["fn:parse_order(1)", "Token"]
+    assert set(got) == {t.id for t in tasks}
+    assert got[2] == [] and got[11] == []
+    # Nur spätere Tasks zählen, nie frühere.
+    assert all(e["task"] > tid for tid, es in got.items() for e in es)
+    assert [ptt.is_mandatory_title(t) for t in (
+        "Verifikation", "Evals", "Nachbarn", "known-limits", "Report", "Report — Basislinie",
+        "Report und Runner-CLI", "Reporting", "Verifikation der API")] == [
+        True, True, True, True, True, True, False, False, False]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 4: Modell je Task
+# --------------------------------------------------------------------------
+
+
+def _model_task(n, title, files, modell=None, consumes="nichts Neues", produces="nichts Neues", after_files=""):
+    """`files`: Liste von (Verb, Pfad). `modell`: Zeile direkt unter dem Titel."""
+    head = f"**Modell:** {modell}\n\n" if modell is not None else ""
+    lines = "\n".join(f"- {verb}: `{path}`" for verb, path in files)
+    return (
+        f"### Task {n}: {title}\n\n{head}**Files:**\n{lines}\n{after_files}\n**Interfaces:**\n"
+        f"- Consumes: {consumes}\n- Produces: {produces}\n\n- [ ] **Step 1: Bauen**\n"
+    )
+
+
+def _choose(*task_texts, idx=0):
+    tasks = ptt.parse_plan("\n".join(task_texts)).tasks
+    return ptt.choose_model(tasks[idx], ptt.consumers_of(tasks)[tasks[idx].id])
+
+
+def test_model_rules():
+    plain = [("Create", "src/a.py")]
+    # Standard
+    assert _choose(_model_task(1, "A", plain)) == ("sonnet", "Standard")
+    # M0 schlägt M1 bis M3, Wert ohne Groß-/Kleinschreibung
+    producer = "`fn:parse_order(line)`"
+    users = [_model_task(2, "B", [("Create", "src/b.py")], consumes=producer),
+             _model_task(3, "C", [("Create", "src/c.py")], consumes=producer)]
+    assert _choose(_model_task(1, "A", plain, produces=producer), *users)[0] == "opus"
+    assert _choose(_model_task(1, "A", plain, modell="Sonnet", produces=producer), *users) == ("sonnet", "Plan")
+    assert _choose(_model_task(1, "A", [("Create", "src/auth.py")], modell="sonnet")) == ("sonnet", "Plan")
+    # M0 nur direkt unter dem Titel, vor Files: — nicht dahinter, nicht im Step
+    late = _model_task(1, "A", [("Create", "src/auth.py")], after_files="**Modell:** sonnet\n")
+    assert _choose(late)[0] == "opus"
+    in_step = _model_task(1, "A", plain).replace("Bauen**", "Bauen**\n**Modell:** opus")
+    assert _choose(in_step) == ("sonnet", "Standard")
+    # M1 ab zwei Abnehmern, nicht bei einem
+    assert _choose(_model_task(1, "A", plain, produces=producer), *users) == ("opus", "Vorleistung für Task 2, 3")
+    assert _choose(_model_task(1, "A", plain, produces=producer), users[0]) == ("sonnet", "Standard")
+    # M2: Risikowort im Pfad, auch zerlegt an Großbuchstaben und Suffix .sql
+    assert _choose(_model_task(1, "A", [("Create", "src/auth_service.py")])) == ("opus", "Risikopfad src/auth_service.py")
+    assert _choose(_model_task(1, "A", [("Test", "ui/LoginForm.pas")]))[0] == "opus"
+    assert _choose(_model_task(1, "A", [("Create", "db/x.sql")]))[0] == "opus"
+    assert _choose(_model_task(1, "A", [("Create", "src/authors.py")])) == ("sonnet", "Standard")
+    assert ptt.risk_words("src/auth_service.py") == ["auth"]
+    assert ptt.risk_words("ui/LoginForm.pas") == ["login"]
+    assert ptt.risk_words("db/migrations/x.sql") == ["migrations", ".sql"]
+    assert ptt.risk_words("src/UserSession-Store.py") == ["session"]
+    assert ptt.risk_words("src/authors.py") == []
+    # M3: ab fünf Create/Modify-Pfaden, Test-Zeilen zählen nicht
+    five = [("Create" if i % 2 else "Modify", f"src/f{i}.py") for i in range(5)]
+    assert _choose(_model_task(1, "A", five)) == ("opus", "Breite: 5 Dateien")
+    assert _choose(_model_task(1, "A", five[:4] + [("Test", "tests/t.py")])) == ("sonnet", "Standard")
+    assert _choose(_model_task(1, "A", five[:4])) == ("sonnet", "Standard")
+    # Ungültiger Wert: Lint-Befund und Rückfall auf M1 bis M3
+    bad = _model_task(1, "A", [("Create", "src/auth.py")], modell="gpt")
+    assert _choose(bad)[0] == "opus" and _choose(bad)[1].startswith("Risikopfad")
+    assert _choose(_model_task(1, "A", plain, modell="gpt")) == ("sonnet", "Standard")
+    findings = ptt.lint_plan(_wp_bad_model())
+    assert any("Modell" in f.message and "gpt" in f.message for f in findings)
+    assert not any("Modell" in f.message for f in ptt.lint_plan(_wp_bad_model("opus")))
+
+
+def _wp_bad_model(value="gpt"):
+    return (
+        "<!-- skill: impl-plan | schema: 1 | generated: x -->\n\n**Goal:** g\n\n**Spec:** `none.md`\n\n"
+        + _model_task(1, "A", [("Create", "src/a.py")], modell=value)
+    )
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 5: Prüfpunkte und gate.json
+# --------------------------------------------------------------------------
+
+
+CP_PLAN = "\n".join([
+    _consumer_task(1, "Parser", "src/parser.py", "nichts Neues", "`fn:parse_order(line)`"),
+    _consumer_task(2, "Anmeldung", "src/auth.py", "nichts Neues", "`Token`"),
+    _consumer_task(3, "Kern", "src/core.py", "`fn:parse_order(line)`, `Token`", "`fn:run(cfg)`"),
+    _consumer_task(4, "CLI", "src/cli.py", "`fn:parse_order(line)`"),
+    _consumer_task(5, "Export", "src/export.py", "`fn:run(cfg)`"),
+    _consumer_task(6, "Import", "src/importer.py", "`fn:run(cfg)`"),
+    _consumer_task(7, "Verifikation", "tests/test_all.py", "`fn:run(cfg)`"),
+])
+
+
+def _place(plan, gate=None):
+    tasks = ptt.parse_plan(plan).tasks
+    if gate is None:
+        gate = ptt.gate_verdict(tasks, ptt.build_overlap_graph(tasks))
+    return ptt.place_checkpoints(tasks, ptt.consumers_of(tasks), gate)
+
+
+def _kinds(checkpoints):
+    return [(c["kind"], c["task"], c["profile"], [r[:2] for r in c["reasons"]]) for c in checkpoints]
+
+
+def test_checkpoint_placement():
+    got = _place(CP_PLAN)
+    assert all(list(c) == ["kind", "task", "profile", "reasons"] for c in got)
+    # C1 (Task 1: zwei Abnehmer; Task 2: Risikopfad mit Abnehmer) vor Task 3 und C2 nach
+    # Task 2 fallen zwischen dieselben Tasks: einer, alle Gründe, höheres Profil.
+    # C1 (Task 3) vor Task 5; C4 vor der Verifikations-Task mit task: null; kein C3.
+    assert _kinds(got) == [
+        ("after", 2, "standard", ["C1", "C1", "C2"]),
+        ("before", 5, "checkpoint", ["C1"]),
+        ("final", None, "standard", ["C4"]),
+    ]
+    assert "Task 3" in got[0]["reasons"][0] and "src/auth.py" in got[0]["reasons"][2]
+    # C3 nur bei `parallel`, task = höchste ID der Gruppe; nach Task 4 fällt er mit C1 vor
+    # Task 5 zusammen (bleibt `group`), auf dem finalen Prüfpunkt bleibt `final`.
+    tasks = ptt.parse_plan(CP_PLAN).tasks
+    group = ptt.GateResult(verdict="parallel", parallel_group=[1, 4, 2], reasoning="r")
+    assert _kinds(_place(CP_PLAN, group))[1] == ("group", 4, "checkpoint", ["C1", "C3"])
+    late = ptt.GateResult(verdict="parallel", parallel_group=[4, 5, 6], reasoning="r")
+    assert _kinds(_place(CP_PLAN, late))[-1] == ("final", None, "standard", ["C3", "C4"])
+    for verdict in ("sequential", "no-delegate"):
+        other = ptt.GateResult(verdict=verdict, parallel_group=[], reasoning="r")
+        assert "group" not in [c["kind"] for c in ptt.place_checkpoints(tasks, ptt.consumers_of(tasks), other)]
+    # C4: vor der Verifikations-Task (auch `Verifikation — …`) oder am Ende.
+    risky = _consumer_task(1, "Sitzung", "src/session.py", "nichts Neues")
+    for last in ("Verifikation", "Verifikation — Gesamtlauf"):
+        plan = risky + _consumer_task(2, last, "tests/test_x.py", "nichts Neues")
+        assert _kinds(_place(plan)) == [("final", None, "standard", ["C2", "C4"])]
+    plan = risky + _consumer_task(2, "Verifikation der API", "src/api.py", "nichts Neues")
+    assert _kinds(_place(plan)) == [("after", 1, "standard", ["C2"]), ("final", None, "standard", ["C4"])]
+    # Bedingungen von M1/M2 gelten unabhängig von M0; ein Abnehmer allein löst kein C1 aus.
+    pinned = CP_PLAN.replace("### Task 1: Parser\n\n", "### Task 1: Parser\n\n**Modell:** sonnet\n\n")
+    assert _kinds(_place(pinned)) == _kinds(got)
+    single = "\n".join([
+        _consumer_task(1, "A", "src/a.py", "nichts Neues", "`fn:a(x)`"),
+        _consumer_task(2, "B", "src/b.py", "`fn:a(x)`"),
+    ])
+    assert _kinds(_place(single)) == [("final", None, "standard", ["C4"])]
+
+
+def test_rules_use_whole_plan_with_tasks_filter(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text(CP_PLAN, encoding="utf-8")
+    ptt.main(["generate", str(plan_path), "--out-dir", str(tmp_path / "all")])
+    ptt.main(["generate", str(plan_path), "--tasks", "3,4", "--out-dir", str(tmp_path / "some")])
+    full = json.loads((tmp_path / "all" / "gate.json").read_text(encoding="utf-8"))
+    part = json.loads((tmp_path / "some" / "gate.json").read_text(encoding="utf-8"))
+    assert [t["id"] for t in part["tasks"]] == [3, 4]
+    by_id = {t["id"]: t for t in full["tasks"]}
+    for t in part["tasks"]:
+        for key in ("model", "model_reason", "consumers"):
+            assert t[key] == by_id[t["id"]][key]
+    assert by_id[3]["model"] == "opus" and [c["task"] for c in by_id[3]["consumers"]] == [5, 6]
+    assert part["checkpoints"] == full["checkpoints"]
+    task3 = ptt.parse_task_machine_block(next((tmp_path / "some").glob("task-3-*.md")).read_text(encoding="utf-8"))
+    assert task3["model"] == "opus" and [c["task"] for c in task3["consumers"]] == [5, 6]
+    # C3 aus dem Gate über den ganzen Plan, nicht über die Teilmenge.
+    disjoint = "\n".join([
+        _consumer_task(1, "A", "src/a.py", "nichts Neues"),
+        _consumer_task(2, "B", "src/b.py", "nichts Neues"),
+        _consumer_task(3, "C", "src/c.py", "nichts Neues"),
+        _consumer_task(4, "D", "src/d.py", "nichts Neues"),
+        _consumer_task(5, "E", "src/a.py", "nichts Neues"),
+    ])
+    plan_path.write_text(disjoint, encoding="utf-8")
+    ptt.main(["generate", str(plan_path), "--tasks", "3,4", "--out-dir", str(tmp_path / "dis")])
+    gate = json.loads((tmp_path / "dis" / "gate.json").read_text(encoding="utf-8"))
+    assert gate["verdict"] == "no-delegate"  # bisheriger Schlüssel: Urteil über die Teilmenge
+    assert _kinds(gate["checkpoints"]) == [("group", 4, "checkpoint", ["C3"]), ("final", None, "standard", ["C4"])]
+
+
+GATE_FIXTURES = {
+    "plan-disjoint-batch": {
+        "tasks": [[1, "Batch-Parser", ["src/batch.py"]], [2, "Batch-Writer", ["src/writer.py"]],
+                  [3, "Batch-Validator", ["src/validator.py"]], [4, "Batch-CLI", ["src/cli.py"]]],
+        "overlap": {"1": [], "2": [], "3": [], "4": []}, "verdict": "parallel",
+        "parallel_group": [1, 2, 3, 4], "components": [[1], [2], [3], [4]],
+    },
+    "plan-hidden-overlap": {
+        "tasks": [[1, "Feature A", ["config/shared.yaml", "src/feature_a.py"]],
+                  [2, "Feature B", ["config/shared.yaml", "src/feature_b.py"]]],
+        "overlap": {"1": [2], "2": [1]}, "verdict": "sequential",
+        "parallel_group": [], "components": [[1, 2]],
+    },
+    "plan-mini-two-tasks": {
+        "tasks": [[1, "Logging-Helfer", ["src/logging_helper.py"]], [2, "Config-Loader", ["src/config_loader.py"]]],
+        "overlap": {"1": [], "2": []}, "verdict": "no-delegate",
+        "parallel_group": [], "components": [[1], [2]],
+    },
+}
+
+
+def test_gate_json_keys_backward_compatible(tmp_path):
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "evals" / "fixtures"
+    for name, want in GATE_FIXTURES.items():
+        touch = json.loads((root / name / "fixture.json").read_text(encoding="utf-8"))["commits"][0]["touch"]
+        plan_path, text = next((p, t) for p, t in touch.items() if p.startswith("docs/superpowers/plans/"))
+        doc = ptt.parse_plan(text)
+        ptt.write_tasks(doc, plan_path, tmp_path / name)
+        gate = json.loads((tmp_path / name / "gate.json").read_text(encoding="utf-8"))
+        assert list(gate) == ["_meta", "plan", "tasks", "overlap", "verdict", "parallel_group",
+                              "reasoning", "components", "checkpoints", "plan_order"]
+        assert gate["_meta"]["schema"] == 1 and gate["plan"] == plan_path
+        for task, (tid, title, files) in zip(gate["tasks"], want["tasks"], strict=True):
+            assert list(task) == ["id", "title", "files", "files_unknown", "interfaces_unknown",
+                                  "model", "model_reason", "consumers"]
+            assert [task["id"], task["title"], task["files"]] == [tid, title, files]
+            assert task["files_unknown"] is False and task["interfaces_unknown"] is False
+        for key in ("overlap", "verdict", "parallel_group", "components"):
+            assert gate[key] == want[key], (name, key)
+        assert gate["reasoning"] == ptt.gate_verdict(doc.tasks, ptt.build_overlap_graph(doc.tasks)).reasoning
+    # Anti-Zeremonie-Fall: zwei Tasks ohne Vorleistung und Risikopfad.
+    mini = json.loads((tmp_path / "plan-mini-two-tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert [(t["model"], t["consumers"]) for t in mini["tasks"]] == [("sonnet", []), ("sonnet", [])]
+    assert _kinds(mini["checkpoints"]) == [("final", None, "standard", ["C4"])]
+
+
+# --------------------------------------------------------------------------
+# Fix nach Prüfpunkt vor Task 6 (Plan 2026-10-30-subagent-dev-checkpoints)
+# --------------------------------------------------------------------------
+
+FENCE_STEP_PLAN = """### Task 1: Mit Code
+
+**Files:**
+- Create: `src/a.py`
+
+**Interfaces:**
+- Consumes: nichts Neues
+- Produces: nichts Neues
+
+- [ ] **Step 1: Test schreiben** — erster Absatz:
+
+  ```python
+  def test_a():
+      assert helper(1) == 2
+
+      assert True
+  ```
+
+  zweiter Absatz.
+- [ ] **Step 2: Weiter**
+"""
+
+
+def _criteria(rendered):
+    return rendered.split("## Akzeptanzkriterien\n\n")[1].split("\n\n## ")[0]
+
+
+def _render(task, doc, plan_path="docs/superpowers/plans/x.md"):
+    consumers = ptt.consumers_of(doc.tasks)[task.id]
+    return ptt.render_task_file(task, doc, plan_path, consumers, ptt.choose_model(task, consumers))
+
+
+def test_step_text_keeps_fenced_code():
+    doc = ptt.parse_plan(FENCE_STEP_PLAN)
+    rendered = _render(doc.tasks[0], doc)
+    assert "  ```python\n" in rendered
+    assert "      assert helper(1) == 2" in rendered
+    assert [t for t, _ in doc.tasks[0].step_texts] == ["Step 1: Test schreiben", "Step 2: Weiter"]
+
+
+def test_step_text_keeps_relative_indent_and_paragraphs():
+    doc = ptt.parse_plan(FENCE_STEP_PLAN)
+    assert doc.tasks[0].step_texts[0][1] == (
+        "erster Absatz:\n\n```python\ndef test_a():\n    assert helper(1) == 2\n\n    assert True\n```\n\nzweiter Absatz."
+    )
+    assert _criteria(_render(doc.tasks[0], doc)) == (
+        "- Step 1: Test schreiben\n"
+        "  erster Absatz:\n\n"
+        "  ```python\n"
+        "  def test_a():\n"
+        "      assert helper(1) == 2\n\n"
+        "      assert True\n"
+        "  ```\n\n"
+        "  zweiter Absatz.\n"
+        "- Step 2: Weiter"
+    )
+
+
+def test_risk_words_split_at_every_capital():
+    assert "auth" in ptt.risk_words("src/OAuthClient.py")
+    assert "migration" in ptt.risk_words("db/DBMigration.cs")
+    assert "session" in ptt.risk_words("web/HTTPSession.ts")
+    assert ptt.risk_words("src/authors.py") == []
+    assert ptt.risk_words("ui/LoginForm.pas") == ["login"]
+
+
+def test_c1_reason_names_risk_path_with_consumers():
+    plan = "\n".join([
+        _consumer_task(1, "Anmeldung", "src/auth.py", "nichts Neues", "`fn:sign_in(user)`"),
+        _consumer_task(2, "A", "src/a.py", "`fn:sign_in(user)`"),
+        _consumer_task(3, "B", "src/b.py", "`fn:sign_in(user)`"),
+    ])
+    reason = _place(plan)[0]["reasons"][0]
+    assert reason.startswith("C1: Task 1 (2 Abnehmer, Risikopfad src/auth.py) vor dem ersten Abnehmer Task 2")
+
+
+def test_title_helper_shared():
+    assert ptt.title_is("Verifikation", "Verifikation")
+    assert ptt.title_is("Verifikation — Gesamtlauf", "Verifikation")
+    assert not ptt.title_is("Verifikation der API", "Verifikation")
+    assert not ptt.title_is("Reporting", "Report")
+
+
+def test_write_tasks_computes_gate_and_models_once(tmp_path, monkeypatch):
+    doc = ptt.parse_plan(CP_PLAN)
+    calls = {"gate": 0, "model": 0}
+    gate_verdict, choose_model = ptt.gate_verdict, ptt.choose_model
+
+    def counting_gate(*a, **k):
+        calls["gate"] += 1
+        return gate_verdict(*a, **k)
+
+    def counting_model(*a, **k):
+        calls["model"] += 1
+        return choose_model(*a, **k)
+
+    monkeypatch.setattr(ptt, "gate_verdict", counting_gate)
+    monkeypatch.setattr(ptt, "choose_model", counting_model)
+    ptt.write_tasks(doc, "plan.md", tmp_path)
+    assert calls == {"gate": 1, "model": len(doc.tasks)}
+
+
+def test_render_task_file_needs_consumers_and_model():
+    doc = ptt.parse_plan(SAMPLE_PLAN)
+    try:
+        ptt.render_task_file(doc.tasks[0], doc, "plan.md")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("render_task_file ohne Abnehmer und Modell darf nicht rechnen")
+    # Eine Task außerhalb des (gefilterten) Docs wirft keinen KeyError; die Angaben gelten.
+    only = ptt.PlanDoc(global_constraints=doc.global_constraints, tasks=doc.tasks[1:])
+    rendered = ptt.render_task_file(doc.tasks[0], only, "plan.md", [{"task": 9, "symbols": ["parse(1)"]}], ("opus", "Plan"))
+    assert "- Modell: `opus` — Plan" in rendered and "Task 9 (`parse(1)`)" in rendered
+    block = ptt.parse_task_machine_block(rendered)
+    assert block["model"] == "opus" and block["consumers"] == [{"task": 9, "symbols": ["parse(1)"]}]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 6: checkpoint init, status, mark
+# --------------------------------------------------------------------------
+
+# Task-IDs mit Lücken: C1 vor Task 3 sitzt hinter Task 1, C2 hinter Task 9, C4 hinter
+# Task 10 (vor der Verifikation), C3 hinter Task 12 (höchste ID der Gruppe 9, 10, 12).
+GAP_PLAN = "\n".join([
+    _consumer_task(1, "Parser", "src/parser.py", "nichts Neues", "`fn:parse(x)`"),
+    _consumer_task(3, "A", "src/a.py", "`fn:parse(x)`"),
+    _consumer_task(7, "B", "src/b.py", "`fn:parse(x)`"),
+    _consumer_task(9, "Sitzung", "src/session.py", "nichts Neues"),
+    _consumer_task(10, "D", "src/d.py", "nichts Neues"),
+    _consumer_task(12, "Verifikation", "tests/test_all.py", "nichts Neues"),
+])
+
+
+def _rev(repo, ref="HEAD"):
+    return subprocess.run(["git", "rev-parse", ref], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _commit(repo, files, msg):
+    for rel, content in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content) if isinstance(content, bytes) else path.write_text(content, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "-m", msg)
+
+
+def _cp_repo(tmp_path):
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "Test")
+    _commit(tmp_path, {"src/a.py": "x = 1\n", "docs/plan.md": GAP_PLAN}, "base")
+    git(tmp_path, "tag", "-a", "v1", "-m", "Basis")  # annotiert: rev-parse allein gäbe das Tag-Objekt
+    assert ptt.main(["generate", str(tmp_path / "docs" / "plan.md"),
+                     "--out-dir", str(tmp_path / ".skills" / "cache" / "tasks")]) == 0
+    return tmp_path
+
+
+def _cp_state(repo):
+    return json.loads((repo / ".skills" / "cache" / "tasks" / "review-state.json").read_text(encoding="utf-8"))
+
+
+def _cp_status(repo, n, red=False):
+    argv = ["checkpoint", "status", "--after-task", str(n), "--repo", str(repo)] + (["--tests-red"] if red else [])
+    assert ptt.main(argv) == 0
+    return json.loads((repo / ".skills" / "cache" / "tasks" / "checkpoint.json").read_text(encoding="utf-8"))
+
+
+def test_checkpoint_command(tmp_path):
+    repo = _cp_repo(tmp_path)
+    base = _rev(repo)
+    # Ohne review-state.json: fällig, ohne Bereich.
+    cp = _cp_status(repo, 3)
+    assert (cp["due"], cp["reasons"], cp["range"]) == (True, ["review-state fehlt — Basis unbekannt"], None)
+    assert cp["_meta"]["skill"] == "subagent-dev"
+    # init löst den annotierten Tag zum Commit auf.
+    assert ptt.main(["checkpoint", "init", "--base", "v1", "--repo", str(repo)]) == 0
+    state = _cp_state(repo)
+    assert list(state) == ["_meta", "plan", "base", "last_reviewed", "runs", "reviewed_tasks"]
+    assert (state["base"], state["last_reviewed"], state["runs"]) == (base, base, [])
+    assert state["plan"].endswith("plan.md") and state["_meta"]["schema"] == ptt.SCHEMA_VERSION
+    # Kein geplanter Prüfpunkt, nichts geändert: nicht fällig.
+    cp = _cp_status(repo, 3)
+    assert list(cp) == ["_meta", "due", "reasons", "range", "changed_lines", "binary_files", "profile", "since_runs"]
+    assert (cp["due"], cp["reasons"], cp["range"], cp["changed_lines"]) == (False, [], f"{base}..{base}", 0)
+    # .skills/ zählt nicht, Binärdateien zählen 0 und stehen in binary_files.
+    _commit(repo, {
+        ".skills/subagent-dev/runlog.jsonl": "{}\n" * 500,
+        "src/blob.bin": b"\0\1\2" * 100,
+        "src/a.py": "".join(f"y{i} = {i}\n" for i in range(10)),
+    }, "Task 3")
+    cp = _cp_status(repo, 3)
+    assert (cp["due"], cp["changed_lines"], cp["binary_files"]) == (False, 11, ["src/blob.bin"])
+    # --tests-red macht fällig.
+    cp = _cp_status(repo, 3, red=True)
+    assert cp["due"] and cp["profile"] == "checkpoint" and [r[:2] for r in cp["reasons"]] == ["C5"]
+    # Ab SIZE_TRIGGER_LINES geänderten Zeilen fällig, darunter nicht.
+    assert ptt.SIZE_TRIGGER_LINES == 400
+    _commit(repo, {"src/big.py": "z = 0\n" * 388}, "groß")
+    assert _cp_status(repo, 3)["changed_lines"] == 399 and not _cp_status(repo, 3)["due"]
+    _commit(repo, {"src/big.py": "z = 0\n" * 389}, "größer")
+    cp = _cp_status(repo, 3)
+    assert cp["due"] and cp["changed_lines"] == 400 and "400" in cp["reasons"][0]
+    # mark setzt den aufgelösten Commit und hängt den Lauf an; --run none hängt nichts an.
+    head = _rev(repo)
+    state = ptt.checkpoint_mark(repo, "HEAD", "run-1", [1, 3])
+    assert (state["last_reviewed"], state["runs"], state["reviewed_tasks"]) == (head, ["run-1"], [1, 3])
+    assert _cp_status(repo, 3)["changed_lines"] == 0
+    assert ptt.main(["checkpoint", "mark", "--commit", "v1", "--run", "none", "--tasks", "3,7",
+                     "--repo", str(repo)]) == 0
+    state = _cp_state(repo)
+    assert (state["last_reviewed"], state["runs"], state["reviewed_tasks"]) == (base, ["run-1"], [1, 3, 7])
+    # status nimmt Refs aus review-state.json und löst sie auf.
+    state["last_reviewed"] = "v1"
+    (repo / ".skills" / "cache" / "tasks" / "review-state.json").write_text(json.dumps(state), encoding="utf-8")
+    cp = _cp_status(repo, 3)
+    assert cp["range"] == f"{base}..{head}" and cp["changed_lines"] == 400
+
+
+def test_checkpoint_command_follows_plan_order_with_id_gaps(tmp_path):
+    repo = _cp_repo(tmp_path)
+    base = _rev(repo)
+    ptt.checkpoint_init(repo, "v1")
+    gate = json.loads((repo / ".skills" / "cache" / "tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert _kinds(gate["checkpoints"]) == [
+        ("before", 3, "checkpoint", ["C1"]), ("after", 9, "standard", ["C2"]),
+        ("final", None, "standard", ["C3", "C4"]),  # C3 läge hinter der Verifikation (12): mit final zusammengelegt
+    ]
+    # Fällig nach der Task, hinter der der Prüfpunkt steht — nicht nach "ID + 1": Task 2
+    # gibt es nicht, `before 3` ist nach Task 1 fällig; hinter der Verifikation (12) nichts mehr.
+    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 3, 7, 9, 10, 12)}
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10]
+    assert [(got[n]["profile"], [r[:2] for r in got[n]["reasons"]]) for n in (1, 9, 10)] == [
+        ("checkpoint", ["C1"]), ("standard", ["C2"]), ("standard", ["C3", "C4"]),
+    ]
+    # Am finalen Prüfpunkt alle Läufe in since_runs und Bereich base..HEAD; sonst leer.
+    _commit(repo, {"src/d.py": "d = 1\n"}, "Task 9")
+    ptt.checkpoint_mark(repo, "HEAD", "run-1", [9])
+    _commit(repo, {"src/e.py": "e = 1\n"}, "Fix")
+    fix = _rev(repo)
+    ptt.checkpoint_mark(repo, "HEAD", "run-2", [9])
+    _commit(repo, {"src/f.py": "f = 1\n"}, "Task 10")
+    head = _rev(repo)
+    final = ptt.checkpoint_status(repo, 10, False)
+    assert (final["since_runs"], final["range"]) == (["run-1", "run-2"], f"{base}..{head}")
+    after = ptt.checkpoint_status(repo, 9, False)
+    assert (after["since_runs"], after["range"]) == ([], f"{fix}..{head}")
+
+
+def test_checkpoint_status_uses_whole_plan_order_after_tasks_filter(tmp_path):
+    # `generate --tasks` (offene Tasks eines laufenden Plans) darf die Reihenfolge für
+    # `before`/`final` nicht auf die Teilmenge schrumpfen lassen.
+    repo = _cp_repo(tmp_path)
+    assert ptt.main(["generate", str(repo / "docs" / "plan.md"), "--tasks", "9,10,12",
+                     "--out-dir", str(repo / ".skills" / "cache" / "tasks")]) == 0
+    gate = json.loads((repo / ".skills" / "cache" / "tasks" / "gate.json").read_text(encoding="utf-8"))
+    assert [t["id"] for t in gate["tasks"]] == [9, 10, 12]
+    assert [t["id"] for t in gate["plan_order"]] == [1, 3, 7, 9, 10, 12]
+    ptt.checkpoint_init(repo, "v1")
+    got = {n: ptt.checkpoint_status(repo, n, False) for n in (1, 7, 9, 10, 12)}
+    assert [n for n, cp in got.items() if cp["due"]] == [1, 9, 10]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 7: verify mit consumer_check — eine Arity-Regel für beide Checks
+# --------------------------------------------------------------------------
+
+
+def _fn(source):
+    import ast
+    return ast.parse(source).body[0]
+
+
+def test_consumer_check_arity_matches_rule():
+    assert ptt.arity_matches(_fn("def f(a, b=1): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, b=1): pass"), 2)
+    assert not ptt.arity_matches(_fn("def f(a, b=1): pass"), 0)
+    assert not ptt.arity_matches(_fn("def f(a, b=1): pass"), 3)
+    assert ptt.arity_matches(_fn("def f(a, /, b): pass"), 2)
+    assert not ptt.arity_matches(_fn("def f(a, /, b): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, *args): pass"), 4)
+    assert not ptt.arity_matches(_fn("def f(a, *args): pass"), 0)  # Pflichtparameter bleiben Pflicht
+    assert not ptt.arity_matches(_fn("def f(a, *, strict): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(a, *, strict=False): pass"), 1)
+    assert ptt.arity_matches(_fn("def f(self, a): pass"), 1)  # Methode: self zählt nicht
+    assert ptt.arity_matches(_fn("def f(a, b, c): pass"), None)  # ohne Arity nur Präsenz
+    assert ptt.arity_matches(_fn("class F: pass"), 3)  # Klasse: nur Präsenz
+
+
+def test_consumer_check_statuses(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "def parse(line, strict):\n    return 1\n\n\ndef load(path, mode='r'):\n    return 1\n\n\n"
+        "class A:\n    def helper(self, x, y):\n        pass\n\n\nclass B:\n    def helper(self, x, y, z):\n        pass\n",
+        encoding="utf-8",
+    )
+    consumers = [
+        {"task": 3, "symbols": ["parse(1)", "fn:load(1)", "load"]},  # mit und ohne Präfix (alte Task-Datei)
+        {"task": 5, "symbols": ["helper(1)", "gone(2)", "parse(2)", "parse"]},
+    ]
+    results = ptt.check_consumers(tmp_path, ["a.py"], consumers)
+    assert all(list(r) == ["task", "name", "status", "detail"] for r in results)
+    assert [(r["task"], r["name"], r["status"]) for r in results] == [
+        (3, "parse", "arity_mismatch"), (3, "load", "present"), (3, "load", "present"),
+        (5, "helper", "ambiguous"), (5, "gone", "missing"), (5, "parse", "present"), (5, "parse", "present"),
+    ]
+
+
+def test_consumer_check_unchecked_without_python_or_without_consumers(tmp_path):
+    (tmp_path / "Unit1.pas").write_text("function Parse(Line: string): Integer;\n", encoding="utf-8")
+    results = ptt.check_consumers(tmp_path, ["Unit1.pas"], [{"task": 2, "symbols": ["Parse(1)"]}])
+    assert [(r["task"], r["name"], r["status"]) for r in results] == [(2, "Parse", "unchecked")]
+    assert "Python" in results[0]["detail"]
+    old = ptt.check_consumers(tmp_path, ["Unit1.pas"], None)
+    assert [r["status"] for r in old] == ["unchecked"] and "consumers" in old[0]["detail"]
+    assert ptt.check_consumers(tmp_path, ["Unit1.pas"], []) == []
+
+
+def test_consumer_check_produces_uses_the_same_rule(tmp_path):
+    (tmp_path / "a.py").write_text("def parse(line, strict=False):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "present"
+    (tmp_path / "a.py").write_text("def parse(line, *, strict):\n    return 1\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["a.py"], [("parse", 1)])[0]["status"] == "arity_mismatch"
+    # Eval verify-catches-signature-drift-before-review: ein Parameter statt zwei bleibt ein Bruch.
+    (tmp_path / "batch.py").write_text("def batch_parse(items):\n    return {}\n", encoding="utf-8")
+    assert ptt.check_produces(tmp_path, ["batch.py"], [("batch_parse", 2)])[0]["status"] == "arity_mismatch"
+
+
+CONSUMER_PLAN = """### Task 1: Parser
+
+**Files:**
+- Create: `src/parser.py`
+
+**Interfaces:**
+- Consumes: (nichts Neues)
+- Produces: `fn:parse_order`
+
+- [ ] **Step 1: x**
+
+### Task 2: Import
+
+**Files:**
+- Create: `src/importer.py`
+
+**Interfaces:**
+- Consumes: `fn:parse_order(line)`
+- Produces: (nichts Neues)
+
+- [ ] **Step 1: x**
+"""
+
+
+def _consumer_check_verify(tmp_path, parser_src, *, drop_consumers=False, allow=None, log=None, no_base=False):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    plan = tmp_path / "plan.md"
+    plan.write_text(CONSUMER_PLAN if allow is None else CONSUMER_PLAN.replace("src/parser.py", allow), encoding="utf-8")
+    out = tmp_path / "tasks"
+    assert ptt.main(["generate", str(plan), "--out-dir", str(out)]) == 0
+    task_file = next(out.glob("task-1-*.md"))
+    if drop_consumers:
+        text = task_file.read_text(encoding="utf-8")
+        block = ptt.parse_task_machine_block(text)
+        del block["consumers"]
+        task_file.write_text(text.split("```json")[0] + "```json\n" + json.dumps(block, indent=2) + "\n```\n",
+                             encoding="utf-8")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    git(wt, "init", "--quiet", "--initial-branch=main")
+    git(wt, "config", "user.email", "t@example.invalid")
+    git(wt, "config", "user.name", "Test")
+    git(wt, "commit", "--quiet", "--allow-empty", "-m", "base")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt, capture_output=True, text=True, check=True).stdout.strip()
+    target = wt / (allow or "src/parser.py")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(parser_src, encoding="utf-8")
+    git(wt, "add", "-A")
+    git(wt, "commit", "--quiet", "-m", "Task 1")
+    if log is not None:  # das Log liegt wie im Betrieb unversioniert in .skills/cache/
+        (wt / ".git" / "info" / "exclude").write_text(".skills/\n", encoding="utf-8")
+        (wt / ".skills" / "cache" / "test-first").mkdir(parents=True)
+        (wt / ".skills" / "cache" / "test-first" / "log.md").write_text(log, encoding="utf-8")
+    result_file = tmp_path / "verify.json"
+    code = ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(wt),
+                     *([] if no_base else ["--base", base]), "--out", str(result_file)])
+    return code, json.loads(result_file.read_text(encoding="utf-8"))
+
+
+def test_verify_consumer_check_fails_on_arity_drift(tmp_path):
+    code, result = _consumer_check_verify(tmp_path, "def parse_order(line, strict):\n    return 1\n")
+    assert result["produces"][0]["status"] == "present"  # Produces ohne Arity: der alte Check sieht nichts
+    assert result["consumer_check"] == [{
+        "task": 2, "name": "parse_order", "status": "arity_mismatch", "detail": result["consumer_check"][0]["detail"],
+    }]
+    assert (code, result["verdict"], result["ok"]) == (1, "fail", False)
+
+
+def test_verify_consumer_check_passes_with_default_parameter(tmp_path):
+    code, result = _consumer_check_verify(tmp_path, "def parse_order(line, strict=False):\n    return 1\n")
+    assert [r["status"] for r in result["consumer_check"]] == ["present"]
+    assert (code, result["verdict"]) == (0, "pass")
+
+
+def test_verify_consumer_check_unchecked_is_at_most_unverified(tmp_path):
+    code, result = _consumer_check_verify(tmp_path / "old", "def parse_order(line):\n    return 1\n",
+                                          drop_consumers=True)
+    assert [r["status"] for r in result["consumer_check"]] == ["unchecked"]
+    assert (code, result["verdict"]) == (1, "unverified")
+    code, result = _consumer_check_verify(tmp_path / "pas", "procedure ParseOrder;\n", allow="src/Parser.pas")
+    assert [r["status"] for r in result["consumer_check"]] == ["unchecked"]
+    assert result["verdict"] in ("unverified", "fail") and result["verdict"] != "pass"
+
+
+TDD_LOG = """<!-- skill: test-first | schema: 1 | generated: scripts/tdd_log.py -->
+# test-first — Beleg
+
+## Abschnitt 2026-10-30T10:00:00
+
+| Test | Phase | Befehl | Exit | Zeit | Ausgabe |
+| --- | --- | --- | --- | --- | --- |
+| test_alt | red | pytest | 1 | 1 | x |
+| test_alt | green | pytest | 0 | 1 | x |
+| test_neu | sofort-grün | pytest | 0 | 1 | x |
+
+Vollständige Zyklen: 1
+"""
+
+
+def test_verify_hints(tmp_path):
+    src = "def parse_order(line, strict=False):\n    # TODO später\n    print(line)\n    return 1\n"
+    clean_code, clean = _consumer_check_verify(tmp_path / "clean", "def parse_order(line, strict=False):\n    return 1\n",
+                                               log=TDD_LOG.replace("test_neu | sofort-grün", "test_neu | green"))
+    assert (clean_code, clean["verdict"], clean["hints"]) == (0, "pass", [])
+    code, result = _consumer_check_verify(tmp_path / "dirty", src, log=TDD_LOG)
+    hints = {(h["kind"], h["path"], h["line"]): h["text"] for h in result["hints"]}
+    assert hints[("platzhalter", "src/parser.py", 2)] == "# TODO später"
+    assert hints[("debug-ausgabe", "src/parser.py", 3)] == "print(line)"
+    assert hints[("sofort-grün", ".skills/cache/test-first/log.md", None)] == "test_neu"
+    assert len(hints) == 3  # test_alt (rot, dann grün) und die nicht hinzugefügten Zeilen melden nichts
+    assert (code, result["verdict"]) == (0, "pass")  # Hinweise ändern das Verdikt nie
+    _, nolog = _consumer_check_verify(tmp_path / "nolog", "def parse_order(line, strict=False):\n    return 1\n")
+    assert [h["kind"] for h in nolog["hints"]] == ["log-fehlt"]
+    code, nobase = _consumer_check_verify(tmp_path / "nobase", src, log=TDD_LOG, no_base=True)
+    assert [h["kind"] for h in nobase["hints"]] == ["diff-ungeprüft", "sofort-grün"]  # kein stiller Erfolg
+    assert (code, nobase["verdict"]) == (1, "unverified")
+    assert [h["kind"] for h in ptt.collect_hints(tmp_path / "dirty" / "wt", None)] == ["diff-ungeprüft", "sofort-grün"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 9: fix-task aus verdicts.jsonl oder /code-review-Funden
+# --------------------------------------------------------------------------
+
+
+def _verdict(fid, path, status, related=(), lines="3-9", reason="Grund"):
+    return {"id": fid, "path": path, "lines": lines, "class": "bug", "status": status,
+            "reason": reason, "evidence": "", "related": list(related)}
+
+
+def test_fix_task_from_verdicts(tmp_path):
+    verdicts = tmp_path / "verdicts.jsonl"
+    rows = [{"_meta": {"skill": "deep-review", "schema": 1}},
+            _verdict("F1", "src/a.py", "bestätigt", ["src/helper.py"], reason="a bricht bei leerer Eingabe"),
+            _verdict("F2", "src/b.py", "plausibel", ["src/a.py"]),
+            _verdict("F3", "src/c.py", "widerlegt"),
+            _verdict("F4", "src/d.py", "offen", ["src/e.py"])]
+    verdicts.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    out = tmp_path / "tasks"
+    target = ptt.fix_task_from_verdicts(verdicts, out)
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("<!-- skill: subagent-dev | schema: 1 | generated: ")
+    block = ptt.parse_task_machine_block(text)
+    assert block["allowlist"] == ["src/a.py", "src/helper.py", "src/b.py"]
+    assert block["produces"] == [] and block["plan"] == str(verdicts)
+    assert {"task_id", "plan", "allowlist", "produces"} <= set(block)
+    criteria = _criteria(text)
+    assert criteria.count("behoben und mit Test belegt") == 2
+    assert "F1" in criteria and "F2" in criteria and "F3" not in criteria and "F4" not in criteria
+    assert "a bricht bei leerer Eingabe" in criteria
+
+
+def test_fix_task_from_code_review_list(tmp_path):
+    findings = tmp_path / "findings.json"
+    findings.write_text(json.dumps([
+        {"file": "src/x.py", "line": 12, "summary": "Off-by-one", "failure_scenario": "leere Liste"},
+        {"file": "src/y.py", "line": 3, "summary": "KeyError", "failure_scenario": "fehlender Schlüssel"},
+        {"file": "src/x.py", "line": 40, "summary": "None", "failure_scenario": "kein Wert"},
+    ]), encoding="utf-8")
+    target = ptt.fix_task_from_verdicts(findings, tmp_path / "tasks")
+    text = target.read_text(encoding="utf-8")
+    assert ptt.parse_task_machine_block(text)["allowlist"] == ["src/x.py", "src/y.py"]
+    assert _criteria(text).count("behoben und mit Test belegt") == 3
+    assert "Off-by-one" in text and "leere Liste" in text
+
+
+def test_fix_task_model_is_highest_of_affected_tasks_and_command(tmp_path):
+    out = tmp_path / "tasks"
+    out.mkdir()
+    (out / "gate.json").write_text(json.dumps({"tasks": [
+        {"id": 1, "files": ["src/a.py"], "model": "sonnet"},
+        {"id": 2, "files": ["src/b.py"], "model": "opus"},
+        {"id": 3, "files": ["src/z.py"], "model": "opus"}]}), encoding="utf-8")
+    verdicts = tmp_path / "v.jsonl"
+    verdicts.write_text(json.dumps(_verdict("F1", "src/a.py", "bestätigt", ["src/b.py"])) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "opus"
+    verdicts.write_text(json.dumps(_verdict("F1", "src/a.py", "bestätigt")) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "sonnet"
+    assert ptt.main(["fix-task", "--verdicts", str(verdicts), "--out-dir", str(out)]) == 0
+
+
+def test_fix_task_without_actionable_findings_writes_nothing(tmp_path):
+    verdicts = tmp_path / "v.jsonl"
+    verdicts.write_text(json.dumps(_verdict("F3", "src/c.py", "widerlegt")) + "\n", encoding="utf-8")
+    out = tmp_path / "tasks"
+    assert ptt.main(["fix-task", "--verdicts", str(verdicts), "--out-dir", str(out)]) == 1
+    assert not list(out.glob("*fix*"))
+
+
+def test_log_line(tmp_path):
+    path = tmp_path / ".skills" / "subagent-dev" / "runlog.jsonl"
+    ptt.append_log(path, {"plan": "p.md", "task": 3, "model": "sonnet", "reason": "Standard",
+                          "verdicts": ["pass"], "subagent_tokens": 1234})
+    ptt.append_log(path, {"plan": "p.md", "checkpoint": "after-3", "model": "opus", "reason": "Größe",
+                          "verdicts": ["bestätigt", "offen"], "findings": 2, "finding_task": 3})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    meta = json.loads(lines[0])
+    assert list(meta) == ["_meta"] and meta["_meta"]["skill"] == "subagent-dev" and meta["_meta"]["schema"] == 1
+    keys = ["plan", "task", "checkpoint", "model", "reason", "verdicts", "subagent_tokens", "findings", "finding_task"]
+    first, second = json.loads(lines[1]), json.loads(lines[2])
+    assert list(first) == keys and list(second) == keys
+    assert first["task"] == 3 and first["checkpoint"] is None and first["subagent_tokens"] == 1234
+    assert second["task"] is None and second["subagent_tokens"] is None and second["finding_task"] == 3
+
+
+def test_log_command_writes_relative_to_repo(tmp_path):
+    base = ["log", "--repo", str(tmp_path), "--plan", "p.md", "--model", "sonnet", "--reason", "Standard"]
+    assert ptt.main(base + ["--task", "4", "--verdict", "pass", "--verdict", "unverified"]) == 0
+    assert ptt.main(base + ["--checkpoint", "final", "--findings", "1", "--finding-task", "4", "--subagent-tokens", "99"]) == 0
+    rows = [json.loads(l) for l in (tmp_path / ".skills" / "subagent-dev" / "runlog.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert "_meta" in rows[0] and len(rows) == 3
+    assert rows[1]["task"] == 4 and rows[1]["verdicts"] == ["pass", "unverified"] and rows[1]["subagent_tokens"] is None
+    assert rows[2]["checkpoint"] == "final" and rows[2]["findings"] == 1 and rows[2]["subagent_tokens"] == 99
+
+
+def test_log_keeps_umlauts(tmp_path):
+    path = tmp_path / "runlog.jsonl"
+    ptt.append_log(path, {"plan": "p.md", "reason": "größer als 400 Zeilen"})
+    assert "größer" in path.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# Fix nach dem Review über Task 6 bis 10
+# --------------------------------------------------------------------------
+
+
+def test_checkpoint_status_rejects_unknown_task(tmp_path, capsys):
+    repo = _cp_repo(tmp_path)
+    ptt.checkpoint_init(repo, "v1")
+    for bad in (2, 99):  # 2: Lücke in den IDs
+        try:
+            ptt.checkpoint_status(repo, bad, False)
+        except ptt.PlanParseError as exc:
+            assert f"Task {bad}" in str(exc) and "gate.json" in str(exc)
+        else:
+            raise AssertionError("unbekannte Task darf nicht still 'nicht fällig' ergeben")
+    assert ptt.main(["checkpoint", "status", "--after-task", "2", "--repo", str(repo)]) == 1
+    assert "checkpoint status: " in capsys.readouterr().err
+
+
+def test_fix_task_model_matches_directory_and_glob_entries(tmp_path):
+    out = tmp_path / "tasks"
+    out.mkdir()
+    (out / "gate.json").write_text(json.dumps({"tasks": [
+        {"id": 1, "files": ["src/auth/"], "model": "sonnet"},
+        {"id": 2, "files": ["lib/*.py"], "model": "sonnet"},
+        {"id": 3, "files": ["src/other.py"], "model": "opus"}]}), encoding="utf-8")
+    verdicts = tmp_path / "v.jsonl"
+    for path in ("src/auth/token.py", "lib/x.py"):
+        verdicts.write_text(json.dumps(_verdict("F1", path, "bestätigt")) + "\n", encoding="utf-8")
+        block = ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))
+        assert block["model"] == "sonnet"  # Verzeichnis- und Glob-Eintrag treffen; Rückfall wäre opus
+    # Keine Task passt: Rückfall opus.
+    verdicts.write_text(json.dumps(_verdict("F1", "docs/x.md", "bestätigt")) + "\n", encoding="utf-8")
+    assert ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(verdicts, out).read_text(encoding="utf-8"))["model"] == "opus"
+
+
+def test_group_checkpoint_containing_verification_merges_into_final():
+    # Die Gruppe 9, 10, 12 enthält die Verifikation (12): C3 läge hinter dem finalen Prüfpunkt.
+    tasks = ptt.parse_plan(GAP_PLAN).tasks
+    consumers = ptt.consumers_of(tasks)
+    gate = ptt.gate_verdict(tasks, ptt.build_overlap_graph(tasks))
+    assert gate.verdict == "parallel" and 12 in gate.parallel_group
+    got = ptt.place_checkpoints(tasks, consumers, gate)
+    assert _kinds(got)[-1] == ("final", None, "standard", ["C3", "C4"])
+    assert [c["kind"] for c in got].count("group") == 0
+
+
+def _hint_repo(tmp_path, name="wt"):
+    wt = tmp_path / name
+    wt.mkdir(parents=True)
+    git(wt, "init", "--quiet", "--initial-branch=main")
+    git(wt, "config", "user.email", "t@example.invalid")
+    git(wt, "config", "user.name", "Test")
+    git(wt, "commit", "--quiet", "--allow-empty", "-m", "base")
+    return wt, _rev(wt)
+
+
+def test_collect_hints_counts_untracked_files(tmp_path):
+    wt, base = _hint_repo(tmp_path)
+    (wt / "src").mkdir()
+    (wt / "src" / "neu.py").write_text("x = 1\n# TODO später\nprint(x)\n", encoding="utf-8")
+    (wt / ".skills" / "cache").mkdir(parents=True)
+    (wt / ".skills" / "cache" / "notiz.md").write_text("TODO hier\n", encoding="utf-8")
+    hints = {(h["kind"], h["path"], h["line"]) for h in ptt.collect_hints(wt, base)}
+    assert ("platzhalter", "src/neu.py", 2) in hints and ("debug-ausgabe", "src/neu.py", 3) in hints
+    assert not any(p and p.startswith(".skills/cache/notiz") for _, p, _ in hints)
+
+
+def test_collect_hints_path_with_space_and_mnemonic_prefix(tmp_path):
+    wt, base = _hint_repo(tmp_path)
+    git(wt, "config", "diff.mnemonicPrefix", "true")
+    (wt / "src").mkdir()
+    (wt / "src" / "mein modul.py").write_text("print(1)\n", encoding="utf-8")
+    git(wt, "add", "-A")
+    git(wt, "commit", "--quiet", "-m", "Task")
+    (wt / "src" / "mein modul.py").write_text("print(1)\nprint(2)\n", encoding="utf-8")  # uncommittet
+    hints = [(h["path"], h["line"]) for h in ptt.collect_hints(wt, base) if h["kind"] == "debug-ausgabe"]
+    assert hints == [("src/mein modul.py", 1), ("src/mein modul.py", 2)]
+
+
+def test_added_lines_strips_trailing_tab_from_header():
+    diff = "--- a/x y.py\n+++ b/x y.py\t\n@@ -0,0 +1 @@\n+print(1)\n"
+    assert ptt._added_lines(diff) == [("x y.py", 1, "print(1)")]
+
+
+def test_added_lines_plusplus_content_is_not_a_header():
+    diff = (
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,0 +2 @@\n+++ TODO\n"
+        "@@ -5 +6 @@\n--- Zeile\n+++ print(1)\n"
+        "@@ -9,0 +10,2 @@\n+a = 1\n+print(2)\n"
+    )
+    assert ptt._added_lines(diff) == [
+        ("x.py", 2, "++ TODO"), ("x.py", 6, "++ print(1)"), ("x.py", 10, "a = 1"), ("x.py", 11, "print(2)"),
+    ]
+
+
+def test_checkpoint_command_reports_broken_input_without_traceback(tmp_path, capsys):
+    repo = _cp_repo(tmp_path)
+    ptt.checkpoint_init(repo, "v1")
+    base = ["--repo", str(repo)]
+    assert ptt.main(["checkpoint", "mark", "--commit", "HEAD", "--run", "none", "--tasks", "1,x", *base]) == 1
+    assert "checkpoint mark: " in capsys.readouterr().err
+    state_file = repo / ".skills" / "cache" / "tasks" / "review-state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    del state["last_reviewed"]
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    assert ptt.main(["checkpoint", "status", "--after-task", "1", *base]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("checkpoint status: ") and "last_reviewed" in err
+    assert ptt.main(["checkpoint", "mark", "--commit", "HEAD", "--run", "none", "--tasks", "1", *base]) == 0
+
+
+def test_consumer_symbols_carry_the_kind_prefix_of_the_plan():
+    plan = "\n".join([
+        _consumer_task(1, "Doktrin", "src/a.py", "nichts Neues", "`token:Next`, `fn:parse(line)`, `Bare`"),
+        _consumer_task(2, "Nutzer", "src/b.py", "`token:Next`, `fn:parse(line)`, `Bare`"),
+    ])
+    got = ptt.consumers_of(ptt.parse_plan(plan).tasks)
+    assert got[1] == [{"task": 2, "symbols": ["token:Next", "fn:parse(1)", "Bare"]}]
+
+
+def test_verify_consumer_check_reads_kind_from_prefix(tmp_path):
+    plan = "\n".join([
+        _consumer_task(1, "Doktrin", "SKILL.md", "nichts Neues", "`token:Review ohne Abdeckungsnachweis`"),
+        _consumer_task(2, "Nutzer", "src/b.py", "`token:Review ohne Abdeckungsnachweis`"),
+    ])
+    out = tmp_path / "tasks"
+    (tmp_path / "plan.md").write_text(plan, encoding="utf-8")
+    assert ptt.main(["generate", str(tmp_path / "plan.md"), "--out-dir", str(out)]) == 0
+    block = ptt.parse_task_machine_block(next(out.glob("task-1-*.md")).read_text(encoding="utf-8"))
+    assert block["consumers"][0]["symbols"] == ["token:Review ohne Abdeckungsnachweis"]
+    (tmp_path / "SKILL.md").write_text("Review ohne Abdeckungsnachweis\n", encoding="utf-8")
+    assert [r["status"] for r in ptt.check_consumers(tmp_path, ["SKILL.md"], block["consumers"])] == ["present"]
+
+
+# --------------------------------------------------------------------------
+# Spec 27, Task 15: Evals und Fixtures
+# --------------------------------------------------------------------------
+
+SPEC27_EVALS = ("anti-ceremony-mini-plan-gets-only-final-checkpoint", "fanout-producer-gets-opus-and-checkpoint",
+                "plan-model-line-overrides-rules", "consumer-check-catches-arity-drift", "checkpoint-due-by-size")
+
+
+def _sd_run(root, *args):
+    """Das Skript so, wie der Agent es im Workspace aufruft: Subprozess mit cwd = Workspace."""
+    script = REPO_ROOT / "skills" / "subagent-dev" / "scripts" / "plan_to_tasks.py"
+    return subprocess.run([sys.executable, str(script), *args], cwd=root, capture_output=True, text=True)
+
+
+def _sd_commit(root, files, message, amend=False):
+    for rel, text in files.items():
+        (root / rel).write_text(text, encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", *(["--amend"] if amend else []), "-m", message)
+
+
+def test_evals_and_fixtures_spec27(tmp_path):
+    evals = {ev.id: ev for ev in load_evals(REPO_ROOT / "evals" / "subagent-dev" / "evals.json")}
+    assert len(evals) == 9 and set(SPEC27_EVALS) <= set(evals)
+    assert all(evals[i].eval_class == "contract" for i in SPEC27_EVALS)
+    fixtures = REPO_ROOT / "evals" / "fixtures"
+    for name in ("plan-fanout", "plan-fanout-override", "plan-fanout-dispatched", "cp-size"):
+        manifest = json.loads((fixtures / name / "fixture.json").read_text(encoding="utf-8"))
+        assert manifest["git"] is True and (fixtures / name / "README.md").is_file()
+        assert manifest["commits"][0]["touch"][".gitignore"] == ".skills/cache/\n.claude/\n"
+        assert sorted(p.name for p in (fixtures / name).iterdir()) == ["README.md", "fixture.json"]
+    skill = REPO_ROOT / "skills" / "subagent-dev"
+
+    def workspace(fixture, label):
+        ws = prepare(tmp_path / label, skill, fixtures / fixture)
+        return ws.root, ws.baseline
+
+    def passed(eval_id, root, baseline):
+        return grade(evals[eval_id], root, baseline, {}).passed
+
+    def generate(root, plan):
+        assert _sd_run(root, "generate", plan).returncode == 0
+
+    # Eval 1: Mini-Plan — nur der finale Prüfpunkt, kein opus; der Fanout-Plan trifft must_not.
+    root, base = workspace("plan-mini-two-tasks", "e1")
+    generate(root, "docs/superpowers/plans/mini-two-tasks.md")
+    assert passed(SPEC27_EVALS[0], root, base)
+    root, base = workspace("plan-fanout", "e1-variant")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[0], root, base)
+
+    # Eval 2: Task 1 mit zwei Abnehmern — opus und C1 vor Task 3; mit nur einem Abnehmer weder noch.
+    root, base = workspace("plan-fanout", "e2")
+    generate(root, "docs/plans/fanout.md")
+    assert passed(SPEC27_EVALS[1], root, base)
+    root, base = workspace("plan-fanout", "e2-variant")
+    plan = root / "docs" / "plans" / "fanout.md"
+    text = plan.read_text(encoding="utf-8")
+    one_consumer = text.replace("- Consumes: `fn:parse_order(line)`\n- Produces: `fn:export_orders",
+                                "- Consumes: (nichts Neues)\n- Produces: `fn:export_orders", 1)
+    assert one_consumer != text
+    _sd_commit(root, {"docs/plans/fanout.md": one_consumer}, "Task 4 ohne parse_order")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[1], root, base)
+
+    # Eval 3: **Modell:** sonnet schlägt M1; ohne die Zeile (plan-fanout) steht dort opus.
+    root, base = workspace("plan-fanout-override", "e3")
+    generate(root, "docs/plans/fanout.md")
+    assert passed(SPEC27_EVALS[2], root, base)
+    root, base = workspace("plan-fanout", "e3-variant")
+    generate(root, "docs/plans/fanout.md")
+    assert not passed(SPEC27_EVALS[2], root, base)
+
+    # Eval 4: parse_order(line, strict) ohne Default — arity_mismatch, fail; mit Default pass.
+    def verify(root):
+        generate(root, "docs/plans/fanout.md")
+        task_file = next((root / ".skills" / "cache" / "tasks").glob("task-1-*.md")).relative_to(root)
+        return _sd_run(root, "verify", "--task-file", str(task_file), "--worktree", ".", "--base", "base",
+                       "--out", ".skills/cache/tasks/verify-task-1.json")
+
+    root, base = workspace("plan-fanout-dispatched", "e4")
+    assert verify(root).returncode == 1
+    assert passed(SPEC27_EVALS[3], root, base)
+    result = json.loads((root / ".skills/cache/tasks/verify-task-1.json").read_text(encoding="utf-8"))
+    assert result["allowlist_violations"] == [] and [p["status"] for p in result["produces"]] == ["present"]
+    root, base = workspace("plan-fanout-dispatched", "e4-variant")
+    parser = (root / "src" / "parser.py").read_text(encoding="utf-8")
+    _sd_commit(root, {"src/parser.py": parser.replace("(line, strict)", "(line, strict=False)")},
+               "Task 1: Parser", amend=True)
+    done = verify(root)
+    assert done.returncode == 0, done.stdout
+    assert not passed(SPEC27_EVALS[3], root, base)
+
+    # Eval 5: 430 Zeilen seit reviewed — fällig; mit 120 Zeilen nach Task 3 nicht.
+    root, base = workspace("cp-size", "e5")
+    gate = json.loads((root / ".skills/cache/tasks/gate.json").read_text(encoding="utf-8"))
+    assert all(ptt._checkpoint_after(cp, gate["plan_order"]) != 3 for cp in gate["checkpoints"])
+    assert _sd_run(root, "checkpoint", "status", "--after-task", "3").returncode == 0
+    assert passed(SPEC27_EVALS[4], root, base)
+    root, base = workspace("cp-size", "e5-variant")
+    lines = (root / "src" / "importer.py").read_text(encoding="utf-8").splitlines(keepends=True)
+    _sd_commit(root, {"src/importer.py": "".join(lines[:120])}, "Task 3: Import", amend=True)
+    assert _sd_run(root, "checkpoint", "status", "--after-task", "3").returncode == 0
+    status = json.loads((root / ".skills/cache/tasks/checkpoint.json").read_text(encoding="utf-8"))
+    assert (status["due"], status["changed_lines"]) == (False, 120)
+    assert not passed(SPEC27_EVALS[4], root, base)

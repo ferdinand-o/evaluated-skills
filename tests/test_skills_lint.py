@@ -33,13 +33,13 @@ KNOWN_FINDINGS: dict[str, frozenset[str]] = {
     "rest-api-architect": frozenset({"description", "neighbors", "report-section", "routing"}),
     "review-context": frozenset({"anti-ceremony-eval", "description", "report-section", "routing"}),
     "sql-schema-architect": frozenset({"anti-ceremony-eval", "description", "report-section", "routing"}),
-    "subagent-dev": frozenset({"anti-ceremony-eval", "description", "report-section", "routing"}),
+    "subagent-dev": frozenset({"description", "routing"}),
     "testing-strategy": frozenset({"description", "neighbors", "report-section"}),
     "ui-architect": frozenset({"description", "evals-exist", "report-section", "routing"}),
     "verified-research": frozenset({"description", "gate-language", "neighbors", "report-section", "routing"}),
     "visual-summary": frozenset({"anti-ceremony-eval", "description", "neighbors", "report-section"}),
 }
-KNOWN_FINDINGS_MAX_PAIRS = 79
+KNOWN_FINDINGS_MAX_PAIRS = 77
 
 
 def _skills() -> list[Path]:
