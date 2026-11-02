@@ -9,13 +9,16 @@ Hilfscommits der Paket-Bereiche, gebaut über einen temporären Index; der Vergl
 Arbeitsbaum läuft auf einer Kopie des Index); HEAD, Index und Arbeitsbaum des Nutzers
 bleiben unberührt (E6).
 
-Stand Task 3: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
+Stand Task 4: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
 ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel,
-`build_plan`, Paket-Bereiche (`make_packet_range`) und `cleanup`.
+`build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
+Python (`collect_python`, `render_block`, `write_counterparts`; Zielcode nur per `ast`
+gelesen, aus Git am ZIEL).
 """
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import datetime as dt
 import fnmatch
@@ -32,6 +35,7 @@ import string
 import subprocess
 import tempfile
 import time
+import warnings
 from pathlib import Path, PurePath, PurePosixPath
 from typing import NamedTuple
 
@@ -455,6 +459,14 @@ def write_json(path, meta, payload):
         text = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     except ValueError as exc:
         raise KitError(f"nicht als JSON schreibbar: {exc}") from None
+    _write_text(path, text)
+    return data
+
+
+def _write_text(path, text: str) -> None:
+    """Text als UTF-8 atomar schreiben — für `write_json` und die Paketblöcke. Text, der kein
+    UTF-8 ist, ist ein KitError. Schreibt über eine eigene Temp-Datei im Zielordner (Rechte
+    nach der umask), ersetzt atomar und räumt die Temp-Datei bei jedem Fehler weg."""
     try:
         raw = text.encode("utf-8")
     except UnicodeEncodeError as exc:
@@ -480,7 +492,6 @@ def write_json(path, meta, payload):
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
-    return data
 
 
 # --- Plan ---------------------------------------------------------------------------------
@@ -1132,3 +1143,563 @@ def cleanup(repo, run_id, stale):
         _git(repo, "update-ref", "--stdin", stdin=commands.encode("utf-8", errors="surrogateescape"))
         _reset_ranges(repo, doomed)
     return sorted(ref for ref, _ in doomed)
+
+
+# --- Gegenstellen (Spec 26, Ablauf Schritt 3) -----------------------------------------------
+#
+# Übernommen aus dem gemessenen Prototyp `docs/superpowers/reports/review-bench/counterparts.py`:
+# Auflösung über die Importe der Datei (spezifischster Importpfad), voll qualifizierte
+# Modulpfade `a.b.C(...)` zuerst, raise-Stellen transitiv im selben Modul, Weg eines
+# Schlüsselwort-Arguments, `except` → Ausnahmen der Aufrufe im try-Block; ohne Importbezug und
+# mit mehr als `AMBIGUOUS_MAX` gleichnamigen Definitionen: nichts statt Raten, aber gezählt.
+
+COUNTERPART_SUFFIXES = frozenset({".py"})  # Dateiendungen mit Sammler, klein geschrieben
+COUNTERPART_MAX_DEFS = 2   # Definitionen je Aufruf im Block (wie im Prototyp)
+RAISE_LINES_MAX = 8        # raise-Zeilen je Gegenstelle
+FLOW_LINES_MAX = 12        # Zeilen des Wegs je geändertem Schlüsselwort-Argument
+DOC_CHARS = 240            # erste Docstring-Zeile höchstens so lang
+UNPARSED_NAMES_MAX = 10    # so viele unlesbare Dateien nennt der Paketblock mit Namen
+INDEX_CACHE_SIZE = 4       # Definitions-Indizes so vieler (Repo, ZIEL) je Prozess
+NO_COLLECTOR = "Gegenstellen nicht gesammelt (Sprache)"
+HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_C_ESCAPES = {ord(k): ord(v) for k, v in
+              {"a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
+               '"': '"', "\\": "\\"}.items()}
+_FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+_TRIES = (ast.Try, *((ast.TryStar,) if hasattr(ast, "TryStar") else ()))
+
+
+class Collected(NamedTuple):
+    """Rückgabe eines Sammlers (`collect_python`; Delphi folgt demselben Format).
+
+    `entries`: je Stelle, die die Sammelregel trifft, ein Dict `{"file", "line", "kind",
+    "lines"}` — `kind` `call` oder `except`, `lines[0]` die Überschrift
+    `### <datei>:<zeile> …`, danach die Zeilen `- Gegenstelle <Name> [<datei>:<zeile>]:
+    <Signatur>`, `  Doc: …`, `  wirft: <Typen>`, `    raise <Typ> at <datei>:<zeile>`,
+    `  geändert: <arg>=<wert>; Weg:` mit eingerückten Wegzeilen; sortiert nach Datei, Zeile,
+    Art. `unresolved`: Aufrufe ohne Importbezug mit mehr als `AMBIGUOUS_MAX` gleichnamigen
+    Definitionen — nicht im Block, aber gezählt. `unparsed`: Dateien am ZIEL, die der Sammler
+    nicht lesen konnte (Python: Syntaxfehler), sortiert — übersprungen und gezählt."""
+    entries: list
+    unresolved: int
+    unparsed: list
+
+
+def _has_collector(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in COUNTERPART_SUFFIXES
+
+
+def _under_skills(path: str) -> bool:
+    return path == ".skills" or path.startswith(".skills/")
+
+
+def _unquote_path(raw: str) -> str:
+    """Pfad aus einer `---`/`+++`-Zeile von `git diff`: ohne den Tab, den git bei Pfaden mit
+    Leerzeichen anhängt, und ohne C-Quoting (`"b/\\303\\244.py"` → `b/ä.py`)."""
+    raw = raw[:-1] if raw.endswith("\t") else raw
+    if len(raw) < 2 or raw[0] != '"' or raw[-1] != '"':
+        return raw
+    data = raw[1:-1].encode("utf-8", errors="surrogateescape")
+    out = bytearray()
+    i = 0
+    while i < len(data):
+        byte = data[i]
+        if byte != 0x5C or i + 1 >= len(data):
+            out.append(byte)
+            i += 1
+        elif 0x30 <= data[i + 1] <= 0x37:
+            out.append(int(data[i + 1:i + 4], 8) & 0xFF)
+            i += 4
+        else:
+            out.append(_C_ESCAPES.get(data[i + 1], data[i + 1]))
+            i += 2
+    return out.decode("utf-8", errors="surrogateescape")
+
+
+def _changed_lines(repo: Path, span: Span, files) -> dict:
+    """Geänderte Zeilen am ZIEL je Datei: `git diff -U0 BASIS ZIEL -- <dateien>` (Pathspecs in
+    Stücken), ohne Umbenennungen, externe Diffs, Textconv und Farbe, mit festen Präfixen
+    `a/` `b/` gegen `diff.noprefix`. Eine reine Löschung ändert keine Zeile am ZIEL; eine
+    gelöschte Datei fehlt."""
+    changed: dict[str, set] = {}
+    for chunk in _literal_chunks(files):
+        out = _git(repo, "diff", "-U0", "--no-renames", "--no-ext-diff", "--no-textconv",
+                   "--no-color", "--src-prefix=a/", "--dst-prefix=b/", span.base, span.target,
+                   "--", *chunk)
+        current, header = None, False
+        for line in out.split("\n"):
+            if line.startswith("diff --git "):
+                current, header = None, True
+            elif header and line.startswith("+++ "):
+                name = _unquote_path(line[4:])
+                current = name[2:] if name.startswith("b/") else None
+            elif line.startswith("@@"):
+                header = False
+                match = HUNK_RE.match(line)
+                if match and current is not None:
+                    start, count = int(match.group(1)), int(match.group(2) or 1)
+                    if count:
+                        changed.setdefault(current, set()).update(range(start, start + count))
+    return changed
+
+
+def _python_sources(repo: Path, target: str) -> dict:
+    """Pfad → Bytes aller `.py`-Blobs am ZIEL (ohne `.skills/`, Symlinks und Pfade, die kein
+    UTF-8 sind), gelesen aus Git (`ls-tree`, `cat-file --batch`), nie aus dem Arbeitsbaum."""
+    blobs = []
+    for record in _git(repo, "ls-tree", "-r", "-z", "--full-tree", target).split("\0"):
+        if not record:
+            continue
+        info, path = record.split("\t", 1)
+        mode, kind, sha = info.split()
+        if (kind == "blob" and mode != "120000" and path.endswith(".py") and _is_utf8(path)
+                and not _under_skills(path)):
+            blobs.append((path, sha))
+    if not blobs:
+        return {}
+    feed = "".join(f"{sha}\n" for _, sha in blobs).encode("ascii")
+    data = _git(repo, "cat-file", "--batch", stdin=feed).encode("utf-8", errors="surrogateescape")
+    sources, pos = {}, 0
+    for path, _sha in blobs:
+        end = data.index(b"\n", pos)
+        fields = data[pos:end].split()
+        if len(fields) != 3:
+            raise KitError(f"git cat-file: unerwartete Antwort für {path}: {data[pos:end]!r}")
+        size = int(fields[2])
+        sources[path] = data[end + 1:end + 1 + size]
+        pos = end + 1 + size + 1
+    return sources
+
+
+def _walk_defs(tree):
+    """Definitionen auf Modulebene und Methoden von Klassen auf Modulebene: (Klasse, Knoten)."""
+    for node in tree.body:
+        if isinstance(node, (*_FUNCS, ast.ClassDef)):
+            yield None, node
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, _FUNCS):
+                    yield node.name, item
+
+
+class _PyIndex:
+    """Alle Definitionen am ZIEL: Name → [(datei, qualname, knoten)]; Bäume je Datei;
+    Dateien mit Syntaxfehler in `unparsed` (übersprungen und gezählt)."""
+
+    def __init__(self, sources: dict) -> None:
+        self.trees: dict[str, ast.Module] = {}
+        self.defs: dict[str, list] = {}
+        self.unparsed: list[str] = []
+        self._prefixes: dict[str, set] = {}
+        for rel in sorted(sources):
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    tree = ast.parse(sources[rel], filename=rel)
+            except (SyntaxError, ValueError, RecursionError, MemoryError):
+                self.unparsed.append(rel)
+                continue
+            self.trees[rel] = tree
+            for cls, node in _walk_defs(tree):
+                qual = f"{cls}.{node.name}" if cls else node.name
+                self.defs.setdefault(node.name, []).append((rel, qual, node))
+
+    def module_file(self, module):
+        """Datei zu einem Modulpfad `a.b.c` (auch unter `src/`), sonst None."""
+        if not module:
+            return None
+        base = module.replace(".", "/")
+        for cand in (f"src/{base}.py", f"src/{base}/__init__.py", f"{base}.py",
+                     f"{base}/__init__.py"):
+            if cand in self.trees:
+                return cand
+        return None
+
+    def import_prefixes(self, rel: str) -> set:
+        """Dateien und Pakete (`pkg/`), aus denen `rel` Namen bezieht — der spezifischste
+        Importpfad: `from a.b import C` nimmt `a/b/C.py`, wenn es die gibt, sonst `a/b.py`
+        bzw. das Paket `a/b/`. Relative Importe gelten vom Paket der Datei aus."""
+        if rel in self._prefixes:
+            return self._prefixes[rel]
+        out: set[str] = set()
+        tree = self.trees.get(rel)
+
+        def add(found):
+            if found:
+                out.add(found.rsplit("/", 1)[0] + "/" if found.endswith("__init__.py") else found)
+
+        for node in ast.walk(tree) if tree is not None else ():
+            if isinstance(node, ast.ImportFrom):
+                module = _from_module(rel, node)
+                for alias in node.names:
+                    add(self.module_file(f"{module}.{alias.name}" if module else alias.name)
+                        or self.module_file(module))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if "." in alias.name:
+                        add(self.module_file(alias.name))
+        self._prefixes[rel] = out
+        return out
+
+    def resolve(self, name: str, from_file: str):
+        """(Definitionen, mehrdeutig) zu einem Namen: bevorzugt die eigene Datei, dann die
+        importierten Dateien und Pakete; ohne Importbezug und mit mehr als `AMBIGUOUS_MAX`
+        Kandidaten keine — `mehrdeutig` wahr."""
+        cands = self.defs.get(name, [])
+        if not cands:
+            return [], False
+        prefixes = self.import_prefixes(from_file)
+
+        def rank(cand):
+            rel = cand[0]
+            if rel == from_file:
+                return 0
+            if any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in prefixes):
+                return 1
+            return 2
+
+        ranked = sorted(cands, key=rank)
+        best = rank(ranked[0])
+        if best == 2 and len(cands) > AMBIGUOUS_MAX:
+            return [], True
+        return [c for c in ranked if rank(c) == best][:COUNTERPART_MAX_DEFS], False
+
+    def resolve_call(self, call: ast.Call, from_file: str):
+        """Wie `resolve`, aber ein voll qualifizierter Modulpfad (`a.b.C(...)`) entscheidet
+        zuerst."""
+        name = _callee_name(call)
+        if isinstance(call.func, ast.Attribute):
+            module = _dotted(call.func.value)
+            found = self.module_file(module) if module and "." in module else None
+            if found:
+                exact = [c for c in self.defs.get(name, []) if c[0] == found]
+                if exact:
+                    return exact[:COUNTERPART_MAX_DEFS], False
+        return self.resolve(name or "", from_file)
+
+
+def _from_module(rel: str, node: ast.ImportFrom):
+    """Absoluter Modulpfad eines `from … import`; relative Importe vom Paket der Datei aus."""
+    if not node.level:
+        return node.module
+    parts = PurePosixPath(rel).parent.parts
+    if node.level - 1 > len(parts):
+        return None
+    package = list(parts[:len(parts) - (node.level - 1)])
+    if node.module:
+        package.append(node.module)
+    return ".".join(package) or None
+
+
+def _callee_name(call: ast.Call):
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _dotted(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+@functools.lru_cache(maxsize=INDEX_CACHE_SIZE)
+def _python_index(repo: Path, target: str) -> _PyIndex:
+    """Definitions-Index am ZIEL, je (Repo, SHA) einmal gebaut — `target` ist ein SHA, der
+    Index also unveränderlich."""
+    return _PyIndex(_python_sources(repo, target))
+
+
+def _target_def(node):
+    """Was ein Aufruf erreicht: bei einer Klasse ihr `__init__` (None ohne), sonst die
+    Funktion selbst."""
+    if isinstance(node, ast.ClassDef):
+        return next((b for b in node.body if isinstance(b, _FUNCS) and b.name == "__init__"),
+                    None)
+    return node
+
+
+def _signature(node) -> str:
+    if isinstance(node, ast.ClassDef):
+        bases = [ast.unparse(b) for b in node.bases] + [ast.unparse(k) for k in node.keywords]
+        head = f"class {node.name}" + (f"({', '.join(bases)})" if bases else "")
+        init = _target_def(node)
+        return f"{head}: {_signature(init)}" if init is not None else head
+    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+    return f"{prefix} {node.name}({ast.unparse(node.args)})"
+
+
+def _raises_in(index: _PyIndex, rel: str, node, depth: int, seen: set) -> list:
+    """(Typ, Zeile) aller `raise` in `node`, transitiv über Aufrufe von Funktionen desselben
+    Moduls bis `depth` Ebenen tief."""
+    key = (rel, node.lineno)
+    if key in seen:
+        return []
+    seen.add(key)
+    out = []
+    for item in ast.walk(node):
+        if isinstance(item, ast.Raise) and item.exc is not None:
+            exc = item.exc.func if isinstance(item.exc, ast.Call) else item.exc
+            out.append((ast.unparse(exc), item.lineno))
+        elif depth > 0 and isinstance(item, ast.Call):
+            for drel, _qual, dnode in index.defs.get(_callee_name(item) or "", []):
+                if drel == rel and isinstance(dnode, _FUNCS):
+                    out += _raises_in(index, rel, dnode, depth - 1, seen)
+    return out
+
+
+def _raises(index: _PyIndex, rel: str, node) -> list:
+    """raise-Stellen einer Definition (Tiefe `RAISE_DEPTH`), nach Zeile, ohne Doppelte."""
+    if node is None:
+        return []
+    return sorted(set(_raises_in(index, rel, node, RAISE_DEPTH, set())), key=lambda r: (r[1], r[0]))
+
+
+def _param_flow(index: _PyIndex, rel: str, fn, param: str, depth: int, seen: set) -> list:
+    """Wo landet ein Parameter: Bedingungen, die ihn prüfen, und Weitergaben als
+    Schlüsselwort an aufgelöste Gegenstellen (rekursiv, `depth` Funktionen tief)."""
+    if depth == 0 or (rel, fn.lineno, param) in seen:
+        return []
+    seen.add((rel, fn.lineno, param))
+    lines = []
+    for item in ast.walk(fn):
+        if isinstance(item, (ast.If, ast.IfExp, ast.While)) and any(
+                isinstance(x, ast.Name) and x.id == param for x in ast.walk(item.test)):
+            body = item.body if isinstance(item.body, list) else [item.body]
+            first = ast.unparse(body[0]).splitlines()[0] if body else ""
+            lines.append(f"{rel}:{item.lineno}: if {ast.unparse(item.test)}: {first}")
+        if isinstance(item, ast.Call):
+            for kw in item.keywords:
+                if isinstance(kw.value, ast.Name) and kw.value.id == param and kw.arg:
+                    defs, _ambiguous = index.resolve_call(item, rel)
+                    for drel, qual, dnode in defs:
+                        if isinstance(dnode, _FUNCS):
+                            lines.append(f"{rel}:{item.lineno}: {param} -> {qual}({kw.arg}=...) "
+                                         f"[{drel}:{dnode.lineno}]")
+                            lines += _param_flow(index, drel, dnode, kw.arg, depth - 1, seen)
+    return lines
+
+
+def _counterpart_head(drel: str, qual: str, node, raises: list) -> list:
+    """`- Gegenstelle …`, erste Docstring-Zeile, `wirft:` und die raise-Zeilen."""
+    lines = [f"- Gegenstelle {qual} [{drel}:{node.lineno}]: {_signature(node)}"]
+    doc = ast.get_docstring(node)
+    if doc and doc.strip():
+        lines.append("  Doc: " + doc.strip().splitlines()[0].strip()[:DOC_CHARS])
+    if raises:
+        lines.append("  wirft: " + ", ".join(sorted({t for t, _ in raises})))
+        lines += [f"    raise {t} at {drel}:{n}" for t, n in raises[:RAISE_LINES_MAX]]
+    return lines
+
+
+def _handler_lines(handler: ast.ExceptHandler) -> set:
+    end = handler.type.end_lineno if handler.type is not None else handler.lineno
+    return set(range(handler.lineno, end + 1))
+
+
+def _python_sites(index: _PyIndex, rel: str, tree, lines: set, unresolved: set) -> list:
+    """Die Stellen einer Datei nach der Sammelregel (Spec 26, Schritt 3)."""
+    entries = []
+    done = set()
+    for node in ast.walk(tree):
+        # geänderte except-Klausel: was können die Aufrufe im try-Block werfen?
+        if isinstance(node, _TRIES):
+            for handler in node.handlers:
+                if not _handler_lines(handler) & lines:
+                    continue
+                found, reached = [], set()
+                for stmt in node.body:
+                    for call in ast.walk(stmt):
+                        if not isinstance(call, ast.Call):
+                            continue
+                        defs, ambiguous = index.resolve_call(call, rel)
+                        if ambiguous:
+                            unresolved.add((rel, call.lineno, call.col_offset))
+                        for drel, qual, dnode in defs:
+                            raises = _raises(index, drel, _target_def(dnode))
+                            if raises and (drel, dnode.lineno) not in reached:
+                                reached.add((drel, dnode.lineno))
+                                found.append(_counterpart_head(drel, qual, dnode, raises))
+                if found:
+                    caught = ast.unparse(handler.type) if handler.type is not None else "alles"
+                    entries.append({"file": rel, "line": handler.lineno, "kind": "except",
+                                    "lines": [f"### {rel}:{handler.lineno} except {caught}",
+                                              *(x for part in found for x in part)]})
+        if not isinstance(node, ast.Call) or not (
+                set(range(node.lineno, node.end_lineno + 1)) & lines):
+            continue
+        name = _callee_name(node)
+        if not name or (node.lineno, name) in done:
+            continue
+        done.add((node.lineno, name))
+        defs, ambiguous = index.resolve_call(node, rel)
+        if ambiguous:
+            unresolved.add((rel, node.lineno, node.col_offset))
+        if not defs:
+            continue
+        changed_kw = [kw for kw in node.keywords if kw.arg and kw.value.lineno in lines]
+        body, throws = [], False
+        for drel, qual, dnode in defs:
+            target = _target_def(dnode)
+            raises = _raises(index, drel, target)
+            throws = throws or bool(raises)
+            body += _counterpart_head(drel, qual, dnode, raises)
+            if target is None:
+                continue
+            for kw in changed_kw:
+                flow = _param_flow(index, drel, target, kw.arg, FLAG_DEPTH, set())
+                if flow:
+                    body.append(f"  geändert: {kw.arg}={ast.unparse(kw.value)}; Weg:")
+                    body += [f"    {x}" for x in flow[:FLOW_LINES_MAX]]
+        if changed_kw or throws:
+            entries.append({"file": rel, "line": node.lineno, "kind": "call",
+                            "lines": [f"### {rel}:{node.lineno} ruft {name}(...)", *body]})
+    return entries
+
+
+def collect_python(repo, rng, files):
+    """Gegenstellen der geänderten Python-Zeilen (Spec 26, Ablauf Schritt 3).
+
+    `rng` wie bei `numstat` (`BASIS..ZIEL`, eine Revision, ein Paket-Bereich `von..bis`);
+    `files` die Dateien, deren Stellen gesammelt werden — gezählt nur `.py` außerhalb von
+    `.skills/`. Geänderte Zeilen aus `git diff -U0` über den Bereich, beschränkt auf `files`;
+    der Code — die geänderten Dateien wie der Index aller Definitionen — kommt per `ast` aus
+    dem Baum des ZIELS in Git, nie aus dem Arbeitsbaum, und wird nie importiert. Je Aufruf
+    auf einer geänderten Zeile die erreichte Definition (aufgelöst über die Importe der Datei
+    und voll qualifizierte Modulpfade, auch in vendortem Code), Signatur, erste
+    Docstring-Zeile und raise-Stellen transitiv im selben Modul (`RAISE_DEPTH`); je
+    geänderter `except`-Klausel die Ausnahmen der Aufrufe im try-Block; je geändertem
+    Schlüsselwort-Argument sein Weg bis zu den Bedingungen (`FLAG_DEPTH`). Eine Stelle steht
+    im Ergebnis, wenn eine ihrer Definitionen etwas wirft oder sie ein geändertes
+    Schlüsselwort-Argument hat. Rückgabe: `Collected(entries, unresolved, unparsed)`."""
+    repo = _toplevel(repo)
+    wanted = sorted({str(f) for f in files
+                     if str(f).endswith(".py") and not _under_skills(str(f))})
+    if not wanted:
+        return Collected([], 0, [])
+    span = split_range(repo, rng)
+    index = _python_index(repo, span.target)
+    unresolved: set = set()
+    entries = []
+    for rel, lines in sorted(_changed_lines(repo, span, wanted).items()):
+        tree = index.trees.get(rel)
+        if tree is not None:
+            entries += _python_sites(index, rel, tree, lines, unresolved)
+    entries.sort(key=lambda e: (e["file"], e["line"], e["kind"]))
+    return Collected(entries, len(unresolved), list(index.unparsed))
+
+
+def _render_head(packet) -> str:
+    """Kopf des Paketblocks: ID, Bereich, Dateien — eine Datei ohne Sammler mit Hinweis."""
+    files = packet.get("files") or []
+    rng = packet.get("range")
+    lines = [f"# Paket {packet.get('id')}", "",
+             f"Bereich: `{rng}`" if rng else "Bereich: noch nicht gebaut", "",
+             f"Dateien ({len(files)}):"]
+    lines += [f"- `{f}`" + ("" if _has_collector(f) else f" — {NO_COLLECTOR}") for f in files]
+    return "\n".join(lines) + "\n\n"
+
+
+def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
+    """`render_block` mit der Zahl der Stellen, die im Block stehen."""
+    cap = BLOCK_MAX_CHARS if cap is None else cap
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+        raise KitError(f"cap muss eine positive Zahl sein, nicht {cap!r}")
+    if not isinstance(unresolved, int) or isinstance(unresolved, bool) or unresolved < 0:
+        raise KitError(f"unresolved muss eine Zahl ≥ 0 sein, nicht {unresolved!r}")
+    total = len(entries)
+    intro = (f"## Gegenstellen\n\n{total} Stelle(n) nach der Sammelregel, mechanisch gesammelt "
+             f"(ohne Auswahl nach Verdacht); {unresolved} nicht aufgelöst (ohne Importbezug "
+             "und mehrdeutig: nichts statt Raten).\n")
+    blocks = ["\n" + "\n".join(e["lines"]) + "\n" for e in entries]
+    head = _render_head(packet)
+    if len(intro) + sum(map(len, blocks)) <= cap:
+        return head + intro + "".join(blocks), total
+
+    def notice(omitted: int) -> str:
+        return (f"\n(gekappt: {omitted} von {total} Stellen nicht im Block — Grenze {cap} "
+                "Zeichen je Paket)\n")
+
+    reserve = len(notice(total))
+    if len(intro) + reserve > cap:
+        raise KitError(f"cap {cap} zu klein für Kopf und Kappungshinweis des Blocks")
+    size, shown = len(intro), 0
+    for block in blocks:
+        if size + len(block) + reserve > cap:
+            break
+        size += len(block)
+        shown += 1
+    return head + intro + "".join(blocks[:shown]) + notice(total - shown), shown
+
+
+def render_block(packet, entries, unresolved, cap):
+    """Paketblock in Markdown: Kopf (Paket, Bereich, Dateien; eine Datei ohne Sammler mit
+    „Gegenstellen nicht gesammelt (Sprache)") und Abschnitt `## Gegenstellen` mit der Zahl
+    der Stellen und der nicht aufgelösten, dann je Stelle ihre `lines` (Format bei
+    `Collected`) in der gegebenen Reihenfolge. Für jede Sprache dasselbe.
+
+    `cap` (None = `BLOCK_MAX_CHARS`) begrenzt den Abschnitt `## Gegenstellen` bis zum Ende in
+    Zeichen. Passen nicht alle Stellen, stehen die ersten, die passen, und am Ende
+    `(gekappt: <weggelassen> von <alle> Stellen nicht im Block — …)` — nie still. Ein `cap`,
+    in den nicht einmal Überschrift und Hinweis passen, ist ein KitError. Die Kopfzeile des
+    Artefakts (E3) setzt `write_counterparts` davor."""
+    return _render(packet, entries, unresolved, cap)[0]
+
+
+def _unparsed_note(unparsed) -> str:
+    if not unparsed:
+        return ""
+    names = ", ".join(f"`{p}`" for p in unparsed[:UNPARSED_NAMES_MAX])
+    more = len(unparsed) - UNPARSED_NAMES_MAX
+    names += f" und {more} weitere" if more > 0 else ""
+    return (f"\nNicht im Index (Syntaxfehler am ZIEL, übersprungen): {len(unparsed)} "
+            f"Datei(en): {names}\n")
+
+
+def write_counterparts(repo, run_id):
+    """`counterparts --run <lauf>`: je Paket des Plans `packets/<id>.md` im Laufordner.
+
+    Je Paket zuerst der reviewbare Bereich (`make_packet_range`; vorhandene Bereiche kommen
+    ohne neue Refs zurück), dann die Gegenstellen über den Bereich des Plans, beschränkt auf
+    die Paketdateien — dieselben geänderten Zeilen wie im Paket-Bereich, der Code aber am
+    ZIEL des Plans (`bis^{tree}` weicht bei einer Datei/Ordner-Kollision ab). Die Datei
+    beginnt mit der Kopfzeile `<!-- skill: deep-review | schema: 1 | generated: … | packet:
+    <id> -->`, dann `render_block` und, falls Dateien am ZIEL nicht lesbar waren, ihre Zahl.
+    Fokus `quality` sammelt keine Gegenstellen und sagt das. Schreibt atomar, überschreibt
+    einen früheren Block. Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "path"
+    (repo-relativ), "counterparts", "shown", "unresolved"}`."""
+    repo = _toplevel(repo)
+    run_id = _check_run_id(run_id)
+    _path, plan = _load_plan(repo, run_id)
+    plan_range = plan.get("range")
+    if not isinstance(plan_range, str) or not plan_range:
+        raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
+    written = []
+    for packet in plan["packets"]:
+        pid = packet["id"]
+        rng = make_packet_range(repo, run_id, pid, None, None)
+        shown_packet = {**packet, "range": rng}
+        header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
+                  f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+        if plan.get("focus") == "quality":
+            body = (_render_head(shown_packet)
+                    + "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n")
+            total = shown = unresolved = 0
+        else:
+            found = collect_python(repo, plan_range, packet["files"])
+            body, shown = _render(shown_packet, found.entries, found.unresolved, None)
+            body += _unparsed_note(found.unparsed)
+            total, unresolved = len(found.entries), found.unresolved
+        rel = CACHE_DIR / run_id / "packets" / f"{pid}.md"
+        _write_text(repo / rel, header + body)
+        written.append({"packet": pid, "path": rel.as_posix(), "counterparts": total,
+                        "shown": shown, "unresolved": unresolved})
+    return written

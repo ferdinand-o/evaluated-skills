@@ -1347,3 +1347,211 @@ def test_k6_malformed_note_is_a_kit_error(tmp_path):
             kit.make_packet_range(root, run, "p1", None, None)
     path.write_text(json.dumps({**good, "notes": [note]}), encoding="utf-8")
     kit.make_packet_range(root, run, "p1", None, None)
+
+
+# --- review_kit.py: Gegenstellen für Python (Task 4) ---------------------------------------
+
+def _section(text):
+    """Der Gegenstellen-Abschnitt eines Paketblocks — für ihn gilt die Kappung."""
+    return text[text.index("## Gegenstellen"):]
+
+
+def _collect_block(kit, root, rng="base..HEAD"):
+    plan = kit.build_plan(root, rng, "standard", "bugs", None, False)
+    packet = plan["packets"][0]
+    found = kit.collect_python(root, plan["range"], packet["files"])
+    return plan, found, kit.render_block(packet, found.entries, found.unresolved, None)
+
+
+VENDOR_LIB = (
+    "def _check(items):\n"
+    "    if not isinstance(items, list):\n"
+    "        raise TypeError(\"items muss eine Liste sein\")\n"
+    "    return items\n"
+    "\n"
+    "\n"
+    "def group(items, key):\n"
+    "    \"\"\"Gruppiert Einträge nach einem Schlüssel.\n"
+    "\n"
+    "    Zweite Zeile.\"\"\"\n"
+    "    _check(items)\n"
+    "    if key is None:\n"
+    "        raise ValueError(\"key fehlt\")\n"
+    "    return {key(i): i for i in items}\n"
+)
+GROUPS = (
+    "from vendor.lib import group\n"
+    "\n"
+    "\n"
+    "def build(items):\n"
+    "    try:\n"
+    "        return group(items, key=len)\n"
+    "    except (ValueError, TypeError, LookupError):\n"
+    "        return {}\n"
+)
+
+
+def test_counterparts_python_except_and_raises(tmp_path):
+    kit = _kit()
+    before = {"vendor/__init__.py": "", "vendor/lib.py": VENDOR_LIB, "app/__init__.py": "",
+              "app/groups.py": GROUPS,
+              # gleichnamig, aber ohne Importbezug: nicht die Gegenstelle
+              "tools/misc.py": "def group(x):\n    raise KeyError(x)\n",
+              # Syntaxfehler am ZIEL: übersprungen und gezählt
+              "tools/broken.py": "def kaputt(:\n"}
+    after = {"app/groups.py": GROUPS.replace("(ValueError, TypeError, LookupError)",
+                                             "(ValueError, LookupError)")}
+    root = _commit_repo(tmp_path, before, after)
+    plan, found, block = _collect_block(kit, root)
+
+    assert found.unresolved == 0
+    assert found.unparsed == ["tools/broken.py"]
+    assert [(e["file"], e["line"], e["kind"]) for e in found.entries] == [
+        ("app/groups.py", 7, "except")]
+    assert found.entries[0]["lines"] == [
+        "### app/groups.py:7 except (ValueError, LookupError)",
+        "- Gegenstelle group [vendor/lib.py:7]: def group(items, key)",
+        "  Doc: Gruppiert Einträge nach einem Schlüssel.",
+        "  wirft: TypeError, ValueError",
+        "    raise TypeError at vendor/lib.py:3",
+        "    raise ValueError at vendor/lib.py:13",
+    ]
+    assert re.search(r"wirft:[^\n]*TypeError", block)
+    assert "tools/misc.py" not in block and "Zweite Zeile" not in block
+
+    # counterparts --run <lauf>: packets/<id>.md mit Kopfzeile, Bereich, Dateien und Block.
+    run = plan["_meta"]["run"]
+    written = kit.write_counterparts(root, run)
+    md_path = kit.run_dir(root, run) / "packets" / "p1.md"
+    assert [w["packet"] for w in written] == ["p1"]
+    assert written[0]["path"] == f".skills/cache/deep-review/{run}/packets/p1.md"
+    assert (written[0]["counterparts"], written[0]["shown"], written[0]["unresolved"]) == (1, 1, 0)
+    md = md_path.read_text(encoding="utf-8")
+    first = md.splitlines()[0]
+    assert first.startswith("<!-- skill: deep-review | schema: 1 | ") and first.endswith(" -->")
+    assert f"counterparts --run {run}" in first
+    assert f"Bereich: `{plan['range']}`" in md
+    assert "- `app/groups.py`" in md
+    assert "\n".join(found.entries[0]["lines"]) in md
+    assert re.search(r"wirft:[^\n]*TypeError", md) and "vendor/lib.py" in md
+    assert "tools/broken.py" in md and "Syntaxfehler" in md
+
+
+PKG_MOD = (
+    "class Klasse:\n"
+    "    \"\"\"Lädt Einträge aus einer Datei.\"\"\"\n"
+    "\n"
+    "    def __init__(self, path, strict=True):\n"
+    "        self.data = _load(path, strict=strict)\n"
+    "\n"
+    "\n"
+    "def _load(path, strict):\n"
+    "    return _parse(path, strict=strict)\n"
+    "\n"
+    "\n"
+    "def _parse(path, strict):\n"
+    "    if not strict:\n"
+    "        return []\n"
+    "    raise ValueError(path)\n"
+)
+OTHER_MOD = (
+    "class Klasse:\n"
+    "    def __init__(self, path, strict=True):\n"
+    "        if strict:\n"
+    "            raise KeyError(path)\n"
+)
+MAIN = (
+    "import other.mod\n"
+    "import pkg.mod\n"
+    "\n"
+    "\n"
+    "def run(path):\n"
+    "    first = other.mod.Klasse(path)\n"
+    "    return pkg.mod.Klasse(path, strict=True), first\n"
+)
+
+
+def test_counterparts_python_flag_flow(tmp_path):
+    kit = _kit()
+    before = {"pkg/__init__.py": "", "pkg/mod.py": PKG_MOD, "other/__init__.py": "",
+              "other/mod.py": OTHER_MOD, "app/main.py": MAIN}
+    root = _commit_repo(tmp_path, before, {"app/main.py": MAIN.replace("strict=True", "strict=False")})
+    _plan, found, block = _collect_block(kit, root)
+
+    assert found.unresolved == 0 and found.unparsed == []
+    assert [(e["file"], e["line"]) for e in found.entries] == [("app/main.py", 7)]
+    assert found.entries[0]["lines"] == [
+        "### app/main.py:7 ruft Klasse(...)",
+        "- Gegenstelle Klasse [pkg/mod.py:1]: class Klasse: def __init__(self, path, strict=True)",
+        "  Doc: Lädt Einträge aus einer Datei.",
+        "  wirft: ValueError",
+        "    raise ValueError at pkg/mod.py:15",
+        "  geändert: strict=False; Weg:",
+        "    pkg/mod.py:5: strict -> _load(strict=...) [pkg/mod.py:8]",
+        "    pkg/mod.py:9: strict -> _parse(strict=...) [pkg/mod.py:12]",
+        "    pkg/mod.py:13: if not strict: return []",
+    ]
+    # Der voll qualifizierte Pfad entscheidet: die gleichnamige, ebenfalls importierte
+    # Klasse in other/mod.py ist nicht die Gegenstelle.
+    assert "other/mod.py" not in block and "KeyError" not in block
+
+
+STORE = "class Store:\n    def values(self):\n        raise RuntimeError(\"leer\")\n"
+
+
+def test_counterparts_python_no_guessing(tmp_path):
+    kit = _kit()
+    before = {f"{d}/m.py": STORE for d in "abcd"}
+    before.update({
+        "app/report.py": "import json\n\n\ndef total(data):\n    return sum(data.values())\n",
+        "app/known.py": "from a.m import Store\n\n\ndef first():\n    return Store().values()\n",
+    })
+    after = {"app/report.py": before["app/report.py"].replace("data.values())", "data.values()) + 1"),
+             "app/known.py": before["app/known.py"].replace("Store().values()",
+                                                            "list(Store().values())")}
+    root = _commit_repo(tmp_path, before, after)
+    _plan, found, block = _collect_block(kit, root)
+
+    # `.values()` ohne Importbezug bei vier gleichnamigen Definitionen: nichts statt Raten,
+    # aber gezählt. Mit Importbezug (`from a.m import Store`) löst derselbe Name auf.
+    assert found.unresolved == 1
+    assert [(e["file"], e["line"]) for e in found.entries] == [("app/known.py", 5)]
+    assert found.entries[0]["lines"][:3] == [
+        "### app/known.py:5 ruft values(...)",
+        "- Gegenstelle Store.values [a/m.py:2]: def values(self)",
+        "  wirft: RuntimeError",
+    ]
+    assert "app/report.py:" not in block
+    assert not any(f"{d}/m.py" in block for d in "bcd")
+    assert "1 nicht aufgelöst" in block
+
+
+def test_counterparts_cap():
+    kit = _kit()
+    packet = {"id": "p2", "files": ["app/x.py", "web/y.ts"], "range": "aaa..bbb"}
+    entries = [{"file": f"app/m{i:03}.py", "line": i + 1, "kind": "call",
+                "lines": [f"### app/m{i:03}.py:{i + 1} ruft f(...)",
+                          f"- Gegenstelle f [lib/f.py:{i + 1}]: def f(x)",
+                          "  wirft: ValueError",
+                          "    raise ValueError at lib/f.py:9 " + "x" * 40]}
+               for i in range(400)]
+    text = kit.render_block(packet, entries, 2, None)
+    section = _section(text)
+    assert sum(len("\n".join(e["lines"])) for e in entries) > kit.BLOCK_MAX_CHARS
+    assert len(section) <= kit.BLOCK_MAX_CHARS
+    shown = section.count("\n### ")
+    assert 0 < shown < 400
+    assert f"gekappt: {400 - shown} von 400 Stellen" in section
+    # In Reihenfolge: die ersten Stellen stehen, die letzten fehlen.
+    assert "app/m000.py:1 " in section and f"app/m{shown - 1:03}.py:" in section
+    assert f"app/m{shown:03}.py:" not in section
+    assert "Bereich: `aaa..bbb`" in text and "2 nicht aufgelöst" in section
+    # Datei ohne Sammler: gesagt, nicht still.
+    assert "- `web/y.ts` — Gegenstellen nicht gesammelt (Sprache)" in text
+
+    small = _section(kit.render_block(packet, entries, 0, 2000))
+    assert len(small) <= 2000 and "gekappt:" in small
+    full = _section(kit.render_block(packet, entries, 0, 10 ** 6))
+    assert "gekappt" not in full and full.count("\n### ") == 400
+    with pytest.raises(kit.KitError):
+        kit.render_block(packet, entries, 0, 10)
