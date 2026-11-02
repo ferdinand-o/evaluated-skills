@@ -501,6 +501,34 @@ rot war. Den Lauf der vollen Suite nach allen Zyklen kann man daher nicht als `g
 protokollieren. Der Agent wich auf `refactor` aus. Deshalb meldete die Vertragsprüfung von
 Task 7 „volle Suite fehlt“. Der Step „Grün sehen: volle Suite“ und das Log passen nicht zusammen.
 
+### Task 8, Task 9 und Prüfpunkt 7 (vor Task 10, C1 und C5)
+
+Task 8 (Sonnet) hat `fix-task` beigebracht, die `findings.json` von deep-review zu lesen; Task 9
+(Opus) hat `references/packets.md` und `references/counterparts.md` geschrieben. Beide haben
+`verify` bestanden. Bei Task 8 meldet die Vertragsprüfung wieder „volle Suite nicht im Log“
+(Lesson oben); nach dem Merge waren 1.761 Tests grün. Der Haiku-Agent der Vertragsprüfung rief
+einmal `interrupt_session` auf, obwohl der Auftrag das ausschloss. Der Aufruf wurde abgelehnt.
+
+Task 9 nennt 13 Stellen, an denen das Skript vom Spec abweicht. Die References beschreiben das
+Skript. Der Spec muss nachgezogen werden, das geschieht vor der Abnahme in Task 16. Die
+wichtigsten Abweichungen:
+
+- `plan` hat kein `--run`. Ein Lauf wird über `counterparts`, `record`, `merge` und `audit`
+  fortgesetzt.
+- Die Paket-Bereiche baut `counterparts`.
+- `s1` bekommt beim Wurzel-Commit und nach `--since` doch Hilfscommits.
+- `--since` hat Abdeckungskette, Fokus- und Profilgleichheit und `outside`.
+- `merge` ist nicht transitiv.
+- `audit.json` hat zusätzlich `coverage`.
+- Der Anti-Zeremonie-Fall zählt die Kopfzeile nicht mit.
+- Der Delphi-Sammler kann mehr als im Spec beschrieben.
+
+`/code-review` über 571 Zeilen ergab 11 Funde. Die wichtigsten: `fix-task` nahm bei
+zusammengelegten Funden nur die erste Zeile und mischte die Szenarien. Jedes Objekt mit
+`findings`, auch ein einzelnes `results/p1.json`, galt als ganzer Lauf. `file: null` wurde zum
+Allowlist-Eintrag. Den Report-Fund (Zählung in Prüfpunkt 6) habe ich selbst berichtigt. Die
+übrigen sieben gehen in Fix-Runde 1.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
