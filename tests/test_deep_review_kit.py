@@ -2935,12 +2935,13 @@ def test_since_per_file(tmp_path, monkeypatch):
         assert plan_b == before                          # die Eingabe bleibt, wie sie ist
         assert applied["file_keys"]["a.py"] == {
             "key": keys_a["a.py"]["key"], "changed_lines": 5,
-            "base_blob": kit.ABSENT_MARK, "target_blob": git(root, "rev-parse", "t2:a.py").strip(),
+            "base_blob": kit.ABSENT_MARK, "target_blob": "100644:" + _blob(root, "t2", "a.py"),
             "reused_from": run_a2["_meta"]["run"],       # der jüngere Lauf gilt
+            "reused_chain": [run_a2["_meta"]["run"]],
             "findings": [_finding("a.py", 5, "neu A2")]}
         assert applied["file_keys"]["b.py"] == {
             "key": plan_b["file_keys"]["b.py"]["key"], "changed_lines": 7,
-            "base_blob": kit.ABSENT_MARK, "target_blob": git(root, "rev-parse", "t2:b.py").strip(),
+            "base_blob": kit.ABSENT_MARK, "target_blob": "100644:" + _blob(root, "t2", "b.py"),
             "reused_from": None}
         # b.py allein wird neu gepackt; ohne Hilfscommits baut erst `counterparts` den Bereich.
         assert applied["packets"] == [{"id": "p1", "files": ["b.py"], "changed_lines": 7,
@@ -3077,26 +3078,39 @@ def test_f1_since_reuses_only_when_coverage_chain_closes(tmp_path, monkeypatch):
 
     run_a0 = kit.build_plan(root, "t0..t1", "standard", "bugs", None, False)
     run_a = kit.build_plan(root, "t1..t2", "standard", "bugs", None, False)
-    _record(kit, root, run_a0, "p1", [_finding("x.py", 9, "A0")])
-    _record(kit, root, run_a, "p1", [_finding("x.py", 5, "A")])
+    both = _finding("x.py", 7, "beide")
+    _record(kit, root, run_a0, "p1", [_finding("x.py", 9, "A0"),
+                                      {**both, "failure_scenario": "aus A0"}])
+    _record(kit, root, run_a, "p1", [_finding("x.py", 5, "A"), both])
     plan_b = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
     entry = plan_b["file_keys"]["x.py"]
     assert entry["key"] == run_a["file_keys"]["x.py"]["key"]          # gleicher Stand am ZIEL
-    assert entry["base_blob"] == _blob(root, "t0", "x.py")
-    assert entry["target_blob"] == _blob(root, "t2", "x.py")
-    assert run_a["file_keys"]["x.py"]["base_blob"] == _blob(root, "t1", "x.py")
-    assert run_a0["file_keys"]["x.py"]["target_blob"] == _blob(root, "t1", "x.py")
+    assert entry["base_blob"] == "100644:" + _blob(root, "t0", "x.py")
+    assert entry["target_blob"] == "100644:" + _blob(root, "t2", "x.py")
+    assert run_a["file_keys"]["x.py"]["base_blob"] == "100644:" + _blob(root, "t1", "x.py")
+    assert run_a0["file_keys"]["x.py"]["target_blob"] == "100644:" + _blob(root, "t1", "x.py")
 
     # A sah nur t1..t2 (Zeile 5), B zählt t0..t2: ohne Kette nichts übernommen.
     assert kit.apply_since(plan_b, [_run_path(root, run_a)]) == plan_b
     assert kit.apply_since(plan_b, [_run_path(root, run_a0)]) == plan_b
-    # A0 deckt t0..t1, A t1..t2: die Kette schließt sich, übernommen wird von A.
+    # A0 deckt t0..t1, A t1..t2: die Kette schließt sich, übernommen wird von A — mit den
+    # Funden aller Glieder (der jüngste zuerst), ein Fund beider Läufe nur einmal.
     dirs = [_run_path(root, run_a0), _run_path(root, run_a)]
     for order in (dirs, dirs[::-1]):
         applied = kit.apply_since(plan_b, order)
         assert applied["file_keys"]["x.py"]["reused_from"] == run_a["_meta"]["run"]
-        assert applied["file_keys"]["x.py"]["findings"] == [_finding("x.py", 5, "A")]
+        assert applied["file_keys"]["x.py"]["reused_chain"] == [run_a["_meta"]["run"],
+                                                                run_a0["_meta"]["run"]]
+        assert applied["file_keys"]["x.py"]["findings"] == [
+            _finding("x.py", 5, "A"), both, _finding("x.py", 9, "A0")]
         assert applied["packets"] == []
+    # Ohne Kette (A deckt alles selbst) besteht sie nur aus A.
+    run_full = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
+    _record(kit, root, run_full, "p1", [_finding("x.py", 3, "voll")])
+    alone = kit.apply_since(plan_b, [*dirs, _run_path(root, run_full)])["file_keys"]["x.py"]
+    assert alone["reused_from"] == run_full["_meta"]["run"]
+    assert alone["reused_chain"] == [run_full["_meta"]["run"]]
+    assert alone["findings"] == [_finding("x.py", 3, "voll")]
 
     # Ein früherer Plan ohne die Blob-Felder übernimmt nichts und trägt keine Kette.
     def drop(data):
@@ -3123,7 +3137,7 @@ def test_f1_since_reuses_only_when_coverage_chain_closes(tmp_path, monkeypatch):
     assert gone_b["file_keys"]["f.py"]["key"] == gone_a["file_keys"]["f.py"]["key"]
     assert gone_b["file_keys"]["f.py"]["target_blob"] == gone_a["file_keys"]["f.py"]["target_blob"]
     assert not re.fullmatch(r"[0-9a-f]{40,64}", gone_b["file_keys"]["f.py"]["target_blob"])
-    assert gone_b["file_keys"]["f.py"]["base_blob"] == _blob(root, "e1", "f.py")
+    assert gone_b["file_keys"]["f.py"]["base_blob"] == "100644:" + _blob(root, "e1", "f.py")
     assert kit.apply_since(gone_b, [_run_path(root, gone_a)]) == gone_b
     again = kit.build_plan(root, "d0..d1", "standard", "bugs", None, False)
     assert kit.apply_since(again, [_run_path(root, gone_a)])["file_keys"]["f.py"][
@@ -3269,6 +3283,88 @@ def test_f5_symlink_key_follows_the_real_file(tmp_path, monkeypatch):
     assert len(set(keys)) == 3 and all(re.fullmatch(r"[0-9a-f]{64}", k) for k in keys)
 
 
+def test_cp5b_f2_symlink_key_follows_through_directory_links(tmp_path, monkeypatch):
+    """F2 (Fix-Runde 2): ein Link über einen Ordner-Symlink folgt der echten Datei; ein Link
+    auf einen Ordner bekommt eine Marke, ohne dass dessen Inhalt gelistet wird."""
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _fresh_repo(tmp_path / "repo")
+    _commit_files(root, "t0", {"src/m.py": "def f():\n    return 1\n", "README.md": "# x\n"})
+    git(root, "tag", "base")
+    os.symlink("src", root / "lnk")
+    os.symlink("lnk/m.py", root / "a.py")
+    os.symlink(".", root / "d.py")
+    os.symlink("src", root / "e.py")
+    os.symlink("lnk/../src/m.py", root / "g.py")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "t1")
+    git(root, "tag", "t1")
+    _commit_files(root, "t2", {"src/m.py": "def f():\n    return 2\n"})
+    git(root, "tag", "t2")
+
+    t1, t2 = _rev(root, "t1"), _rev(root, "t2")
+    keys = [kit.file_keys(root, t, ["a.py", "g.py"], []) for t in (t1, t2)]
+    assert keys[0]["a.py"] != keys[1]["a.py"]
+    assert keys[0]["g.py"] != keys[1]["g.py"]
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [_finding("a.py", 1, "link")])
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    assert plan_b["file_keys"]["a.py"]["key"] != run_a["file_keys"]["a.py"]["key"]
+    assert kit.apply_since(plan_b, [_run_path(root, run_a)])["file_keys"]["a.py"][
+        "reused_from"] is None
+
+    # Ein Link auf einen Ordner (oder die Wurzel): Marke, kein rekursives Listen des Ordners.
+    outputs = []
+    real = kit._git
+
+    def spy(repo, *args, **kwargs):
+        out = real(repo, *args, **kwargs)
+        if "ls-tree" in args:
+            outputs.append(out)
+        return out
+
+    monkeypatch.setattr(kit, "_git", spy)
+    dirs = [kit.file_keys(root, t, ["d.py", "e.py"], []) for t in (t1, t2)]
+    assert dirs[0] == dirs[1]
+    assert not any("src/m.py" in out or "README.md" in out for out in outputs)
+
+
+def test_cp5b_f3_mode_counts_in_the_coverage_chain(tmp_path, monkeypatch):
+    """F3 (Fix-Runde 2): Symlink und reguläre Datei mit denselben Bytes sind nicht derselbe
+    Stand an der Basis."""
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _fresh_repo(tmp_path / "repo")
+    _commit_files(root, "c0", {"README.md": "# x\n"})
+    git(root, "tag", "c0")
+    os.symlink("b.py", root / "f.py")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "s0")
+    git(root, "tag", "s0")
+    (root / "f.py").unlink()
+    _commit_files(root, "s1", {"f.py": "v = 1\n"})
+    git(root, "tag", "s1")
+    git(root, "checkout", "--quiet", "-b", "other", "c0")
+    _commit_files(root, "r0", {"f.py": "b.py"})
+    git(root, "tag", "r0")
+    _commit_files(root, "r1", {"f.py": "v = 1\n"})
+    git(root, "tag", "r1")
+    assert _blob(root, "s0", "f.py") == _blob(root, "r0", "f.py")      # dieselben Bytes
+
+    run_a = kit.build_plan(root, "s0..s1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [_finding("f.py", 1, "A")])
+    plan_b = kit.build_plan(root, "r0..r1", "standard", "bugs", None, False)
+    a_marks, b_marks = run_a["file_keys"]["f.py"], plan_b["file_keys"]["f.py"]
+    assert b_marks["key"] == a_marks["key"] and b_marks["target_blob"] == a_marks["target_blob"]
+    assert a_marks["base_blob"] == "120000:" + _blob(root, "s0", "f.py")
+    assert b_marks["base_blob"] == "100644:" + _blob(root, "r0", "f.py")
+    assert b_marks["target_blob"] == "100644:" + _blob(root, "r1", "f.py")
+    assert kit.apply_since(plan_b, [_run_path(root, run_a)]) == plan_b
+    again = kit.build_plan(root, "s0..s1", "standard", "bugs", None, False)
+    assert kit.apply_since(again, [_run_path(root, run_a)])["file_keys"]["f.py"][
+        "reused_from"] == run_a["_meta"]["run"]
+
+
 def test_f6_apply_since_packs_like_build_plan(tmp_path, monkeypatch):
     kit = _kit()
     _tick(kit, monkeypatch)
@@ -3324,8 +3420,11 @@ def test_f7_malformed_earlier_plan_is_a_kit_error(tmp_path, monkeypatch):
     def keys_list(data):
         data["file_keys"] = ["a.py"]
 
+    def bad_chain(data):
+        data["file_keys"]["a.py"]["reused_chain"] = "x"
+
     for change, why in ((nested, "files"), (no_lines, "changed_lines"), (bad_blob, "base_blob"),
-                        (keys_list, "file_keys")):
+                        (keys_list, "file_keys"), (bad_chain, "reused_chain")):
         path.write_text(good, encoding="utf-8")
         _rewrite_plan(root, run_a, change)
         with pytest.raises(kit.KitError, match=f"{run}.*{why}|{why}.*{run}"):

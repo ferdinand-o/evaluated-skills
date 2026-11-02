@@ -44,6 +44,7 @@ import tempfile
 import time
 import tokenize
 import warnings
+from collections import deque
 from pathlib import Path, PurePath, PurePosixPath
 from typing import NamedTuple
 
@@ -78,7 +79,8 @@ HELPER_NAME = "deep-review"
 HELPER_EMAIL = "deep-review@localhost"
 RUN_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{6}-[0-9a-f]{7}-[0-9a-z]{4}")
 RUN_STAMP_CHARS = len("2026-01-01-000000")   # Zeitteil der Lauf-ID (UTC, sekundengenau)
-# Stand einer Datei in `file_keys` (`base_blob`, `target_blob`): Blob-SHA, sonst eine Marke.
+# Stand einer Datei in `file_keys` (`base_blob`, `target_blob`): `<modus>:<blob-SHA>`, sonst
+# eine Marke.
 BLOB_FIELDS = ("base_blob", "target_blob")
 ABSENT_MARK = "absent"                        # die Datei fehlt in diesem Baum
 GITLINK_MARK = "gitlink:"                     # Submodul: Marke plus Commit-SHA
@@ -589,7 +591,7 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
     null}`: den Datei-Schlüssel (`file_keys()`, über die Gegenstellen des Bereichs — bei Fokus
     `quality`, der keine sammelt, nur über den Inhalt), die geänderten Zeilen, die
     `apply_since` zum Neupacken braucht, und den Stand der Datei an der gezählten Basis und am
-    ZIEL (`_file_blobs`: Blob-SHA, `ABSENT_MARK` oder `gitlink:<commit>`), aus dem
+    ZIEL (`_file_blobs`: `<modus>:<blob-SHA>`, `ABSENT_MARK` oder `gitlink:<commit>`), aus dem
     `apply_since` die Abdeckungskette prüft. Sammler und Schlüssel bekommen den einmal
     aufgelösten Bereich (`Span`), sie lösen ihn nicht neu auf. Die Lauf-ID
     steht in `_meta.run`; `plan.json` liegt in `run_dir(repo, run)`. `--since` übernimmt
@@ -880,8 +882,9 @@ def _read_plan(path: Path, run_id: str) -> dict:
 def _check_file_keys(keyed, bad) -> dict:
     """`file_keys` eines Plans prüfen; `bad(grund)` liefert den KitError. Ein Objekt Pfad →
     Objekt mit `key` (Text), `changed_lines` (Zahl ≥ 0), `base_blob`/`target_blob` (Text,
-    wenn vorhanden — ältere Pläne haben sie nicht), `reused_from` (Text oder null) und
-    `findings` (Liste, wenn vorhanden). Fehlt `file_keys` ganz: leer."""
+    wenn vorhanden — ältere Pläne haben sie nicht), `reused_from` (Text oder null),
+    `reused_chain` (Liste von Text, wenn vorhanden) und `findings` (Liste, wenn vorhanden).
+    Fehlt `file_keys` ganz: leer."""
     if keyed is None:
         return {}
     if not isinstance(keyed, dict):
@@ -902,6 +905,9 @@ def _check_file_keys(keyed, bad) -> dict:
             raise bad(f"{where}: reused_from ist weder Text noch null")
         if "findings" in info and not isinstance(info["findings"], list):
             raise bad(f"{where}: findings ist keine Liste")
+        chain = info.get("reused_chain", [])
+        if not isinstance(chain, list) or not all(isinstance(r, str) and r for r in chain):
+            raise bad(f"{where}: reused_chain ist keine Liste von Lauf-IDs")
     return keyed
 
 
@@ -3715,9 +3721,11 @@ def _blob_contents(repo: Path, shas) -> dict:
 
 
 def _blob_marks(found: dict, paths) -> dict:
-    """Pfad → Stand in einem Baum aus seinen `_tree_entries`: der Blob-SHA (auch bei einem
-    Symlink: der Blob des Links), `gitlink:<commit>` für ein Submodul, `ABSENT_MARK`, wenn
-    der Baum den Pfad nicht als Datei hat."""
+    """Pfad → Stand in einem Baum aus seinen `_tree_entries`: `<modus>:<blob-SHA>` (auch bei
+    einem Symlink: Modus `120000` und der Blob des Links — ein Symlink und eine Datei mit
+    denselben Bytes sind so verschiedene Stände, ebenso eine reine Modusänderung),
+    `gitlink:<commit>` für ein Submodul, `ABSENT_MARK`, wenn der Baum den Pfad nicht als
+    Datei hat."""
     marks = {}
     for path in paths:
         entry = found.get(path)
@@ -3726,7 +3734,7 @@ def _blob_marks(found: dict, paths) -> dict:
         elif entry[1] == "commit":
             marks[path] = GITLINK_MARK + entry[2]
         else:
-            marks[path] = entry[2]
+            marks[path] = f"{entry[0]}:{entry[2]}"
     return marks
 
 
@@ -3737,41 +3745,79 @@ def _file_blobs(repo: Path, treeish: str, files) -> dict:
     return _blob_marks(_tree_entries(repo, treeish, wanted), wanted)
 
 
+LINK_MAX_HOPS = 40     # höchstens so viele Symlinks auf dem Weg zum Ziel (wie MAXSYMLINKS)
+
+
 def _link_parts(repo: Path, target: str, links: dict) -> dict:
     """Je Symlink (`links`: Pfad → Inhalt des Link-Blobs) der Teil, den sein Ziel am `target`
     zum Datei-Schlüssel beiträgt: `("link-target", Inhalt)` der Datei, auf die er im Repo
-    zeigt (relativ zum Ordner des Links, normalisiert, `_link_dest`; über weitere Symlinks
-    hinweg), `("link-gitlink", Commit)` bei einem Submodul, sonst `("link-unresolved", b"")`
-    — absolut, aus dem Repo hinaus, ohne Datei am Ziel oder im Kreis. Je Schritt ein
-    `ls-tree` und ein `cat-file` für alle Links zusammen."""
+    zeigt, `("link-gitlink", Commit)` bei einem Submodul, sonst `("link-unresolved", b"")` —
+    absolut, aus dem Repo hinaus, ein Ordner, ohne Eintrag am Ziel, durch ein Submodul oder
+    über mehr als `LINK_MAX_HOPS` Symlinks (auch im Kreis).
+
+    Aufgelöst wird wie im Dateisystem, Teil für Teil am `target`, relativ zum Ordner des
+    Links: `.` bleibt, `..` geht einen Ordner zurück (nie über die Wurzel des Repos hinaus),
+    ein Ordner wird betreten, ein Symlink unterwegs — auch auf einen Ordner — wird durch
+    seinen Inhalt ersetzt. Je Teil wird nur der eine Eintrag im Baum seines Ordners gesucht
+    (`ls-tree <baum> -- :(literal)<name>`, nicht rekursiv), ein Ordner als Ziel also nie
+    gelistet. Je Schritt ein `ls-tree` je beteiligtem Ordner und ein `cat-file` für alle
+    Links zusammen."""
+    unresolved = ("link-unresolved", b"")
     parts: dict = {}
-    pending: dict = {}
+    if not links:
+        return parts
+    root = _git(repo, "rev-parse", "--verify", "--quiet", f"{target}^{{tree}}").strip()
+    pending: dict = {}                    # Pfad → [Bäume bis zum Ordner, übrige Teile, Sprünge]
     for path, raw in links.items():
-        dest = _link_dest(path, raw)
-        if dest is None:
-            parts[path] = ("link-unresolved", b"")
+        dest = raw.decode("utf-8", errors="surrogateescape")
+        if not dest or dest.startswith("/"):
+            parts[path] = unresolved
         else:
-            pending[path] = (dest, {path})
+            pending[path] = [[root], posixpath.dirname(path).split("/") + dest.split("/"), 0]
     while pending:
-        found = _tree_entries(repo, target, {dest for dest, _seen in pending.values()})
-        blobs = _blob_contents(repo, {found[d][2] for d, _seen in pending.values()
-                                      if d in found and found[d][1] == "blob"})
-        following = {}
-        for path, (dest, seen) in pending.items():
-            entry = found.get(dest)
-            if entry is None:
-                parts[path] = ("link-unresolved", b"")
-            elif entry[1] == "commit":
-                parts[path] = ("link-gitlink", entry[2].encode("ascii"))
-            elif entry[0] == "120000":
-                nxt = _link_dest(dest, blobs[entry[2]])
-                if nxt is None or nxt in seen or nxt == dest:
-                    parts[path] = ("link-unresolved", b"")
-                else:
-                    following[path] = (nxt, seen | {dest})
+        asks: dict = {}                   # Pfad → (Baum, Name)
+        for path, (trees, rest, _hops) in list(pending.items()):
+            while rest and rest[0] in ("", ".", ".."):
+                if rest.pop(0) == "..":
+                    if len(trees) == 1:
+                        break
+                    trees.pop()
             else:
-                parts[path] = ("link-target", blobs[entry[2]])
-        pending = following
+                if rest:
+                    asks[path] = (trees[-1], rest.pop(0))
+                    continue
+            parts[path] = unresolved      # aus dem Repo hinaus, oder das Ziel ist ein Ordner
+            del pending[path]
+        found: dict = {}
+        for tree in sorted({tree for tree, _name in asks.values()}):
+            names = sorted({name for t, name in asks.values() if t == tree})
+            for chunk in _literal_chunks(names):
+                out = _git(repo, "ls-tree", "-z", "--full-tree", tree, "--", *chunk)
+                for record in out.split("\0"):
+                    if record:
+                        info, name = record.split("\t", 1)
+                        found[(tree, name)] = tuple(info.split())
+        blobs = _blob_contents(repo, {found[ask][2] for ask in asks.values()
+                                      if ask in found and found[ask][1] == "blob"})
+        for path, ask in asks.items():
+            trees, rest, hops = pending[path]
+            entry = found.get(ask)
+            if entry is None:
+                parts[path] = unresolved
+            elif entry[1] == "commit":
+                parts[path] = ("link-gitlink", entry[2].encode("ascii")) if not rest else unresolved
+            elif entry[1] == "tree":
+                trees.append(entry[2])
+                continue
+            elif entry[0] == "120000":
+                dest = blobs[entry[2]].decode("utf-8", errors="surrogateescape")
+                if hops < LINK_MAX_HOPS and dest and not dest.startswith("/"):
+                    pending[path] = [trees, dest.split("/") + rest, hops + 1]
+                    continue
+                parts[path] = unresolved
+            else:
+                parts[path] = ("link-target", blobs[entry[2]]) if not rest else unresolved
+            del pending[path]
     return parts
 
 
@@ -3908,20 +3954,27 @@ def _run_age(directory: Path, run_id: str) -> tuple:
     return run_id[:RUN_STAMP_CHARS], newest, run_id
 
 
-def _chain_closes(start: str, goal: str, steps: dict) -> bool:
-    """Führt eine Kette früherer Reviews von `start` (Stand an der Basis des passenden Laufs)
-    zurück bis `goal` (Stand an der Basis des neuen Plans)? `steps`: Stand am ZIEL eines
-    Laufs → die Stände an den Basen der Läufe, die mit diesem ZIEL die Datei reviewt haben."""
-    todo, seen = [start], {start}
+def _coverage_chain(start: str, goal: str, steps: dict):
+    """Die Läufe einer Kette früherer Reviews von `start` (Stand an der Basis des passenden
+    Laufs) zurück bis `goal` (Stand an der Basis des neuen Plans), oder None, wenn sie sich
+    nicht schließt. `steps`: Stand am ZIEL eines Laufs → Liste `(Stand an seiner Basis,
+    Lauf-ID)` der Läufe, die mit diesem ZIEL die Datei reviewt haben, der jüngste zuerst.
+    Gesucht wird in der Breite, also die kürzeste Kette, bei gleicher Länge über die
+    jüngeren Läufe; `[]`, wenn `start` schon `goal` ist."""
+    todo, came = deque([start]), {start: None}
     while todo:
-        blob = todo.pop()
+        blob = todo.popleft()
         if blob == goal:
-            return True
-        for nxt in steps.get(blob, ()):
-            if nxt not in seen:
-                seen.add(nxt)
+            runs = []
+            while came[blob] is not None:
+                blob, run_id = came[blob]
+                runs.append(run_id)
+            return runs[::-1]
+        for nxt, run_id in steps.get(blob, ()):
+            if nxt not in came:
+                came[nxt] = (blob, run_id)
                 todo.append(nxt)
-    return False
+    return None
 
 
 def apply_since(plan, run_dirs):
@@ -3952,12 +4005,16 @@ def apply_since(plan, run_dirs):
 
     Schließt sich die Kette für mehrere passende Läufe, gilt der jüngste (`_run_age`: Zeitteil
     der Lauf-ID; in derselben Sekunde der Lauf, dessen `results/*.json` zuletzt geschrieben
-    wurde, nach `st_mtime_ns`; dann die Lauf-ID); übernommen werden seine Funde, nicht die der
-    übrigen Glieder. Ein jüngerer Lauf mit anderem Schlüssel oder ohne Ergebnis verdeckt einen
-    älteren nicht. Ohne Ergebnis wird nichts übernommen — die Datei wäre sonst als reviewt
-    gemeldet, ohne dass ein Review lief. In `file_keys` steht die Datei dann mit
-    `reused_from` = Lauf-ID des Laufs aus `run_dirs` und `findings` = ihren Funden (Kopien
-    der Einträge, `file`, `line`, `summary`, `failure_scenario`).
+    wurde, nach `st_mtime_ns`; dann die Lauf-ID). Die Kette ist die kürzeste von seiner Basis
+    zur Basis des neuen Plans (`_coverage_chain`, bei gleicher Länge über die jüngeren Läufe);
+    übernommen werden die Funde aller ihrer Glieder, denn jedes hat einen Teil des Bereichs
+    gesehen — der jüngste Lauf zuerst, ein Fund mit gleichem `file`, `line` und `summary` nur
+    einmal (der aus dem jüngeren Lauf). Ein jüngerer Lauf mit anderem Schlüssel oder ohne
+    Ergebnis verdeckt einen älteren nicht. Ohne Ergebnis wird nichts übernommen — die Datei
+    wäre sonst als reviewt gemeldet, ohne dass ein Review lief. In `file_keys` steht die Datei
+    dann mit `reused_from` = Lauf-ID des passenden Laufs aus `run_dirs`, `reused_chain` = die
+    Lauf-IDs der Kette, der jüngste zuerst (ohne Kette nur `[reused_from]`), und `findings` =
+    den Funden (Kopien der Einträge, `file`, `line`, `summary`, `failure_scenario`).
 
     Wurde etwas übernommen, werden die übrigen Dateien mit `_pack` neu gepackt — dieselbe
     Regel wie in `build_plan`, mit `split_at` und `packet_size` des Plans; keine Datei übrig:
@@ -3988,15 +4045,26 @@ def apply_since(plan, run_dirs):
         if not isinstance(goal, str):
             continue
         known = {r: earlier[r][1][path] for r in youngest_first if path in earlier[r][1]}
-        steps: dict[str, set] = {}
-        for item in known.values():
-            if isinstance(item.base_blob, str) and isinstance(item.target_blob, str):
-                steps.setdefault(item.target_blob, set()).add(item.base_blob)
+        steps: dict[str, list] = {}
         for run_id, item in known.items():                  # der jüngste zuerst
-            if (item.key == info["key"] and isinstance(item.base_blob, str)
-                    and isinstance(item.target_blob, str)
-                    and _chain_closes(item.base_blob, goal, steps)):
-                reused[path] = (run_id, item.findings)
+            if isinstance(item.base_blob, str) and isinstance(item.target_blob, str):
+                steps.setdefault(item.target_blob, []).append((item.base_blob, run_id))
+        for run_id, item in known.items():                  # der jüngste zuerst
+            if (item.key != info["key"] or not isinstance(item.base_blob, str)
+                    or not isinstance(item.target_blob, str)):
+                continue
+            links = _coverage_chain(item.base_blob, goal, steps)
+            if links is not None:
+                members = set(links) | {run_id}
+                chain = [r for r in youngest_first if r in members]
+                findings, seen = [], set()
+                for member in chain:
+                    for finding in known[member].findings:
+                        mark = (finding.get("file"), finding.get("line"), finding.get("summary"))
+                        if mark not in seen:
+                            seen.add(mark)
+                            findings.append(finding)
+                reused[path] = (run_id, chain, findings)
                 break
     if not reused:
         return new
@@ -4004,8 +4072,9 @@ def apply_since(plan, run_dirs):
     packet_files = [f for packet in plan["packets"] for f in packet["files"]]
     if sorted(packet_files) != sorted(plan["file_keys"]):
         raise KitError("file_keys und die Dateien der Pakete passen nicht zusammen")
-    for path, (run_id, findings) in reused.items():
+    for path, (run_id, chain, findings) in reused.items():
         new["file_keys"][path]["reused_from"] = run_id
+        new["file_keys"][path]["reused_chain"] = chain
         new["file_keys"][path]["findings"] = copy.deepcopy(findings)
     remaining = {path: info["changed_lines"] for path, info in plan["file_keys"].items()
                  if path not in reused}
