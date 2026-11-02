@@ -1440,21 +1440,40 @@ FIX_STATUSES = ("bestätigt", "plausibel")
 FIX_TASK_NAME = "fix-task.md"
 
 
+def _list_findings(items: list) -> list[dict]:
+    """Funde aus einer Liste mit `file`, `line`, `summary`, `failure_scenario`. `line` ist
+    eine Zahl, ein Text `a-b` oder null (dann bleibt `lines` leer); `summary` und
+    `failure_scenario` können null sein. Weitere Felder (`packets`, `reused_from`, `sources`)
+    bleiben unbeachtet."""
+    return [{"id": f"F{i}", "path": f["file"], "lines": "" if f.get("line") is None else str(f["line"]),
+             "related": [],
+             "reason": "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)}
+            for i, f in enumerate(items, 1)]
+
+
 def _read_findings(path: Path) -> list[dict]:
-    """Funde aus `verdicts.jsonl` (Spec 26: `_meta` in Zeile 1, Status je Fund; nur
-    `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von `/code-review`
-    (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund)."""
+    """Funde aus `findings.json` von `review_kit.py merge` (Spec 26: Objekt mit `_meta` und
+    `findings`; jeder Fund zählt), aus `verdicts.jsonl` (Spec 26: `_meta` in Zeile 1, Status
+    je Fund; nur `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von
+    `/code-review` (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund)."""
     text = path.read_text(encoding="utf-8")
     if text.lstrip().startswith("["):
-        return [{"id": f"F{i}", "path": f["file"], "lines": str(f["line"]), "related": [],
-                 "reason": "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)}
-                for i, f in enumerate(json.loads(text), 1)]
+        return _list_findings(json.loads(text))
+    try:
+        whole = json.loads(text)
+    except json.JSONDecodeError:
+        whole = None  # mehrere Zeilen: verdicts.jsonl
+    if isinstance(whole, dict) and "findings" in whole:
+        if not isinstance(whole["findings"], list):
+            raise PlanParseError(f"{path}: `findings` ist keine Liste")
+        return _list_findings(whole["findings"])
     rows = [json.loads(line) for line in text.splitlines() if line.strip()]
     return [r for r in rows if "_meta" not in r and r.get("status") in FIX_STATUSES]
 
 
 def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Path:
-    """Schreibt `fix-task.md` nach `out_dir`: Allowlist aus `path` und `related` der Funde,
+    """Schreibt `fix-task.md` nach `out_dir` aus `findings.json` (deep-review, Spec 26),
+    `verdicts.jsonl` oder der `/code-review`-Liste: Allowlist aus `path` und `related` der Funde,
     Akzeptanz je Fund „behoben und mit Test belegt", Modell das höchste der Tasks aus
     `gate.json`, deren Dateien die Funde berühren (sonst `opus`)."""
     verdicts_path, out_dir = Path(verdicts_path), Path(out_dir)
@@ -1470,7 +1489,8 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
     task = PlanTask(
         id=0, title="Funde des Prüfpunkts beheben", files=[FileRef(raw=p, path=p) for p in paths],
         files_unknown=False, consumes="", produces="", interfaces_unknown=False, steps=[],
-        step_texts=[(f"Fund {f['id']} ({f['path']}:{f['lines']}): behoben und mit Test belegt", f.get("reason", ""))
+        step_texts=[(f"Fund {f['id']} ({f['path']}{':' + str(f['lines']) if f['lines'] else ''}): behoben und mit Test belegt",
+                     f.get("reason", ""))
                     for f in findings],
     )
     doc = PlanDoc(global_constraints="- Je Fund zuerst ein Test, der rot ist; Änderungen nur in der Allowlist.", tasks=[task])
@@ -2334,8 +2354,8 @@ def main(argv: list[str] | None = None) -> int:
     cp_mark.add_argument("--tasks", required=True, help="Kommagetrennte Task-IDs des Bereichs")
     cp.set_defaults(func=_cmd_checkpoint)
 
-    fix = sub.add_parser("fix-task", help="Funde eines Prüfpunkts (verdicts.jsonl oder /code-review-Liste) als Fix-Task-Datei schreiben")
-    fix.add_argument("--verdicts", required=True, help="verdicts.jsonl (Spec 26) oder JSON-Liste von /code-review-Funden")
+    fix = sub.add_parser("fix-task", help="Funde eines Prüfpunkts (findings.json von deep-review, verdicts.jsonl oder /code-review-Liste) als Fix-Task-Datei schreiben")
+    fix.add_argument("--verdicts", required=True, help="findings.json (Spec 26, deep-review merge), verdicts.jsonl (Spec 26) oder JSON-Liste von /code-review-Funden")
     fix.add_argument("--out-dir", default=str(TASKS_DIR))
     fix.set_defaults(func=_cmd_fix_task)
 

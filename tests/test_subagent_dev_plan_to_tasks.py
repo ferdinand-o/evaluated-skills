@@ -2102,6 +2102,51 @@ def test_fix_task_from_code_review_list(tmp_path):
     assert "Off-by-one" in text and "leere Liste" in text
 
 
+def test_fix_task_reads_deep_review_findings(tmp_path):
+    """findings.json von review_kit merge (Spec 26): Objekt mit `_meta` und `findings`."""
+    findings = tmp_path / "findings.json"
+    doc = {"_meta": {"skill": "deep-review", "schema": 1, "run": "r1"},
+           "findings": [
+               {"file": "src/a.py", "line": 12, "summary": "Off-by-one | KeyError",
+                "failure_scenario": "leere Liste | fehlender Schlüssel",
+                "packets": ["p1", "p2"], "reused_from": None, "sources": [{"packet": "p1"}]},
+               {"file": "src/b.py", "line": None, "summary": "Datei ohne Zeile",
+                "failure_scenario": None, "packets": [], "reused_from": "r0", "sources": []},
+               {"file": "src/c.py", "line": "5-9", "summary": "Spanne",
+                "failure_scenario": "bricht", "packets": ["p3"], "reused_from": None, "sources": []}]}
+    findings.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    text = ptt.fix_task_from_verdicts(findings, tmp_path / "tasks").read_text(encoding="utf-8")
+    assert ptt.parse_task_machine_block(text)["allowlist"] == ["src/a.py", "src/b.py", "src/c.py"]
+    criteria = _criteria(text)
+    assert criteria.count("behoben und mit Test belegt") == 3
+    assert "(src/a.py:12)" in criteria and "(src/c.py:5-9)" in criteria
+    assert "(src/b.py)" in criteria and "src/b.py:" not in criteria and "None" not in criteria
+    assert "Off-by-one | KeyError" in text and "leere Liste | fehlender Schlüssel" in text
+    # Einzeilig geschrieben bleibt es ein Objekt, kein jsonl.
+    findings.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    assert ptt.main(["fix-task", "--verdicts", str(findings), "--out-dir", str(tmp_path / "t2")]) == 0
+    # Leere `findings` -> Exit 1, nichts geschrieben.
+    findings.write_text(json.dumps({"_meta": doc["_meta"], "findings": []}), encoding="utf-8")
+    out = tmp_path / "t3"
+    assert ptt.main(["fix-task", "--verdicts", str(findings), "--out-dir", str(out)]) == 1
+    assert not list(out.glob("*fix*"))
+    # `findings` keine Liste -> Exit 1.
+    findings.write_text(json.dumps({"_meta": doc["_meta"], "findings": "x"}), encoding="utf-8")
+    assert ptt.main(["fix-task", "--verdicts", str(findings), "--out-dir", str(out)]) == 1
+
+
+def test_fix_task_old_forms_stay_readable_next_to_deep_review_findings(tmp_path):
+    lst = tmp_path / "list.json"
+    lst.write_text(json.dumps([{"file": "src/x.py", "line": None, "summary": "S", "failure_scenario": None}]),
+                   encoding="utf-8")
+    text = ptt.fix_task_from_verdicts(lst, tmp_path / "t1").read_text(encoding="utf-8")
+    assert "(src/x.py)" in _criteria(text) and "None" not in _criteria(text)
+    jl = tmp_path / "verdicts.jsonl"
+    jl.write_text(json.dumps(_verdict("F1", "src/a.py", "bestätigt")) + "\n", encoding="utf-8")  # eine Zeile, Objekt ohne findings
+    assert ptt.parse_task_machine_block(
+        ptt.fix_task_from_verdicts(jl, tmp_path / "t2").read_text(encoding="utf-8"))["allowlist"] == ["src/a.py"]
+
+
 def test_fix_task_model_is_highest_of_affected_tasks_and_command(tmp_path):
     out = tmp_path / "tasks"
     out.mkdir()
