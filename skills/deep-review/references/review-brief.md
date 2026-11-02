@@ -96,22 +96,30 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 
 ## Fokus `security`
 
-`/security-review` wählt seinen Bereich selbst: die ausstehenden Änderungen des aktuellen
-Branches. Einen Bereich nimmt es nicht an. Darum prüfst du zuerst, ob sich dieser Umfang mit
-dem Bereich des Plans deckt:
+`/security-review` wählt seinen Bereich selbst: die Änderungen von HEAD gegen die
+Merge-Basis mit `origin/HEAD`, dem Default-Branch des Remotes. Einen Bereich nimmt es nicht
+an. Darum prüfst du zuerst, ob sich dieser Umfang mit dem Bereich des Plans deckt. Er deckt
+sich nur, wenn alle drei Bedingungen gelten:
 
 - ZIEL ist HEAD: `target` aus `plan.json` gleich `git rev-parse HEAD`, unter `notes` kein
   `target_not_head`.
-- BASIS ist die Merge-Basis des aktuellen Branches mit seinem Upstream oder, ohne Upstream,
-  mit dem Default-Branch: `base` aus `plan.json` gleich `git merge-base HEAD @{upstream}`
-  (sonst `git merge-base HEAD origin/HEAD`).
+- BASIS ist die Basis von `/security-review`: `git rev-parse --verify --quiet origin/HEAD`
+  findet `origin/HEAD`, und `base` aus `plan.json` ist gleich `git merge-base HEAD
+  origin/HEAD`. Ein Upstream des Branches zählt nicht: Gegen `origin/<branch>` vergleicht
+  `/security-review` nicht.
 - Unter `notes` steht kein `worktree_differs` und kein `worktree_unknown`. Sonst sieht
   `/security-review` andere Dateistände als der Plan.
 
+Fehlt `origin/HEAD`, oder gilt eine der Bedingungen nicht, deckt sich der Umfang nicht. Dann
+prüfst du im Hauptkontext, und zwar über den Bereich `<von>..<bis>`, den `counterparts` für
+`s1` ausgegeben hat (`s1: <bereich> · …`), nicht über `range` aus `plan.json`. Beim
+Wurzel-Commit ist `range` nur `<ziel>`; `git diff <ziel>` vergliche dann mit dem Arbeitsbaum.
+Der Bereich von `counterparts` sind die Hilfscommits.
+
 | Fall | Beispiel | Review | `--tool` |
 | --- | --- | --- | --- |
-| Umfang deckt sich | Feature-Branch mit ausstehenden Änderungen, Bereich `main..HEAD` | `/security-review` einmal für `s1`, die Gegenstellen aller Dateien als Kontext | `/security-review` |
-| Umfang deckt sich nicht | Bereich `v1.2..v1.3` auf einem anderen Branch, ein älterer Commit, ZIEL nicht HEAD | im Hauptkontext über den Bereich des Plans, Ablauf wie [Review ohne /code-review](#review-ohne-code-review), Prüfblick auf Eingaben von außen, Rechte, Geheimnisse und Injektion | `"Review ohne /security-review"` |
+| Umfang deckt sich | Plan `main..HEAD`, `origin/HEAD` zeigt auf `main`, `base` gleich `git merge-base HEAD origin/HEAD`, keine Hinweise zum Arbeitsbaum | `/security-review` einmal für `s1`, die Gegenstellen aller Dateien als Kontext | `/security-review` |
+| Umfang deckt sich nicht | gepushter Feature-Branch mit Plan `origin/feature..HEAD` (die Basis ist nicht die Merge-Basis mit `origin/HEAD`); kein `origin/HEAD`; Wurzel-Commit; Bereich `v1.2..v1.3`; ZIEL nicht HEAD; `worktree_differs` oder `worktree_unknown` | im Hauptkontext über den Bereich von `s1`, den `counterparts` ausgegeben hat, Ablauf wie [Review ohne /code-review](#review-ohne-code-review), Prüfblick auf Eingaben von außen, Rechte, Geheimnisse und Injektion | `"Review ohne /security-review"` |
 
 Im zweiten Fall nennt der Bericht das Werkzeug wörtlich „Review ohne /security-review“ in der
 Kopfzeile und in der Übergabe, wie beim Review ohne /code-review.
@@ -151,8 +159,9 @@ Regeln:
 - Fokus `quality`: der Auftrag aus Fassung 2 gilt unverändert, ebenfalls ohne Vergleich der
   Gegenstellen.
 - Fokus `security`, wenn sich der Umfang von `/security-review` nicht mit dem Bereich des
-  Plans deckt oder `/security-review` fehlt ([Fokus `security`](#fokus-security)): ein Paket
-  `s1`, derselbe Ablauf über dessen Bereich, Prüfblick auf Eingaben von außen, Rechte,
+  Plans deckt, `origin/HEAD` fehlt oder `/security-review` fehlt ([Fokus
+  `security`](#fokus-security)): ein Paket `s1`, derselbe Ablauf über den Bereich, den
+  `counterparts` für `s1` ausgegeben hat, Prüfblick auf Eingaben von außen, Rechte,
   Geheimnisse und Injektion. `--tool` ist dann `"Review ohne /security-review"`.
 - Sonst ist `--tool` `"Review ohne /code-review"`.
 
@@ -189,7 +198,7 @@ wird nichts geschrieben:
 
 | Prüfung | angenommen | abgewiesen |
 | --- | --- | --- |
-| Antwort | JSON-Liste, oder Objekt mit Liste unter `findings`; über stdin UTF-8 | kein JSON, anderes JSON, stdin kein UTF-8 |
+| Antwort | JSON-Liste, oder Objekt mit Liste unter `findings`; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, stdin kein UTF-8, Datei kein UTF-8 |
 | Fund | ein Objekt | alles andere, etwa ein Text oder eine Liste |
 | `file` | nicht leerer Text; `\` wird `/`, `./` fällt weg, ein absoluter Pfad im Repo wird relativ | fehlt, leer oder kein Text; ein Glied `..`; ein absoluter Pfad außerhalb des Repos |
 | `line` | ganze Zahl ≥ 0; Text `12`, `L12`, `12-14`, `12 - 14`, `12–14`, `L12-L14`, `12 bis 14` (vertauschte Enden werden sortiert, `12-12` wird 12); `null`, fehlt oder leerer Text wird `null` | negative Zahl, Kommazahl, `true`/`false`, Objekt, Liste; Text ohne diese Form, etwa `"near 40"`, `"ca. 12"` oder `"12, 15"` |
@@ -205,11 +214,14 @@ Ablauf in `failure_scenario` ist ein Satz als Text, kein Objekt mit Feldern.
 review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->
 ```
 
-- `<werkzeug>` ist das, was lief: `/code-review`; `/security-review`, wenn sich sein Umfang
-  mit dem Bereich des Plans deckt; `"Review ohne /security-review"` für ein Sicherheitsreview
-  im Hauptkontext, wenn er sich nicht deckt ([Fokus `security`](#fokus-security)); sonst
+- `<werkzeug>` ist das, was lief: `/code-review`; `/security-review` nur, wenn ZIEL HEAD
+  ist, `base` gleich `git merge-base HEAD origin/HEAD` und unter `notes` kein
+  `worktree_differs` und kein `worktree_unknown` steht; `"Review ohne /security-review"`
+  für ein Sicherheitsreview im Hauptkontext über den Bereich von `s1` aus `counterparts` in
+  jedem anderen Fall, auch ohne `origin/HEAD` ([Fokus `security`](#fokus-security)); sonst
   `"Review ohne /code-review"`. Der Bericht übernimmt es.
-- `-` liest die Liste von stdin als UTF-8.
+- `-` liest die Liste von stdin als UTF-8, eine Datei ebenso; ein BOM am Anfang zählt in
+  beiden Fällen nicht.
 - Angenommen wird nur, wenn das Paket im Plan steht und noch kein Ergebnis hat. Ein zweites
   Ergebnis wird abgewiesen; eine falsche Liste ebenso, und dann bleibt `results/` unberührt.
   Korrigiere die Liste und rufe `record` erneut auf.

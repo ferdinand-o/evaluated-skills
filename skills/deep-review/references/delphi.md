@@ -90,8 +90,11 @@ Exception?
   Mit `Remove` war der Bericht nach der Zeile zerstört. Mit `ExtractPair` lebt er weiter und
   gehört jetzt niemandem: Wer ruft `Pair.Value.Free`, wenn `Outbox` es nicht tut? Umgekehrt:
   Bleibt nach dem Wechsel auf `Remove` ein `Free` auf dem Wert stehen, ist es eine doppelte
-  Freigabe. Gegenprobe: Ohne `doOwnsValues` gibt auch `Remove` nichts frei, dann ändert der
-  Wechsel am Besitz nichts.
+  Freigabe. Gegenprobe: Ohne `doOwnsValues` gibt auch `Remove` den Wert nicht frei, dann
+  ändert der Wechsel am Besitz des Werts nichts. Steht `doOwnsKeys` in `Ownerships`, gilt
+  dasselbe für den Schlüssel: `Remove` gibt ihn frei, `ExtractPair` nicht. Nach dem Wechsel
+  auf `ExtractPair` gehört dann auch `Pair.Key` dem Aufrufer, und ohne `doOwnsKeys` ändert
+  der Wechsel am Besitz des Schlüssels nichts.
 
 ### Besitzübergabe an Antwort-Objekte
 
