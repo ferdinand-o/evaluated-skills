@@ -929,3 +929,305 @@ def test_plan_packet_range_root_split_false_and_target_not_head(tmp_path):
     assert git(first, "log", "-1", "--format=%B", rng.split("..")[1]).strip() == "erster"
     assert len(kit.cleanup(first, rplan["_meta"]["run"], False)) == 2
     assert _refs(first) == []
+
+
+# --- review_kit.py: Funde des Prüfpunkts nach Task 3 (J1–J12) -----------------------------
+
+def _split_plan(kit, root, rng="base..HEAD", split_at=10):
+    plan = kit.build_plan(root, rng, "standard", "bugs", split_at, False)
+    assert plan["split"] is True
+    return plan, plan["_meta"]["run"]
+
+
+def _spy_git(kit, monkeypatch):
+    calls = []
+    real = kit._git
+
+    def spy(repo, *args, **kwargs):
+        calls.append(args)
+        return real(repo, *args, **kwargs)
+
+    monkeypatch.setattr(kit, "_git", spy)
+    return calls
+
+
+def test_j01_file_and_directory_in_different_packets(tmp_path):
+    kit = _kit()
+    # Richtung 1: BASIS hat die Datei `pkg`, ZIEL löscht sie und legt `pkg/b.py` an.
+    (tmp_path / "one").mkdir()
+    one = _commit_repo(tmp_path / "one", {"pkg": _lines(8, "f")},
+                       {"pkg": None, "pkg/b.py": _lines(8, "b")})
+    # Richtung 2: BASIS hat `pkg/b.py`, ZIEL löscht sie und legt die Datei `pkg` an.
+    two = tmp_path / "two"
+    (two / "pkg").mkdir(parents=True)
+    git(two, "init", "--quiet", "--initial-branch=main")
+    git(two, "config", "user.email", "t@example.invalid")
+    git(two, "config", "user.name", "Test")
+    (two / "pkg" / "b.py").write_text(_lines(8, "b"), encoding="utf-8")
+    git(two, "add", "-A")
+    git(two, "commit", "--quiet", "-m", "basis")
+    git(two, "tag", "base")
+    git(two, "rm", "--quiet", "-r", "pkg")
+    (two / "pkg").write_text(_lines(8, "f"), encoding="utf-8")
+    git(two, "add", "-A")
+    git(two, "commit", "--quiet", "-m", "änderung")
+
+    for root, expected in ((one, {"p1": [("D", "pkg")], "p2": [("A", "pkg/b.py")]}),
+                           (two, {"p1": [("A", "pkg")], "p2": [("D", "pkg/b.py")]})):
+        plan, run = _split_plan(kit, root)
+        assert [p["files"] for p in plan["packets"]] == [["pkg"], ["pkg/b.py"]]
+        before = _user_state(root)
+        for packet in plan["packets"]:
+            rng = kit.make_packet_range(root, run, packet, plan["base"], plan["target"])
+            assert _name_status(root, rng) == expected[packet["id"]], (root.name, packet["id"])
+        assert _user_state(root) == before
+
+
+def test_j02_two_packets_sequential_and_concurrent(tmp_path, monkeypatch):
+    import threading
+    import time
+    import types
+
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": ""},
+                        {"a/x.py": _lines(8), "b/y.py": _lines(8, "y")})
+    plan, run = _split_plan(kit, root)
+    assert [p["id"] for p in plan["packets"]] == ["p1", "p2"]
+
+    # Gleichzeitig: p2 startet, während p1 seine Hilfscommits baut. Wartet p2 auf die
+    # Sperre, meldet das sein erstes sleep; ohne Sperre läuft p2 ganz durch.
+    waiting = threading.Event()
+
+    def nap(seconds):
+        waiting.set()
+        time.sleep(min(seconds, 0.01))
+
+    monkeypatch.setattr(kit, "time", types.SimpleNamespace(sleep=nap, monotonic=time.monotonic),
+                        raising=False)
+    real = kit._helper_commits
+    errors, threads = [], []
+
+    def second():
+        try:
+            kit.make_packet_range(root, run, "p2", plan["base"], plan["target"])
+        except BaseException as exc:  # noqa: BLE001 — im Haupt-Thread prüfen
+            errors.append(exc)
+
+    def helper(*args, **kwargs):
+        if not threads:
+            thread = threading.Thread(target=second)
+            threads.append(thread)
+            thread.start()
+            deadline = time.monotonic() + 20
+            while thread.is_alive() and not waiting.is_set() and time.monotonic() < deadline:
+                time.sleep(0.01)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(kit, "_helper_commits", helper)
+    first = kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    threads[0].join(30)
+    assert not threads[0].is_alive() and errors == []
+    on_disk = _plan_on_disk(kit, root, run)
+    ranges = [p["range"] for p in on_disk["packets"]]
+    assert ranges[0] == first and ranges[1] is not None, ranges
+    for pid, rng in zip(("p1", "p2"), ranges):
+        assert rng == (f"{_rev(root, f'refs/deep-review/{run}/{pid}/von')}.."
+                       f"{_rev(root, f'refs/deep-review/{run}/{pid}/bis')}")
+    assert not (kit.run_dir(root, run) / "plan.lock").exists()
+
+    # Nacheinander in einem frischen Lauf: beide Bereiche und beide Hinweise bleiben.
+    monkeypatch.setattr(kit, "_helper_commits", real)
+    (root / "a" / "x.py").write_text("anders\n", encoding="utf-8")
+    (root / "b" / "y.py").write_text("anders\n", encoding="utf-8")
+    plan, run = _split_plan(kit, root)
+    got = [kit.make_packet_range(root, run, p, plan["base"], plan["target"]) for p in ("p1", "p2")]
+    on_disk = _plan_on_disk(kit, root, run)
+    assert [p["range"] for p in on_disk["packets"]] == got
+    assert [(n["packet"], n["kind"]) for n in on_disk["notes"]] == [
+        ("p1", "worktree_differs"), ("p2", "worktree_differs")]
+
+
+def test_j03_range_after_cleanup_is_rebuilt(tmp_path):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": ""},
+                        {"a/x.py": _lines(8), "b/y.py": _lines(8, "y")})
+    plan, run = _split_plan(kit, root)
+    for pid in ("p1", "p2"):
+        kit.make_packet_range(root, run, pid, plan["base"], plan["target"])
+    other, other_run = _split_plan(kit, root)
+    kit.make_packet_range(root, other_run, "p1", plan["base"], plan["target"])
+
+    # cleanup setzt die Bereiche, deren Refs es löscht, im Plan zurück.
+    assert len(kit.cleanup(root, run, False)) == 4
+    assert [p["range"] for p in _plan_on_disk(kit, root, run)["packets"]] == [None, None]
+    assert _plan_on_disk(kit, root, other_run)["packets"][0]["range"] is not None
+    rng = kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    von, bis = rng.split("..")
+    assert von == _rev(root, f"refs/deep-review/{run}/p1/von")
+    assert bis == _rev(root, f"refs/deep-review/{run}/p1/bis")
+
+    # Fehlen die Refs, ohne dass der Plan es weiß (anderer Worktree, Hand), wird neu gebaut.
+    git(root, "update-ref", "-d", f"refs/deep-review/{run}/p1/von")
+    again = kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    assert again.split("..")[0] == _rev(root, f"refs/deep-review/{run}/p1/von")
+    assert _name_status(root, again) == [("M", "a/x.py")]
+
+    # cleanup --stale räumt auch die Pläne der anderen Läufe auf.
+    kit.cleanup(root, run, True)
+    assert _plan_on_disk(kit, root, other_run)["packets"][0]["range"] is None
+    assert _plan_on_disk(kit, root, run)["packets"][0]["range"] == again
+
+
+def test_j04_worktree_check_runs_through_git_in_chunks(tmp_path, monkeypatch):
+    kit = _kit()
+    names = [f"a/{'langer_ordnername_' * 2}{i:02d}.py" for i in range(8)]
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {n: "" for n in names} | {"a/gone.py": "g = 1\n"},
+                        {n: _lines(1, f"v{i}") for i, n in enumerate(names)} | {"a/gone.py": None})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    (root / names[1]).write_text("geändert\n", encoding="utf-8")
+    (root / names[6]).unlink()
+    os.utime(root / names[3], (1_000_000_000, 1_000_000_000))  # nur die Zeit: kein Unterschied
+    (root / "a" / "gone.py").write_text("g = 2\n", encoding="utf-8")  # in ZIEL gelöscht, untracked
+    before = _user_state(root)
+
+    monkeypatch.setattr(kit, "ARG_CHUNK_CHARS", 120, raising=False)
+    calls = _spy_git(kit, monkeypatch)
+    kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    assert _user_state(root) == before
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [(n["kind"], n["files"]) for n in notes] == [
+        ("worktree_differs", sorted(["a/gone.py", names[1], names[6]]))]
+
+    diffs = [c for c in calls if c and c[0] == "diff" and "--name-only" in c]
+    assert len(diffs) > 1, calls
+    assert not [c for c in calls if c and c[0] == "hash-object" and "--" in c]
+    for call in diffs:
+        specs = list(call[call.index("--") + 1:])
+        assert specs and all(s.startswith(":(literal)") for s in specs)
+        assert len(" ".join(specs)) <= 120 or len(specs) == 1
+
+
+def test_j05_symlink_without_core_symlinks(tmp_path):
+    kit = _kit()
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    (root / "a").mkdir()
+    (root / "a" / "x.py").write_text(_lines(2), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "basis")
+    git(root, "tag", "base")
+    os.symlink("x.py", root / "a" / "link.py")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "link")
+    # Wie unter Windows ohne Symlinks: git legt den Link als Datei mit dem Ziel als Inhalt an.
+    git(root, "config", "core.symlinks", "false")
+    (root / "a" / "link.py").unlink()
+    git(root, "checkout", "--", "a/link.py")
+    assert not (root / "a" / "link.py").is_symlink()
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    assert _plan_on_disk(kit, root, run)["notes"] == []
+
+
+def test_j06_base_object_keeps_the_cause(tmp_path, monkeypatch):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": ""}, {"a/x.py": _lines(2)})
+    head = _rev(root, "HEAD")
+    empty = git(root, "hash-object", "-t", "tree", "--stdin").strip()
+    assert kit._base_object(root, head) == head
+    assert kit._base_object(root, empty) == empty
+    with pytest.raises(kit.KitError, match="unbekannt"):
+        kit._base_object(root, "gibt-es-nicht")
+    real = kit.subprocess.run
+
+    def slow(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"] and any(a.endswith("^{commit}") for a in cmd):
+            raise subprocess.TimeoutExpired(cmd, 1)
+        return real(cmd, **kwargs)
+
+    monkeypatch.setattr(kit.subprocess, "run", slow)
+    with pytest.raises(kit.KitError, match="abgebrochen"):
+        kit._base_object(root, head)
+
+
+def test_j07_malformed_plan_is_a_kit_error(tmp_path):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": ""}, {"a/x.py": _lines(2)})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    path = kit.run_dir(root, run) / "plan.json"
+    good = json.loads(path.read_text(encoding="utf-8"))
+    bad_packets = (["p1"], [{"id": ["p1"], "files": []}], [{"id": "p1", "files": "a/x.py"}],
+                   [{"id": "p1", "files": ["a/x.py"], "range": 7}], {"p1": {}})
+    for packets in bad_packets:
+        path.write_text(json.dumps({**good, "packets": packets}), encoding="utf-8")
+        with pytest.raises(kit.KitError, match="Plan"):
+            kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    for broken in ({"notes": [1]}, {"_meta": []}, {"target": 3}):
+        path.write_text(json.dumps({**good, **broken}), encoding="utf-8")
+        with pytest.raises(kit.KitError, match="Plan"):
+            kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+
+
+def test_j08_tree_entries_list_only_the_packet_paths(tmp_path, monkeypatch):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo",
+                        {"a/[x].py": "", "a/x.py": _lines(3), "z/other.py": _lines(3)},
+                        {"a/[x].py": _lines(8), "b/y.py": _lines(8, "y")})
+    plan, run = _split_plan(kit, root)
+    assert [p["files"] for p in plan["packets"]] == [["a/[x].py"], ["b/y.py"]]
+    calls = _spy_git(kit, monkeypatch)
+    rng = kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    assert _name_status(root, rng) == [("M", "a/[x].py")]
+    trees = [c for c in calls if c and c[0] == "ls-tree"]
+    assert len(trees) == 2, trees
+    for call in trees:
+        assert "--" in call and list(call[call.index("--") + 1:]) == [":(literal)a/[x].py"]
+
+
+def test_j09_message_and_head_once_per_run(tmp_path, monkeypatch):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": "", "c/z.py": ""},
+                        {"a/x.py": _lines(8), "b/y.py": _lines(8, "y"), "c/z.py": _lines(8, "z")})
+    plan, run = _split_plan(kit, root)
+    calls = _spy_git(kit, monkeypatch)
+    for packet in plan["packets"]:
+        kit.make_packet_range(root, run, packet, plan["base"], plan["target"])
+    assert len(plan["packets"]) == 3
+    assert len([c for c in calls if c and c[0] == "log"]) == 1
+    assert len([c for c in calls if c and c[0] == "rev-parse" and "HEAD^{commit}" in c]) == 1
+
+
+def test_j11_base_and_target_may_be_none_or_the_typed_basis(tmp_path):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": ""},
+                        {"a/x.py": _lines(8), "b/y.py": _lines(8, "y")})
+    # BASIS ist weitergelaufen: Merge-Basis (`base`) und getippte BASIS (`side`) weichen ab.
+    git(root, "checkout", "--quiet", "-b", "side", "base")
+    (root / "c.py").write_text("c = 1\n", encoding="utf-8")
+    git(root, "add", "c.py")
+    git(root, "commit", "--quiet", "-m", "seite")
+    git(root, "checkout", "--quiet", "main")
+    plan, run = _split_plan(kit, root, "side..main")
+    assert plan["base"] == _rev(root, "base") and plan["log_base"] == _rev(root, "side")
+    first = kit.make_packet_range(root, run, "p1", None, None)
+    assert kit.make_packet_range(root, run, "p1", "side", "main") == first
+    assert kit.make_packet_range(root, run, "p1", "base", None) == first
+    assert kit.make_packet_range(root, run, "p2", None, "main")
+    with pytest.raises(kit.KitError, match="Plan"):
+        kit.make_packet_range(root, run, "p1", "main", None)
+    with pytest.raises(kit.KitError, match="Plan"):
+        kit.make_packet_range(root, run, "p1", None, "side")

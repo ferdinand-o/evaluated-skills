@@ -5,8 +5,9 @@ Das Skript reviewt nichts. Es schneidet einen Bereich `BASIS..ZIEL` nach einer f
 Schnittregel in Pakete, schreibt den Plan nach `.skills/cache/deep-review/<lauf>/plan.json`
 und nimmt später die Ergebnisse je Paket an (Spec 26). Zielcode wird nie importiert oder
 gestartet. Git schreibt nur Objekte und Refs unter `refs/deep-review/<lauf>/` (die
-Hilfscommits der Paket-Bereiche, gebaut über einen temporären Index); HEAD, Index und
-Arbeitsbaum des Nutzers bleiben unberührt (E6).
+Hilfscommits der Paket-Bereiche, gebaut über einen temporären Index; der Vergleich mit dem
+Arbeitsbaum läuft auf einer Kopie des Index); HEAD, Index und Arbeitsbaum des Nutzers
+bleiben unberührt (E6).
 
 Stand Task 3: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
 ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel,
@@ -15,6 +16,7 @@ ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittr
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import fnmatch
 import json
@@ -27,6 +29,7 @@ import shutil
 import string
 import subprocess
 import tempfile
+import time
 from pathlib import Path, PurePath, PurePosixPath
 from typing import NamedTuple
 
@@ -62,7 +65,13 @@ HELPER_EMAIL = "deep-review@localhost"
 RUN_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{6}-[0-9a-f]{7}-[0-9a-z]{4}")
 NOTE_TARGET_NOT_HEAD = "target_not_head"
 NOTE_WORKTREE_DIFFERS = "worktree_differs"
-HASH_BATCH = 200          # Dateien je `git hash-object`-Aufruf
+PACKET_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
+# Pfade je git-Aufruf als Pathspecs: unter der Grenze von cmd.exe (8191 Zeichen) und der
+# Windows-Kommandozeile (32767), mit Platz für git und die übrigen Argumente.
+ARG_CHUNK_CHARS = 8000
+LOCK_NAME = "plan.lock"   # Sperrdatei im Laufordner, solange plan.json geändert wird
+LOCK_WAIT = 600           # Sekunden, die ein Aufruf auf die Sperre wartet
+LOCK_POLL = 0.05          # Sekunden zwischen zwei Versuchen
 
 PROFILES = ("standard", "checkpoint")
 FOCI = ("bugs", "security", "quality")
@@ -141,6 +150,12 @@ def _git(repo: Path, *args: str, env: dict | None = None, stdin: bytes | None = 
     return done.stdout.decode("utf-8", errors="surrogateescape")
 
 
+class UnknownRevision(KitError):
+    """Die Revision gibt es nicht oder sie ist kein Commit (Exit 1 von
+    `rev-parse --verify --quiet`) — der einzige Fehler von `_commit`, den Aufrufer umdeuten
+    dürfen."""
+
+
 def _toplevel(repo) -> Path:
     """Repo-Wurzel zu `repo` (auch aus einem Unterordner). Kein Repo: KitError mit git's
     Meldung, nie „Revision unbekannt"."""
@@ -155,15 +170,15 @@ def _toplevel(repo) -> Path:
 
 def _commit(repo: Path, rev: str) -> str:
     """SHA des Commits zu `rev`. Nur „gibt es nicht oder ist kein Commit" (Exit 1 von
-    `rev-parse --verify --quiet`) heißt „unbekannt"; jeder andere Fehler behält seine
-    Ursache."""
+    `rev-parse --verify --quiet`) heißt „unbekannt" (`UnknownRevision`); jeder andere
+    Fehler behält seine Ursache."""
     if not rev or rev.startswith("-"):
         raise KitError(f"ungültige Revision: {rev!r}")
     try:
         return _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").strip()
     except GitError as exc:
         if exc.returncode == 1:
-            raise KitError(f"Revision {rev!r} unbekannt oder kein Commit") from None
+            raise UnknownRevision(f"Revision {rev!r} unbekannt oder kein Commit") from None
         raise
 
 
@@ -602,7 +617,40 @@ def _check_run_id(run_id) -> str:
     return run_id
 
 
+@contextlib.contextmanager
+def _plan_lock(directory: Path, run_id: str):
+    """Exklusive Sperre auf `plan.json` eines Laufs: Sperrdatei `plan.lock` im Laufordner,
+    angelegt mit O_EXCL, im `finally` wieder gelöscht. Wer sie nicht bekommt, wartet bis
+    `LOCK_WAIT` Sekunden; danach KitError mit dem Pfad der Sperrdatei (bleibt sie nach einem
+    Absturz liegen, löscht der Nutzer sie). Fehlt der Laufordner: KitError „hat keinen Plan"."""
+    lock = directory / LOCK_NAME
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    deadline = time.monotonic() + LOCK_WAIT
+    while True:
+        try:
+            fd = os.open(lock, flags, 0o666)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise KitError(f"Plan von Lauf {run_id} ist gesperrt ({lock}) — läuft noch ein "
+                               "Aufruf? Sonst die Sperrdatei löschen") from None
+            time.sleep(LOCK_POLL)
+        except FileNotFoundError:
+            raise KitError(f"Lauf {run_id} hat keinen Plan ({directory / 'plan.json'})") from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()}\n")
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
+    """`plan.json` des Laufs, geprüft auf die Felder, die die Paket-Bereiche lesen: `_meta`
+    ein Objekt, `base`/`target` Text, `log_base` Text oder null, `packets` eine Liste von
+    Objekten mit eindeutiger `id` (Text aus Buchstaben, Ziffern, `_`, `-`), `files` (Liste
+    von Text) und `range` (Text oder null), `notes` eine Liste von Objekten. Alles andere ist
+    ein KitError, kein TypeError."""
     path = run_dir(repo, run_id) / "plan.json"
     try:
         plan = json.loads(path.read_text(encoding="utf-8"))
@@ -610,96 +658,166 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
         raise KitError(f"Lauf {run_id} hat keinen Plan ({path})") from None
     except (OSError, ValueError) as exc:
         raise KitError(f"Plan von Lauf {run_id} nicht lesbar: {exc}") from None
+
+    def bad(why: str) -> KitError:
+        return KitError(f"Plan von Lauf {run_id} ist kein deep-review-Plan ({why}): {path}")
+
     if not isinstance(plan, dict) or not all(k in plan for k in ("_meta", "base", "target",
                                                                    "log_base", "packets")):
-        raise KitError(f"Plan von Lauf {run_id} ist kein deep-review-Plan: {path}")
+        raise bad("Pflichtfelder fehlen")
+    if not isinstance(plan["_meta"], dict):
+        raise bad("_meta ist kein Objekt")
+    for key in ("base", "target"):
+        if not isinstance(plan[key], str) or not plan[key]:
+            raise bad(f"{key} ist kein SHA")
+    for key in ("log_base", "range"):
+        if plan.get(key) is not None and not isinstance(plan[key], str):
+            raise bad(f"{key} ist weder Text noch null")
+    if not isinstance(plan["packets"], list):
+        raise bad("packets ist keine Liste")
+    seen = set()
+    for packet in plan["packets"]:
+        if not isinstance(packet, dict):
+            raise bad(f"Paket {packet!r} ist kein Objekt")
+        pid = packet.get("id")
+        if not isinstance(pid, str) or not PACKET_ID_RE.fullmatch(pid) or pid in seen:
+            raise bad(f"Paket-ID {pid!r} ungültig oder doppelt")
+        seen.add(pid)
+        files = packet.get("files")
+        if not isinstance(files, list) or not all(isinstance(f, str) and f for f in files):
+            raise bad(f"files von {pid} ist keine Liste von Pfaden")
+        if packet.get("range") is not None and not isinstance(packet["range"], str):
+            raise bad(f"range von {pid} ist weder Text noch null")
+    notes = plan.get("notes", [])
+    if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
+        raise bad("notes ist keine Liste von Objekten")
     return path, plan
 
 
+def _write_plan(path: Path, plan: dict, notes=None) -> None:
+    """`plan` zurückschreiben, `_meta` ohne die festen Felder, `notes` (die gegebenen, sonst
+    die vorhandenen) als letzter Schlüssel."""
+    meta = {k: v for k, v in plan["_meta"].items() if k not in RESERVED_META}
+    payload = {k: v for k, v in plan.items() if k not in ("_meta", "notes")}
+    if notes is not None:
+        payload["notes"] = notes
+    elif "notes" in plan:
+        payload["notes"] = plan["notes"]
+    write_json(path, meta, payload)
+
+
 def _base_object(repo: Path, rev) -> str:
-    """SHA der gezählten Basis: ein Commit, beim Wurzel-Commit der leere Baum."""
+    """SHA der gezählten Basis: ein Commit, beim Wurzel-Commit der leere Baum. Nur „kein
+    Commit" (`UnknownRevision`) fällt auf die Baum-Suche durch; Zeitgrenze, Startfehler und
+    andere git-Fehler behalten ihre Ursache."""
     try:
         return _commit(repo, rev)
-    except KitError:
+    except UnknownRevision:
         pass
     try:
         return _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}").strip()
-    except GitError:
-        raise KitError(f"Basis {rev!r} unbekannt — weder Commit noch Baum") from None
+    except GitError as exc:
+        if exc.returncode == 1:
+            raise KitError(f"Basis {rev!r} unbekannt — weder Commit noch Baum") from None
+        raise
 
 
-def _helper_env(index_file: Path) -> dict:
-    """Umgebung für die Hilfscommits: temporärer Index statt dem des Nutzers, feste
-    Identität (kein user.name nötig), keine optionalen Sperren."""
-    env = dict(os.environ)
-    env.update(GIT_INDEX_FILE=str(index_file), GIT_OPTIONAL_LOCKS="0",
-               GIT_AUTHOR_NAME=HELPER_NAME, GIT_AUTHOR_EMAIL=HELPER_EMAIL,
-               GIT_COMMITTER_NAME=HELPER_NAME, GIT_COMMITTER_EMAIL=HELPER_EMAIL)
-    return env
+def _head(repo: Path):
+    """SHA von HEAD; None nur, wenn HEAD noch keinen Commit hat."""
+    try:
+        return _commit(repo, "HEAD")
+    except UnknownRevision:
+        return None
+
+
+_RUN_CACHE: dict = {}
+
+
+def _run_cached(repo: Path, run_id: str, key, compute):
+    """Je Lauf einmal rechnen: HEAD beim ersten Paket-Bereich des Laufs in diesem
+    Prozess, die Commit-Messages des Bereichs (SHAs, also unveränderlich)."""
+    slot = (str(repo), run_id, key)
+    if slot not in _RUN_CACHE:
+        _RUN_CACHE[slot] = compute()
+    return _RUN_CACHE[slot]
+
+
+def _literal_chunks(paths):
+    """Pfade als `:(literal)<pfad>`-Pathspecs in Stücken, deren Länge mit Trennzeichen
+    `ARG_CHUNK_CHARS` nicht überschreitet — so bleibt jeder Aufruf unter der Grenze der
+    Kommandozeile unter Windows. Ein einzelner längerer Pfad steht allein."""
+    chunk: list[str] = []
+    size = 0
+    for path in paths:
+        spec = f":(literal){path}"
+        if chunk and size + 1 + len(spec) > ARG_CHUNK_CHARS:
+            yield chunk
+            chunk, size = [], 0
+        size += len(spec) + (1 if chunk else 0)
+        chunk.append(spec)
+    if chunk:
+        yield chunk
 
 
 def _tree_entries(repo: Path, treeish: str, paths) -> dict:
-    """Pfad → (Modus, Typ, SHA) für die `paths`, die in `treeish` liegen. Liest den ganzen
-    Baum und filtert, damit kein Pfad als Pathspec gedeutet wird."""
-    wanted = set(paths)
+    """Pfad → (Modus, Typ, SHA) für die `paths`, die in `treeish` liegen. `ls-tree` bekommt
+    nur diese Pfade als `:(literal)`-Pathspecs (in Stücken, `_literal_chunks`), listet also
+    nicht den ganzen Baum; übernommen wird nur, was genau einem Pfad gleicht — ein Pfad, der
+    in `treeish` ein Ordner ist, zählt nicht."""
+    wanted = sorted(set(paths))
     entries = {}
-    for record in _git(repo, "ls-tree", "-r", "-z", "--full-tree", treeish).split("\0"):
-        if not record:
-            continue
-        info, path = record.split("\t", 1)
-        if path in wanted:
-            mode, kind, sha = info.split()
-            entries[path] = (mode, kind, sha)
+    for chunk in _literal_chunks(wanted):
+        out = _git(repo, "ls-tree", "-r", "-z", "--full-tree", treeish, "--", *chunk)
+        for record in out.split("\0"):
+            if not record:
+                continue
+            info, path = record.split("\t", 1)
+            if path in wanted:
+                mode, kind, sha = info.split()
+                entries[path] = (mode, kind, sha)
     return entries
 
 
-def _worktree_differs(repo: Path, files, entries: dict) -> list:
-    """Paketdateien, deren Stand im Arbeitsbaum von ZIEL abweicht: Inhalt (über
-    `git hash-object` mit den Filtern des Pfads, schreibt nichts), Datei fehlt oder liegt
-    da, obwohl ZIEL sie gelöscht hat. Submodule werden nicht verglichen."""
-    differs, hashable = [], []
+def _worktree_differs(repo: Path, target: str, files, entries: dict) -> list:
+    """Paketdateien, deren Stand im Arbeitsbaum von ZIEL abweicht. git vergleicht selbst:
+    `git diff --name-only --no-renames ZIEL -- :(literal)<pfade>` (in Stücken), mit den
+    Filtern und der Symlink-Behandlung des Repos (auch `core.symlinks=false`); ein
+    Submodul nur, wenn sein ausgecheckter Commit abweicht. `git diff` frischt den Index auf
+    und schreibt ihn trotz `GIT_OPTIONAL_LOCKS=0` — deshalb läuft es auf einer Kopie des
+    Index (`GIT_INDEX_FILE`), der des Nutzers bleibt unberührt (E6). Dazu kommt, was git
+    nicht sieht: eine Datei, die ZIEL gelöscht hat (`entries` = Einträge von ZIEL) und die
+    ungetrackt noch da liegt (ein Ordner an ihrer Stelle zählt nicht)."""
+    files = sorted(set(files))
+    index = Path(_git(repo, "rev-parse", "--git-path", "index").strip())
+    index = index if index.is_absolute() else repo / index
+    differs: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
+        copy = Path(tmp) / "index"
+        if index.is_file():
+            shutil.copyfile(index, copy)
+        env = dict(os.environ)
+        env.update(GIT_INDEX_FILE=str(copy), GIT_OPTIONAL_LOCKS="0")
+        for chunk in _literal_chunks(files):
+            out = _git(repo, "diff", "--name-only", "--no-renames", "--no-ext-diff",
+                       "--ignore-submodules=dirty", "-z", target, "--", *chunk, env=env)
+            differs.update(p for p in out.split("\0") if p)
     for path in files:
         disk = repo / path
-        entry = entries.get(path)
-        if entry is None:
-            if os.path.lexists(disk):
-                differs.append(path)
-            continue
-        mode, kind, sha = entry
-        if kind != "blob":
-            continue
-        if mode == "120000":
-            if not disk.is_symlink():
-                differs.append(path)
-                continue
-            got = _git(repo, "hash-object", "--no-filters", "--stdin",
-                       stdin=os.fsencode(os.readlink(disk))).strip()
-            if got != sha:
-                differs.append(path)
-        elif disk.is_symlink() or not disk.is_file():
-            differs.append(path)
-        else:
-            hashable.append((path, sha))
-    for start in range(0, len(hashable), HASH_BATCH):
-        chunk = hashable[start:start + HASH_BATCH]
-        got = _git(repo, "hash-object", "--", *(p for p, _ in chunk)).split()
-        differs.extend(p for (p, sha), new in zip(chunk, got) if new != sha)
+        if (path not in entries and path not in differs and os.path.lexists(disk)
+                and (disk.is_symlink() or not disk.is_dir())):
+            differs.add(path)
     return sorted(differs)
 
 
-def _range_notes(repo: Path, pid: str, target: str, files, entries: dict) -> list:
+def _range_notes(repo: Path, pid: str, head, target: str, files, entries: dict) -> list:
     """Hinweise für den Bericht: Der Reviewer liest den Arbeitsbaum, nicht ZIEL."""
     notes = []
-    try:
-        head = _commit(repo, "HEAD")
-    except KitError:
-        head = None
     if head != target:
         where = head[:SHORT_SHA_LEN] if head else "ohne Commit"
         notes.append({"packet": pid, "kind": NOTE_TARGET_NOT_HEAD, "files": [],
                       "text": f"ZIEL {target[:SHORT_SHA_LEN]} ist nicht HEAD ({where}) — "
                               "der Reviewer liest den Arbeitsbaum, nicht ZIEL"})
-    differs = _worktree_differs(repo, files, entries)
+    differs = _worktree_differs(repo, target, files, entries)
     if differs:
         notes.append({"packet": pid, "kind": NOTE_WORKTREE_DIFFERS, "files": differs,
                       "text": f"Arbeitsbaum weicht in {len(differs)} Paketdatei(en) von ZIEL "
@@ -715,83 +833,168 @@ def _range_message(repo: Path, log_base, target: str) -> bytes:
     return out.encode("utf-8", errors="surrogateescape")
 
 
-def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files) -> tuple[str, str]:
+def _index_info(files, entries: dict, null: str) -> bytes:
+    """`update-index --index-info`-Eingabe: die Paketdateien auf den Stand von `entries`.
+    Erst entfernen, dann setzen — so steht keine Datei einem gleichnamigen Ordner im Weg."""
+    records = [f"0 {null}\t{p}" for p in files if p not in entries]
+    records += [f"{entries[p][0]} {entries[p][2]}\t{p}" for p in files if p in entries]
+    return b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in records)
+
+
+def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
+                    target_entries: dict) -> tuple[str, str]:
     """`von` = ZIEL mit den Paketdateien auf dem Stand der gezählten Basis (Parent ZIEL),
-    `bis` = Baum von ZIEL mit Parent `von` und den Messages des Bereichs; beide unter
-    `refs/deep-review/<lauf>/<id>/`. Nur temporärer Index, Objekte und diese Refs."""
+    `bis` = `von` mit den Paketdateien auf dem Stand von ZIEL (Parent `von`, die Messages
+    des Bereichs); beide unter `refs/deep-review/<lauf>/<id>/`. Nur temporärer Index,
+    Objekte und diese Refs.
+
+    Der Baum von `bis` ist der von ZIEL. Nur wenn eine Paketdatei auf dem Stand der Basis
+    als Datei/Ordner mit einem Pfad außerhalb des Pakets kollidiert (BASIS hat die Datei
+    `a`, ZIEL den Ordner `a/` eines anderen Pakets, oder umgekehrt), kann ein Baum nicht
+    beides tragen: `von` verliert den fremden Pfad, und `bis` trägt ihn dann auch nicht —
+    so zeigt `von..bis` weiter genau die Paketdateien."""
     target = plan["target"]
-    base_entries = _tree_entries(repo, plan["base"], files)
     null = "0" * len(target)
-    # Erst entfernen, dann setzen — so steht keine Datei einem gleichnamigen Ordner im Weg.
-    records = [f"0 {null}\t{p}" for p in files if p not in base_entries]
-    records += [f"{base_entries[p][0]} {base_entries[p][2]}\t{p}" for p in files
-                if p in base_entries]
-    index_info = b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in records)
-    message = _range_message(repo, plan["log_base"], target)
+    von_info = _index_info(files, _tree_entries(repo, plan["base"], files), null)
+    bis_info = _index_info(files, target_entries, null)
+    message = _run_cached(repo, run_id, ("message", plan["log_base"], target),
+                          lambda: _range_message(repo, plan["log_base"], target))
     with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
         env = _helper_env(Path(tmp) / "index")
         _git(repo, "read-tree", target, env=env)
-        _git(repo, "update-index", "-z", "--replace", "--index-info", env=env, stdin=index_info)
-        tree = _git(repo, "write-tree", env=env).strip()
+        _git(repo, "update-index", "-z", "--replace", "--index-info", env=env, stdin=von_info)
+        von_tree = _git(repo, "write-tree", env=env).strip()
         von = _git(repo, "commit-tree", "--no-gpg-sign", "-p", target,
-                   "-m", f"deep-review {run_id} {pid}: Basis", tree, env=env).strip()
+                   "-m", f"deep-review {run_id} {pid}: Basis", von_tree, env=env).strip()
+        _git(repo, "update-index", "-z", "--replace", "--index-info", env=env, stdin=bis_info)
+        bis_tree = _git(repo, "write-tree", env=env).strip()
         bis = _git(repo, "commit-tree", "--no-gpg-sign", "-p", von, "-F", "-",
-                   f"{target}^{{tree}}", env=env, stdin=message).strip()
+                   bis_tree, env=env, stdin=message).strip()
     prefix = f"{REF_ROOT}/{run_id}/{pid}"
     _git(repo, "update-ref", "--stdin",
          stdin=f"update {prefix}/von {von}\nupdate {prefix}/bis {bis}\n".encode("utf-8"))
     return von, bis
 
 
+def _helper_env(index_file: Path) -> dict:
+    """Umgebung für die Hilfscommits: temporärer Index statt dem des Nutzers, feste
+    Identität (kein user.name nötig), keine optionalen Sperren."""
+    env = dict(os.environ)
+    env.update(GIT_INDEX_FILE=str(index_file), GIT_OPTIONAL_LOCKS="0",
+               GIT_AUTHOR_NAME=HELPER_NAME, GIT_AUTHOR_EMAIL=HELPER_EMAIL,
+               GIT_COMMITTER_NAME=HELPER_NAME, GIT_COMMITTER_EMAIL=HELPER_EMAIL)
+    return env
+
+
+def _refs_hold(repo: Path, run_id: str, pid: str, rng: str) -> bool:
+    """Stehen `refs/deep-review/<lauf>/<id>/von|bis` noch auf `rng` (`<von>..<bis>`)?"""
+    prefix = f"{REF_ROOT}/{run_id}/{pid}/"
+    found = {}
+    for line in _git(repo, "for-each-ref", "--format=%(objectname) %(refname)",
+                     prefix).splitlines():
+        sha, ref = line.split(" ", 1)
+        found[ref] = sha
+    return f"{found.get(prefix + 'von')}..{found.get(prefix + 'bis')}" == rng
+
+
+def _check_span(repo: Path, run_id: str, plan: dict, base, target) -> None:
+    """`base` None, die gezählte Basis des Plans oder die getippte BASIS (`log_base`);
+    `target` None oder ZIEL des Plans. Sonst KitError."""
+    base_ok = base is None or _base_object(repo, base) in (plan["base"], plan["log_base"])
+    target_ok = target is None or _commit(repo, target) == plan["target"]
+    if not (base_ok and target_ok):
+        raise KitError(f"Bereich {base}..{target} passt nicht zum Plan von Lauf {run_id} "
+                       f"({plan['base']}..{plan['target']})")
+
+
 def make_packet_range(repo, run_id, packet, base, target):
     """Reviewbarer Bereich eines Pakets; trägt ihn als `range` in `plan.json` ein.
 
     `packet` ist das Paket aus dem Plan (Dict) oder seine ID; maßgeblich sind die Dateien im
-    Plan des Laufs. `base` und `target` müssen `base` und `target` des Plans meinen
-    (Revision oder SHA), sonst KitError. Hat das Paket schon einen `range` — bei
-    `split: false` ohne Wurzel-Commit der Originalbereich, oder aus einem früheren Aufruf —,
-    entstehen keine Refs, und dieser Bereich kommt zurück. Sonst baut die Funktion zwei
-    Hilfscommits (Spec 26, Paket-Bereich; E6): über einen temporären Index
-    (`GIT_INDEX_FILE`) `read-tree ZIEL`, je Paketdatei Modus und Blob aus der gezählten
-    Basis oder entfernt (beim Wurzel-Commit ist die Basis leer), `write-tree`,
-    `commit-tree` als `deep-review <deep-review@localhost>`; `von` hat Parent ZIEL und die
-    Message „deep-review <lauf> <id>: Basis", `bis` den Baum von ZIEL, Parent `von` und die
+    Plan des Laufs. `base` und `target` dürfen None sein und heißen dann die Werte des Plans;
+    sonst muss `base` die gezählte Basis (`base`) oder die getippte BASIS (`log_base`) des
+    Plans meinen und `target` dessen `target` (Revision oder SHA), sonst KitError. Ein
+    vorhandener `range` kommt ohne neue Refs zurück: bei `split: false` ohne Wurzel-Commit der
+    Originalbereich, sonst ein früher gebauter, solange
+    `refs/deep-review/<lauf>/<id>/von|bis` noch auf ihm stehen — fehlen sie (`cleanup`,
+    anderer Worktree), wird neu gebaut. Sonst baut die Funktion zwei Hilfscommits (Spec 26,
+    Paket-Bereich; E6): über einen temporären Index (`GIT_INDEX_FILE`) `read-tree ZIEL`, je
+    Paketdatei Modus und Blob aus der gezählten Basis oder entfernt (beim Wurzel-Commit ist
+    die Basis leer), `write-tree`, `commit-tree` als `deep-review <deep-review@localhost>`;
+    `von` hat Parent ZIEL und die Message „deep-review <lauf> <id>: Basis", `bis` den Baum
+    von ZIEL (Ausnahme Datei/Ordner-Kollision, `_helper_commits`), Parent `von` und die
     Commit-Messages des Bereichs; `update-ref refs/deep-review/<lauf>/<id>/von|bis`.
     `git diff von..bis` zeigt so genau die Paketdateien, der Reviewer sieht den vollen Code.
     HEAD, Index und Arbeitsbaum des Nutzers bleiben unberührt.
 
-    Ist ZIEL nicht HEAD oder weicht der Arbeitsbaum in Paketdateien von ZIEL ab, steht ein
-    Hinweis unter `notes` im Plan (`packet`, `kind` = `target_not_head` |
-    `worktree_differs`, `files`, `text`), weil der Reviewer den Arbeitsbaum liest; jeder
-    Aufruf ersetzt die Hinweise seines Pakets. `notes` steht als letzter Schlüssel nach
-    `not_reviewed`. Rückgabe: der Bereich `<von>..<bis>` (SHAs) oder der vorhandene."""
+    Lesen, Bauen und Schreiben von `plan.json` laufen unter der Sperre `plan.lock` des
+    Laufs (`_plan_lock`); der Plan wird darin neu gelesen — zwei Aufrufe für verschiedene
+    Pakete desselben Laufs, auch gleichzeitig, verlieren nichts. Ist ZIEL nicht HEAD oder
+    weicht der Arbeitsbaum in Paketdateien von ZIEL ab, steht ein Hinweis unter `notes` im
+    Plan (`packet`, `kind` = `target_not_head` | `worktree_differs`, `files`, `text`), weil
+    der Reviewer den Arbeitsbaum liest; HEAD wird je Lauf und Prozess einmal gelesen, der
+    Arbeitsbaum bei jedem Aufruf; jeder Aufruf ersetzt die Hinweise seines Pakets. `notes`
+    steht als letzter Schlüssel nach `not_reviewed`. Rückgabe: der Bereich `<von>..<bis>`
+    (SHAs) oder der vorhandene."""
     repo = _toplevel(repo)
     run_id = _check_run_id(run_id)
-    path, plan = _load_plan(repo, run_id)
     pid = packet.get("id") if isinstance(packet, dict) else packet
-    order = {p.get("id"): i for i, p in enumerate(plan["packets"])}
-    if pid not in order:
-        raise KitError(f"Paket {pid!r} steht nicht im Plan von Lauf {run_id}")
-    entry = plan["packets"][order[pid]]
-    base_sha, target_sha = _base_object(repo, base), _commit(repo, target)
-    if (base_sha, target_sha) != (plan["base"], plan["target"]):
-        raise KitError(f"Bereich {base}..{target} passt nicht zum Plan von Lauf {run_id} "
-                       f"({plan['base']}..{plan['target']})")
-    files = list(entry["files"])
-    notes = _range_notes(repo, pid, target_sha, files, _tree_entries(repo, target_sha, files))
-    rng = entry.get("range")
-    if rng is None:
-        von, bis = _helper_commits(repo, run_id, pid, plan, files)
-        rng = entry["range"] = f"{von}..{bis}"
-    kinds = (NOTE_TARGET_NOT_HEAD, NOTE_WORKTREE_DIFFERS)
-    kept = [n for n in plan.get("notes", []) if n.get("packet") != pid] + notes
-    kept.sort(key=lambda n: (order.get(n.get("packet"), len(order)),
-                             kinds.index(n["kind"]) if n.get("kind") in kinds else len(kinds)))
-    meta = {k: v for k, v in plan["_meta"].items() if k not in RESERVED_META}
-    payload = {k: v for k, v in plan.items() if k not in ("_meta", "notes")}
-    payload["notes"] = kept
-    write_json(path, meta, payload)
+    if not isinstance(pid, str):
+        raise KitError(f"keine Paket-ID: {pid!r}")
+    with _plan_lock(run_dir(repo, run_id), run_id):
+        path, plan = _load_plan(repo, run_id)
+        order = {p["id"]: i for i, p in enumerate(plan["packets"])}
+        if pid not in order:
+            raise KitError(f"Paket {pid!r} steht nicht im Plan von Lauf {run_id}")
+        entry = plan["packets"][order[pid]]
+        _check_span(repo, run_id, plan, base, target)
+        target_sha = plan["target"]
+        files = list(entry["files"])
+        target_entries = _tree_entries(repo, target_sha, files)
+        head = _run_cached(repo, run_id, "head", lambda: _head(repo))
+        notes = _range_notes(repo, pid, head, target_sha, files, target_entries)
+        rng = entry.get("range")
+        if rng is not None and rng != plan.get("range") and not _refs_hold(repo, run_id, pid, rng):
+            rng = None
+        if rng is None:
+            von, bis = _helper_commits(repo, run_id, pid, plan, files, target_entries)
+            rng = entry["range"] = f"{von}..{bis}"
+        kinds = (NOTE_TARGET_NOT_HEAD, NOTE_WORKTREE_DIFFERS)
+        kept = [n for n in plan.get("notes", []) if n.get("packet") != pid] + notes
+        kept.sort(key=lambda n: (order.get(n.get("packet"), len(order)),
+                                 kinds.index(n["kind"]) if n.get("kind") in kinds else len(kinds)))
+        _write_plan(path, plan, kept)
     return rng
+
+
+def _reset_ranges(repo: Path, deleted) -> None:
+    """Nach dem Löschen: je Lauf, dessen `plan.json` in diesem Repo liegt, die Pakete, deren
+    `range` genau auf die gelöschten `von`/`bis` zeigte, wieder auf null — unter der Sperre
+    des Plans. Ein Lauf ohne Plan hier (anderer Worktree) oder mit unlesbarem Plan bleibt,
+    wie er ist; `make_packet_range` prüft die Refs ohnehin und baut dann neu."""
+    built: dict[str, dict[str, dict[str, str]]] = {}
+    for ref, sha in deleted:
+        parts = ref.split("/")
+        if len(parts) == 5 and parts[4] in ("von", "bis") and RUN_ID_RE.fullmatch(parts[2]):
+            built.setdefault(parts[2], {}).setdefault(parts[3], {})[parts[4]] = sha
+    for run_id, packets in sorted(built.items()):
+        directory = run_dir(repo, run_id)
+        if not (directory / "plan.json").is_file():
+            continue
+        with _plan_lock(directory, run_id):
+            try:
+                path, plan = _load_plan(repo, run_id)
+            except KitError:
+                continue
+            changed = False
+            for packet in plan["packets"]:
+                ends = packets.get(packet["id"], {})
+                if packet.get("range") is not None and \
+                        packet["range"] == f"{ends.get('von')}..{ends.get('bis')}":
+                    packet["range"] = None
+                    changed = True
+            if changed:
+                _write_plan(path, plan)
 
 
 def cleanup(repo, run_id, stale):
@@ -801,8 +1004,10 @@ def cleanup(repo, run_id, stale):
     `stale` wahr: die Refs aller anderen Läufe — abgebrochener —, die von `run_id` bleiben;
     `run_id` None löscht alle unter `refs/deep-review/`. Refs gelten für alle Worktrees
     eines Repos: `stale` löscht auch die eines Laufs, der in einem anderen Worktree noch
-    läuft. Jede Ref wird nur mit ihrem gelesenen Wert gelöscht. Objekte, HEAD, Index,
-    Arbeitsbaum und `plan.json` bleiben. Rückgabe: die gelöschten Refs, sortiert."""
+    läuft. Jede Ref wird nur mit ihrem gelesenen Wert gelöscht. Danach steht in jedem
+    `plan.json` dieses Repos, dessen Bereiche auf gelöschte Refs zeigten, dort wieder
+    `range: null` (`_reset_ranges`). Objekte, HEAD, Index und Arbeitsbaum bleiben.
+    Rückgabe: die gelöschten Refs, sortiert."""
     repo = _toplevel(repo)
     if run_id is not None:
         _check_run_id(run_id)
@@ -819,4 +1024,5 @@ def cleanup(repo, run_id, stale):
     if doomed:
         commands = "".join(f"delete {ref} {sha}\n" for ref, sha in doomed)
         _git(repo, "update-ref", "--stdin", stdin=commands.encode("utf-8", errors="surrogateescape"))
+        _reset_ranges(repo, doomed)
     return sorted(ref for ref, _ in doomed)
