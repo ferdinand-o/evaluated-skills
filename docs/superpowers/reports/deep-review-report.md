@@ -595,7 +595,6 @@ Fix-Runde 2 behob die fünf. `audit` prüft jetzt die Zeilen Hinweise und Übern
 Kommentarzeilen zählen nicht zur Längengrenze. `DELPHI_RELEASES` kennt `ExtractPair`,
 `ExtractKey` und `ExtractValue`. 1.780 Tests grün. Zusätzlich offen: Ob `ExtractKey` und
 `ExtractValue` RTL-Methoden sind, ist ungeprüft. Sie greifen nur bei Besitz-Typen.
-`counterparts.md` nennt die neuen Namen noch nicht (Task 13).
 
 ## Was nicht gemessen wurde
 
