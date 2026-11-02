@@ -6,6 +6,7 @@ Fehler hängt an einer Stelle in `base`, die der Diff nicht berührt."""
 
 import datetime as dt
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -755,3 +756,176 @@ def test_h04_pas_segments_split_capital_runs_and_digits():
         assert kit.classify(f"src/{name}.pas", False) == kit.REASON_TEST, name
     for name in ("HTMLTestament", "TESTUNIT", "Contest2"):
         assert kit.classify(f"src/{name}.pas", False) is None, name
+
+
+# --- review_kit.py: Paket-Bereiche und cleanup (Task 3) ----------------------------------
+
+IDENTITY = "deep-review <deep-review@localhost>"
+
+
+def _no_identity(monkeypatch, root, home):
+    """Kein user.name, keine Identität aus Umgebung, globaler oder System-Konfiguration;
+    `user.useConfigOnly` verbietet git das Raten aus Rechnername und Login."""
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
+                "GIT_COMMITTER_EMAIL", "EMAIL", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    git(root, "config", "--unset", "user.name")
+    git(root, "config", "--unset", "user.email")
+    git(root, "config", "user.useConfigOnly", "true")
+    with pytest.raises(subprocess.CalledProcessError):
+        git(root, "commit-tree", "-m", "x", f"{_rev(root, 'HEAD')}^{{tree}}")
+
+
+def _user_state(root):
+    """HEAD, Index-Hash und Status ohne `.skills/` — `status` ohne optionale Sperren, damit
+    die Messung selbst den Index nicht auffrischt."""
+    index = hashlib.sha256((root / ".git" / "index").read_bytes()).hexdigest()
+    status = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(root), "status", "--porcelain",
+         "--untracked-files=all"], capture_output=True, text=True, check=True).stdout
+    status = "\n".join(line for line in status.splitlines() if ".skills/" not in line)
+    head = git(root, "symbolic-ref", "-q", "HEAD") + _rev(root, "HEAD")
+    return head, index, status
+
+
+def _refs(root, prefix="refs/deep-review/"):
+    return git(root, "for-each-ref", "--format=%(refname)", prefix).split()
+
+
+def _name_status(root, rng):
+    out = git(root, "diff", "--name-status", "--no-renames", rng)
+    return sorted(tuple(line.split("\t")) for line in out.splitlines())
+
+
+def _plan_on_disk(kit, root, run):
+    return json.loads((kit.run_dir(root, run) / "plan.json").read_text(encoding="utf-8"))
+
+
+def test_plan_packet_range_shows_only_the_packet(tmp_path, monkeypatch):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(
+        tmp_path / "repo",
+        {"a/mod.py": _lines(4), "b/gone.py": _lines(8, "g"), "README.md": "# x\n"},
+        {"a/mod.py": _lines(2) + _lines(2, "neu"),   # M, 4 Zeilen
+         "a/new.py": _lines(4, "n"),                 # A, 4 Zeilen
+         "b/gone.py": None,                          # D, 8 Zeilen
+         "README.md": "# x\n\nmehr\n"},              # nicht reviewt
+    )
+    # Zweiter Commit im Bereich: die Message von `bis` sind alle Messages von BASIS..ZIEL.
+    (root / "a" / "new.py").write_text(_lines(5, "n"), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "zweite änderung\n\nmit Rumpf")
+    _no_identity(monkeypatch, root, tmp_path / "home")
+
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False)
+    assert plan["split"] is True
+    assert [(p["id"], p["files"], p["range"]) for p in plan["packets"]] == [
+        ("p1", ["a/mod.py", "a/new.py"], None), ("p2", ["b/gone.py"], None)]
+    run = plan["_meta"]["run"]
+
+    # Ungespeicherte Änderung in einer Paketdatei und eine im Index.
+    (root / "a" / "mod.py").write_text(_lines(1), encoding="utf-8")
+    (root / "staged.py").write_text("s = 1\n", encoding="utf-8")
+    git(root, "add", "staged.py")
+    before = _user_state(root)
+
+    ranges = {p["id"]: kit.make_packet_range(root, run, p, plan["base"], plan["target"])
+              for p in plan["packets"]}
+    assert _user_state(root) == before
+
+    head = _rev(root, "HEAD")
+    expected = {"p1": [("A", "a/new.py"), ("M", "a/mod.py")], "p2": [("D", "b/gone.py")]}
+    message = git(root, "log", "--format=%B", f"{plan['log_base']}..{plan['target']}")
+    assert "zweite änderung" in message and "\nänderung" in message
+    for pid, rng in ranges.items():
+        von, bis = rng.split("..")
+        assert von == _rev(root, f"refs/deep-review/{run}/{pid}/von")
+        assert bis == _rev(root, f"refs/deep-review/{run}/{pid}/bis")
+        assert _name_status(root, rng) == expected[pid]
+        assert _rev(root, f"{bis}^{{tree}}") == _rev(root, f"{head}^{{tree}}")
+        assert _rev(root, f"{bis}^") == von and _rev(root, f"{von}^") == head
+        assert git(root, "log", "-1", "--format=%an <%ae>|%cn <%ce>", bis).strip() == \
+            f"{IDENTITY}|{IDENTITY}"
+        assert git(root, "log", "-1", "--format=%B", von).strip() == f"deep-review {run} {pid}: Basis"
+        assert git(root, "log", "-1", "--format=%B", bis).strip() == message.strip()
+
+    on_disk = _plan_on_disk(kit, root, run)
+    assert [p["range"] for p in on_disk["packets"]] == [ranges["p1"], ranges["p2"]]
+    assert list(on_disk) == PLAN_KEYS + ["notes"]
+    assert all(list(p) == PACKET_KEYS for p in on_disk["packets"])
+    assert on_disk["_meta"]["run"] == run and on_disk["_meta"]["skill"] == "deep-review"
+    # Der Arbeitsbaum weicht in a/mod.py von ZIEL ab: Hinweis für p1, keiner für p2.
+    assert [(n["packet"], n["kind"], n["files"]) for n in on_disk["notes"]] == [
+        ("p1", "worktree_differs", ["a/mod.py"])]
+    assert all(n["text"] for n in on_disk["notes"])
+    # Ein zweiter Aufruf baut nichts neu; eine Basis, die nicht zum Plan passt, ist ein Fehler.
+    assert kit.make_packet_range(root, run, "p1", plan["base"], plan["target"]) == ranges["p1"]
+    assert _plan_on_disk(kit, root, run)["notes"] == on_disk["notes"]
+    with pytest.raises(kit.KitError, match="Plan"):
+        kit.make_packet_range(root, run, "p1", head, head)
+
+    # cleanup: keine Ref des Laufs bleibt; ein anderer Lauf bleibt, bis --stale ihn löscht.
+    other = kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False)
+    kit.make_packet_range(root, other["_meta"]["run"], "p2", other["base"], other["target"])
+    third = kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False)
+    kit.make_packet_range(root, third["_meta"]["run"], "p1", third["base"], third["target"])
+    deleted = kit.cleanup(root, run, False)
+    assert sorted(deleted) == sorted(f"refs/deep-review/{run}/{p}/{e}"
+                                     for p in ("p1", "p2") for e in ("von", "bis"))
+    assert _refs(root, f"refs/deep-review/{run}/") == []
+    assert _refs(root, f"refs/deep-review/{other['_meta']['run']}/")
+    kit.cleanup(root, third["_meta"]["run"], True)
+    assert [r.split("/")[2] for r in _refs(root)] == [third["_meta"]["run"]] * 2
+    kit.cleanup(root, None, True)
+    assert _refs(root) == []
+    assert kit.cleanup(root, run, False) == []
+    with pytest.raises(kit.KitError):
+        kit.cleanup(root, None, False)
+    with pytest.raises(kit.KitError):
+        kit.cleanup(root, "../x", False)
+    assert _user_state(root) == before
+
+
+def test_plan_packet_range_root_split_false_and_target_not_head(tmp_path):
+    kit = _kit()
+    # Bis split_at, kein Wurzel-Commit: der Originalbereich, keine Hilfscommits.
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": ""}, {"a/x.py": _lines(3)})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    assert kit.make_packet_range(root, run, "p1", plan["base"], plan["target"]) == plan["range"]
+    assert _refs(root) == []
+    assert _plan_on_disk(kit, root, run)["notes"] == []
+    with pytest.raises(kit.KitError, match="p9"):
+        kit.make_packet_range(root, run, "p9", plan["base"], plan["target"])
+
+    # ZIEL ist nicht HEAD: Hinweis im Plan.
+    (root / "a" / "y.py").write_text(_lines(2), encoding="utf-8")
+    git(root, "add", "a/y.py")
+    tree = git(root, "write-tree").strip()
+    git(root, "rm", "--quiet", "--cached", "a/y.py")
+    (root / "a" / "y.py").unlink()
+    side = git(root, "commit-tree", "-p", "HEAD", "-m", "seite", tree).strip()
+    git(root, "update-ref", "refs/heads/side", side)
+    off = kit.build_plan(root, "base..side", "standard", "bugs", None, False)
+    assert off["packets"][0]["files"] == ["a/x.py", "a/y.py"]
+    kit.make_packet_range(root, off["_meta"]["run"], "p1", off["base"], off["target"])
+    notes = _plan_on_disk(kit, root, off["_meta"]["run"])["notes"]
+    assert [(n["packet"], n["kind"], n["files"]) for n in notes] == [
+        ("p1", "target_not_head", []), ("p1", "worktree_differs", ["a/y.py"])]
+
+    # Wurzel-Commit: auch ein einzelnes Paket bekommt Hilfscommits mit leerer Basis.
+    (tmp_path / "first").mkdir()
+    first = _root_repo(tmp_path / "first", {"app/a.py": _lines(3), "README.md": "# r\n"})
+    rplan = kit.build_plan(first, None, "standard", "bugs", None, False)
+    assert rplan["root"] is True and rplan["packets"][0]["range"] is None
+    rng = kit.make_packet_range(first, rplan["_meta"]["run"], rplan["packets"][0],
+                                rplan["base"], rplan["target"])
+    assert _name_status(first, rng) == [("A", "app/a.py")]
+    assert git(first, "log", "-1", "--format=%B", rng.split("..")[1]).strip() == "erster"
+    assert len(kit.cleanup(first, rplan["_meta"]["run"], False)) == 2
+    assert _refs(first) == []
