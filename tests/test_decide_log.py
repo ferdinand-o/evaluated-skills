@@ -1032,7 +1032,7 @@ def concurrent_row(monkeypatch, root):
         monkeypatch.setattr(dl, "append_block", real)
         if result[0] is not None:
             dl.append_row(root, SESSION, {"zeit": "2026-11-02T10:00:00", "thema": "Abhängigkeiten",
-                                          "klasse": "gross", "frage": "Datumsangaben parsen?",
+                                          "klasse": "gross", "frage": args[2]["question"],
                                           "entscheidung": f"D-{result[0]}", "beleg": "—", "regel": "—"})
         return result
 
@@ -1069,7 +1069,7 @@ def test_same_question_other_options_is_refused(decide_repo, capsys):
     err = capsys.readouterr().err
     assert "D-1 steht offen mit anderen Optionen — von Hand ändern oder mit resolve beantworten" in err, err
     assert big("--option", "A: python-dateutil", "--option", "B: strptime", "--recommendation", "A") == 1
-    assert "D-1 steht offen mit anderen Optionen" in capsys.readouterr().err
+    assert "D-1 steht offen mit anderer Empfehlung" in capsys.readouterr().err    # CP2-R3-F4: Feld genannt
     assert ledger_text(root) == before
     assert log_file(root).read_text(encoding="utf-8") == log_before
     assert big(*TWO) == 0                                   # wirklich gleich: weiter „steht schon“
@@ -1155,3 +1155,94 @@ def test_key_pattern_with_inner_spaces(decide_repo, capsys):
         assert big(*TWO, question="Zweite?", key=bad) == 1, bad
         assert "Tab oder Zeilenumbruch" in capsys.readouterr().err
     assert blocks_in(root) == ["D-1"]
+
+
+# --- Funde des Prüfpunkts 2, Runde 3 (Mini-Runde F1–F4) ---------------------------------
+
+def test_new_block_after_discarded_ledger_gets_its_row(decide_repo, capsys):
+    """CP2-R3-F1: Wird die Ablage verworfen, bekommt ein neuer Block mit wiederverwendeter Nummer
+    trotzdem seine Protokollzeile — eine alte Zeile mit derselben Nummer, aber anderer Frage
+    verhindert sie nicht."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    (root / "docs" / "big-decisions.md").unlink()
+    capsys.readouterr()
+    assert big(*TWO, question="Neue Frage?") == 0, capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert "steht schon" not in out, out
+    assert blocks_in(root) == ["D-1"]
+    assert [(r[2], r[3], r[4]) for r in rows(root)] == [
+        ("gross", "Datumsangaben parsen?", "D-1"), ("gross", "Neue Frage?", "D-1")]
+
+
+def test_unversioned_notice_only_when_cache_appears_and_written(decide_repo, capsys):
+    """CP2-R3-F2: Der Hinweis zu .skills/cache/ kommt genau dann, wenn der Ordner bei diesem
+    Aufruf entstand und etwas geschrieben wurde — nicht in jeder neuen Sitzung, nicht nach einem
+    resolve, das nichts geschrieben hat."""
+    root, _ = decide_repo
+    notice = ".skills/cache/ steht nicht in der .gitignore"
+    assert add_small("CLI", "Kurz?", "ja", "gesucht: a.py — Treffer: a.py:1") == 0
+    assert notice in capsys.readouterr().out
+    assert add_small("CLI", "Kurz?", "ja", "gesucht: a.py — Treffer: a.py:1", "--session", "sitzung-2") == 0
+    out = capsys.readouterr().out
+    assert "Protokoll angelegt" in out and notice not in out, out
+    assert big(*TWO, "--session", "sitzung-3") == 0
+    out = capsys.readouterr().out
+    assert "Protokoll angelegt" in out and notice not in out, out
+
+    shutil.rmtree(root / ".skills")
+    assert big(*TWO, question="Zweite?") == 0             # neuer Block legt den Ordner an
+    assert notice in capsys.readouterr().out
+
+    shutil.rmtree(root / ".skills")
+    (root / "docs" / "big-decisions.md").unlink()
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 1
+    captured = capsys.readouterr()
+    assert "nichts geschrieben" in captured.err and notice not in captured.out + captured.err, captured
+
+
+def test_unreadable_rules_are_reported(decide_repo, monkeypatch, capsys):
+    """CP2-R3-F3: Eine unlesbare rules.md fällt nicht still weg — add und rules melden
+    „Regeln <pfad> nicht lesbar (<Ursache>) — ohne diese Regeln eingeordnet“; eine fehlende bleibt still."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    unreadable(monkeypatch, "rules.md")
+    want = "Regeln .skills/decide/rules.md nicht lesbar (Permission denied) — ohne diese Regeln eingeordnet"
+    assert dl.load_rules(root, home) == []
+    assert add_small("UI-Texte", "Text?", "kurz", "gesucht: a.py — Treffer: a.py:1") == 0
+    captured = capsys.readouterr()
+    assert want in captured.out + captured.err, captured
+    assert big(*TWO) == 0
+    captured = capsys.readouterr()
+    assert want in captured.out + captured.err, captured
+    assert dl.main(["rules"]) == 0
+    assert want in capsys.readouterr().out
+    assert "~/.skills" not in want                          # die fehlende Nutzerdatei bleibt still
+    monkeypatch.undo()
+    assert dl.main(["rules"]) == 0
+    assert "nicht lesbar" not in capsys.readouterr().out
+
+
+def test_same_block_by_request_and_normalized_file_values(decide_repo, capsys):
+    """CP2-R3-F4: Ein wiederholter Auftrag vergleicht nur Frage, Schlüssel und Quelle; Werte aus
+    der Datei werden wie die Argumente normalisiert; die Meldung nennt das abweichende Feld."""
+    root, _ = decide_repo
+    assert big("--approved-by-request", "nimm python-dateutil auf", question="Auftrag?") == 0
+    assert big("--approved-by-request", "nimm python-dateutil auf", question="Auftrag?",
+               *("--recommendation", "A")) == 0, capsys.readouterr().err
+    assert "D-1 steht schon" in capsys.readouterr().out
+
+    assert big(*TWO) == 0
+    path = root / "docs" / "big-decisions.md"
+    path.write_text(ledger_text(root).replace("Empfehlung: B, weil Stdlib", "Empfehlung: B,  weil Stdlib ")
+                    .replace("- A: python-dateutil", "-  A:  python-dateutil"), encoding="utf-8")
+    capsys.readouterr()
+    assert big(*TWO) == 0, capsys.readouterr().err
+    assert "D-2 steht schon" in capsys.readouterr().out
+    assert blocks_in(root) == ["D-1", "D-2"]
+
+    assert big("--option", "A: python-dateutil", "--option", "B: strptime", "--recommendation", "A") == 1
+    err = capsys.readouterr().err
+    assert "D-2 steht offen mit anderer Empfehlung — von Hand ändern" in err, err
+    assert big("--option", "A: x", "--option", "B: strptime", "--recommendation", "B, weil Stdlib") == 1
+    assert "D-2 steht offen mit anderen Optionen — von Hand ändern" in capsys.readouterr().err
