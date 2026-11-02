@@ -446,6 +446,24 @@ einzutragen reicht nicht. `verify` liest den JSON-Block am Ende, also muss sie a
 stehen. Sonst meldet `verify` FAIL wegen der Testdatei, obwohl der Fix sich an die Allowlist
 hielt. Das spricht dafür, dass `fix-task` die Testdatei selbst aufnimmt (Lesson 2 aus Prüfpunkt 4).
 
+### Prüfpunkt 6 (nach Task 7, C1 und C5: record, merge, audit, CLI)
+
+Task 7 mit Opus: `verify` PASS. Die Vertragsprüfung meldet 1 von 5 Steps fehlend: Die volle
+Suite stand nicht im test-first-Log. Nach dem Merge liefen 1.738 Tests grün, das belegt den Step.
+`/code-review` über 1.113 Zeilen ergab 20 Funde. Der schwerste: Ein Fund in einer Datei mit
+Leerzeichen im Pfad oder mit einer Zeilenangabe wie `12 - 14` konnte nie als „im Bericht“
+zählen, `audit` wäre nie vollständig geworden. Fix-Runde 1 nimmt 19 Funde auf (Zeilen beim
+`record` normalisieren, UTF-8 für stdin/stdout, BOM, Funde zu Gegenstellen-Dateien bei
+`--since`, eine strenge Definition für angenommene Ergebnisse, `merge` nicht mehr transitiv,
+Kopfzeile mit allen fünf Feldern, Berichtslänge `REPORT_BASE_LINES` plus eine Zeile je Fund).
+
+Offen für known-limits:
+
+- `audit` liest den Bericht mit regulären Ausdrücken aus freiem Markdown. Ein anderer Gedankenstrich,
+  Fettdruck oder eine Tabellenzeile statt der Fundzeile ergibt einen falschen `report_mismatch`.
+  Sauberer wäre, wenn das Skript die datentragenden Zeilen selbst schreibt. Die Zahlen in der
+  Pakettabelle prüft `audit` nicht. Das gehört zur Vorlage aus Task 11.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
