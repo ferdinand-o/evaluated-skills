@@ -7,16 +7,46 @@ When `decide_log.py check --range <bereich>` läuft
 Then meldet es beide Stellen mit Datei, Kategorie und Grund aus `reversibility.md`
 Then die Ausgabe nennt die ungeprüften Kategorien
 """
-import pytest
+from conftest import decide_script, git
+
+dl = decide_script()
+TAIL = "ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration"
 
 
-@pytest.mark.skip("stub: noch nicht implementiert")
-def test_decide_teure_aenderung_ohne_freigabe_wird_gemeldet():
+def commit(root, message):
+    git(root, "add", "-A")
+    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "commit", "-q", "-m", message)
+
+
+def test_decide_teure_aenderung_ohne_freigabe_wird_gemeldet(decide_repo, monkeypatch, capsys):
     # Arrange
-    ...
+    root, _ = decide_repo
+    (root / "pyproject.toml").write_text('[project]\nname = "app"\ndependencies = []\n', encoding="utf-8")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0001_initial.py").write_text("def up(): pass\n", encoding="utf-8")
+    assert dl.main(["add", "--class", "gross", "--topic", "Abhängigkeiten", "--question", "Datumsangaben parsen?",
+                    "--key", "dependency:pyproject.toml", "--option", "A: python-dateutil",
+                    "--option", "B: strptime", "--recommendation", "B, weil Stdlib"]) == 0
+    commit(root, "Basis")
+    base = git(root, "rev-parse", "HEAD").strip()
+    (root / "pyproject.toml").write_text('[project]\nname = "app"\ndependencies = ["python-dateutil"]\n',
+                                         encoding="utf-8")
+    (root / "migrations" / "0002_drop_legacy.py").write_text("def up(): pass\n", encoding="utf-8")
+    capsys.readouterr()
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")            # check braucht keine Sitzung
 
     # Act
-    ...
+    code = dl.main(["check", "--range", base])
+    out = capsys.readouterr().out
 
     # Assert
-    ...
+    categories, problem = dl.load_categories(dl.REFERENCE)
+    assert problem is None
+    assert code == 1, out
+    lines = out.splitlines()
+    dep = next(line for line in lines if line.startswith("- pyproject.toml "))
+    mig = next(line for line in lines if line.startswith("- migrations/0002_drop_legacy.py "))
+    assert "dependency" in dep and categories["dependency"].meaning in dep and "D-1" in dep and "offen" in dep
+    assert "migration" in mig and categories["migration"].meaning in mig and "kein Eintrag" in mig
+    assert "0001_initial.py" not in out                      # unverändert: keine Stelle
+    assert lines[-1] == TAIL

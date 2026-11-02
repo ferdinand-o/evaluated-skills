@@ -10,12 +10,13 @@
     decide_log.py resolve D-<n> --answer "…" | --reject     Antwort eintragen
     decide_log.py open                                      offene große Fragen
     decide_log.py summary                                   Einträge der laufenden Sitzung
+    decide_log.py check --range <rev> | <a>..<b>            teure Änderungen im Diff ohne Freigabe
 
 Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py"`. Repo-Wurzel ist
 `git rev-parse --show-toplevel`, sonst das Arbeitsverzeichnis; `~` ist `HOME`. Die Sitzung
 ist `--session`, sonst `CLAUDE_CODE_SESSION_ID`; fehlen beide, enden `add` und `summary`
-mit Exit 1 und nennen `--session`. `resolve` und `open` brauchen keine Sitzung: Die Ablage
-gehört dem Repo, nicht einer Sitzung.
+mit Exit 1 und nennen `--session`. `resolve`, `open` und `check` brauchen keine Sitzung: Die
+Ablage gehört dem Repo, nicht einer Sitzung.
 
 Protokoll `.skills/cache/decide/<session>/log.md`: Kopfzeile, dann die Tabelle
 `| zeit | thema | klasse | frage | entscheidung | beleg | regel |` mit `klasse` aus `klein`,
@@ -64,7 +65,8 @@ große Frage ein Block
 `Nutzer in Sitzung` (`resolve`), `Auftrag: „<Zitat>“` (`--approved-by-request`) oder `von Hand`.
 Pflicht je Weg:
 - `add --class gross`: `--topic`, `--question`, `--key`, `--recommendation`, zwei bis vier
-  `--option`; Schlüssel `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus `CATEGORIES`, oder
+  `--option`; Schlüssel `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus
+  `references/reversibility.md` (`load_categories`; fehlt sie oder parst sie nicht, Exit 1), oder
   `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft — sonst Exit 1.
 - `add --class gross --approved-by-request "<Zitat>"`: `--topic`, `--question`, `--key` wie oben
   (auch `rule:<thema>` — konkreter Auftrag vor Regel); Status `freigegeben`, „Optionen: — (Auftrag)“.
@@ -97,7 +99,27 @@ und Vorlage), geschrieben ohne BOM.
 Konsumenten-Regel (docs/artifact-header.md): fehlt die Kopfzeile von decide oder ist `schema`
 höher als 1, überspringen `read_ledger` und `open` die Datei sichtbar („docs/big-decisions.md
 schema 1 erwartet, 2 gefunden — Freigaben übersprungen“), `add` und `resolve` schreiben nichts.
-`CATEGORIES` ist bis Task 3 eine Konstante; dann liest das Skript `references/reversibility.md`.
+
+`check --range <rev>` liest `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die
+unversionierten Dateien aus `git ls-files --others --exclude-standard`; `<a>..<b>` (auch
+`<a>...<b>`) lässt Arbeitsbaum und unversionierte Dateien aus. Git läuft über `subprocess` mit
+Argumentliste, nie über eine Shell; ein Bereich mit führendem `-` ist kein Bereich. Eine Stelle
+ist eine Datei im Diff (geändert, neu, gelöscht, unversioniert; Umbenennung als Löschen plus
+Neuanlage). Ihre Kategorien kommen aus den Pfadmustern der Tabelle in
+`references/reversibility.md` — der einen Quelle für Kategorien, Grad und Muster. Muster mit `/`
+am Ende sind ein Präfix, sonst ein Glob, den `glob_to_regex` selbst übersetzt (`*` und `?` ohne
+`/`, `**/` null oder mehr Ordner, `**` sonst alles), relativ zur Repo-Wurzel. Frei ist eine
+Stelle, wenn ein Block mit Status `freigegeben` einen Schlüssel derselben Kategorie trägt, dessen
+Muster die Datei trifft und — mit `#<text>` — dessen Text in einer hinzugefügten Zeile der Datei
+steht (Leerraum zusammengezogen; bei einer unversionierten Datei ist jede Zeile hinzugefügt).
+`rule:`-Schlüssel vergleicht check nie. Überspringt die Konsumenten-Regel die Ablage, sagt
+check das und meldet jede Stelle. Ausgabe auf stdout: je Stelle
+„- <datei> — <kategorie> (<grad>): <Bedeutung aus der Tabelle> — <warum nicht frei>“, als letzte
+Zeile immer „ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api,
+migration“ (aus der Spalte Grad). Exit 1 bei mindestens einer Stelle, sonst 0. Exit 2 auf
+stderr, nie ein Erfolg: „ungeprüft — kein Git“ (kein `git` oder kein Repo), ein Bereich, den Git
+nicht kennt, und „ungeprüft — references/reversibility.md fehlt“ bzw. der Grund, warum sie nicht
+parst (dann ohne Schlusszeile — sie käme aus der Datei).
 
 Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
 """
@@ -145,12 +167,16 @@ SMALL_FLAGS = (("decision", "--decision"), ("evidence", "--evidence"))
 
 LEDGER = Path("docs") / "big-decisions.md"
 LEDGER_SHOWN = LEDGER.as_posix()
-LEDGER_ASSET = Path(__file__).resolve().parent.parent / "assets" / "big-decisions.md"
+SKILL_DIR = Path(__file__).resolve().parent.parent
+LEDGER_ASSET = SKILL_DIR / "assets" / "big-decisions.md"
 LEDGER_LOCK = Path(".skills") / "cache" / "decide" / "big-decisions.md"   # Sperrdatei: dies + „.lock“
-# Bis Task 3 eine Konstante; dann aus references/reversibility.md gelesen.
-CATEGORIES = ("api", "migration", "data-delete", "unsaved-work", "push", "external", "permissions",
-              "dependency", "cost")
+# Die eine Quelle für Kategorien, Grad und Pfadmuster (load_categories); keine Liste im Skript.
+REFERENCE = SKILL_DIR / "references" / "reversibility.md"
+REFERENCE_COLUMNS = ("Kategorie", "Bedeutung", "Beispiel", "Grad", "Pfadmuster", "Grenze")
+GRADES = ("geprüft", "teilweise", "ungeprüft")
+TAIL_GRADES = ("ungeprüft", "teilweise")       # die Schlusszeile von check nennt diese
 RULE_CATEGORY = "rule"
+GIT_TIMEOUT = 60
 KEY_FORM = "<kategorie>:<pfadmuster>[#<text>]"
 STATUSES = ("offen", "freigegeben", "abgelehnt")
 SOURCE_USER = "Nutzer in Sitzung"
@@ -160,6 +186,18 @@ BLOCK_RE = re.compile(r"^## (?P<id>D-(?P<number>\d+)) · (?P<date>\S+) · (?P<st
 BLOCK_NUMBER_RE = re.compile(r"(?m)^## D-(\d+)\b")
 FIELDS = (("question", "Frage"), ("topic", "Thema"), ("key", "Schlüssel"), ("options", "Optionen"),
           ("recommendation", "Empfehlung"), ("answer", "Antwort"), ("source", "Quelle der Antwort"))
+
+
+class Category(NamedTuple):
+    """Eine Zeile der Tabelle in `references/reversibility.md`: `name` (`"migration"`), `meaning`
+    (Bedeutung, der Grund in check), `example`, `grade` (aus `GRADES`), `patterns` (Tupel der
+    Pfadmuster, leer bei `ungeprüft`), `limit` (Grenze, `—` wenn keine)."""
+    name: str
+    meaning: str
+    example: str
+    grade: str
+    patterns: tuple
+    limit: str
 
 
 class Rule(NamedTuple):
@@ -849,7 +887,8 @@ def store_big(root, session, status, fields, row):
 
 
 def check_key(key, topic, rules):
-    """(Schlüssel, Problem): `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus `CATEGORIES`,
+    """(Schlüssel, Problem): `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus der Tabelle in
+    `references/reversibility.md` (`load_categories`, dieselbe Quelle wie check),
     oder — mit und ohne Auftrag — `rule:<thema>`, wenn eine Regel `immer fragen` dieses Thema und
     `topic` trifft, dann in der Schreibweise der Regel. Leerraum um Kategorie, Pfadmuster und Text
     fällt weg; Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler."""
@@ -873,9 +912,12 @@ def check_key(key, topic, rules):
     if re.search(r"[^\S ]", pattern):
         return None, (f"Schlüssel „{key}“: Tab oder Zeilenumbruch im Pfadmuster „{line_value(pattern)}“ — "
                       f"Form {KEY_FORM}; nichts geschrieben.")
-    if category not in CATEGORIES:
+    categories, problem = load_categories(REFERENCE)
+    if problem:
+        return None, f"Schlüssel „{key}“ nicht prüfbar: {problem}; nichts geschrieben."
+    if category not in categories:
         return None, (f"Schlüssel „{key}“: Kategorie „{category}“ unbekannt — erlaubt: "
-                      f"{', '.join(CATEGORIES)}, oder rule:<thema> bei einer Regel immer fragen; "
+                      f"{', '.join(categories)}, oder rule:<thema> bei einer Regel immer fragen; "
                       "nichts geschrieben.")
     return f"{category}:{pattern}{hash_}{' '.join(text.split())}", None
 
@@ -1041,6 +1083,289 @@ def open_questions(root):
     return 0, "\n".join(lines)
 
 
+# --- check: Kategorien, Pfadmuster, Diff ------------------------------------------------
+
+def reference_shown(path):
+    """`references/<name>` für eine Datei in einem Ordner `references`, sonst der Pfad."""
+    path = Path(path)
+    return f"{path.parent.name}/{path.name}" if path.parent.name == "references" else str(path)
+
+
+def _table_cells(line):
+    """Zellen einer Markdown-Tabellenzeile, getrimmt; None, wenn die Zeile keine ist."""
+    line = line.strip()
+    if not line.startswith("|"):
+        return None
+    inner = line[1:-1] if len(line) > 1 and line.endswith("|") else line[1:]
+    return [c.strip() for c in inner.split("|")]
+
+
+def _patterns(text):
+    """(Muster, Problem) aus einer Zelle Pfadmuster: Muster in Backticks, durch Komma getrennt;
+    `—`, `-` oder leer heißt keines."""
+    if text in ("", "—", "-"):
+        return (), None
+    found = tuple(p.strip() for p in re.findall(r"`([^`]+)`", text))
+    if not found or re.sub(r"`[^`]+`", "", text).strip(" ,") or not all(found):
+        return (), f"Pfadmuster „{text}“ — erwartet Muster in Backticks, durch Komma getrennt, oder —"
+    return found, None
+
+
+def load_categories(path):
+    """(Kategorien, Problem) aus der Tabelle in `references/reversibility.md` (`path`).
+
+    Kategorien: dict Name → `Category`, in Tabellenreihenfolge. Die Tabelle beginnt mit der
+    Kopfzeile `| Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |` und der
+    Trennzeile und reicht bis zur ersten Zeile, die nicht mit `|` beginnt. Je Zeile: Kategorie als
+    Name in Backticks (einmal, nicht `rule`), Grad aus `GRADES`, Pfadmuster nach `_patterns` —
+    `geprüft` und `teilweise` mit mindestens einem, `ungeprüft` mit keinem —, Bedeutung nicht leer.
+    Problem: None, oder eine Zeile Grund („references/reversibility.md fehlt“, nicht lesbar,
+    keine Tabelle, Zeile <n>: …); dann sind die Kategorien {}."""
+    where = reference_shown(path)
+    try:
+        text = read_file(path)
+    except Unreadable as error:
+        return {}, unreadable_problem(error, where, "")
+    if text is None:
+        return {}, f"{where} fehlt"
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if _table_cells(line) == list(REFERENCE_COLUMNS)), None)
+    if start is None:
+        return {}, f"{where}: keine Tabelle mit der Kopfzeile | {' | '.join(REFERENCE_COLUMNS)} |"
+    rule = _table_cells(lines[start + 1]) if start + 1 < len(lines) else None
+    if not rule or not all(re.fullmatch(r":?-{3,}:?", c) for c in rule):
+        return {}, f"{where}:{start + 2}: Trennzeile | --- | … fehlt unter der Kopfzeile"
+    categories = {}
+    for number, line in enumerate(lines[start + 2:], start + 3):
+        cells = _table_cells(line)
+        if cells is None:
+            break
+        if len(cells) != len(REFERENCE_COLUMNS):
+            return {}, f"{where}:{number}: {len(cells)} Zellen, erwartet {len(REFERENCE_COLUMNS)}"
+        row = dict(zip(REFERENCE_COLUMNS, cells))
+        match = re.fullmatch(r"`([a-z][a-z0-9-]*)`", row["Kategorie"])
+        if not match:
+            return {}, f"{where}:{number}: Kategorie „{row['Kategorie']}“ ist kein Name in Backticks"
+        name = match.group(1)
+        if name == RULE_CATEGORY:
+            return {}, f"{where}:{number}: `{RULE_CATEGORY}` ist reserviert und hat keine Pfadmuster"
+        if name in categories:
+            return {}, f"{where}:{number}: Kategorie `{name}` steht doppelt"
+        grade = row["Grad"]
+        if grade not in GRADES:
+            return {}, f"{where}:{number}: Grad „{grade}“ für `{name}` unbekannt — erlaubt: {', '.join(GRADES)}"
+        patterns, problem = _patterns(row["Pfadmuster"])
+        if problem:
+            return {}, f"{where}:{number}: {problem}"
+        if grade == "ungeprüft" and patterns:
+            return {}, f"{where}:{number}: `{name}` ist ungeprüft und hat trotzdem Pfadmuster"
+        if grade != "ungeprüft" and not patterns:
+            return {}, f"{where}:{number}: `{name}` ist {grade} und braucht mindestens ein Pfadmuster"
+        if row["Bedeutung"] in ("", "—", "-"):
+            return {}, f"{where}:{number}: Bedeutung für `{name}` leer"
+        categories[name] = Category(name, row["Bedeutung"], row["Beispiel"], grade, patterns, row["Grenze"] or NONE)
+    if not categories:
+        return {}, f"{where}: Tabelle ohne Zeilen"
+    return categories, None
+
+
+def tail_line(categories):
+    """Die Schlusszeile von check: „ungeprüft: …; teilweise: …“ in Tabellenreihenfolge."""
+    parts = []
+    for grade in TAIL_GRADES:
+        names = [c.name for c in categories.values() if c.grade == grade]
+        if names:
+            parts.append(f"{grade}: {', '.join(names)}")
+    return "; ".join(parts) or "ungeprüft: —"
+
+
+def glob_to_regex(pattern):
+    """Regex (kompiliert, für `fullmatch` auf einen Pfad relativ zur Wurzel mit `/`) zu einem
+    Pfadmuster: endet es auf `/`, ist es ein Präfix (jede Datei darunter); `**/` null oder mehr
+    Ordner, `**` sonst beliebige Zeichen samt `/`, `*` beliebige Zeichen außer `/`, `?` ein
+    Zeichen außer `/`, alles andere wörtlich. Selbst übersetzt statt `fnmatch` (dort trifft `*`
+    auch `/`) oder `PurePath.full_match` (erst ab Python 3.13)."""
+    prefix = pattern.endswith("/")
+    body = pattern[:-1] if prefix else pattern
+    out, i = [], 0
+    while i < len(body):
+        if body.startswith("**/", i):
+            out.append("(?:[^/]+/)*")
+            i += 3
+        elif body.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif body[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif body[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(body[i]))
+            i += 1
+    if prefix:
+        out.append("/.+")
+    return re.compile("".join(out))
+
+
+def pattern_matches(pattern, path):
+    return glob_to_regex(pattern).fullmatch(path) is not None
+
+
+class NoGit(Exception):
+    """`git` fehlt oder lässt sich nicht starten."""
+
+
+def _git(cwd, *args):
+    """Git mit Argumentliste in `cwd`, nie über eine Shell; `NoGit`, wenn es nicht startet."""
+    try:
+        return subprocess.run(["git", "-C", str(cwd), "--literal-pathspecs", *args], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise NoGit(str(error)) from error
+
+
+def _git_error(result):
+    return next((line.strip() for line in result.stderr.splitlines() if line.strip()), f"Exit {result.returncode}")
+
+
+def _changed(root, rev):
+    """(Wurzel des Repos, Dateien, unversionierte Dateien, Problem) — siehe `changed_files`."""
+    rev = (rev or "").strip()
+    if not rev or rev.startswith("-") or re.search(r"\s", rev):
+        return None, [], set(), f"Bereich „{rev}“ ungültig — erwartet <rev> oder <a>..<b>"
+    try:
+        top = _git(root, "rev-parse", "--show-toplevel")
+        if top.returncode != 0 or not top.stdout.strip():
+            return None, [], set(), "kein Git"
+        top = Path(top.stdout.strip())
+        diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", rev, "--")
+        if diff.returncode != 0:
+            return top, [], set(), f"git diff {rev} fehlgeschlagen: {_git_error(diff)}"
+        files = {name for name in diff.stdout.split("\0") if name}
+        untracked = set()
+        if ".." not in rev:
+            others = _git(top, "ls-files", "--others", "--exclude-standard", "--full-name", "-z")
+            if others.returncode != 0:
+                return top, [], set(), f"git ls-files --others fehlgeschlagen: {_git_error(others)}"
+            untracked = {name for name in others.stdout.split("\0") if name} - files
+    except NoGit:
+        return None, [], set(), "kein Git"
+    return top, sorted(files | untracked), untracked, None
+
+
+def changed_files(root, rev):
+    """(Dateien, Problem): die Stellen des Bereichs als Pfade relativ zur Repo-Wurzel mit `/`,
+    sortiert. `<rev>`: `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) plus
+    `git ls-files --others --exclude-standard`; `<a>..<b>` (oder `<a>...<b>`): nur `git diff`.
+    Problem: None, „kein Git“ (kein `git` oder kein Repo), ein ungültiger Bereich (leer, mit
+    führendem `-`) oder der Grund, mit dem Git abbricht; dann sind die Dateien []."""
+    _, files, _, problem = _changed(root, rev)
+    return files, problem
+
+
+def added_lines(top, rev, path, untracked):
+    """Hinzugefügte Zeilen von `path` im Bereich, Leerraum zusammengezogen; eine unversionierte
+    Datei ist ganz hinzugefügt. Kann Git den Diff nicht liefern, [] (die Datei bleibt gemeldet)."""
+    if path in untracked:
+        try:
+            text = read_file(Path(top) / path) or ""
+        except Unreadable:
+            return []
+        lines = text.splitlines()
+    else:
+        try:
+            result = _git(top, "diff", "--no-color", "--no-ext-diff", "--no-renames", "-U0", rev, "--", path)
+        except NoGit:
+            return []
+        if result.returncode != 0:
+            return []
+        lines, in_hunk = [], False
+        for line in result.stdout.splitlines():
+            if line.startswith("diff --git "):
+                in_hunk = False
+            elif line.startswith("@@"):
+                in_hunk = True
+            elif in_hunk and line.startswith("+"):
+                lines.append(line[1:])
+    return [" ".join(line.split()) for line in lines]
+
+
+def _ledger_key(key):
+    """(Kategorie, Muster, Text) eines Schlüssels aus der Ablage; None, wenn er die Form nicht hat."""
+    category, sep, rest = (key or "").partition(":")
+    pattern, _, text = rest.partition("#")
+    category, pattern = category.strip(), pattern.strip()
+    if not sep or not category or not pattern:
+        return None
+    return category, pattern, " ".join(text.split())
+
+
+def check(root, rev):
+    """Teure Änderungen im Bereich `rev` ohne freigegebenen Eintrag in `docs/big-decisions.md`;
+    (exit, text). Braucht keine Sitzung. Exit 1 bei mindestens einer Stelle, sonst 0; Exit 2 bei
+    fehlender oder kaputter Reference („ungeprüft — references/reversibility.md fehlt“), ohne Git
+    („ungeprüft — kein Git“) oder bei einem Bereich, den Git nicht kennt. Jede Ausgabe außer der
+    ohne Reference endet mit `tail_line` („ungeprüft: data-delete, …; teilweise: api, migration“)."""
+    categories, problem = load_categories(REFERENCE)
+    if problem:
+        return 2, f"ungeprüft — {problem}"
+    tail = tail_line(categories)
+    top, files, untracked, problem = _changed(Path(root), rev)
+    if problem:
+        return 2, f"ungeprüft — {problem}\n{tail}"
+    rev = rev.strip()
+
+    blocks, ledger_note, exists = _read_ledger(top)
+    notes = [ledger_note] if ledger_note else []
+    if not exists:
+        notes.append(f"{LEDGER_SHOWN} fehlt — keine Freigaben.")
+    entries = []
+    for block in blocks:
+        parsed = _ledger_key(block["key"])
+        if parsed is None:
+            if block["status"] == "freigegeben":
+                notes.append(f"Hinweis: {block['id']} Schlüssel „{block['key'] or NONE}“ hat nicht die Form "
+                             f"{KEY_FORM} — gibt nichts frei.")
+            continue
+        if parsed[0] == RULE_CATEGORY:
+            continue                                    # rule:<thema> vergleicht check nie
+        if parsed[0] not in categories:
+            if block["status"] == "freigegeben":
+                notes.append(f"Hinweis: {block['id']} Kategorie „{parsed[0]}“ steht nicht in "
+                             f"{reference_shown(REFERENCE)} — gibt nichts frei.")
+            continue
+        entries.append((block, *parsed))
+
+    found, added_cache, with_category = [], {}, 0
+    for path in files:
+        hit = [c for c in categories.values() if any(pattern_matches(p, path) for p in c.patterns)]
+        with_category += bool(hit)
+        for category in hit:
+            matching = [e for e in entries if e[1] == category.name and pattern_matches(e[2], path)]
+            why = []
+            for block, _, pattern, text in matching:
+                label = f"{block['id']} {block['key']}"
+                if block["status"] != "freigegeben":
+                    why.append(f"{label} steht {block['status']}")
+                    continue
+                if not text:
+                    break
+                if path not in added_cache:
+                    added_cache[path] = added_lines(top, rev, path, untracked)
+                if any(text in line for line in added_cache[path]):
+                    break
+                why.append(f"{label} freigegeben, aber „{text}“ in keiner hinzugefügten Zeile")
+            else:
+                reason = "; ".join(why) or f"kein Eintrag mit passendem Schlüssel in {LEDGER_SHOWN}"
+                found.append(f"- {path} — {category.name} ({category.grade}): {category.meaning} — {reason}")
+
+    summary_line = (f"Stellen ohne Freigabe: {len(found)}" if found else "Keine Stelle ohne Freigabe") + (
+        f" (Bereich {rev}; {len(files)} Dateien im Diff, {with_category} mit Kategorie)")
+    return (1 if found else 0), "\n".join(notes + [summary_line] + found + [tail])
+
+
 # --- add --class klein ------------------------------------------------------------------
 
 def add_small(root, session, args):
@@ -1196,6 +1521,8 @@ def build_parser():
     res.add_argument("--answer")
     res.add_argument("--reject", action="store_true")
     sub.add_parser("open", help="offene große Fragen")
+    chk = sub.add_parser("check", help="teure Änderungen im Diff ohne Freigabe")
+    chk.add_argument("--range", dest="rev", required=True, metavar="<rev>|<a>..<b>")
     return parser
 
 
@@ -1213,6 +1540,8 @@ def main(argv):
         code, message = resolve(root, args.decision_id, args.answer, args.reject)
     elif args.action == "open":
         code, message = open_questions(root)
+    elif args.action == "check":
+        code, message = check(root, args.rev)
     else:
         session = session_id(args.session)
         if not session:
@@ -1240,7 +1569,8 @@ def main(argv):
                         "bei einer kleinen Entscheidung ignoriert; ist die Frage groß, mit --class gross eintragen.")
                 warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
                            f"--class gross — {what}")
-    print(message, file=sys.stdout if code == 0 else sys.stderr)
+    report = code == 0 or (args.action == "check" and code == 1)     # check: Stellen sind ein Bericht
+    print(message, file=sys.stdout if report else sys.stderr)
     if warning:
         print(warning, file=sys.stderr)
     return code

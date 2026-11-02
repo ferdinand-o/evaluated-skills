@@ -1246,3 +1246,244 @@ def test_same_block_by_request_and_normalized_file_values(decide_repo, capsys):
     assert "D-2 steht offen mit anderer Empfehlung — von Hand ändern" in err, err
     assert big("--option", "A: x", "--option", "B: strptime", "--recommendation", "B, weil Stdlib") == 1
     assert "D-2 steht offen mit anderen Optionen — von Hand ändern" in capsys.readouterr().err
+
+
+# --- Task 3: check und references/reversibility.md --------------------------------------
+
+LEDGER_HEAD = "<!-- skill: decide | schema: 1 | generated: python decide_log.py add -->\n\n# Große Entscheidungen\n"
+
+
+def ledger_block(number, status, key, question="Frage?"):
+    return (f"\n## D-{number} · 2026-11-02 · {status}\nFrage: {question}\nThema: T\nSchlüssel: {key}\n"
+            "Optionen:\n- A: x\n- B: y\nEmpfehlung: B\nAntwort: —\nQuelle der Antwort: —\n")
+
+
+def write_ledger(root, *blocks, head=LEDGER_HEAD):
+    path = root / "docs" / "big-decisions.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(head + "".join(blocks), encoding="utf-8")
+    return path
+
+
+def test_read_ledger_gives_keys_with_status_for_check(decide_repo):
+    """Abnehmer-Test Task 3: read_ledger auf einer von Hand geschriebenen Ablage mit einem
+    freigegebenen und einem offenen Block liefert beide Schlüssel mit Status — mehr braucht check nicht."""
+    root, _ = decide_repo
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml#python-dateutil"),
+                 ledger_block(2, "offen", "migration:migrations/"))
+    blocks, problem = dl.read_ledger(root)
+    assert problem is None
+    assert [(b["key"], b["status"]) for b in blocks] == [
+        ("dependency:pyproject.toml#python-dateutil", "freigegeben"), ("migration:migrations/", "offen")]
+
+
+TAIL = "ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration"
+
+
+def commit(root, message="x"):
+    git(root, "add", "-A")
+    git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "commit", "-q", "-m", message)
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def check_out(capsys, rev):
+    """`main(["check", "--range=<rev>"])`; (exit, stdout, stderr). `=` lässt auch einen Bereich mit
+    führendem `-` an argparse vorbei, damit check selbst ihn abweist."""
+    code = dl.main(["check", f"--range={rev}"])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def reported(out):
+    """Die gemeldeten Dateien, je Stelle eine Zeile „- <datei> — …“."""
+    return [line[2:].split(" — ", 1)[0] for line in out.splitlines() if line.startswith("- ")]
+
+
+def test_glob_matcher():
+    def hits(pattern, path):
+        return dl.glob_to_regex(pattern).fullmatch(path) is not None
+
+    assert hits("db/**/*.sql", "db/schema.sql") and hits("db/**/*.sql", "db/a/b.sql")
+    assert not hits("db/**/*.sql", "db/schema.sqlx") and not hits("db/**/*.sql", "x/db/schema.sql")
+    assert hits("**/migrations/", "migrations/0002.py")
+    assert hits("**/migrations/", "evals/fixtures/x/migrations/0001.py")
+    assert not hits("**/migrations/", "app/migrations.py") and not hits("**/migrations/", "migrations")
+    assert hits("requirements*.txt", "requirements-dev.txt") and not hits("requirements*.txt", "req/requirements.txt")
+    assert hits("openapi.*", "openapi.yaml") and not hits("openapi.*", "api/openapi.yaml")
+    assert not hits("*", "a/b") and hits("*", "ab") and not hits("a*", "a/b")
+    assert hits("evals/fixtures/", "evals/fixtures/x/migrations/0001.py")
+    assert hits("docs/User Guides/*.md", "docs/User Guides/a.md")
+    assert hits("a?c", "abc") and not hits("a?c", "a/c")
+    assert hits("a.b", "a.b") and not hits("a.b", "axb")              # alles andere wörtlich
+
+
+def test_categories_from_reference():
+    """Die Tabelle in references/reversibility.md liefert alle neun Kategorien mit Grad; die
+    Schlusszeile von check entsteht aus ihr."""
+    categories, problem = dl.load_categories(dl.REFERENCE)
+    assert problem is None
+    assert {name: c.grade for name, c in categories.items()} == {
+        "api": "teilweise", "migration": "teilweise", "data-delete": "ungeprüft", "unsaved-work": "ungeprüft",
+        "push": "ungeprüft", "external": "ungeprüft", "permissions": "geprüft", "dependency": "geprüft",
+        "cost": "ungeprüft"}
+    assert "rule" not in categories                                 # rule vergleicht check nie
+    assert categories["migration"].patterns == ("**/migrations/", "**/alembic/versions/", "db/**/*.sql")
+    assert categories["dependency"].patterns == ("pyproject.toml", "requirements*.txt", "package.json",
+                                                 "Cargo.toml", "go.mod", "Gemfile")
+    assert categories["permissions"].patterns == (".github/workflows/", "CODEOWNERS", ".github/CODEOWNERS",
+                                                  ".claude/settings.json")
+    assert categories["api"].patterns == ("openapi.*", "api/openapi.*")
+    assert all(c.patterns == () for c in categories.values() if c.grade == "ungeprüft")
+    assert all(c.meaning and c.meaning != "—" for c in categories.values())
+    assert dl.tail_line(categories) == TAIL
+
+
+def test_reference_missing_or_broken(decide_repo, monkeypatch, tmp_path, capsys):
+    """Fehlt die Reference oder parst sie nicht: check endet mit 2 und dem Grund, nie mit Erfolg;
+    add --class gross prüft Schlüssel gegen dieselbe Quelle."""
+    root, _ = decide_repo
+    (root / "a.txt").write_text("a\n", encoding="utf-8")
+    commit(root)
+    monkeypatch.setattr(dl, "REFERENCE", tmp_path / "references" / "reversibility.md")
+    code, out, err = check_out(capsys, "HEAD")
+    assert code == 2 and "ungeprüft — references/reversibility.md fehlt" in err and out == ""
+
+    ref = tmp_path / "references" / "reversibility.md"
+    ref.parent.mkdir()
+    ref.write_text("# Kategorien\n\nkeine Tabelle\n", encoding="utf-8")
+    code, out, err = check_out(capsys, "HEAD")
+    assert code == 2 and "ungeprüft — references/reversibility.md" in err and "Tabelle" in err, err
+    head = "| Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |\n| --- | --- | --- | --- | --- | --- |\n"
+    ref.write_text(head + "| `api` | x | y | vielleicht | `openapi.*` | — |\n", encoding="utf-8")
+    code, _, err = check_out(capsys, "HEAD")
+    assert code == 2 and "vielleicht" in err, err
+    ref.write_text(head + "| `api` | x | y | geprüft | — | — |\n", encoding="utf-8")
+    code, _, err = check_out(capsys, "HEAD")
+    assert code == 2 and "Pfadmuster" in err, err
+
+    # dieselbe Quelle für add: eine zehnte Kategorie aus der Tabelle ist ein gültiger Schlüssel
+    ref.write_text(head + "| `api` | x | y | teilweise | `openapi.*` | — |\n"
+                   "| `infra` | Infrastruktur | Terraform | geprüft | `**/*.tf` | — |\n", encoding="utf-8")
+    assert big(*TWO, key="infra:main.tf") == 0, capsys.readouterr().err
+    assert big(*TWO, question="Zweite?", key="dependency:pyproject.toml") == 1
+    assert "dependency" in capsys.readouterr().err
+    ref.unlink()
+    assert big(*TWO, question="Dritte?", key="api:openapi.yaml") == 1
+    assert "references/reversibility.md fehlt" in capsys.readouterr().err
+    assert big(*TWO, topic="UI-Texte", question="Vierte?", key="rule:UI-Texte") == 1   # ohne Regel weiter 1
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    assert big(*TWO, topic="UI-Texte", question="Fünfte?", key="rule:UI-Texte") == 0  # rule braucht die Tabelle nicht
+
+
+def test_check_untracked_and_hash_key(decide_repo, monkeypatch, tmp_path, capsys):
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "pyproject.toml").write_text("[project]\ndependencies = []\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml#python-dateutil"))
+    base = commit(root)
+
+    # unversionierte Datei unter migrations/ wird gemeldet; ohne Änderung an pyproject.toml nur sie
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0003_x.py").write_text("def up(): pass\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["migrations/0003_x.py"], out
+    assert out.splitlines()[-1] == TAIL
+
+    # #python-dateutil: eine andere Abhängigkeit gibt die Datei nicht frei …
+    (root / "pyproject.toml").write_text('[project]\ndependencies = ["requests"]\n', encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["migrations/0003_x.py", "pyproject.toml"], out
+    line = next(line for line in out.splitlines() if line.startswith("- pyproject.toml"))
+    assert "D-1" in line and "python-dateutil" in line, line
+    # … eine hinzugefügte Zeile mit dem Text gibt sie frei, samt weiterer Änderungen in der Datei
+    (root / "pyproject.toml").write_text('[project]\nname = "neu"\ndependencies = [\n  "python-dateutil>=2",\n]\n',
+                                         encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert reported(out) == ["migrations/0003_x.py"], out
+    # der Text nur in einer entfernten Zeile zählt nicht
+    after = commit(root)
+    (root / "pyproject.toml").write_text('[project]\nname = "neu"\ndependencies = []\n', encoding="utf-8")
+    code, out, _ = check_out(capsys, after)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+
+    # <a>..<b> lässt Arbeitsbaum und unversionierte Dateien aus
+    (root / "migrations" / "0004_y.py").write_text("def up(): pass\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, f"{base}..{after}")
+    assert code == 1 and reported(out) == ["migrations/0003_x.py"], out
+    code, out, _ = check_out(capsys, f"{after}..{after}")
+    assert code == 0 and "Keine Stelle ohne Freigabe" in out and out.splitlines()[-1] == TAIL, out
+
+    # ein Bereich, den Git nicht kennt, oder einer, der wie eine Option aussieht: Exit 2
+    code, out, err = check_out(capsys, "gibtsnicht")
+    assert code == 2 and "ungeprüft" in err and "gibtsnicht" in err, err
+    code, out, err = check_out(capsys, "--output=x")
+    assert code == 2 and not (root / "x").exists()
+
+    # ohne Git Exit 2: kein Repo, und kein git im PATH
+    plain = tmp_path / "ohne-git"
+    plain.mkdir()
+    (plain / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(plain)
+    code, out, err = check_out(capsys, "HEAD")
+    assert code == 2 and "ungeprüft — kein Git" in err and err.splitlines()[-1] == TAIL, err
+    monkeypatch.chdir(root)
+    empty = tmp_path / "leer"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    assert dl.check(root, "HEAD")[0] == 2
+    assert "ungeprüft — kein Git" in dl.check(root, "HEAD")[1]
+
+
+def test_consumer_rule_check(decide_repo, monkeypatch, capsys):
+    """Ablage mit `schema: 2`: Freigaben übersprungen, sichtbar — check meldet jede Stelle."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    base = commit(root)
+    head2 = "<!-- skill: decide | schema: 2 | generated: python decide_log.py add -->\n"
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"),
+                 ledger_block(2, "freigegeben", "migration:migrations/"), head=head2)
+    (root / "pyproject.toml").write_text("[project]\ndependencies = ['x']\n", encoding="utf-8")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0002.py").write_text("x\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1, out
+    assert reported(out) == ["migrations/0002.py", "pyproject.toml"], out
+    assert "docs/big-decisions.md schema 1 erwartet, 2 gefunden — Freigaben übersprungen" in out
+    assert out.splitlines()[-1] == TAIL
+    # ohne Kopfzeile ebenso
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"), head="# Große Entscheidungen\n")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["migrations/0002.py", "pyproject.toml"], out
+    assert "ohne Kopfzeile von decide — Freigaben übersprungen" in out
+
+
+def test_check_key_matching(decide_repo, monkeypatch, capsys):
+    """Eine Freigabe gilt nur mit passender Kategorie und passendem Muster; abgelehnt und offen
+    geben nichts frei; rule:-Schlüssel vergleicht check nie; Präfix deckt Fixtures."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root)
+    fixture = root / "evals" / "fixtures" / "dc-models" / "migrations"
+    fixture.mkdir(parents=True)
+    (fixture / "0001_initial.py").write_text("x\n", encoding="utf-8")
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "ci.yml").write_text("x\n", encoding="utf-8")
+    (root / "openapi.yaml").write_text("x\n", encoding="utf-8")
+    (root / "app.py").write_text("x\n", encoding="utf-8")                # keine Kategorie
+    write_ledger(root, ledger_block(1, "freigegeben", "data-delete:evals/fixtures/"),       # falsche Kategorie
+                 ledger_block(2, "abgelehnt", "permissions:.github/workflows/"),
+                 ledger_block(3, "freigegeben", "rule:openapi.yaml"),
+                 ledger_block(4, "freigegeben", "api:api/openapi.*"))                       # anderes Muster
+    code, out, _ = check_out(capsys, base)
+    assert code == 1
+    assert reported(out) == [".github/workflows/ci.yml", "evals/fixtures/dc-models/migrations/0001_initial.py",
+                             "openapi.yaml"], out
+    assert "D-2" in next(line for line in out.splitlines() if "ci.yml" in line)
+    write_ledger(root, ledger_block(1, "freigegeben", "migration:evals/fixtures/"),
+                 ledger_block(2, "freigegeben", "permissions:.github/workflows/"),
+                 ledger_block(3, "freigegeben", "api:openapi.*"))
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [] and out.splitlines()[-1] == TAIL, out
