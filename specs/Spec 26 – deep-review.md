@@ -166,8 +166,8 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
      oder `SetContentStream` der Typ des Empfängers (aus Parameterliste, `var`-Abschnitt der
      Methode oder Feld der Klasse), seine Klassendeklaration mit Basisklasse und der
      `inherited Create(…)` ihres Konstruktors, falls vorhanden; erbt sie von `TObjectList<…>`
-     oder `TObjectDictionary<…>`, steht der Besitz-Default der RTL dabei (`OwnsObjects`
-     standardmäßig wahr).
+     oder `TObjectDictionary<…>`, steht der Besitz-Default der RTL dabei (`TObjectList`:
+     `OwnsObjects` standardmäßig wahr; `TObjectDictionary`: Besitz nur über `Ownerships`).
    - Je Paket höchstens 30.000 Zeichen; Kappung mit Zahl, nie still.
 4. **Review je Paket**, im Hauptkontext, in Plan-Reihenfolge:
    - Fokus `bugs`: `/code-review --max-findings all <von>..<bis>` (bei `split: false` der
