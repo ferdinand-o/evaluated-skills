@@ -96,35 +96,52 @@ ihrer `task`; `final` nach der letzten Nicht-Verifikations-Task. Weitere Regeln:
 
 ## Review am Prüfpunkt
 
-**Heute (deep-review, Spec 26, pausiert):** Ist `due` wahr, läuft
-`/code-review --max-findings all <range>` im Hauptkontext über den `range` aus
-`checkpoint.json` — ohne den Schalter meldet `/code-review` höchstens zehn Funde, und ein
-Prüfpunkt über mehrere Tasks bekäme nicht mehr Plätze als ein Review über eine: `last_reviewed..HEAD`, am finalen
-Prüfpunkt `base..HEAD`. Der finale Durchgang ist der einzige, der das Zusammenspiel aller
-Tasks sieht; ohne `--since` prüft er alles noch einmal, bleibt aber ein einzelnes Review
-statt eines je Task. Danach
-`checkpoint mark --run none`; die Übergabe sagt wörtlich:
+Ist `due` wahr, reviewt **deep-review** (Spec 26) im Hauptkontext den `range` aus
+`checkpoint.json` in Paketen mit Nachweis je Paket: `last_reviewed..HEAD`, am finalen
+Prüfpunkt `base..HEAD`. Die Schalter für den Plan von deep-review kommen aus
+`checkpoint.json`:
+
+| Schalter | Quelle | Wert |
+| --- | --- | --- |
+| `--range` | `range` | Bereich seit dem letzten `mark` |
+| `--profile checkpoint` oder `--profile standard` | `profile` | wie gemeldet; Fokus bleibt `bugs` |
+| `--soll-file <datei>` | subagent-dev | nur im Profil `checkpoint`: die Task-Dateien des Bereichs (Tasks seit dem letzten `mark`) in einer Datei unter `.skills/cache/tasks/`; im Profil `standard` ist das Soll die Commit-Messages des Bereichs |
+| `--since <lauf>[,<lauf>…]` | `since_runs` | am finalen Prüfpunkt alle Läufe aus `runs`, sonst weglassen |
+
+- **`--since` wirkt je Datei.** Eine Datei übernimmt die Funde eines früheren Laufs, wenn ihr
+  Datei-Schlüssel (Inhalt am ZIEL und Gegenstellen-Zeilen ihrer geänderten Stellen) gleich
+  ist und sich die Abdeckungskette bis zur neuen Basis schließt. Neu reviewt werden die
+  übrigen Dateien und die Aufrufer, deren Gegenstellen sich geändert haben.
+- **Nur Läufe mit demselben Profil und Fokus** zählen; andere übergeht deep-review still. Der
+  finale Prüfpunkt (`standard`) übernimmt also nur aus `standard`-Läufen (C2 und deren
+  Nachprüfungen) und reviewt die Dateien der `checkpoint`-Läufe neu.
+- **Keine Grenze von Verifikationen.** deep-review vereinigt die Funde aller Pakete in
+  `.skills/cache/deep-review/<lauf>/findings.json`, ohne abzustimmen und ohne Status
+  `offen`; jeder Fund geht in den Fix-Pfad.
+- **Übergabe:** deep-review nennt Lauf-ID, Bericht, Zahl der Funde und Abdeckung. Sagt sie
+  „unvollständig", fehlen Pakete: den Lauf mit seinen Befehlen und `--run <lauf>` fortsetzen,
+  nie mit einem zweiten `plan` über denselben Bereich (das gäbe einen zweiten Lauf). Erst
+  dann `mark`. Ohne Funde folgt `checkpoint mark --commit HEAD --run <lauf> --tasks <ids>`,
+  sonst der Fix-Pfad.
+
+**Ersatz ohne deep-review** (Repo ohne die Skill): `/code-review --max-findings all <range>`
+im Hauptkontext, das Soll als Kontext dazu. Ohne den Schalter meldet `/code-review` höchstens
+zehn Funde, und ein Prüfpunkt über mehrere Tasks bekäme nicht mehr Plätze als ein Review
+über eine. Der finale Durchgang prüft ohne `--since` alles noch einmal, bleibt aber ein
+einzelnes Review statt eines je Task. Danach `checkpoint mark --run none`; die Übergabe
+sagt wörtlich:
 
 > Review ohne Abdeckungsnachweis
-
-**Soll:** subagent-dev schreibt die Task-Dateien des Bereichs (Tasks seit dem letzten
-`mark`) in eine Datei unter `.skills/cache/tasks/` und gibt sie dem Review als Soll mit.
-
-**Später mit deep-review:** Profil `checkpoint` als `--profile checkpoint`, Profil
-`standard` als `--depth standard`, das Soll als `--soll-file`. Der finale Prüfpunkt reviewt
-`base..HEAD` mit `--since` über alle Läufe aus `since_runs` und übernimmt so die Urteile
-unveränderter Einheiten; neu geprüft werden der Rest und die Aufrufer über Task-Grenzen.
-`mark` bekommt dann die Lauf-ID, die deep-review in seiner Übergabe nennt.
 
 ## Fix-Pfad nach einem Prüfpunkt
 
 | Schritt | Inhalt |
 | --- | --- |
-| 1 | `python plan_to_tasks.py fix-task --verdicts <datei>` schreibt `.skills/cache/tasks/fix-task.md`. Eingabe: `verdicts.jsonl` (nur Status `bestätigt`/`plausibel`, `FIX_STATUSES`) oder die JSON-Liste von `/code-review` (`file`, `line`, `summary`; jeder übernommene Fund zählt). Ohne Fund fällt der Aufruf mit Exit 1. |
-| 2 | Allowlist: `path` und `related` jedes Funds; Akzeptanz je Fund „behoben und mit Test belegt"; Modell: das höchste der Tasks in `gate.json`, deren `files` die Funde berühren, sonst `opus`. |
+| 1 | `python plan_to_tasks.py fix-task --verdicts <datei>` schreibt `.skills/cache/tasks/fix-task.md`. Eingabe: `findings.json` von deep-review (nach `merge`, Objekt mit `_meta` und `findings`; jeder Fund zählt, ein Paket-Ergebnis `results/<id>.json` wird abgewiesen), die JSON-Liste von `/code-review` (`file`, `line`, `summary`; jeder übernommene Fund zählt) oder `verdicts.jsonl` (nur Status `bestätigt`/`plausibel`, `FIX_STATUSES`). Ohne Fund fällt der Aufruf mit Exit 1. |
+| 2 | Allowlist: `path` und `related` jedes Funds (aus `findings.json` und der `/code-review`-Liste nur `file`); Akzeptanz je Fund „behoben und mit Test belegt"; Modell: das höchste der Tasks in `gate.json`, deren `files` die Funde berühren, sonst `opus`. |
 | 3 | Ein Agent arbeitet sie in einem frischen Worktree vom integrierten Stand ab; dann `verify`, Merge, Gesamttests. |
-| 4 | Nachprüfung: heute `/code-review` nur über den Bereich des Fix-Commits; später deep-review `--since <lauf>` im selben Profil. |
-| 5 | `checkpoint mark --commit <fix-commit> --run none --tasks <ids>` (später: Lauf-ID der Nachprüfung). |
+| 4 | Nachprüfung: deep-review über `last_reviewed..HEAD` im selben Profil mit `--since <lauf>` — neu reviewt wird, was der Fix geändert hat, samt Aufrufern. Ohne deep-review `/code-review` nur über den Bereich des Fix-Commits. |
+| 5 | `checkpoint mark --commit <fix-commit> --run <lauf der Nachprüfung> --tasks <ids>`; ohne deep-review `--run none`. |
 
 Höchstens **zwei Fix-Runden je Prüfpunkt**, dann Eskalation an den Nutzer. Diese Grenze
 verlangt die SKILL.md; anders als in E8 der Spec (`MAX_FIX_ROUNDS = 2`) steht sie nicht

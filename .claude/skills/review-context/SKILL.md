@@ -79,6 +79,9 @@ muss, was eine Änderung erreichen sollte.
 - **`/code-review`** — das eigentliche Review (Linsen parallel, adversariale Verifikation je
   Finding, Verdicts confirmed/plausible, `--fix` im Selbst-Modus, `--comment` im Fremd-Modus).
   Trigger wie „review mal meinen Diff", „schau dir den PR an" gehören dorthin, nicht hierher.
+- **deep-review** — reviewt einen großen Bereich oder einen Prüfpunkt in Paketen, mit
+  Nachweis je Paket, und sammelt dafür je Paket die Gegenstellen; ein Soll nimmt es nur mit
+  `--soll-file` entgegen. Kontext und Soll für einen Diff sammelt diese Skill.
 - **`/security-review`, trailofbits/skills** — Sicherheitsfragen. Diese Skill hat keine
   Security-Linse (Spec 04, Constraints) und routet nicht selbst dorthin weiter, sondern nennt
   nur die Zuständigkeit.

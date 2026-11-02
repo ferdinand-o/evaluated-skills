@@ -69,9 +69,9 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 6. **Merge und Prüfpunkt:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem
    Merge, dann `plan_to_tasks.py checkpoint status --after-task <N>` (bei roten
    Gesamttests nach deren Behebung mit `--tests-red`). Nur wenn `due` wahr ist, läuft
-   das Review über den gemeldeten `range` — `/code-review --max-findings all <range>`,
-   solange deep-review fehlt;
-   die Übergabe sagt dann „Review ohne Abdeckungsnachweis". Funde → `fix-task`, Fix in
+   deep-review über den gemeldeten `range` mit `--profile checkpoint|standard` aus
+   `checkpoint.json`; ohne die Skill `/code-review --max-findings all <range>`, und
+   die Übergabe sagt „Review ohne Abdeckungsnachweis". Funde (`findings.json`) → `fix-task`, Fix in
    frischem Worktree, `verify`, Merge, Review des Fixes, dann
    `checkpoint mark --commit HEAD --run <lauf|none> --tasks <liste>`; höchstens zwei
    Fix-Runden je Prüfpunkt. Je Runde und Prüfpunkt eine Zeile über
@@ -140,6 +140,6 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 - Das eingebaute **Agent**-Werkzeug — Delegation ohne Plan, ohne Gate und ohne
   `verify`. Liegt ein Plan vor und die Frage ist „parallel oder sequenziell, und was
   bekommt jeder Agent", gehört sie hierher.
-- `/code-review` — das Review am Prüfpunkt, solange `deep-review` (Spec 26) nicht gebaut
-  ist; subagent-dev prüft selbst nur Vertrag und Signaturen.
+- **deep-review** — das Review am Prüfpunkt, in Paketen mit Nachweis je Paket; ohne die
+  Skill `/code-review`. subagent-dev prüft selbst nur Vertrag und Signaturen.
 - test-first — Rot vor Grün je Test; subagent-dev liest dessen Log nur als Hinweis.

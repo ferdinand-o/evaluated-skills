@@ -30,7 +30,7 @@ list; once installed, skills are namespaced by plugin, e.g. `evaluated-dev:hando
 Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
 - `/plugin install evaluated-dev --marketplace ferdinand-o/evaluated-skills` — development, always
-  on: architecture-map, debug-ledger, dev-report, feature-spec, handoff,
+  on: architecture-map, debug-ledger, deep-review, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
   testing-strategy, work-plan.
 - `/plugin install evaluated-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
@@ -57,13 +57,13 @@ With older versions, first run `/plugin marketplace add ferdinand-o/evaluated-sk
   in this repo.
 - cad-parts is excluded because it needs an `stl-cad-server` MCP server.
 
-**Project copies.** `.claude/skills/` holds ten skills for working on this repo:
-impl-plan, skill-forge and eight from `evaluated-dev` (all except rest-api-architect and
-sql-schema-architect). The original is always `skills/<name>/`;
+**Project copies.** `.claude/skills/` holds eleven skills for working on this repo:
+impl-plan, skill-forge and nine from `evaluated-dev` (all except rest-api-architect,
+sql-schema-architect, test-first and work-plan). The original is always `skills/<name>/`;
 `scripts/sync_skills.py` mirrors the skills in its `PROJECT_SKILLS` table, and
 `python3 scripts/sync_skills.py --check` reports every copy that has drifted. The
 committed `.claude/settings.json` turns `evaluated-dev@evaluated-skills` off inside this repo so the
-eight skills do not appear twice.
+nine skills do not appear twice.
 
 `tests/test_marketplace.py` keeps manifest, `excluded.json` and copies in sync with
 `skills/`: a new skill is listed in exactly one `skills` list or, with a reason, in
@@ -99,8 +99,9 @@ also carries a delimitation clause against its two strongest competitors.
 | bug, failing test | debug-ledger | feature-spec |
 | test plan, repo-type question | testing-strategy | test-first (the cycle *during* implementation), feature-spec (produces the test stubs, testing-strategy implements from them) |
 | implement new behaviour, regression test after diagnosis | test-first | testing-strategy (which tests are missing), debug-ledger (diagnosis first), superpowers:test-driven-development (doctrine without evidence) |
-| review a diff | `/code-review` (built in) | a dedicated review skill — see Spec 04, scope left open |
-| security | `/security-review`, trailofbits | all skills of this collection |
+| review a diff | `/code-review` (built in) | deep-review (up to 800 changed lines it only adds the counterparts), review-context (collects context and the intended behaviour, does not review) |
+| thorough review of a large range or a checkpoint (branch, plan checkpoint, with evidence per packet) | deep-review | `/code-review` over everything (loses findings in large ranges), review-context, subagent-dev (sets the checkpoints, does not review) |
+| security | `/security-review`, trailofbits | all skills of this collection; deep-review passes focus `security` on to `/security-review` when its scope covers the range and is no security skill |
 | UI: style and tokens | ui-architect | enterprise-ui (product UI), motion-landing (motion) |
 | UI: product surfaces, tables, forms | enterprise-ui | ui-architect (marketing/brand) |
 | landing-page motion | motion-landing | ui-architect (style/tokens), enterprise-ui |
