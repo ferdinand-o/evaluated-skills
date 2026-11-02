@@ -646,3 +646,179 @@ def test_hold_lock_gives_up_and_ends_child(decide_repo, monkeypatch):
             pass
     assert time.monotonic() - begin < 3
     assert len(started) == 1 and started[0].poll() is not None
+
+
+# --- Task 2: Ablage großer Fragen, Freigabe, Antwort, offene Fragen ---------------------
+
+def ledger_text(root):
+    return (root / "docs" / "big-decisions.md").read_text(encoding="utf-8")
+
+
+def big(*extra, topic="Abhängigkeiten", question="Datumsangaben parsen?", key="dependency:pyproject.toml"):
+    """`decide_log.py add --class gross …` über `main`; gibt den Exit-Code zurück."""
+    args = ["add", "--class", "gross"]
+    for flag, value in (("--topic", topic), ("--question", question), ("--key", key)):
+        if value is not None:
+            args += [flag, value]
+    return dl.main(args + list(extra))
+
+
+TWO = ("--option", "A: python-dateutil", "--option", "B: strptime", "--recommendation", "B, weil Stdlib")
+
+
+def test_upgrade_writes_rule_key_block(decide_repo):
+    """Abnehmer-Test Task 2: add_small mit Regeltreffer immer fragen und zwei --option legt einen
+    Block mit `Schlüssel: rule:UI-Texte` an."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    args = SimpleNamespace(topic="ui-texte", question="Text der Fehlermeldung?", decision="B: „Datei fehlt“",
+                           evidence="gesucht: app/cli.py — Treffer: app/cli.py:12",
+                           options=["A: „Fehler“", "B: „Datei fehlt“"], home=home)
+    code, message = dl.add_small(root, SESSION, args)
+    assert code == 0, message
+    text = ledger_text(root)
+    assert "\nSchlüssel: rule:UI-Texte\n" in text
+    assert "\nThema: UI-Texte\n" in text
+    assert "\nEmpfehlung: B: „Datei fehlt“\n" in text
+    assert re.search(r"(?m)^## D-1 · \d{4}-\d{2}-\d{2} · offen$", text)
+
+
+def test_option_count(decide_repo, capsys):
+    root, home = decide_repo
+    # eine oder fünf Optionen: Exit 1, keine Datei, keine Zeile
+    assert big("--option", "A: x", "--recommendation", "A") == 1
+    assert "zwei bis vier --option" in capsys.readouterr().err
+    five = [a for n in range(5) for a in ("--option", f"{n}: x")]
+    assert big(*five, "--recommendation", "A") == 1
+    assert "zwei bis vier --option" in capsys.readouterr().err
+    assert not (root / "docs").exists()
+    assert not log_file(root).exists()
+
+    # Pflichtfelder: ohne --recommendation, ohne --question → Exit 1
+    assert big("--option", "A: x", "--option", "B: y") == 1
+    assert "--recommendation" in capsys.readouterr().err
+    assert big(*TWO, question=None) == 1
+    assert "--question" in capsys.readouterr().err
+    # unbekannte Kategorie, leeres Pfadmuster
+    assert big(*TWO, key="frontend:app/") == 1
+    assert "frontend" in capsys.readouterr().err
+    assert big(*TWO, key="dependency:") == 1
+    capsys.readouterr()
+    # rule:X ohne Regel zu X
+    assert big(*TWO, topic="X", key="rule:X") == 1
+    assert "immer fragen" in capsys.readouterr().err
+    assert not (root / "docs").exists()
+
+    # Hochstufung ohne --option
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: UI-Texte\n")
+    assert add_small("UI-Texte", "Text?", "kurz", "gesucht: a.py — Treffer: a.py:1") == 1
+    assert "Regel immer fragen: UI-Texte trifft — zwei bis vier --option nötig" in capsys.readouterr().err
+    assert not (root / "docs").exists()
+
+    # rule:<thema> mit Regel: zulässig
+    assert big(*TWO, topic="ui-texte", key="rule:ui-texte") == 0
+    text = ledger_text(root)
+    assert "\nSchlüssel: rule:UI-Texte\n" in text and "\nThema: UI-Texte\n" in text
+
+    # --approved-by-request ohne Optionen schreibt den Block
+    capsys.readouterr()
+    assert big("--approved-by-request", "nimm python-dateutil auf") == 0
+    text = ledger_text(root)
+    block = text[text.index("## D-2"):]
+    assert "\nOptionen: — (Auftrag)\n" in block
+    assert re.search(r"(?m)^## D-2 · .* · freigegeben$", text)
+    # mit Auftrag keine rule:-Schlüssel
+    assert big("--approved-by-request", "ändere den Text", topic="UI-Texte", key="rule:UI-Texte") == 1
+    assert "reversibility.md" in capsys.readouterr().err
+
+
+def test_big_entry_is_log_row(decide_repo, capsys):
+    """Ein großer Eintrag steht zusätzlich als Protokollzeile `gross` mit `D-<n>`."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    [row] = rows(root)
+    assert row[1:5] == ["Abhängigkeiten", "gross", "Datumsangaben parsen?", "D-1"]
+    out = capsys.readouterr().out
+    assert "angelegt: docs/big-decisions.md" in out and "D-1" in out
+
+
+def test_ids_count_up(decide_repo, capsys):
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert "angelegt: docs/big-decisions.md" in capsys.readouterr().out
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 0
+    assert big(*TWO, question="Zweite Frage?") == 0
+    assert "angelegt" not in capsys.readouterr().out
+    text = ledger_text(root)
+    assert re.findall(r"(?m)^## (D-\d+) ", text) == ["D-1", "D-2"]
+    assert [r[4] for r in rows(root)] == ["D-1", "D-2"]
+
+
+def test_reject(decide_repo, capsys):
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert dl.main(["resolve", "D-1", "--reject"]) == 0
+    text = ledger_text(root)
+    assert re.search(r"(?m)^## D-1 · .* · abgelehnt$", text)
+    assert "\nQuelle der Antwort: Nutzer in Sitzung\n" in text
+    capsys.readouterr()
+    # unbekannte ID, keine Antwort: Exit 1, Datei unverändert
+    assert dl.main(["resolve", "D-7", "--answer", "B"]) == 1
+    assert "D-7" in capsys.readouterr().err
+    assert dl.main(["resolve", "D-1"]) == 1
+    assert "--answer" in capsys.readouterr().err
+    assert ledger_text(root) == text
+
+
+def test_read_ledger_shape(decide_repo):
+    """Rückgabe von read_ledger für Task 3: Liste von dicts je Block, Problem None."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert big("--approved-by-request", "lösch die Spalte", topic="Migrationen", question="Spalte weg?",
+               key="migration:migrations/") == 0
+    blocks, problem = dl.read_ledger(root)
+    assert problem is None
+    assert [(b["id"], b["number"], b["status"], b["key"]) for b in blocks] == [
+        ("D-1", 1, "offen", "dependency:pyproject.toml"),
+        ("D-2", 2, "freigegeben", "migration:migrations/")]
+    assert blocks[0]["options"] == ["A: python-dateutil", "B: strptime"]
+    assert blocks[0]["recommendation"] == "B, weil Stdlib"
+    assert blocks[1]["options"] == []
+    assert blocks[1]["source"] == "Auftrag: „lösch die Spalte“"
+    assert dl.read_ledger(root / "nirgends") == ([], None)
+
+
+def test_ledger_lock_lives_in_cache(decide_repo):
+    """Die Sperre der Ablage liegt unter .skills/cache/decide/, nicht neben docs/big-decisions.md."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert sorted(p.name for p in (root / "docs").iterdir()) == ["big-decisions.md"]
+    assert (root / ".skills" / "cache" / "decide" / "big-decisions.md.lock").exists()
+
+
+@pytest.mark.parametrize("head, reason", [
+    ("# Große Entscheidungen\n", "ohne Kopfzeile von decide"),
+    ("<!-- skill: decide | schema: 2 | generated: python decide_log.py add -->\n",
+     "docs/big-decisions.md schema 1 erwartet, 2 gefunden — Freigaben übersprungen"),
+])
+def test_consumer_rule_ledger(decide_repo, capsys, head, reason):
+    root, _ = decide_repo
+    path = root / "docs" / "big-decisions.md"
+    path.parent.mkdir()
+    original = head + "\n## D-1 · 2026-11-01 · offen\nFrage: x?\nSchlüssel: api:openapi.yaml\n"
+    path.write_text(original, encoding="utf-8")
+    blocks, problem = dl.read_ledger(root)
+    assert blocks == [] and reason in problem and "übersprungen" in problem
+    assert dl.main(["open"]) == 1
+    assert reason in capsys.readouterr().err
+    assert big(*TWO) == 1
+    assert "nichts geschrieben" in capsys.readouterr().err
+    assert dl.main(["resolve", "D-1", "--answer", "B"]) == 1
+    capsys.readouterr()
+    assert path.read_text(encoding="utf-8") == original
+    assert not log_file(root).exists()
+
+
+def test_open_without_ledger(decide_repo, capsys):
+    assert dl.main(["open"]) == 0
+    assert "Keine offenen großen Fragen" in capsys.readouterr().out

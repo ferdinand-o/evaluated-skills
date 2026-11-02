@@ -3,12 +3,19 @@
 
     decide_log.py rules                                     wirksame Regeln mit Datei
     decide_log.py add --class klein --topic T --question F --decision W --evidence BELEG
+    decide_log.py add --class gross --topic T --question F --key K --option "A: …" --option "B: …"
+                      --recommendation E                    große Frage als Block D-<n>, offen
+    decide_log.py add --class gross --topic T --question F --key K --approved-by-request "ZITAT"
+                                                            große Frage, per Auftrag freigegeben
+    decide_log.py resolve D-<n> --answer "…" | --reject     Antwort eintragen
+    decide_log.py open                                      offene große Fragen
     decide_log.py summary                                   Einträge der laufenden Sitzung
 
 Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py"`. Repo-Wurzel ist
 `git rev-parse --show-toplevel`, sonst das Arbeitsverzeichnis; `~` ist `HOME`. Die Sitzung
 ist `--session`, sonst `CLAUDE_CODE_SESSION_ID`; fehlen beide, enden `add` und `summary`
-mit Exit 1 und nennen `--session`.
+mit Exit 1 und nennen `--session`. `resolve` und `open` brauchen keine Sitzung: Die Ablage
+gehört dem Repo, nicht einer Sitzung.
 
 Protokoll `.skills/cache/decide/<session>/log.md`: Kopfzeile, dann die Tabelle
 `| zeit | thema | klasse | frage | entscheidung | beleg | regel |` mit `klasse` aus `klein`,
@@ -43,8 +50,35 @@ nimmt kleine Einträge aus `summary`. `rules` meldet je Thema einen Widerspruch.
 `--option`, `--recommendation`, `--key` und `--approved-by-request` bei einer kleinen
 Entscheidung meldet `add` als ignoriert (stderr, Exit bleibt 0).
 
-Stand Task 1 des Plans: Die Ablage großer Fragen (`docs/big-decisions.md`) fehlt noch.
-`add --class gross` und eine Hochstufung per `immer fragen` schreiben nichts und enden mit 1.
+Ablage `docs/big-decisions.md` (committet): Kopfzeile, beim ersten Mal aus
+`assets/big-decisions.md` angelegt und mit „angelegt: docs/big-decisions.md“ gemeldet, dann je
+große Frage ein Block
+
+    ## D-<n> · <datum> · <status>
+    Frage: … / Thema: … / Schlüssel: … / Optionen: (je Zeile „- …“) / Empfehlung: …
+    Antwort: … / Quelle der Antwort: …
+
+(jedes Feld auf eigener Zeile). Status `offen`, `freigegeben`, `abgelehnt`; Quelle der Antwort
+`Nutzer in Sitzung` (`resolve`), `Auftrag: „<Zitat>“` (`--approved-by-request`) oder `von Hand`.
+Pflicht je Weg:
+- `add --class gross`: `--topic`, `--question`, `--key`, `--recommendation`, zwei bis vier
+  `--option`; Schlüssel `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus `CATEGORIES`, oder
+  `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft — sonst Exit 1.
+- `add --class gross --approved-by-request "<Zitat>"`: `--topic`, `--question`, `--key` mit
+  Kategorie aus `CATEGORIES` (kein `rule:`); Status `freigegeben`, „Optionen: — (Auftrag)“.
+- `add --class klein`, von `immer fragen` hochgestuft: wie klein, dazu zwei bis vier `--option`
+  (sonst Exit 1 „Regel immer fragen: <thema> trifft — zwei bis vier --option nötig“);
+  `--decision` wird die Empfehlung, der Schlüssel `rule:<thema>`.
+`nie fragen` stuft eine große Frage nie herab; die Ausgabe sagt das. Jeder große Eintrag steht
+zusätzlich als Protokollzeile `gross` mit `D-<n>` unter `entscheidung`. Die Nummer ist die
+höchste in der Datei plus eins. `resolve` ändert Überschrift-Status, Antwort und Quelle und lässt
+den Block stehen. Die Ablage wird unter der Sperre `.skills/cache/decide/big-decisions.md.lock`
+(nicht neben der Datei, `docs/` wird committet) neu gelesen und per `write_atomic` ersetzt.
+Konsumenten-Regel (docs/artifact-header.md): fehlt die Kopfzeile von decide oder ist `schema`
+höher als 1, überspringen `read_ledger` und `open` die Datei sichtbar („docs/big-decisions.md
+schema 1 erwartet, 2 gefunden — Freigaben übersprungen“), `add` und `resolve` schreiben nichts.
+`CATEGORIES` ist bis Task 3 eine Konstante; dann liest das Skript `references/reversibility.md`.
+
 Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
 """
 import argparse
@@ -55,7 +89,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -87,6 +121,25 @@ NO_LOCK_ERRNOS = {getattr(errno, name) for name in ("ENOLCK", "EOPNOTSUPP", "ENO
                   if hasattr(errno, name)}   # das Dateisystem kann nicht sperren: wie fehlende Module
 BIG_FLAGS = (("options", "--option"), ("recommendation", "--recommendation"), ("key", "--key"),
              ("approved_by_request", "--approved-by-request"))
+SMALL_FLAGS = (("decision", "--decision"), ("evidence", "--evidence"))
+
+LEDGER = Path("docs") / "big-decisions.md"
+LEDGER_SHOWN = LEDGER.as_posix()
+LEDGER_ASSET = Path(__file__).resolve().parent.parent / "assets" / "big-decisions.md"
+LEDGER_LOCK = Path(".skills") / "cache" / "decide" / "big-decisions.md"   # Sperrdatei: dies + „.lock“
+# Bis Task 3 eine Konstante; dann aus references/reversibility.md gelesen.
+CATEGORIES = ("api", "migration", "data-delete", "unsaved-work", "push", "external", "permissions",
+              "dependency", "cost")
+RULE_CATEGORY = "rule"
+KEY_FORM = "<kategorie>:<pfadmuster>[#<text>]"
+STATUSES = ("offen", "freigegeben", "abgelehnt")
+SOURCE_USER = "Nutzer in Sitzung"
+OPTIONS_BY_REQUEST = "— (Auftrag)"
+ANSWER_BY_REQUEST = "wie im Auftrag"
+BLOCK_RE = re.compile(r"^## (?P<id>D-(?P<number>\d+)) · (?P<date>\S+) · (?P<status>\S+)\s*$")
+BLOCK_NUMBER_RE = re.compile(r"(?m)^## D-(\d+)\b")
+FIELDS = (("question", "Frage"), ("topic", "Thema"), ("key", "Schlüssel"), ("options", "Optionen"),
+          ("recommendation", "Empfehlung"), ("answer", "Antwort"), ("source", "Quelle der Antwort"))
 
 
 class Rule(NamedTuple):
@@ -475,6 +528,369 @@ def unversioned_notice(root):
     return None
 
 
+# --- Ablage großer Fragen ---------------------------------------------------------------
+
+def ledger_path(root):
+    return Path(root) / LEDGER
+
+
+def ledger_lock_path(root):
+    """Pfad, dessen `.lock`-Nachbar die Ablage sperrt — unter `.skills/cache/decide/`, nicht in `docs/`."""
+    return Path(root) / LEDGER_LOCK
+
+
+def line_value(text):
+    """Wert für eine Feldzeile der Ablage: Zeilenumbrüche werden Leerzeichen, leer wird `—`."""
+    return " ".join(str(text if text is not None else "").split()) or NONE
+
+
+class LedgerUnreadable(Exception):
+    """Die Ablage besteht, lässt sich aber nicht lesen; `args[0]` ist der OSError."""
+
+
+def read_ledger_text(root):
+    """Text der Ablage; None, wenn sie fehlt oder nur Leerraum enthält; `LedgerUnreadable` sonst."""
+    try:
+        text = ledger_path(root).read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise LedgerUnreadable(error) from error
+    return text if text.strip() else None
+
+
+def ledger_problem(text, tail="Freigaben übersprungen"):
+    """Konsumenten-Regel für die Ablage: None, wenn die Kopfzeile passt, sonst der Grund."""
+    problem = header_problem(text, LEDGER_SHOWN)
+    return problem[: -len("übersprungen")] + tail if problem else None
+
+
+def _unreadable_ledger(error, tail):
+    cause = error.args[0]
+    return f"{LEDGER_SHOWN} nicht lesbar ({getattr(cause, 'strerror', None) or cause}){tail}"
+
+
+def parse_blocks(text):
+    """Blöcke der Ablage, in Dateireihenfolge (siehe `read_ledger`). Ein Block reicht von seiner
+    Überschrift bis vor die nächste Zeile mit `## `."""
+    blocks, current, in_options = [], None, False
+    labels = {label: name for name, label in FIELDS}
+    for line in text.splitlines():
+        if line.startswith("## "):
+            match = BLOCK_RE.match(line)
+            current = None
+            if match:
+                current = {"id": match.group("id"), "number": int(match.group("number")),
+                           "date": match.group("date"), "status": match.group("status"), "options": []}
+                current.update({name: None for name, _ in FIELDS if name != "options"})
+                blocks.append(current)
+            in_options = False
+            continue
+        if current is None:
+            continue
+        label, sep, value = line.partition(": ")
+        if not sep and line.rstrip() == "Optionen:":
+            label, sep, value = "Optionen", ": ", ""
+        if sep and label in labels:
+            in_options = label == "Optionen"
+            if not in_options:
+                current[labels[label]] = value.strip()
+            continue
+        if in_options and line.startswith("- "):
+            current["options"].append(line[2:].strip())
+    return blocks
+
+
+def read_ledger(root):
+    """(Blöcke, Problem) aus `docs/big-decisions.md` nach der Konsumenten-Regel.
+
+    Blöcke: Liste von dicts in Dateireihenfolge mit den Schlüsseln `id` (`"D-3"`), `number` (3),
+    `date` (`"2026-11-02"`), `status` (`"offen"`, `"freigegeben"`, `"abgelehnt"` oder was von Hand
+    dort steht), `question`, `topic`, `key` (`"dependency:pyproject.toml#python-dateutil"`,
+    `"rule:UI-Texte"`), `recommendation`, `answer`, `source` (Strings, `—` wie in der Datei, None
+    wenn die Zeile fehlt) und `options` (Liste der Optionstexte ohne `- `; leer bei
+    „Optionen: — (Auftrag)“). Problem: None, oder eine Zeile Grund — Kopfzeile fehlt, `schema`
+    höher als 1 („docs/big-decisions.md schema 1 erwartet, 2 gefunden — Freigaben übersprungen“)
+    oder unlesbar; dann sind die Blöcke []. Fehlt die Datei, ist das ([], None).
+    """
+    try:
+        text = read_ledger_text(root)
+    except LedgerUnreadable as error:
+        return [], _unreadable_ledger(error, " — Freigaben übersprungen")
+    if text is None:
+        return [], None
+    problem = ledger_problem(text)
+    return ([], problem) if problem else (parse_blocks(text), None)
+
+
+def ledger_template():
+    """Anfang einer neuen Ablage aus `assets/big-decisions.md`; fehlt die Vorlage oder trägt sie
+    nicht die Kopfzeile, nur die Kopfzeile und der Titel."""
+    try:
+        text = LEDGER_ASSET.read_text(encoding="utf-8")
+        if not header_problem(text, "assets/big-decisions.md") and not BLOCK_NUMBER_RE.search(text):
+            return text
+    except OSError:
+        pass
+    return f"{LOG_HEADER}\n\n# Große Entscheidungen\n"
+
+
+def render_block(number, day, status, fields):
+    """Block `## D-<n> · <datum> · <status>` mit den Feldern aus `FIELDS`; `fields["options"]`
+    ist eine Liste oder None (→ „Optionen: — (Auftrag)“)."""
+    lines = [f"## D-{number} · {day} · {status}"]
+    for name, label in FIELDS:
+        if name == "options":
+            options = fields.get("options")
+            if options is None:
+                lines.append(f"{label}: {OPTIONS_BY_REQUEST}")
+            else:
+                lines.append(f"{label}:")
+                lines += [f"- {line_value(option)}" for option in options]
+        else:
+            lines.append(f"{label}: {line_value(fields.get(name))}")
+    return "\n".join(lines)
+
+
+def append_block(root, status, fields):
+    """Hängt einen Block an; liest die Ablage unter ihrer Sperre unmittelbar davor neu.
+    (Nummer, angelegt, Problem, ohne Sperre: None oder Ursache). Wirft `LockBusy`,
+    `LedgerUnreadable` oder OSError."""
+    path = ledger_path(root)
+    with log_lock(ledger_lock_path(root)) as unlocked:
+        text = read_ledger_text(root)
+        if text is not None:
+            problem = ledger_problem(text, "nichts geschrieben")
+            if problem:
+                return None, False, problem, unlocked
+        number = max((int(n) for n in BLOCK_NUMBER_RE.findall(text or "")), default=0) + 1
+        created = text is None
+        base = ledger_template() if created else text
+        write_atomic(path, base.rstrip("\n") + "\n\n" + render_block(number, date.today().isoformat(), status, fields) + "\n")
+    return number, created, None, unlocked
+
+
+def _locked_problem(busy, root, what):
+    return (f"{what} gesperrt: {shown(busy.args[0], root)} — nach {LOCK_WAIT:g} s aufgegeben "
+            "(läuft ein zweites decide_log.py?); nichts geschrieben.")
+
+
+def store_big(root, session, status, fields, row):
+    """Legt einen Block in der Ablage an und die Protokollzeile `gross` mit `D-<n>`; (exit, Zeilen).
+    Das Protokoll wird vorher geprüft, damit ein unlesbares nicht erst nach dem Block auffällt."""
+    root = Path(root)
+    log_shown = shown(log_path(root, session), root)
+    try:
+        text = read_log(root, session)
+    except LogUnreadable as error:
+        return 1, [unreadable_problem(error, root, session)]
+    if text is not None and header_problem(text, log_shown):
+        return 1, [header_problem(text, log_shown).replace("übersprungen", "nichts geschrieben")]
+    try:
+        number, created, problem, unlocked = append_block(root, status, fields)
+    except LockBusy as busy:
+        return 1, [_locked_problem(busy, root, "Ablage")]
+    except LedgerUnreadable as error:
+        return 1, [_unreadable_ledger(error, "; nichts geschrieben.")]
+    except OSError as error:
+        return 1, [f"{LEDGER_SHOWN} nicht schreibbar ({error.strerror or error}); nichts geschrieben."]
+    if problem:
+        return 1, [problem]
+
+    did = f"D-{number}"
+    lines = ["angelegt: docs/big-decisions.md"] if created else []
+    if status == "offen":
+        lines.append(f"{did} offen in {LEDGER_SHOWN}: {line_value(fields['topic'])} — "
+                     f"„{line_value(fields['question'])}“. Bis zur Freigabe unterbleibt der Schritt; "
+                     f"Antwort mit `resolve {did} --answer \"…\"` oder `--reject`.")
+    else:
+        lines.append(f"{did} {status} in {LEDGER_SHOWN}: {line_value(fields['topic'])} — "
+                     f"„{line_value(fields['question'])}“ ({line_value(fields['source'])}).")
+    if unlocked:
+        lines.append(f"Hinweis: Ablage ohne Sperre geschrieben ({unlocked}).")
+    row = dict(row, entscheidung=did, klasse="gross")
+    try:
+        log_created, problem, log_unlocked = append_row(root, session, row)
+    except LockBusy as busy:
+        problem = _locked_problem(busy, root, "Protokoll")
+    except LogUnreadable as error:
+        problem = unreadable_problem(error, root, session)
+    except OSError as error:
+        problem = f"Protokoll {log_shown} nicht schreibbar ({error.strerror or error}); nichts geschrieben."
+    if problem:
+        return 1, lines + [f"Protokollzeile für {did} fehlt — {problem} Der Block steht in {LEDGER_SHOWN}."]
+    if log_unlocked:
+        lines.append(f"Hinweis: Protokoll ohne Sperre geschrieben ({log_unlocked}).")
+    if log_created:
+        lines.append(f"Protokoll angelegt: {log_shown}")
+        notice = unversioned_notice(root)
+        if notice:
+            lines.append(notice)
+    return 0, lines
+
+
+def check_key(key, topic, rules, approved):
+    """(Schlüssel, Problem): `<kategorie>:<pfadmuster>[#<text>]` mit Kategorie aus `CATEGORIES`,
+    oder ohne Auftrag `rule:<thema>`, wenn eine Regel `immer fragen` dieses Thema und `topic` trifft
+    — dann in der Schreibweise der Regel."""
+    key = line_value(key)
+    category, sep, rest = key.partition(":")
+    if category == RULE_CATEGORY and sep:
+        if approved:
+            return None, (f"Schlüssel „{key}“: mit --approved-by-request gilt nur eine Kategorie aus "
+                          f"reversibility.md ({', '.join(CATEGORIES)}), nicht rule:; nichts geschrieben.")
+        hits = [r for r in match_rules(rules, rest)[0] if r.kind == "immer fragen"]
+        if not hits:
+            return None, (f"Schlüssel „{key}“: keine Regel „immer fragen: {rest.strip()}“ — rule:<thema> nur, "
+                          "wenn eine Regel immer fragen das Thema trifft; nichts geschrieben.")
+        if _norm(hits[0].topic) != _norm(topic):
+            return None, (f"Schlüssel „{key}“ passt nicht zum Thema „{line_value(topic)}“ — "
+                          f"rule:<thema> nimmt das Thema der Frage; nichts geschrieben.")
+        return f"{RULE_CATEGORY}:{hits[0].topic}", None
+    if not sep or not rest.partition("#")[0].strip():
+        return None, f"Schlüssel „{key}“ hat nicht die Form {KEY_FORM}; nichts geschrieben."
+    if category not in CATEGORIES:
+        return None, (f"Schlüssel „{key}“: Kategorie „{category}“ unbekannt — erlaubt: "
+                      f"{', '.join(CATEGORIES)}, oder rule:<thema> bei einer Regel immer fragen; "
+                      "nichts geschrieben.")
+    return key, None
+
+
+def _options(args):
+    return [o for o in (getattr(args, "options", None) or []) if (o or "").strip()]
+
+
+def add_big(root, session, args):
+    """Große Frage in die Ablage und ins Protokoll; (exit, meldung).
+
+    `args`: argparse-Namespace oder Objekt mit `topic`, `question`, `key`, `recommendation`,
+    `approved_by_request` (Strings oder None), `options` (Liste der `--option`-Werte oder None)
+    und optional `home` (Path; Default `HOME`). Ohne `approved_by_request`: Status `offen`,
+    zwei bis vier Optionen und `recommendation` Pflicht. Mit: Status `freigegeben`, Quelle
+    `Auftrag: „<Zitat>“`, „Optionen: — (Auftrag)“; `options` wird ignoriert. Trifft eine Regel das
+    Thema, gilt ihre Schreibweise; `nie fragen` stuft nicht herab, die Meldung sagt das.
+    """
+    root = Path(root)
+    home = Path(getattr(args, "home", None) or home_dir())
+    approved = line_value(getattr(args, "approved_by_request", None))
+    approved = "" if approved == NONE else approved
+    needed = ("topic", "question", "key") + (() if approved else ("recommendation",))
+    missing = [f"--{name}" for name in needed if not (getattr(args, name, None) or "").strip()]
+    if missing:
+        return 1, f"add --class gross: es fehlt {', '.join(missing)}; nichts geschrieben."
+    options = _options(args)
+    if not approved and not 2 <= len(options) <= 4:
+        return 1, (f"add --class gross: zwei bis vier --option nötig, {len(options)} angegeben; "
+                   "nichts geschrieben.")
+
+    rules = load_rules(root, home)
+    hits, hints = match_rules(rules, args.topic)
+    always = [r for r in hits if r.kind == "immer fragen"]
+    never = [r for r in hits if r.kind == "nie fragen"]
+    topic = (always or never)[0].topic if hits else args.topic.strip()
+    key, problem = check_key(args.key, topic, rules, approved)
+    if problem:
+        return 1, problem
+
+    notes = [f"Hinweis: Regel „{rule_label(r)}“ ({r.source}) ähnelt dem Thema „{args.topic.strip()}“ — "
+             "nicht angewendet; trifft sie, das Thema wörtlich aus `rules` übernehmen." for r in hints]
+    if never:
+        notes.append(f"Regel {rule_ref(never[0])} wirkt nicht auf große Entscheidungen — die Frage bleibt groß"
+                     + (" und offen." if not approved else "."))
+    if approved and options:
+        notes.append("Hinweis: --option bei --approved-by-request ignoriert — der Auftrag hat die Wahl getroffen.")
+    fields = {"question": args.question, "topic": topic, "key": key,
+              "options": None if approved else options,
+              "recommendation": getattr(args, "recommendation", None),
+              "answer": ANSWER_BY_REQUEST if approved else NONE,
+              "source": f"Auftrag: „{approved}“" if approved else NONE}
+    regel = (rule_label(always[0]) if always and key.startswith(RULE_CATEGORY + ":")
+             else f"{rule_label(never[0])} (wirkt nicht auf groß)" if never else NONE)
+    row = {"zeit": datetime.now().isoformat(timespec="seconds"), "thema": topic, "frage": args.question,
+           "beleg": fields["source"], "regel": regel}
+    code, lines = store_big(root, session, "freigegeben" if approved else "offen", fields, row)
+    return code, "\n".join(notes + lines)
+
+
+# --- resolve und open -------------------------------------------------------------------
+
+def resolve(root, decision_id, answer, reject):
+    """Antwort auf `D-<n>` eintragen; (exit, meldung). `answer` (String oder None) wird die
+    Antwort, `reject` setzt `abgelehnt` (sonst `freigegeben`); Quelle wird „Nutzer in Sitzung“.
+    Der Block bleibt stehen, nur Status, Antwort und Quelle ändern sich. Ohne Antwort und ohne
+    `reject`, bei unbekannter oder doppelter ID oder nach der Konsumenten-Regel Exit 1."""
+    root = Path(root)
+    match = re.fullmatch(r"[dD]-(\d+)", (decision_id or "").strip())
+    if not match:
+        return 1, f"resolve: „{decision_id}“ ist keine ID der Form D-<n>; nichts geschrieben."
+    number = int(match.group(1))
+    did = f"D-{number}"
+    answer = line_value(answer)
+    if answer == NONE and not reject:
+        return 1, f"resolve {did}: --answer \"…\" oder --reject nötig; nichts geschrieben."
+    status = "abgelehnt" if reject else "freigegeben"
+    if answer == NONE:
+        answer = "abgelehnt"
+    try:
+        with log_lock(ledger_lock_path(root)):
+            text = read_ledger_text(root)
+            if text is None:
+                return 1, f"resolve {did}: {LEDGER_SHOWN} fehlt; nichts geschrieben."
+            problem = ledger_problem(text, "nichts geschrieben")
+            if problem:
+                return 1, problem
+            lines = text.split("\n")
+            starts = [i for i, line in enumerate(lines)
+                      if (m := BLOCK_RE.match(line)) and int(m.group("number")) == number]
+            if len(starts) != 1:
+                why = "steht mehrfach" if starts else "fehlt"
+                return 1, f"resolve {did}: Block {did} {why} in {LEDGER_SHOWN}; nichts geschrieben."
+            start = starts[0]
+            end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+            head = BLOCK_RE.match(lines[start])
+            before = head.group("status")
+            lines[start] = f"## {did} · {head.group('date')} · {status}"
+            for label, value in (("Antwort", answer), ("Quelle der Antwort", SOURCE_USER)):
+                found = next((i for i in range(start + 1, end) if lines[i].startswith(label + ": ")), None)
+                if found is None:
+                    found = end
+                    while found - 1 > start and not lines[found - 1].strip():
+                        found -= 1
+                    lines.insert(found, "")
+                    end += 1
+                lines[found] = f"{label}: {value}"
+            write_atomic(ledger_path(root), "\n".join(lines))
+    except LockBusy as busy:
+        return 1, _locked_problem(busy, root, "Ablage")
+    except LedgerUnreadable as error:
+        return 1, _unreadable_ledger(error, "; nichts geschrieben.")
+    except OSError as error:
+        return 1, f"{LEDGER_SHOWN} nicht schreibbar ({error.strerror or error}); nichts geschrieben."
+    return 0, (f"{did}: {before} → {status}; Antwort: {answer}; Quelle der Antwort: {SOURCE_USER} "
+               f"({LEDGER_SHOWN}).")
+
+
+def open_questions(root):
+    """(exit, text): die Blöcke mit Status `offen` mit Datum, Thema, Frage, Schlüssel, Optionen
+    und Empfehlung. Exit 1 nur, wenn die Konsumenten-Regel die Ablage überspringt."""
+    root = Path(root)
+    blocks, problem = read_ledger(root)
+    if problem:
+        return 1, problem
+    if not ledger_path(root).exists():
+        return 0, f"Keine offenen großen Fragen ({LEDGER_SHOWN} fehlt)."
+    pending = [b for b in blocks if b["status"] == "offen"]
+    if not pending:
+        return 0, f"Keine offenen großen Fragen in {LEDGER_SHOWN}."
+    lines = [f"Offene große Fragen in {LEDGER_SHOWN}: {len(pending)}"]
+    for b in pending:
+        lines.append(f"{b['id']} · {b['date']} · {b['topic'] or NONE}: {b['question'] or NONE}")
+        lines.append(f"  Schlüssel: {b['key'] or NONE}")
+        lines += [f"  - {option}" for option in b["options"]]
+        lines.append(f"  Empfehlung: {b['recommendation'] or NONE}")
+    return 0, "\n".join(lines)
+
+
 # --- add --class klein ------------------------------------------------------------------
 
 def add_small(root, session, args):
@@ -483,8 +899,9 @@ def add_small(root, session, args):
     `args` ist ein argparse-Namespace oder ein Objekt mit den Attributen `topic`, `question`,
     `decision`, `evidence` (Strings oder None), `options` (Liste der `--option`-Werte oder None)
     und optional `home` (Path; Default `HOME`). Schreibt höchstens eine Zeile: `klein` mit
-    Treffer, `annahme` mit „nichts gefunden“. Trifft eine Regel `immer fragen`, wäre die Frage
-    groß — ohne zwei bis vier `--option` Exit 1; die Ablage selbst fehlt noch (Task 2).
+    Treffer, `annahme` mit „nichts gefunden“. Trifft eine Regel `immer fragen`, ist die Frage
+    groß: ohne zwei bis vier `--option` Exit 1, sonst ein Block `D-<n>` (offen, Schlüssel
+    `rule:<thema>`, `--decision` als Empfehlung) und die Protokollzeile `gross` mit der Regel.
     """
     root = Path(root)
     home = Path(getattr(args, "home", None) or home_dir())
@@ -506,17 +923,19 @@ def add_small(root, session, args):
 
     if always:
         rule = always[0]
-        lines = []
-        if never:
-            lines.append(contradiction(always, never))
-        options = [o for o in (getattr(args, "options", None) or []) if (o or "").strip()]
+        lines = [contradiction(always, never)] if never else []
+        options = _options(args)
         if not 2 <= len(options) <= 4:
             lines.append(f"Regel immer fragen: {rule.topic} trifft — zwei bis vier --option nötig; "
                          "nichts geschrieben.")
-        else:
-            lines.append(f"Regel immer fragen: {rule.topic} trifft — die Frage ist groß; die Ablage in "
-                         "docs/big-decisions.md ist noch nicht gebaut, nichts geschrieben.")
-        return 1, "\n".join(notes + lines)
+            return 1, "\n".join(notes + lines)
+        lines.append(f"Regel {rule_ref(rule)} trifft — die Frage ist groß; --decision ist die Empfehlung.")
+        fields = {"question": args.question, "topic": rule.topic, "key": f"{RULE_CATEGORY}:{rule.topic}",
+                  "options": options, "recommendation": args.decision, "answer": NONE, "source": NONE}
+        row = {"zeit": datetime.now().isoformat(timespec="seconds"), "thema": rule.topic,
+               "frage": args.question, "beleg": evidence, "regel": rule_label(rule)}
+        code, stored = store_big(root, session, "offen", fields, row)
+        return code, "\n".join(notes + lines + stored)
 
     topic = never[0].topic if never else args.topic.strip()
     klasse = "annahme" if evidence.endswith(" — nichts gefunden") else "klein"
@@ -623,6 +1042,11 @@ def build_parser():
     add.add_argument("--key")
     add.add_argument("--approved-by-request", dest="approved_by_request")
     sub.add_parser("summary", parents=[common], help="Einträge der laufenden Sitzung")
+    res = sub.add_parser("resolve", help="Antwort auf eine große Frage eintragen")
+    res.add_argument("decision_id", metavar="D-<n>")
+    res.add_argument("--answer")
+    res.add_argument("--reject", action="store_true")
+    sub.add_parser("open", help="offene große Fragen")
     return parser
 
 
@@ -636,6 +1060,10 @@ def main(argv):
     warning = None
     if args.action == "rules":
         code, message = list_rules(root, home)
+    elif args.action == "resolve":
+        code, message = resolve(root, args.decision_id, args.answer, args.reject)
+    elif args.action == "open":
+        code, message = open_questions(root)
     else:
         session = session_id(args.session)
         if not session:
@@ -646,16 +1074,24 @@ def main(argv):
         elif args.action == "summary":
             code, message = summary(root, session, home)
         elif args.cls == "gross":
-            code, message = 1, ("add --class gross: zwei bis vier --option, --key und --recommendation nötig; "
-                                "die Ablage in docs/big-decisions.md ist noch nicht gebaut, nichts geschrieben.")
+            args.home = home
+            code, message = add_big(root, session, args)
+            ignored = [flag for attr, flag in SMALL_FLAGS if getattr(args, attr, None)]
+            if code == 0 and ignored:
+                warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
+                           "--class klein — bei einer großen Frage ignoriert.")
         else:
             args.home = home
             code, message = add_small(root, session, args)
-            ignored = [flag for attr, flag in BIG_FLAGS if getattr(args, attr, None)]
+            upgraded = any(r.kind == "immer fragen" for r in match_rules(load_rules(root, home), args.topic or "")[0])
+            ignored = [flag for attr, flag in BIG_FLAGS
+                       if getattr(args, attr, None) and not (upgraded and attr == "options")]
             if code == 0 and ignored:
+                what = ("bei einer per Regel hochgestuften Frage ignoriert (--decision ist die Empfehlung, "
+                        "der Schlüssel rule:<thema>)." if upgraded else
+                        "bei einer kleinen Entscheidung ignoriert; ist die Frage groß, mit --class gross eintragen.")
                 warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
-                           "--class gross — bei einer kleinen Entscheidung ignoriert; ist die Frage groß, "
-                           "mit --class gross eintragen.")
+                           f"--class gross — {what}")
     print(message, file=sys.stdout if code == 0 else sys.stderr)
     if warning:
         print(warning, file=sys.stderr)
