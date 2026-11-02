@@ -3162,7 +3162,10 @@ def test_f1_since_reuses_only_when_coverage_chain_closes(tmp_path, monkeypatch):
     assert not re.fullmatch(r"[0-9a-f]{40,64}", marks["base_blob"])
 
 
-def test_f2_since_needs_same_profile(tmp_path, monkeypatch):
+def test_cp9_f1_since_standard_reuses_checkpoint_runs(tmp_path, monkeypatch):
+    """Profil checkpoint ist standard mit Soll (Spec 26): ein standard-Plan übernimmt aus
+    standard- und checkpoint-Läufen, ein checkpoint-Plan nur aus checkpoint-Läufen (ein
+    standard-Lauf hatte kein Soll). Der Fokus muss weiter gleich sein."""
     kit = _kit()
     _tick(kit, monkeypatch)
     root = _since_repo(tmp_path / "repo")
@@ -3171,15 +3174,36 @@ def test_f2_since_needs_same_profile(tmp_path, monkeypatch):
     std = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     _record(kit, root, std, "p1", [_finding("a.py", 5, "std")])
 
+    # Standard-Plan --since checkpoint-Lauf mit gleichem Schlüssel: übernommen.
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     assert plan_b["file_keys"]["a.py"]["key"] == cp["file_keys"]["a.py"]["key"]
-    assert kit.apply_since(plan_b, [_run_path(root, cp)]) == plan_b
-    assert kit.apply_since(plan_b, [_run_path(root, cp), _run_path(root, std)])[
-        "file_keys"]["a.py"]["reused_from"] == std["_meta"]["run"]
+    alone = kit.apply_since(plan_b, [_run_path(root, cp)])["file_keys"]["a.py"]
+    assert alone["reused_from"] == cp["_meta"]["run"]
+    assert alone["findings"] == [_finding("a.py", 5, "cp")]
+    # Beide passen: der jüngere gilt, wie bei Läufen eines Profils.
+    for order in ([cp, std], [std, cp]):
+        both = kit.apply_since(plan_b, [_run_path(root, p) for p in order])["file_keys"]["a.py"]
+        assert both["reused_from"] == std["_meta"]["run"]
+    # Die Kettenregel mischt die Profile: checkpoint über t0..t1, standard über t1..t2.
+    git(root, "checkout", "--quiet", "-b", "weiter", "t2")
+    _commit_files(root, "t3", {"README.md": "# y\n"})
+    later = kit.build_plan(root, "t1..t2", "standard", "bugs", None, False)
+    _record(kit, root, later, "p1", [_finding("b.py", 3, "später")])
+    plan_t3 = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    chained = kit.apply_since(plan_t3, [_run_path(root, cp), _run_path(root, later)])
+    assert chained["file_keys"]["b.py"]["reused_chain"] == [later["_meta"]["run"],
+                                                            cp["_meta"]["run"]]
+
+    # Checkpoint-Plan --since standard-Lauf: nicht übernommen (ohne Soll reviewt).
     plan_cp = kit.build_plan(root, "base..t2", "checkpoint", "bugs", None, False)
     assert kit.apply_since(plan_cp, [_run_path(root, std)]) == plan_cp
     assert kit.apply_since(plan_cp, [_run_path(root, std), _run_path(root, cp)])[
         "file_keys"]["a.py"]["reused_from"] == cp["_meta"]["run"]
+
+    # Anderer Fokus: nicht übernommen, auch bei gleichem Schlüssel.
+    sec = kit.build_plan(root, "base..t2", "standard", "security", None, False)
+    assert sec["file_keys"]["a.py"]["key"] == cp["file_keys"]["a.py"]["key"]
+    assert kit.apply_since(sec, [_run_path(root, cp), _run_path(root, std)]) == sec
 
 
 def test_f3_plan_since_only_on_a_fresh_run(tmp_path, monkeypatch):
@@ -4794,7 +4818,19 @@ def test_cp8b_f5_payload_file_with_bom_is_accepted(tmp_path, monkeypatch):
 def test_cp8b_f2_extract_pair_on_owning_dictionary_gets_owner_entry(tmp_path):
     kit = _kit()
     before = OWNER_PAS.replace("  T := nil;\n", "  T := nil;\n  FBag.Remove('x');\n")
-    for name in ("ExtractPair", "ExtractKey", "ExtractValue"):
+    # Prüfpunkt 9, F2: Nur ExtractPair gibt es an TDictionary/TObjectDictionary; eine eigene
+    # Methode ExtractKey oder ExtractValue bekommt keinen Besitz-Hinweis der RTL.
+    for name in ("ExtractKey", "ExtractValue"):
+        after = before.replace("FBag.Remove('x')", f"FBag.{name}('x')")
+        (tmp_path / name).mkdir()
+        found = _delphi_found(kit, tmp_path / name,
+                              {"Tree.pas": TREE_PAS, "Many.pas": MANY_PAS, "src/Owner.pas": before},
+                              {"src/Owner.pas": after})
+        at = _line_no(after, f"FBag.{name}")
+        assert not [e for e in found.entries if e["line"] == at and e["kind"] == "owner"], \
+            found.entries
+        assert not any(f"{name} auf" in line for e in found.entries for line in e["lines"])
+    for name in ("ExtractPair",):
         after = before.replace("FBag.Remove('x')", f"FBag.{name}('x')")
         (tmp_path / name).mkdir()
         found = _delphi_found(kit, tmp_path / name,

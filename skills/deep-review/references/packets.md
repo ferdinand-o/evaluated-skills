@@ -161,8 +161,11 @@ noch frisch ist: nicht schon mit `--since` geplant, ohne `results/`, `packets/` 
 
 Eine Datei wird übernommen, wenn alles zutrifft:
 
-1. Der frühere Lauf hat denselben Fokus und dasselbe Profil. Andere Läufe werden still
-   übergangen.
+1. Der frühere Lauf hat denselben Fokus und ein passendes Profil (`SINCE_PROFILES`). Profil
+   `checkpoint` ist `standard` mit `--soll-file` als Soll, also eine Obermenge: Ein
+   `standard`-Plan übernimmt aus `standard`- und `checkpoint`-Läufen, ein `checkpoint`-Plan
+   nur aus `checkpoint`-Läufen, denn ein `standard`-Lauf hatte kein Soll. Eine Kette darf
+   Läufe beider erlaubten Profile mischen. Andere Läufe werden still übergangen.
 2. Er hat die Datei reviewt, das heißt ihr Paket hat ein angenommenes `results/<id>.json` (oder
    er hat sie selbst übernommen), und zwar mit demselben `key`.
 3. Die **Abdeckungskette** schließt sich. Der `base_blob` des passenden Laufs gleicht dem

@@ -113,6 +113,10 @@ MESSAGE_CACHE_SIZE = 64   # Commit-Messages so vieler Bereiche je Prozess zwisch
 
 PROFILES = ("standard", "checkpoint")
 FOCI = ("bugs", "security", "quality")
+# Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: checkpoint ist standard mit
+# `--soll-file` als Soll, also eine Obermenge — standard übernimmt aus beiden, checkpoint nur
+# aus checkpoint (ein standard-Lauf hatte kein Soll).
+SINCE_PROFILES = {"standard": ("standard", "checkpoint"), "checkpoint": ("checkpoint",)}
 
 RUN_SUFFIX_CHARS = string.ascii_lowercase + string.digits
 RUN_SUFFIX_LEN = 4
@@ -1924,8 +1928,8 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
 # gleichnamigen Unit-Namen. Was der Scanner nicht sicher zuordnen kann, steht nicht im Block —
 # lieber keine Gegenstelle und gezählt als eine falsche.
 
-DELPHI_RELEASES = frozenset({"extract", "extractpair", "extractkey", "extractvalue", "remove",
-                             "free", "freeandnil", "setcontentstream"})
+DELPHI_RELEASES = frozenset({"extract", "extractpair", "remove", "free", "freeandnil",
+                             "setcontentstream"})
 CLASS_CHAIN_MAX = 4        # Klassen je Empfängertyp im Block (die Klasse und ihre Basisklassen)
 INHERITED_LINES_MAX = 4    # inherited-Zeilen je Klasse
 OWNERSHIP_RTL = {          # Besitz-Default der RTL je Basisklasse: (Name klein ohne <…>, generisch)
@@ -3359,10 +3363,10 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
                   unresolved: set) -> list:
     """Die Stellen einer Delphi-Datei nach der Sammelregel (Spec 26, Schritt 3): je Aufruf auf
     einer geänderten Zeile (`call`: `Name(`, `Obj.Name(`, `Name<T>(`, ohne Klammer `_parenless`),
-    je `Extract`, `ExtractPair`, `ExtractKey`, `ExtractValue`, `Remove`, `Free`, `FreeAndNil`,
-    `SetContentStream` und je `inherited Create`
-    im Konstruktor einer Klasse mit Besitz-Default der RTL (`owner`). Mehrere Einträge gleicher
-    Art und gleichen Namens auf einer Zeile tragen die Spalte wie bei Python. Gezählt
+    je `Extract`, `ExtractPair`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream`
+    (`DELPHI_RELEASES`; `ExtractKey` und `ExtractValue` gibt es an TDictionary nicht) und je
+    `inherited Create` im Konstruktor einer Klasse mit Besitz-Default der RTL (`owner`).
+    Mehrere Einträge gleicher Art und gleichen Namens auf einer Zeile tragen die Spalte wie bei Python. Gezählt
     (`unresolved`) wird jeder Aufruf, für den `resolve_call` nichts statt einer Vermutung
     liefert — ohne Klammer auch, wenn es auf unbekanntem Empfänger gleichnamige Methoden gibt
     (dort wird nie geraten)."""
@@ -4051,7 +4055,11 @@ def apply_since(plan, run_dirs):
     nichts (das tut `plan_since`). Ein früherer Plan, der die Prüfung von `_earlier_plan`
     nicht besteht, ist ein KitError mit seiner Lauf-ID.
 
-    Es zählen nur frühere Läufe mit demselben Fokus und demselben Profil. Darin gilt eine
+    Es zählen nur frühere Läufe mit demselben Fokus und einem Profil aus `SINCE_PROFILES`:
+    Profil `checkpoint` ist `standard` mit `--soll-file` als Soll (eine Obermenge), also
+    übernimmt ein `standard`-Plan aus `standard`- und `checkpoint`-Läufen, ein
+    `checkpoint`-Plan nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte kein Soll); eine
+    Kette darf Läufe beider erlaubten Profile mischen. Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
     oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
@@ -4117,7 +4125,8 @@ def apply_since(plan, run_dirs):
         run_id, eplan = _earlier_plan(directory)
         if run_id == own_run:
             raise KitError(f"Lauf {run_id} kann nicht auf sich selbst folgen (--since)")
-        if eplan.get("focus") != plan.get("focus") or eplan.get("profile") != plan.get("profile"):
+        if eplan.get("focus") != plan.get("focus") \
+                or eplan.get("profile") not in SINCE_PROFILES.get(plan.get("profile"), ()):
             continue
         earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan))
         repo = repo or _layout(Path(directory))[0]
