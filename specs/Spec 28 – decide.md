@@ -31,7 +31,9 @@ Gate-Grade:
   verschiedener Arbeit führen), die Einordnung als klein oder groß, die Wahl des Themas, die
   Beleg-Suche vor einer kleinen Entscheidung, keine Ausführung einer großen ohne Freigabe,
   keine Neigung im Auftrag an einen Subagenten jenseits der Wortliste, die Schätzung „mehr
-  als zwei Dateien".
+  als zwei Dateien", dass Subagenten nichts eintragen. Letzteres wird jedem Subagenten wörtlich
+  mitgeteilt (Ablauf 5), aber bewusst nicht geprüft: kein Skript erkennt einen Subagenten, und
+  `brief --check` prüft den Satz nicht.
 - G2, das Skript meldet: kleine Entscheidung ohne Belegzeile, ohne Treffer als Annahme,
   Regel-Anwendung und -Widerspruch, zwei bis vier Optionen je großer Frage, Länge und
   unzulässige Felder oder Wörter im Auftrag, teure Änderung im Diff ohne freigegebenen
@@ -79,6 +81,8 @@ skills/decide/
 
 skills/feature-spec/SKILL.md         Abgrenzung: eigene Fragen außerhalb eines Spec-Entwurfs → decide; Projekt-Kopie über sync_skills.py
 skills/work-plan/SKILL.md            Abgrenzung: eigene Fragen außerhalb eines Plans → decide
+skills/subagent-dev/scripts/plan_to_tasks.py   fremdes Skript, Tier 1: generate schreibt unter Nicht-Ziele jeder Task-Datei den festen Satz für Subagenten; Test in tests/test_subagent_dev_plan_to_tasks.py
+skills/subagent-dev/references/task-file.md    Abschnitt Nicht-Ziele nennt den Satz
 .claude-plugin/marketplace.json      decide in der skills-Liste von evaluated-dev
 scripts/sync_skills.py               decide in PROJECT_SKILLS (fremdes Skript, Tier 1, nur die Liste)
 specs/Spec 00 – skill-foundation.md, README.md   Routing-Zeile decide
@@ -131,14 +135,20 @@ tests/test_decide_*.py               die 19 Stubs aus dem Entwurf werden Tests, 
      (`--reject` für abgelehnt), dann handeln.
    - **Unbeaufsichtigt** (`claude -p` ohne Permission-Host, jeder Subagent): der Block bleibt
      offen, der teure Schritt unterbleibt, die Übergabe nennt `D-<n>`.
-5. **Subagenten** tragen nichts ein. Ein Subagent, der selbst auf eine Frage stößt, gibt sie im
-   Feld Rückgabe an den Hauptagenten zurück; der ordnet sie ein. Für Tasks von
-   subagent-dev hat die Task-Datei kein Feld dafür (sieben Abschnitte,
-   `skills/subagent-dev/references/task-file.md`); dort bleibt die Rückgabe G1 im Bericht des
-   Tasks.
+5. **Subagenten** tragen nichts ein, und jeder erfährt es wörtlich, nicht sinngemäß. Auf drei
+   Wegen, ohne mechanische Prüfung:
+   - **Auftrag aus decide** (`brief`): Das Skript schreibt unter Rückgabe den festen Satz
+     „Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein."
+   - **Jeder andere Subagent**, den der Hauptagent losschickt, während decide geladen ist: Der
+     Auftrag endet mit demselben Satz, wörtlich (SKILL.md, Ablauf 5).
+   - **Tasks von subagent-dev**: `plan_to_tasks.py generate` schreibt unter Nicht-Ziele jeder
+     Task-Datei „Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in dieser Task stehen, entscheidest und trägst du nicht selbst ein; nenn sie in deinem Bericht mit Frage, Optionen, Folgen und Empfehlung. Der Hauptagent ordnet sie ein." Der Satz nennt decide nicht, weil subagent-dev auch ohne decide läuft.
+   Liest ein Subagent selbst die SKILL.md von decide, gilt dort derselbe Satz: ohne
+   `AskUserQuestion` in der Werkzeugliste trägt er nichts ein und gibt zurück.
 6. **Auftrag an einen Subagenten.** `brief --topic <thema>` schreibt
    `.skills/cache/decide/<session>/brief-<n>.md` mit den sechs Feldern aus
-   `references/brief.md`; Schon entschieden, Feste Vorgaben und Rückgabe füllt das Skript,
+   `references/brief.md`; Schon entschieden, Feste Vorgaben und Rückgabe (mit dem Satz aus
+   Ablauf 5) füllt das Skript,
    Frage, Anlass und Wo nachsehen der Hauptagent. Vor dem Dispatch `brief --check <datei>`.
 7. **Übergabe.** Hat die Aufgabe Dateien geändert, `check --range <commit vor der Aufgabe>`;
    jede gemeldete Stelle nennt die Antwort mit ihrem Grund, die Zeile „ungeprüft: …" wörtlich.
@@ -241,6 +251,9 @@ für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will
   gestellt oder nicht; `check` liest nur diese Datei, nie das Sitzungsprotokoll.
 - **Regeln wirken nur in eine Richtung.** `immer fragen` stuft hoch; `nie fragen` nimmt kleine
   Entscheidungen aus der Zusammenfassung und stuft eine große nie herab.
+- **Subagenten wörtlich unterrichtet.** Auftrag aus `brief`, jeder andere Auftrag unter decide
+  und jede Task-Datei von subagent-dev tragen den festen Satz aus Ablauf 5; ob der Subagent sich
+  daran hält, bleibt G1 und wird nicht geprüft.
 - **Kein wertender Auftrag.** `brief --check` meldet mehr als 25 Zeilen, Felder außer den
   sechs festen und die Wörter `sollte`, `besser`, `lieber`, `empfehle`, `ich würde`,
   `offensichtlich` in der Frage; andere Wertungen bleiben G1.
@@ -270,7 +283,7 @@ für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will
 | neues Feature mit Codebase | **feature-spec** | decide protokolliert die Annahmen des Entwurfs nicht noch einmal |
 | Plan für Arbeit in einem Repo | **work-plan** | decide ist für Fragen außerhalb eines Plans |
 | Migration schreiben oder prüfen | sql-schema-architect (08) | decide legt die Frage ab, ob migriert wird; wie, prüft `migration_gate.py` |
-| Tasks eines Plans an Subagenten geben | subagent-dev (09) | decide ändert Task-Dateien und Prüfpunkte nicht; Fragen aus Tasks ordnet der Hauptagent ein |
+| Tasks eines Plans an Subagenten geben | subagent-dev (09) | decide ändert Prüfpunkte nicht; die Task-Datei bekommt unter Nicht-Ziele nur den festen Satz für Subagenten (Ablauf 5); Fragen aus Tasks ordnet der Hauptagent ein |
 
 Rückverweise beim Bau, je mit dem Wort decide: feature-spec (Abgrenzung), work-plan
 (Abgrenzung). sql-schema-architect und subagent-dev stehen nicht fett und brauchen keinen.
@@ -293,6 +306,8 @@ the assumptions of a plan (use work-plan)."
 | 19 Akzeptanzkriterien | `tests/test_decide_*.py` | je Stub das Given/When/Then aus `docs/specs/wip/decide.md`; der Bau ersetzt `@pytest.mark.skip` durch den Test |
 | `test_option_count` | `tests/test_decide_log.py` | `add --class gross` mit einer oder fünf Optionen → Exit 1, keine Zeile; Hochstufung per Regel ohne `--option` → Exit 1 mit Grund; `--approved-by-request` ohne Optionen schreibt den Block |
 | `test_evidence_form` | dito | `gesucht: x - Treffer: ./a.py:3` und `… Treffer: <wurzel>/a.py:3` werden zu `gesucht: x — Treffer: a.py:3`; ein absoluter Pfad außerhalb der Wurzel bleibt; `gesucht: x` ohne Ergebnis → Exit 1 |
+| `test_brief_return_sentence` | dito | `brief --topic X` schreibt den Satz aus Ablauf 5 wörtlich unter Rückgabe; `brief --check` meldet sein Fehlen nicht |
+| `test_task_file_subagent_sentence` | `tests/test_subagent_dev_plan_to_tasks.py` | `generate` schreibt den Satz für Tasks wörtlich unter Nicht-Ziele jeder Task-Datei; `verify` liest die Datei unverändert |
 | `test_reject_and_rules` | dito | `resolve D-1 --reject` setzt `abgelehnt`; `rules` listet Regeln beider Dateien mit Pfad, `#`-Kommentare ausgelassen; `--topic ui-texte` bei Regel `UI-Texte` schreibt `UI-Texte`; `--class gross --key rule:X` ohne Regel zu X → Exit 1 |
 | `test_glob_matcher` | dito | `db/**/*.sql` trifft `db/schema.sql` und `db/a/b.sql`; `**/migrations/` trifft `migrations/0002.py` und `evals/fixtures/x/migrations/0001.py`; `*` trifft kein `/` |
 | `test_pipe_and_unicode` | dito | `\x7c` in Werten wird `¦`; Umlaute in Frage und Thema; Dateien als UTF-8 |
@@ -374,8 +389,9 @@ eigenem Status.
 
 Ein Generator für Architektur-Entscheidungsdokumente; Schreiben in `docs/decisions.md`
 (feature-spec); eine Änderung an `communication.md` (setup-user, anderes Plugin); Assertions auf
-`tool_use` und ein Permission-Host in evalkit (eigene Spec); Änderungen an Task-Dateien oder
-Prüfpunkten von subagent-dev; die Prüfung, wie eine Migration geschrieben ist
+`tool_use` und ein Permission-Host in evalkit (eigene Spec); Änderungen an Prüfpunkten von
+subagent-dev und an der Task-Datei über den einen Satz unter Nicht-Ziele hinaus; eine
+mechanische Prüfung, ob ein Subagent etwas eingetragen hat; die Prüfung, wie eine Migration geschrieben ist
 (sql-schema-architect); Erkennung öffentlicher Python- oder JS-Schnittstellen im Diff.
 
 ## Open questions
@@ -398,8 +414,9 @@ Prüfpunkten von subagent-dev; die Prüfung, wie eine Migration geschrieben ist
   ein grüner Lauf ist eine Stichprobe; ob `CLAUDE_CODE_SESSION_ID` in Subagenten dieselbe ID
   trägt (die Skill hängt nicht daran, weil Subagenten nichts eintragen); Umgebungen ohne Shell
   (claude.ai), dort fehlt das Skript und die Übergabe sagt „ungeprüft".
-- Ob die Task-Datei von subagent-dev ein Feld für Fragen an den Hauptagenten bekommt, entscheidet
-  ein späterer Zyklus von subagent-dev; bis dahin ist die Rückgabe aus Tasks G1.
+- Entschieden (Nutzer, 2026-11-02): Subagenten werden unmissverständlich unterrichtet, aber nicht
+  mechanisch geprüft. Ob ein Subagent trotzdem `decide_log.py add` aufruft, misst nichts; ob
+  Subagenten dieselbe `CLAUDE_CODE_SESSION_ID` tragen, ist ungemessen.
 - Die Untergrenze („merkt jemand außerhalb der Stelle") ist eine Regel, kein Messwert; Eval 1
   misst nur einen Fall darunter, Eval 2 einen darüber.
 - In einer Cloud-Sitzung war am 2026-11-02 `CLAUDE_CODE_SESSION_ATTENDED=1` gesetzt. Ob die
