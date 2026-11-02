@@ -3,7 +3,8 @@ Form der Belegzeile, Tabellenzeichen und Umlaute, Regeln aus Repo- und Nutzerdat
 
 import os
 import re
-import threading
+import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -180,54 +181,6 @@ def test_summary_hides_never_topic_with_pipe_and_spaces(decide_repo, capsys):
     assert "ausgelassen per nie fragen: 2" in out
 
 
-def test_concurrent_add_keeps_both_rows(decide_repo, monkeypatch):
-    """F3: Ein zweites add zwischen Lesen und Ersetzen des ersten verliert keine Zeile."""
-    root, home = decide_repo
-    assert dl.add_small(root, SESSION, small_args(home, question="Vorher?"))[0] == 0
-    read_log, paused, release = dl.read_log, threading.Event(), threading.Event()
-
-    def slow_read(*args):
-        text = read_log(*args)
-        if threading.current_thread().name == "A" and not paused.is_set():
-            paused.set()
-            release.wait(5)
-        return text
-
-    monkeypatch.setattr(dl, "read_log", slow_read)
-    codes = {}
-
-    def run(name):
-        codes[name] = dl.add_small(root, SESSION, small_args(home, question=f"Frage {name}?"))[0]
-
-    first = threading.Thread(target=run, args=("A",), name="A")
-    first.start()
-    assert paused.wait(5)
-    second = threading.Thread(target=run, args=("B",), name="B")
-    second.start()
-    second.join(0.3)                                # ohne Sperre ist B hier schon fertig
-    release.set()
-    first.join(5)
-    second.join(5)
-    assert codes == {"A": 0, "B": 0}
-    assert sorted(r[3] for r in rows(root)) == ["Frage A?", "Frage B?", "Vorher?"]
-    assert not log_file(root).with_name("log.md.lock").exists()
-
-
-def test_lock_timeout_writes_nothing(decide_repo, monkeypatch, capsys):
-    """F3: Bleibt die Sperre bestehen, endet add nach der Zeitgrenze mit 1 und sichtbarem Grund."""
-    root, _ = decide_repo
-    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
-    lock = log_file(root).with_name("log.md.lock")
-    lock.write_text("fremd\n", encoding="utf-8")
-    monkeypatch.setattr(dl, "LOCK_WAIT", 0.1, raising=False)
-    capsys.readouterr()
-    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
-    err = capsys.readouterr().err
-    assert "log.md.lock" in err and "nichts geschrieben" in err, err
-    assert [r[3] for r in rows(root)] == ["Vorher?"]
-    assert lock.read_text(encoding="utf-8") == "fremd\n"     # fremde Sperre bleibt
-
-
 def test_hint_only_from_word_start(decide_repo, capsys):
     """F4: Ein ähnliches Thema ist nur ab Wortanfang ein Hinweis — `UI` steckt nicht in `Build`."""
     root, home = decide_repo
@@ -270,8 +223,8 @@ def test_relative_path_from_subdir(decide_repo, monkeypatch):
     monkeypatch.chdir(root / "src")
     assert (dl.normalize_evidence("gesucht: ./, ../docs — Treffer: ./parser.py:12", root)
             == "gesucht: src, docs — Treffer: src/parser.py:12")
-    assert add_small("Parser", "Trenner?", ";", "gesucht: . — Treffer: ./parser.py:12") == 0
-    assert rows(root)[0][5] == "gesucht: . — Treffer: src/parser.py:12"
+    assert add_small("Parser", "Trenner?", ";", "gesucht: ./ — Treffer: ./parser.py:12") == 0
+    assert rows(root)[0][5] == "gesucht: src — Treffer: src/parser.py:12"
 
 
 def test_trailing_punctuation(decide_repo):
@@ -366,7 +319,6 @@ def test_unreadable_log_is_not_replaced(decide_repo, monkeypatch, capsys):
     assert "Permission denied" in captured.err
     assert "Protokoll angelegt" not in captured.out + captured.err
     assert log_file(root).read_bytes() == before
-    assert not log_file(root).with_name("log.md.lock").exists()
 
     assert dl.main(["summary"]) == 1
     err = capsys.readouterr().err
@@ -383,94 +335,6 @@ def test_relative_path_outside_root_stays_as_written(decide_repo, monkeypatch):
     monkeypatch.chdir(root / "src")
     assert (dl.normalize_evidence("gesucht: ../../x, ../docs — nichts gefunden", root)
             == "gesucht: ../../x, docs — nichts gefunden")
-
-
-def dead_pid():
-    """PID eines eben beendeten Prozesses."""
-    import subprocess
-    import sys
-    child = subprocess.Popen([sys.executable, "-c", "pass"])
-    child.wait()
-    return child.pid
-
-
-@pytest.mark.skipif(os.name == "nt", reason="unter Windows zählt nur das Alter der Sperre")
-def test_lock_of_dead_process_is_taken_over(decide_repo, capsys):
-    """R2-F3: Eine Sperre, deren Prozess nicht mehr lebt (add per SIGKILL beendet), wird übernommen."""
-    root, _ = decide_repo
-    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
-    lock = log_file(root).with_name("log.md.lock")
-    lock.write_text(f"{dead_pid()} 0123456789abcdef\n", encoding="ascii")
-    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
-    assert [r[3] for r in rows(root)] == ["Vorher?", "Danach?"]
-    assert not lock.exists()
-
-
-def test_old_lock_is_taken_over(decide_repo, capsys):
-    """R2-F3: Eine Sperre, die älter als 30 s ist, wird übernommen — auch wenn ihr Prozess noch lebt."""
-    root, _ = decide_repo
-    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
-    lock = log_file(root).with_name("log.md.lock")
-    lock.write_text(f"{os.getpid()} fedcba9876543210\n", encoding="ascii")
-    old = time.time() - 31
-    os.utime(lock, (old, old))
-    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
-    assert [r[3] for r in rows(root)] == ["Vorher?", "Danach?"]
-    assert not lock.exists()
-
-
-def test_lock_timeout_names_pid_and_age(decide_repo, monkeypatch, capsys):
-    """R2-F3: Bei Zeitgrenze nennt die Meldung PID und Alter der Sperre."""
-    root, _ = decide_repo
-    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
-    lock = log_file(root).with_name("log.md.lock")
-    lock.write_text(f"{os.getpid()} 0011223344556677\n", encoding="ascii")
-    old = time.time() - 5
-    os.utime(lock, (old, old))
-    monkeypatch.setattr(dl, "LOCK_WAIT", 0.1)
-    capsys.readouterr()
-    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
-    err = capsys.readouterr().err
-    assert re.search(rf"PID {os.getpid()}, \d+ s alt", err), err
-    assert "nichts geschrieben" in err
-    assert lock.exists()
-
-
-def test_foreign_lock_is_not_removed(decide_repo, monkeypatch):
-    """R2-F4: Ersetzt jemand die Sperre während add läuft, entfernt add sie am Ende nicht."""
-    root, home = decide_repo
-    assert dl.add_small(root, SESSION, small_args(home, question="Vorher?"))[0] == 0
-    lock = log_file(root).with_name("log.md.lock")
-    foreign = f"{os.getpid()} ffffffffffffffff\n"
-    read_log = dl.read_log
-
-    def swap_lock(*args):
-        lock.unlink()                               # von Hand gelöscht, C sperrt neu
-        lock.write_text(foreign, encoding="ascii")
-        return read_log(*args)
-
-    monkeypatch.setattr(dl, "read_log", swap_lock)
-    assert dl.add_small(root, SESSION, small_args(home, question="A?"))[0] == 0
-    assert lock.read_text(encoding="ascii") == foreign
-
-
-def test_lock_retries_on_permission_error(decide_repo, monkeypatch):
-    """R2-F5: PermissionError beim Anlegen der Sperre (Windows, Sperre wird gerade gelöscht)
-    wird wie FileExistsError innerhalb der Zeitgrenze wiederholt."""
-    root, home = decide_repo
-    real_open, calls = dl.os.open, []
-
-    def flaky_open(path, *args, **kwargs):
-        if str(path).endswith(".lock") and not calls:
-            calls.append(path)
-            raise PermissionError(13, "Access is denied", str(path))
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(dl.os, "open", flaky_open)
-    code, message = dl.add_small(root, SESSION, small_args(home))
-    assert code == 0, message
-    assert calls and len(rows(root)) == 1
-    assert not log_file(root).with_name("log.md.lock").exists()
 
 
 def test_write_failure_keeps_cause(decide_repo, monkeypatch, capsys):
@@ -553,3 +417,153 @@ def test_summary_many_entries_and_rules(decide_repo, monkeypatch):
     assert f"ausgelassen per nie fragen: {hidden}" in lines
     shown_questions = [re.search(r": (F\d+\?) →", line).group(1) for line in lines if line.startswith("- ")]
     assert shown_questions == visible[-dl.SUMMARY_LIMIT:]
+
+
+# --- Funde des Prüfpunkts 1, Runde 3 (F1–F5) --------------------------------------------
+# Die Sperre gilt je offener Datei; geprüft wird sie darum mit echten Unterprozessen.
+
+_LOAD = """
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("decide_log", sys.argv[1])
+dl = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dl)
+"""
+HOLDER = _LOAD + """
+with dl.log_lock(Path(sys.argv[2])):
+    print("gesperrt", flush=True)
+    time.sleep(60)
+"""
+WRITER = _LOAD + """
+dl.LOCK_WAIT = 20                       # die Prozesse warten hier aufeinander, nicht auf die Uhr
+read_log = dl.read_log
+
+def slow_read(*args):                   # Lesen und Ersetzen weit auseinander: ohne Sperre geht eine Zeile verloren
+    text = read_log(*args)
+    time.sleep(0.2)
+    return text
+
+dl.read_log = slow_read
+sys.exit(dl.main(["add", "--class", "klein", "--topic", "CLI", "--question", sys.argv[2],
+                  "--decision", "kurz", "--evidence", "gesucht: cli.py — Treffer: cli.py:3"]))
+"""
+
+
+def script_path():
+    return str(Path(dl.__file__).resolve())
+
+
+def hold_lock(root):
+    """Kindprozess, der die Sperre des Protokolls hält, bis er beendet wird."""
+    child = subprocess.Popen([sys.executable, "-c", HOLDER, script_path(), str(log_file(root))],
+                             stdout=subprocess.PIPE, text=True)
+    assert child.stdout.readline().strip() == "gesperrt"
+    return child
+
+
+def test_concurrent_add_in_processes_keeps_every_row(decide_repo):
+    """R3-F1: Vier add in eigenen Prozessen gleichzeitig verlieren keine Zeile; die Sperrdatei bleibt liegen."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    children = [subprocess.Popen([sys.executable, "-c", WRITER, script_path(), f"Frage {n}?"], cwd=root,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for n in range(4)]
+    results = [child.communicate(timeout=60) + (child.returncode,) for child in children]
+    assert [code for _, _, code in results] == [0, 0, 0, 0], results
+    assert sorted(r[3] for r in rows(root)) == ["Frage 0?", "Frage 1?", "Frage 2?", "Frage 3?", "Vorher?"]
+    assert log_file(root).with_name("log.md.lock").exists()
+
+
+def test_held_lock_ends_with_exit_1_after_wait(decide_repo, monkeypatch, capsys):
+    """R3-F1: Hält ein zweiter Prozess die Sperre, endet add nach LOCK_WAIT mit 1 und nennt den Pfad."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Vorher?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
+    child = hold_lock(root)
+    try:
+        capsys.readouterr()
+        started = time.monotonic()
+        assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 1
+        waited = time.monotonic() - started
+    finally:
+        child.kill()
+        child.wait()
+    err = capsys.readouterr().err
+    assert waited >= 0.3, waited
+    assert "Protokoll gesperrt" in err and f".skills/cache/decide/{SESSION}/log.md.lock" in err, err
+    assert "nichts geschrieben" in err and len(err.strip().splitlines()) == 1, err
+    assert [r[3] for r in rows(root)] == ["Vorher?"]
+
+
+def test_process_end_releases_lock(decide_repo, monkeypatch, capsys):
+    """R3-F1: Endet der Prozess, der die Sperre hält (hier per kill), ist sie frei; die Datei bleibt."""
+    root, _ = decide_repo
+    monkeypatch.setattr(dl, "LOCK_WAIT", 0.3)
+    child = hold_lock(root)
+    child.kill()
+    child.wait()
+    lock = log_file(root).with_name("log.md.lock")
+    assert lock.exists()
+    assert add_small("CLI", "Danach?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0, capsys.readouterr().err
+    assert [r[3] for r in rows(root)] == ["Danach?"]
+    assert lock.exists()
+
+
+def test_without_lock_module_writes_visibly(decide_repo, monkeypatch, capsys):
+    """R3-F1: Gibt es weder fcntl noch msvcrt, schreibt add ohne Sperre und sagt das."""
+    root, _ = decide_repo
+    monkeypatch.setattr(dl, "fcntl", None)
+    monkeypatch.setattr(dl, "msvcrt", None)
+    assert add_small("CLI", "Kurzoption?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    assert "ohne Sperre" in capsys.readouterr().out
+    assert len(rows(root)) == 1
+
+
+def test_bare_dot_is_like_dot_slash(decide_repo, monkeypatch, tmp_path):
+    """R3-F2: Ein nacktes `.` gilt wie `./` relativ zum Arbeitsverzeichnis."""
+    root, _ = decide_repo
+    assert dl.normalize_evidence("gesucht: . — nichts gefunden", root) == "gesucht: . — nichts gefunden"
+    (root / "src").mkdir()
+    monkeypatch.chdir(root / "src")
+    assert dl.normalize_evidence("gesucht: . — nichts gefunden", root) == "gesucht: src — nichts gefunden"
+    assert dl.normalize_evidence("gesucht: ., ./ — nichts gefunden", root) == "gesucht: src, src — nichts gefunden"
+    monkeypatch.chdir(tmp_path)                     # außerhalb der Wurzel bleibt es, wie es steht
+    assert dl.normalize_evidence("gesucht: . — nichts gefunden", root) == "gesucht: . — nichts gefunden"
+
+
+def test_non_word_topic_needs_end_boundary(decide_repo):
+    """R3-F3: `.net` ist ein Hinweis zu `ASP.NET`, aber nicht zu `config.network`."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "immer fragen: .net\n")
+    rules = dl.load_rules(root, home)
+    assert dl.match_rules(rules, "config.network") == ([], [])
+    assert dl.match_rules(rules, "ASP.NET") == ([], rules)
+    assert dl.match_rules(rules, "ASP.NET Core") == ([], rules)
+
+
+def test_decide_rows_fails_on_row_with_wrong_cell_count(decide_repo):
+    """R3-F4: decide_rows scheitert, wenn eine Tabellenzeile beim Parsen wegfiele."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Kurzoption?", "kurz", "gesucht: cli.py — Treffer: cli.py:3") == 0
+    path = log_file(root)
+    path.write_text(path.read_text(encoding="utf-8") + "| a | b | c | d | e | f | g | h |\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="Tabellenzeilen"):
+        rows(root)
+
+
+def test_write_atomic_keeps_original_error(tmp_path, monkeypatch):
+    """R3-F5: Wirft das Aufräumen der Nachbardatei, bleibt der Fehler von os.replace sichtbar."""
+    real_unlink = Path.unlink
+
+    def replace_fails(src, dst):
+        raise PermissionError(13, "replace verweigert", str(src))
+
+    def unlink_fails(self, *args, **kwargs):
+        if self.name.endswith(".tmp"):
+            raise PermissionError(13, "unlink verweigert", str(self))
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(dl.os, "replace", replace_fails)
+    monkeypatch.setattr(dl.time, "sleep", lambda _: None)
+    monkeypatch.setattr(Path, "unlink", unlink_fails)
+    with pytest.raises(PermissionError, match="replace verweigert"):
+        dl.write_atomic(tmp_path / "log.md", "x\n")

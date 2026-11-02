@@ -72,10 +72,19 @@ def decide_log_file(root: Path, session: str = DECIDE_SESSION) -> Path:
 def decide_rows(root: Path, session: str = DECIDE_SESSION):
     """Zellen der Tabellenzeilen ohne Kopf: [zeit, thema, klasse, frage, entscheidung, beleg, regel],
     gelesen mit `parse_rows` aus decide_log.py. Das Format selbst prüft
-    tests/test_decide_log.py::test_log_format_against_raw_text gegen den Rohtext."""
+    tests/test_decide_log.py::test_log_format_against_raw_text gegen den Rohtext.
+
+    `parse_rows` verwirft Zeilen mit falscher Zellzahl still; damit keine für die Tests
+    verschwindet, muss die Zahl der Tabellenzeilen im Rohtext (beginnen mit `|`, ohne Kopf und
+    Trenner) gleich der Zahl der geparsten sein, sonst AssertionError."""
     dl = decide_script()
     text = decide_log_file(root, session).read_text(encoding="utf-8")
-    return [[entry[c] for c in dl.COLUMNS] for entry in dl.parse_rows(text)]
+    entries = dl.parse_rows(text)
+    head = {line.strip() for line in dl.TABLE_HEAD.splitlines()}
+    raw = [line for line in text.splitlines() if line.strip().startswith("|") and line.strip() not in head]
+    if len(raw) != len(entries):
+        raise AssertionError(f"{len(raw)} Tabellenzeilen im Rohtext, {len(entries)} geparst: {raw}")
+    return [[entry[c] for c in dl.COLUMNS] for entry in entries]
 
 
 def decide_add_small(topic, question, decision, evidence, *extra):

@@ -14,15 +14,17 @@ Protokoll `.skills/cache/decide/<session>/log.md`: Kopfzeile, dann die Tabelle
 `| zeit | thema | klasse | frage | entscheidung | beleg | regel |` mit `klasse` aus `klein`,
 `annahme` (Belegzeile „nichts gefunden"), `gross`. `|` in Werten wird `¦`. Ein leeres
 Protokoll gilt als fehlend; ein vorhandenes, aber unlesbares nicht — dann enden `add` und
-`summary` mit 1, und nichts wird geschrieben. Unter der Sperrdatei `log.md.lock` (PID und
-Zufallstoken; höchstens `LOCK_WAIT` Sekunden Wartezeit, danach Exit 1 mit PID und Alter der
-Sperre) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt. Eine Sperre, deren
-Prozess nicht mehr lebt oder die älter als `LOCK_STALE` Sekunden ist, wird übernommen; entfernt
-wird nur die eigene. Scheitert das Schreiben, endet `add` mit 1 und einer Zeile Grund.
+`summary` mit 1, und nichts wird geschrieben. Unter einer Sperre des Betriebssystems auf der
+offenen Datei `log.md.lock` (`fcntl.flock` unter POSIX, `msvcrt.locking` unter Windows; sie endet
+spätestens mit dem Prozess) wird das Protokoll neu gelesen und atomar per `os.replace` ersetzt.
+Ist sie belegt, versucht `add` es bis `LOCK_WAIT` Sekunden lang erneut und endet dann mit 1
+„Protokoll gesperrt“ und dem Pfad. Die Sperrdatei bleibt liegen und wird nie gelöscht. Fehlen
+beide Module, schreibt `add` ohne Sperre und sagt das. Scheitert das Schreiben, endet `add` mit 1
+und einer Zeile Grund.
 
 Belegzeile `--evidence`: `gesucht: <ort> — Treffer: <datei:zeile>` oder
 `gesucht: <ort> — nichts gefunden`. `.`, `,`, `;` und `)` am Ende fallen weg; nur der Trenner
-vor dem Ergebnis wird aus ` - `, ` -- ` oder ` – ` zu ` — `. Pfade mit `./` oder `../` und `..`
+vor dem Ergebnis wird aus ` - `, ` -- ` oder ` – ` zu ` — `. Pfade mit `./` oder `../`, `.` und `..`
 gelten relativ zum Arbeitsverzeichnis; sie und absolute Pfade (auch über Symlinks) werden
 relativ zur Wurzel, wenn sie darunter liegen; andere Pfade bleiben, wie sie stehen. Danach
 prüft das Skript die Form. Fehlt sie: „Keine Belegzeile", Exit 1, nichts geschrieben. Ob die
@@ -32,8 +34,9 @@ Regeln `.skills/decide/rules.md` (Repo) und `~/.skills/decide/rules.md` (Nutzer)
 `immer fragen: <thema>` oder `nie fragen: <thema>`; `#` am Zeilenanfang oder nach Leerraum
 beginnt einen Kommentar. Ein Thema trifft, wenn es nach Kleinschreibung, Trimmen und
 Zusammenziehen von Leerraum (`|` als `¦`, wie in der Tabelle) gleich `--topic` ist — dann gilt
-die Schreibweise der Regel; enthält eines das andere ab einem Wortanfang (beginnt das kürzere
-mit einem Nicht-Wortzeichen wie `.NET`, genügt der Teilstring), ist es nur ein Hinweis.
+die Schreibweise der Regel; enthält eines das andere ab einem Wortanfang, ist es nur ein Hinweis.
+Beginnt das kürzere mit einem Nicht-Wortzeichen wie `.NET`, darf es mitten im Wort beginnen, muss
+dann aber am Ende stehen oder vor einem Nicht-Wortzeichen (`ASP.NET` ja, `config.network` nein).
 `immer fragen` geht vor `nie fragen` und stuft eine kleine Frage zur großen hoch; `nie fragen`
 nimmt kleine Einträge aus `summary`. `rules` meldet je Thema einen Widerspruch.
 `--option`, `--recommendation`, `--key` und `--approved-by-request` bei einer kleinen
@@ -46,7 +49,6 @@ Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
 import argparse
 import os
 import re
-import secrets
 import subprocess
 import sys
 import time
@@ -54,6 +56,15 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+
+try:
+    import fcntl
+except ImportError:                     # Windows
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:                     # POSIX
+    msvcrt = None
 
 SKILL = "decide"
 SCHEMA = 1
@@ -67,9 +78,8 @@ RULE_FILE = Path(".skills") / "decide" / "rules.md"
 RULE_KINDS = ("immer fragen", "nie fragen")
 SUMMARY_LIMIT = 10
 NONE = "—"
-LOCK_WAIT = 2.0          # Sekunden, die add auf eine fremde Sperrdatei wartet
-LOCK_POLL = 0.05         # Abstand der Versuche
-LOCK_STALE = 30.0        # Sekunden, ab denen eine Sperre als verwaist gilt
+LOCK_WAIT = 2.0          # Sekunden, die add auf eine belegte Sperre wartet
+LOCK_POLL = 0.05         # Schlaf zwischen den Versuchen
 WRITE_ATTEMPTS = 3
 BIG_FLAGS = (("options", "--option"), ("recommendation", "--recommendation"), ("key", "--key"),
              ("approved_by_request", "--approved-by-request"))
@@ -182,9 +192,10 @@ def _norm(topic):
 
 def _at_word_start(longer, shorter):
     """`shorter` steht in `longer` und beginnt dort ein Wort (`UI` in `UI-Texte`, nicht in `Build`);
-    beginnt `shorter` mit einem Nicht-Wortzeichen, reicht der Teilstring (`.NET` in `ASP.NET`)."""
+    beginnt `shorter` mit einem Nicht-Wortzeichen, darf es mitten im Wort beginnen, muss dann aber
+    am Ende stehen oder vor einem Nicht-Wortzeichen (`.NET` in `ASP.NET`, nicht in `config.network`)."""
     if not re.match(r"\w", shorter):
-        return shorter in longer
+        return re.search(re.escape(shorter) + r"(?!\w)", longer) is not None
     return re.search(r"(?<!\w)" + re.escape(shorter), longer) is not None
 
 
@@ -239,14 +250,14 @@ def _under_root(path, root):
 
 
 def _norm_path(token, root):
-    """Ein Token: `./…`/`../…`/`..` gegen das Arbeitsverzeichnis und ein absoluter Pfad werden
+    """Ein Token: `./…`/`../…`/`.`/`..` gegen das Arbeitsverzeichnis und ein absoluter Pfad werden
     relativ zur Wurzel, wenn sie darunter liegen, sonst bleiben sie; `:zeile` und ein Komma oder
     Semikolon am Ende bleiben stehen."""
     core, trail = re.match(r"^(.*?)([,;]*)$", token).groups()
     match = _LINE_SUFFIX.search(core)
     suffix = match.group(1) if match else ""
     path = core[: len(core) - len(suffix)]
-    if path == ".." or path.startswith(("./", "../")):
+    if path in (".", "..") or path.startswith(("./", "../")):
         try:
             cwd = Path.cwd()
         except OSError:
@@ -354,7 +365,8 @@ def log_entries(root, session):
 
 def write_atomic(path, text):
     """Schreibt über eine Nachbardatei und `os.replace`; wartet nur zwischen den Versuchen.
-    Scheitern alle Versuche, wirft es den letzten OSError weiter."""
+    Scheitern alle Versuche, wirft es den letzten OSError weiter; ein Fehler beim Aufräumen der
+    Nachbardatei verdeckt ihn nicht."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
@@ -369,90 +381,49 @@ def write_atomic(path, text):
                 if attempt == WRITE_ATTEMPTS - 1:
                     raise
     finally:
-        tmp.unlink(missing_ok=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 class LockBusy(Exception):
-    """Die Sperrdatei bestand länger als `LOCK_WAIT` Sekunden; `args` sind ihr Pfad, die PID
-    darin und ihr Alter in Sekunden (beide None, wenn unbekannt)."""
+    """Die Sperre war länger als `LOCK_WAIT` Sekunden belegt; `args[0]` ist der Pfad der Sperrdatei."""
 
 
-def _pid_alive(pid):
-    """False nur, wenn der Prozess sicher nicht mehr lebt. Unter Windows beendet `os.kill`
-    einen Prozess, statt ihn zu prüfen — dort zählt allein das Alter der Sperre."""
-    if os.name == "nt":
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except (OSError, OverflowError):
-        return True
-    return True
-
-
-def _lock_state(lock):
-    """(Inhalt, PID oder None, Alter in Sekunden) der Sperrdatei; None, wenn sie nicht lesbar ist."""
-    try:
-        content = lock.read_text(encoding="ascii", errors="replace")
-        age = max(time.time() - lock.stat().st_mtime, 0.0)
-    except OSError:
-        return None
-    first = content.split()[:1]
-    pid = int(first[0]) if first and first[0].isdigit() else None
-    return content, pid, age
-
-
-def _remove_lock(lock, expected):
-    """Entfernt die Sperre nur, wenn sie noch `expected` enthält: atomar beiseite benennen, dann
-    prüfen; war es inzwischen eine andere, wird sie zurückgelegt, sofern der Platz frei ist."""
-    aside = lock.with_name(f"{lock.name}.{secrets.token_hex(8)}.old")
-    try:
-        os.rename(lock, aside)
-    except OSError:
-        return
-    try:
-        if aside.read_text(encoding="ascii", errors="replace") != expected:
-            os.link(aside, lock)
-    except OSError:
-        pass
-    finally:
-        aside.unlink(missing_ok=True)
+def _try_lock(fd):
+    """Sperrt `fd` ohne zu warten; wirft OSError, wenn ein anderer die Sperre hält."""
+    if fcntl is not None:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
 
 
 @contextmanager
 def log_lock(path):
-    """Sperrdatei `<log>.lock` neben dem Protokoll (`O_CREAT|O_EXCL`) mit PID und Zufallstoken;
-    wartet bis `LOCK_WAIT` Sekunden in Schritten von `LOCK_POLL`, dann `LockBusy`. Eine Sperre,
-    deren PID nicht mehr lebt oder die älter als `LOCK_STALE` Sekunden ist, wird übernommen.
-    `PermissionError` beim Anlegen (Windows: Sperre wird gerade gelöscht) zählt wie eine
-    bestehende Sperre. Entfernt nur die eigene Sperre."""
+    """Sperre des Betriebssystems auf der offenen Datei `<log>.lock`; das Betriebssystem gibt sie
+    mit dem Schließen frei, spätestens mit dem Ende des Prozesses. Ist sie belegt, neuer Versuch
+    alle `LOCK_POLL` Sekunden bis `LOCK_WAIT`, dann `LockBusy`. Die Datei bleibt liegen. Ohne
+    `fcntl` und `msvcrt` gibt es keine Sperre; das meldet `add_small`."""
     lock = path.with_name(path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
-    mine = f"{os.getpid()} {secrets.token_hex(8)}\n"
-    deadline = time.monotonic() + LOCK_WAIT
-    while True:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            break
-        except (FileExistsError, PermissionError) as error:
-            state = _lock_state(lock)
-            if time.monotonic() >= deadline:
-                if state is None and isinstance(error, PermissionError):
-                    raise                   # keine Sperre da: der Ordner ist nicht schreibbar
-                raise LockBusy(lock, *(state[1:] if state else (None, None))) from None
-            if state and ((state[1] is not None and not _pid_alive(state[1])) or state[2] > LOCK_STALE):
-                _remove_lock(lock, state[0])
-            else:
-                time.sleep(LOCK_POLL)
+    if fcntl is None and msvcrt is None:
+        yield
+        return
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        try:
-            os.write(fd, mine.encode("ascii"))
-        finally:
-            os.close(fd)
+        deadline = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                _try_lock(fd)
+                break
+            except (BlockingIOError, PermissionError) as error:     # belegt: EAGAIN bzw. EACCES
+                if time.monotonic() >= deadline:
+                    raise LockBusy(lock) from error
+                time.sleep(LOCK_POLL)
         yield
     finally:
-        _remove_lock(lock, mine)
+        os.close(fd)
 
 
 def append_row(root, session, values):
@@ -538,12 +509,8 @@ def add_small(root, session, args):
     try:
         created, problem = append_row(root, session, values)
     except LockBusy as busy:
-        lock, pid, age = busy.args
-        holder = f"PID {pid}" if pid is not None else "PID unbekannt"
-        since = f"{age:.0f} s alt" if age is not None else "Alter unbekannt"
-        return 1, (f"Protokoll gesperrt: {shown(lock, root)} ({holder}, {since}) — nach {LOCK_WAIT:g} s "
-                   f"aufgegeben; läuft ein zweites add? Eine verwaiste Sperre wird nach {LOCK_STALE:g} s "
-                   "übernommen; nichts geschrieben.")
+        return 1, (f"Protokoll gesperrt: {shown(busy.args[0], root)} — nach {LOCK_WAIT:g} s aufgegeben "
+                   "(läuft ein zweites add?); nichts geschrieben.")
     except LogUnreadable as error:
         return 1, unreadable_problem(error, root, session)
     except OSError as error:
@@ -555,6 +522,9 @@ def add_small(root, session, args):
     lines = notes + [f"Eingetragen {what}: {cell(topic)} — {cell(args.decision)} ({path_shown})"]
     if never:
         lines.append(f"Regel {rule_ref(never[0])} trifft — der Eintrag erscheint nicht in summary.")
+    if fcntl is None and msvcrt is None:
+        lines.append("Hinweis: weder fcntl noch msvcrt verfügbar — ohne Sperre geschrieben; ein "
+                     "gleichzeitiges add kann eine Zeile überschreiben.")
     if created:
         lines.append(f"Protokoll angelegt: {path_shown}")
         notice = unversioned_notice(root)
