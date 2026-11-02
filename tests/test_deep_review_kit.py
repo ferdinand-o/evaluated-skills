@@ -109,7 +109,7 @@ def test_seeded_fixtures(tmp_path):
 
 KIT_PATH = "skills/deep-review/scripts/review_kit.py"
 RUN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d{6})-([0-9a-f]{7})-([0-9a-z]{4})$")
-PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "profile", "focus", "split",
+PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "root", "profile", "focus", "split",
              "split_at", "packet_size", "changed_lines", "packets", "file_keys", "not_reviewed"]
 PACKET_KEYS = ["id", "files", "changed_lines", "range", "reused_from"]
 
@@ -339,7 +339,7 @@ def test_f03_range_resolved_once(tmp_path, monkeypatch):
 def test_f04_test_files_case_insensitive():
     kit = _kit()
     for path in ("UnitTests/FooTests.pas", "Tests/FooTest.py", "pkg/Test_foo.py",
-                 "pkg/foo_TEST.py", "src/testfoo.pas", "src/FooTest.pas"):
+                 "pkg/foo_TEST.py", "src/test_foo.pas", "src/FooTest.pas"):
         assert kit.classify(path, False) == kit.REASON_TEST, path
         assert kit.classify(path, True) is None, path
     for path in ("src/Latest.pas", "app/contest.py", "app/attest.py"):
@@ -537,13 +537,14 @@ def _root_repo(root, files):
 
 def test_g01_pas_test_rule_uses_word_boundaries():
     kit = _kit()
-    for path in ("src/AppTest.pas", "src/FooTests.pas", "src/TestUtils.pas", "src/testfoo.pas",
-                 "src/TESTUNIT.pas", "src/MyTestUnit.pas", "src/MyTest2.pas"):
+    # Angepasst an die Segmentregel (H1): `FooTEST` ist jetzt Foo + TEST, also ein Test;
+    # `testfoo`, `TESTUNIT` und `MyTest2` haben kein Glied `Test`/`Tests` und sind keine.
+    for path in ("src/AppTest.pas", "src/FooTests.pas", "src/TestUtils.pas", "src/FooTEST.pas",
+                 "src/MyTestUnit.pas"):
         assert kit.classify(path, False) == kit.REASON_TEST, path
-    # `TEST` am Ende ist von LATEST nicht zu unterscheiden; `test` mitten im Wort ist keine
-    # Wortgrenze.
     for path in ("src/LATEST.pas", "src/CONTEST.pas", "src/ATTEST.pas", "src/GREATEST.pas",
-                 "src/FooTEST.pas", "src/mytestunit.pas", "src/Latest.pas", "src/Contests.pas"):
+                 "src/mytestunit.pas", "src/Latest.pas", "src/Contests.pas", "src/testfoo.pas",
+                 "src/TESTUNIT.pas", "src/MyTest2.pas"):
         assert kit.classify(path, False) is None, path
 
 
@@ -552,7 +553,8 @@ def test_g02_root_commit_range_round_trips(tmp_path):
     root = _root_repo(tmp_path, {"app/a.py": _lines(3)})
     head = _rev(root, "HEAD")
     plan = kit.build_plan(root, None, "standard", "bugs", None, False)
-    assert plan["range"] == head and plan["packets"][0]["range"] == head
+    # Angepasst an H2: das Paket eines Wurzel-Commit-Plans trägt range None.
+    assert plan["range"] == head and plan["packets"][0]["range"] is None
     assert kit.numstat(root, plan["range"]).counts == {"app/a.py": 3}
     # Auch der normale Bereich lässt sich wieder einlesen.
     git(root, "commit", "--quiet", "--allow-empty", "-m", "leer")
@@ -689,3 +691,59 @@ def test_g10_non_utc_now_is_refused(monkeypatch):
         monkeypatch.setattr(kit, "_now", lambda when=when: when)
         with pytest.raises(kit.KitError, match="UTC"):
             kit.new_run_id(sha)
+
+
+# --- review_kit.py: Funde des dritten Prüfpunkts nach Task 2 (H1–H3) ----------------------
+
+def test_h01_pas_test_rule_by_segments():
+    kit = _kit()
+    for name in ("MyApp.Tests.Utils", "DUnitX.Tests.Assert", "App.Test.Core", "Foo_Test_Helpers",
+                 "MyTestsUnit", "FooTestsHelper", "FooTEST", "Test"):
+        assert kit.classify(f"src/{name}.pas", False) == kit.REASON_TEST, name
+        assert kit.classify(f"src/{name}.pas", True) is None, name
+    for name in ("Testament", "TestimonialService", "Testing", "Tester", "LATEST", "CONTEST",
+                 "Latest"):
+        assert kit.classify(f"src/{name}.pas", False) is None, name
+
+
+def test_h02_root_commit_plan_needs_helper_commits(tmp_path):
+    kit = _kit()
+    root = _root_repo(tmp_path, {"app/a.py": _lines(3)})
+    head = _rev(root, "HEAD")
+    plan = kit.build_plan(root, None, "standard", "bugs", None, False)
+    on_disk, _ = _read_plan(root, plan)
+    assert list(on_disk) == PLAN_KEYS
+    assert plan["root"] is True and plan["range"] == head
+    assert plan["packets"][0]["range"] is None
+    assert kit.numstat(root, plan["range"]).counts == {"app/a.py": 3}
+    sec = kit.build_plan(root, head, "standard", "security", None, False)
+    assert sec["root"] is True and [p["range"] for p in sec["packets"]] == [None]
+    assert "Hilfscommit" in kit.build_plan.__doc__
+
+    (root / "app" / "a.py").write_text(_lines(5), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "zwei")
+    normal = kit.build_plan(root, "HEAD", "standard", "bugs", None, False)
+    assert normal["root"] is False
+    assert normal["packets"][0]["range"] == normal["range"] == f"{head}..{_rev(root, 'HEAD')}"
+
+
+def test_h03_non_utf8_source_file_has_its_own_reason(tmp_path):
+    kit = _kit()
+    source = os.fsdecode(b"app/caf\xe9.py")
+    image = os.fsdecode(b"assets/caf\xe9.png")
+    root = _commit_repo(tmp_path, {"app/m.py": ""},
+                        {"app/m.py": _lines(2), source: "a = 1\n", image: "x\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    _read_plan(root, plan)
+    assert kit.REASON_SOURCE_NOT_UTF8 == "Quelldatei mit Nicht-UTF-8-Pfad — nicht reviewt"
+    assert plan["not_reviewed"] == [
+        {"file": "app/caf\\xe9.py", "reason": kit.REASON_SOURCE_NOT_UTF8},
+        {"file": "assets/caf\\xe9.png", "reason": kit.REASON_NOT_UTF8},
+    ]
+    assert plan["packets"][0]["files"] == ["app/m.py"]
+
+    (tmp_path / "only").mkdir()
+    only = _commit_repo(tmp_path / "only", {"app/m.py": ""}, {source: "a = 1\n"})
+    with pytest.raises(kit.KitError, match=r"nichts zu reviewen.*app/caf\\xe9\.py"):
+        kit.build_plan(only, "base..HEAD", "standard", "bugs", None, False)
+    assert _runs(only) == []

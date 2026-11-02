@@ -60,20 +60,21 @@ SHORT_SHA_LEN = 7
 
 # Einordnung (Spec 26, Ablauf Schritt 2): Dateien ohne Quellcode werden nie reviewt,
 # Testdateien nur mit --with-tests. Die Python-Muster und die Testordner gelten ohne
-# Rücksicht auf Groß/Klein; die Delphi-Regel steht bei TEST_PAS_STEM.
+# Rücksicht auf Groß/Klein; die Delphi-Regel steht bei TEST_PAS_SPLIT.
 DOC_SUFFIXES = frozenset({".md", ".markdown", ".rst"})
 DOC_NAMES = frozenset({"NEWS", "CHANGES", "CHANGELOG", "AUTHORS", "LICENSE", "COPYING"})
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
                             ".tif", ".tiff"})
 PROJECT_SUFFIXES = frozenset({".dproj", ".res"})
 TEST_NAME_PATTERNS = ("test_*.py", "*_test.py")
-# `*Test*.pas` an Wortgrenzen, auf den Namen ohne Endung: Er beginnt mit `test` (Groß/Klein
-# egal: `TestUtils`, `testfoo`, `TESTUNIT`), endet auf `Test` oder `Tests` (genau so
-# geschrieben: `AppTest`, `FooTests`) oder enthält `Test` als CamelCase-Glied, gefolgt von
-# einem Großbuchstaben oder einer Ziffer (`MyTestUnit`, `MyTest2`). Sonst nicht — `LATEST`,
-# `CONTEST`, `Latest`, `mytestunit` sind keine Testdateien. Ein Name ganz in Großbuchstaben
-# wie `FOOTEST` ist von `LATEST` nicht zu unterscheiden und zählt daher nicht.
-TEST_PAS_STEM = re.compile(r"^(?i:test)|Tests?$|Test(?=[A-Z0-9])")
+# `.pas` nach Gliedern, auf den Namen ohne Endung: Er wird an `.`, `_` und CamelCase-Grenzen
+# geteilt — ein Großbuchstabe nach einem Kleinbuchstaben beginnt ein Glied, eine Folge von
+# Großbuchstaben bleibt ein Glied (`DUnitX` → `DUnit`, `X`). Eine Testdatei ist es, wenn ein
+# Glied `Test` oder `Tests` heißt, Groß/Klein egal: `MyApp.Tests.Utils`, `App.Test.Core`,
+# `Foo_Test_Helpers`, `MyTestsUnit`, `FooTEST`, `Test`. Sonst nicht — `Testament`,
+# `TestimonialService`, `Testing`, `LATEST`, `CONTEST`, `Latest` sind keine Testdateien.
+TEST_PAS_SPLIT = re.compile(r"[._]|(?<=[a-z])(?=[A-Z])")
+TEST_PAS_SEGMENTS = frozenset({"test", "tests"})
 TEST_DIRS = frozenset({"tests", "unittests"})
 
 REASON_DOC = "keine Quelldatei: Doku"
@@ -81,6 +82,7 @@ REASON_IMAGE = "keine Quelldatei: Bild"
 REASON_PROJECT = "keine Quelldatei: Delphi-Projekt oder Ressource"
 REASON_TEST = "Testdatei: nur mit --with-tests"
 REASON_NOT_UTF8 = "Pfad ist kein UTF-8"
+REASON_SOURCE_NOT_UTF8 = "Quelldatei mit Nicht-UTF-8-Pfad — nicht reviewt"
 
 
 class KitError(RuntimeError):
@@ -254,8 +256,9 @@ def classify(path, with_tests):
     Ohne Quellcode (nie reviewt): Doku (Markdown, reStructuredText, `NEWS` und Verwandte
     ohne Endung), Bilder, `.dproj`, `.res`. Tests nur mit `with_tests` — so lief die
     Messung: `test_*.py`, `*_test.py` und Dateien unter `tests/` oder `unittests/` ohne
-    Rücksicht auf Groß/Klein; `*Test*.pas` an Wortgrenzen nach der Regel bei
-    `TEST_PAS_STEM` (`AppTest.pas` ja, `LATEST.pas` und `mytestunit.pas` nein)."""
+    Rücksicht auf Groß/Klein; `.pas`, wenn ein Glied des Namens (geteilt an `.`, `_` und
+    CamelCase-Grenzen, Regel bei `TEST_PAS_SPLIT`) `Test` oder `Tests` heißt
+    (`MyApp.Tests.Utils.pas`, `FooTEST.pas` ja, `Testament.pas`, `LATEST.pas` nein)."""
     pure = PurePosixPath(path)
     suffix = pure.suffix.lower()
     if suffix in DOC_SUFFIXES or pure.name.upper() in DOC_NAMES:
@@ -269,7 +272,8 @@ def classify(path, with_tests):
     name = pure.name.lower()
     is_test = (
         any(fnmatch.fnmatchcase(name, pattern) for pattern in TEST_NAME_PATTERNS)
-        or (suffix == ".pas" and TEST_PAS_STEM.search(pure.stem) is not None)
+        or (suffix == ".pas" and any(segment.lower() in TEST_PAS_SEGMENTS
+                                     for segment in TEST_PAS_SPLIT.split(pure.stem)))
         or any(part.lower() in TEST_DIRS for part in pure.parts[:-1])
     )
     return REASON_TEST if is_test else None
@@ -476,10 +480,15 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
     Ziel, `log_base` die aufgelöste BASIS für die Commit-Messages (`git log log_base..target`,
     beim Wurzel-Commit None: `git log target`). `range` ist `<base>..<target>` als SHAs,
     beim Wurzel-Commit nur `<target>` (`range_text`); `numstat(repo, range)` zählt wieder
-    dasselbe. Der Wortlaut des Auftrags steht in `_meta.generated`. `changed_lines` zählt die
+    dasselbe. `root` ist true nur beim Wurzel-Commit: Ein Wurzel-Commit-Plan braucht immer
+    Hilfscommits (ein Basis-Commit mit leerem Baum), denn `/code-review` läse das blanke
+    `<target>` als Ref und reviewte einen leeren Diff — deshalb trägt dort jedes Paket
+    `range: null`, bis die Hilfscommits den reviewbaren Bereich liefern. Der Wortlaut des
+    Auftrags steht in `_meta.generated`. `changed_lines` zählt die
     reviewten Dateien; die übrigen stehen mit Grund unter `not_reviewed`, ein Pfad, der kein
-    UTF-8 ist, in escapter Form (`caf\\xe9.png`). Ohne reviewte Datei: KitError „nichts zu
-    reviewen", kein Lauf. Bis `split_at` (None = `SPLIT_AT`) — oder wenn das Schneiden nur
+    UTF-8 ist, in escapter Form (`caf\\xe9.png`) — als Quelldatei mit eigenem Grund
+    `REASON_SOURCE_NOT_UTF8`, sonst `REASON_NOT_UTF8`. Ohne reviewte Datei: KitError
+    „nichts zu reviewen", der solche Quelldateien nennt; kein Lauf. Bis `split_at` (None = `SPLIT_AT`) — oder wenn das Schneiden nur
     ein Paket ergäbe — ein Paket `p1` über den Originalbereich, `split: false`; sonst
     `split: true`, Pakete nach `cut_packets` mit `packet_size` = kleiner von `PACKET_SIZE`
     und `split_at`, deren `range` die Paket-Bereiche füllen. Fokus `security`: ein Paket
@@ -504,9 +513,16 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
 
     reviewed: dict[str, int] = {}
     not_reviewed = []
+    source_not_utf8 = []
     for path, lines in stat.counts.items():
         if not _is_utf8(path):
-            not_reviewed.append({"file": _escaped(path), "reason": REASON_NOT_UTF8})
+            # Erst einordnen: eine Quelldatei fehlt im Review, ein Bild oder Doku nicht.
+            escaped = _escaped(path)
+            if classify(escaped, with_tests) is None:
+                source_not_utf8.append(escaped)
+                not_reviewed.append({"file": escaped, "reason": REASON_SOURCE_NOT_UTF8})
+            else:
+                not_reviewed.append({"file": escaped, "reason": REASON_NOT_UTF8})
             continue
         reason = classify(path, with_tests)
         if reason is None:
@@ -515,17 +531,23 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
             not_reviewed.append({"file": path, "reason": reason})
     if not reviewed:
         skipped = f", {len(not_reviewed)} Datei(en) ohne Review" if not_reviewed else ""
-        raise KitError(f"nichts zu reviewen in {rng!r}: keine geänderte Quelldatei{skipped}")
+        sources = (f"; Quelldatei(en) mit Nicht-UTF-8-Pfad nicht reviewt: {', '.join(source_not_utf8)}"
+                   if source_not_utf8 else "")
+        raise KitError(f"nichts zu reviewen in {rng!r}: keine geänderte Quelldatei{skipped}{sources}")
     changed = sum(reviewed.values())
     packet_size = min(PACKET_SIZE, split_at)
 
     cut = cut_packets(reviewed, packet_size) if focus != "security" and changed > split_at else []
     split = len(cut) > 1
+    root = span.log_base is None
     if split:
         packets = [{**p, "range": None, "reused_from": None} for p in cut]
     else:
+        # Beim Wurzel-Commit ist `resolved` nur `<ziel>`; /code-review läse das als Ref und
+        # reviewte einen leeren Diff — den Bereich liefern erst die Hilfscommits.
         packets = [{"id": "s1" if focus == "security" else "p1", "files": list(reviewed),
-                    "changed_lines": changed, "range": resolved, "reused_from": None}]
+                    "changed_lines": changed, "range": None if root else resolved,
+                    "reused_from": None}]
 
     run_id, directory = _new_run_dir(repo, span.target)
     meta = {"generated": _plan_command(rng, profile, focus, split_at, with_tests), "run": run_id}
@@ -534,6 +556,7 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
         "base": span.base,
         "target": span.target,
         "log_base": span.log_base,
+        "root": root,
         "profile": profile,
         "focus": focus,
         "split": split,
