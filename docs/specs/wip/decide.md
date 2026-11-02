@@ -26,6 +26,10 @@ manuell und „wenn Claude Fragen hat".
 - Annahme: Jede kleine Entscheidung trägt im Protokoll eine Belegzeile „gesucht: <Ort oder Muster> — Treffer: <datei:zeile>" oder „gesucht: … — nichts gefunden"; ohne Treffer ist sie eine Annahme statt einer Entscheidung.
 - Annahme: Kleine Entscheidungen fällt der Hauptagent inline.
 - Annahme: Ein Sonnet-Subagent mit frischem Kontext erarbeitet eine kleine Entscheidung nur, wenn die Suche mehr als zwei Dateien lesen müsste — Schwelle gesetzt, nicht gemessen. Das hält die Idee des Nutzers für Entscheidungen, die die Recherche wert sind, ohne Subagenten-Kosten für Kleinkram.
+- Annahme: Jeder Subagent bekommt einen Entscheidungsauftrag statt einer freien Zusammenfassung, mit den Feldern Frage (ein Satz, neutral), Anlass (laufende Aufgabe und Ziel), Feste Vorgaben (Nutzer, Spec, Plan, Regeln, je mit Quelle), Schon entschieden (passende Einträge der Sitzung), Wo nachsehen (Pfade und Suchmuster, keine Inhalte) und Rückgabe (Optionen mit Belegen `datei:zeile`, Folgen, Umkehrbarkeit, Empfehlung).
+- Annahme: Der Auftrag enthält keine Neigung des Hauptagenten — kein Feld „Empfehlung" und keine wertende Formulierung der Frage —, damit der frische Kontext des Subagenten nicht die Sicht des Hauptagenten bestätigt.
+- Annahme: Ein Auftrag umfasst höchstens 25 Zeilen — Grenze geschätzt, nicht gemessen; ein längerer Auftrag nimmt dem Subagenten den Vorteil des frischen Kontexts.
+- Annahme: `decide_log.py brief` füllt Schon entschieden, Feste Vorgaben und Rückgabe aus Protokoll und Regeldateien; der Hauptagent ergänzt Frage, Anlass und Wo nachsehen. Der Auftrag liegt neben dem Protokoll unter `.skills/cache/decide/<session>/brief-<n>.md` und dient bei großen Entscheidungen zugleich als erster Teil der Vorlage an den Nutzer.
 - Annahme: Für eine große Entscheidung schreibt Claude eine Vorlage mit zwei bis vier Optionen (vier ist die Obergrenze von `AskUserQuestion`), je Option Folgen und Umkehrbarkeit, und einer Empfehlung mit Grund; braucht die Vorlage Belege aus mehr als zwei Dateien, erarbeitet sie ein Sonnet-Subagent.
 - Annahme: Claude führt eine große Entscheidung nie selbst aus, sondern arbeitet bis vor den teuren Schritt weiter und stellt die Frage.
 - Annahme: Mehrere große Fragen werden gesammelt und gebündelt gestellt, solange die Arbeit bis dahin weiterlaufen kann.
@@ -36,7 +40,7 @@ manuell und „wenn Claude Fragen hat".
 - Annahme: Regeln des Nutzers stehen als Zeilen `immer fragen: <Thema>` oder `nie fragen: <Thema>` in `.skills/decide/rules.md` (Repo) und `~/.skills/decide/rules.md` (Nutzer), nach Spec 00 §1 als Konfiguration.
 - Annahme: `immer fragen` macht eine kleine Entscheidung zu einer großen; `nie fragen` wirkt nur auf kleine Entscheidungen und kann eine große nie herabstufen.
 - Annahme: Trigger in zwei Schichten — manuell `/decide <frage>` und die Description, die auf Entscheidungen über die laufende Arbeit eingegrenzt ist und brainstorming, learning-coach, exercise-forge und den Plan-Modus ausgrenzt.
-- Annahme: Ein Tier-1-Skript `decide_log.py` mit `add`, `summary`, `check` und `open` trägt das Protokoll; `check --range <bereich>` meldet Änderungen im Diff, die zur Liste „teuer umkehrbar" gehören, aber keinen freigegebenen großen Eintrag haben (G2).
+- Annahme: Ein Tier-1-Skript `decide_log.py` mit `add`, `summary`, `check`, `open` und `brief` trägt das Protokoll; `check --range <bereich>` meldet Änderungen im Diff, die zur Liste „teuer umkehrbar" gehören, aber keinen freigegebenen großen Eintrag haben (G2).
 - Annahme: Plugin `evaluated-dev`, portables Frontmatter ohne `disable-model-invocation`.
 - Annahme: Die zentralen Weichen (Umkehrbarkeit als Achse, Subagent nur bei Recherchebedarf, kein Hook auf der Frage) stammen aus dem Gespräch vom 2026-11-02 und dem Review dieses Entwurfs; bestätigt hat der Nutzer sie noch nicht.
 
@@ -73,6 +77,7 @@ stützt sich auf Vorhandenes:
 Bausteine: `skills/decide/SKILL.md` (Ablauf, Klassen, Contract, Abgrenzung),
 `references/reversibility.md` (die Liste „teuer umkehrbar" mit Beispielen und den Mustern,
 die `check` im Diff sucht), `references/option-memo.md` (Form der Vorlage für große Fragen),
+`references/brief.md` (Felder des Entscheidungsauftrags an Subagenten, was nicht hinein gehört),
 `scripts/decide_log.py` (Tier 1).
 
 ## Akzeptanzkriterien
@@ -127,6 +132,20 @@ die `check` im Diff sucht), `references/option-memo.md` (Form der Vorlage für g
 - And `docs/open-decisions.md` führt beide Fragen mit Antwort des Nutzers als freigegeben
 - When `decide_log.py check --range <bereich>` läuft
 - Then meldet es nichts
+
+### Auftrag übernimmt passende Einträge und Regeln
+- Given das Protokoll der Sitzung hat eine Entscheidung mit Thema `CLI` und eine mit Thema `Logging`
+- And `.skills/decide/rules.md` enthält `immer fragen: UI-Texte`
+- When `decide_log.py brief --topic CLI` läuft
+- Then enthält der Auftrag unter Schon entschieden genau den Eintrag mit Thema `CLI`
+- And unter Feste Vorgaben die Regel mit ihrer Datei als Quelle
+- And die Felder Frage, Anlass und Wo nachsehen stehen leer zum Ausfüllen
+
+### Zu langer oder wertender Auftrag wird gemeldet
+- Given ein ausgefüllter Auftrag mit 30 Zeilen und einem Feld `Empfehlung des Hauptagenten`
+- When `decide_log.py brief --check` den Auftrag prüft
+- Then meldet es die Länge über 25 Zeilen und das unzulässige Feld
+- And endet mit Exit 1
 
 ### Offene große Fragen überleben die Sitzung
 - Given eine große Frage wurde in einer früheren Sitzung abgelegt und nicht beantwortet
