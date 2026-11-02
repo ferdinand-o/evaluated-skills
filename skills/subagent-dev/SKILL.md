@@ -69,16 +69,16 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 6. **Merge und Prüfpunkt:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem
    Merge, dann `plan_to_tasks.py checkpoint status --after-task <N>` (bei roten
    Gesamttests nach deren Behebung mit `--tests-red`). Nur wenn `due` wahr ist, läuft
-   deep-review über den gemeldeten `range` mit `--profile checkpoint|standard` aus
-   `checkpoint.json`; ohne die Skill `/code-review --max-findings all <range>`, und
-   die Übergabe sagt „Review ohne Abdeckungsnachweis". Funde (`findings.json`) → `fix-task`, Fix in
-   frischem Worktree, `verify`, Merge, Review des Fixes, dann
-   `checkpoint mark --commit HEAD --run <lauf|none> --tasks <liste>`; höchstens zwei
-   Fix-Runden je Prüfpunkt. Je Runde und Prüfpunkt eine Zeile über
-   `plan_to_tasks.py log`. Zum Schluss der finale Prüfpunkt über `base..HEAD`.
-   Ein Interface-Bruch zwischen zwei Paketen ist ein Gate-Fehler (Überlappung
-   falsch beurteilt) — als Lesson im Plan vermerken, nicht einfach fixen und
-   weiter. Details: [references/merge-protocol.md](references/merge-protocol.md).
+   deep-review über `range` mit dem `profile` aus `checkpoint.json` (`checkpoint` mit
+   `--soll-file`); ohne die Skill `/code-review --max-findings all <range>`, und die
+   Übergabe sagt „Review ohne Abdeckungsnachweis". Funde (`findings.json` von deep-review,
+   im Ersatz die JSON-Liste von `/code-review`) → `fix-task`, Fix in frischem Worktree,
+   `verify`, Merge, Review nur der Fix-Commits ohne `--since`, dann `checkpoint mark` je
+   Lauf ([references/checkpoints.md](references/checkpoints.md)); höchstens zwei
+   Fix-Runden je Prüfpunkt, je Runde und Prüfpunkt eine Zeile über `plan_to_tasks.py log`.
+   Zum Schluss der finale Prüfpunkt über `base..HEAD`. Ein Interface-Bruch zwischen zwei
+   Paketen ist ein Gate-Fehler (Überlappung falsch beurteilt) — als Lesson im Plan
+   vermerken, nicht einfach fixen und weiter. Details: [references/merge-protocol.md](references/merge-protocol.md).
 7. **Recherche-/Analyse-Fan-out** (großer Codebase-Scan, der den Hauptkontext
    fluten würde) läuft unabhängig vom Gate: siehe
    [references/research-fanout.md](references/research-fanout.md). Die
