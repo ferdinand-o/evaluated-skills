@@ -109,8 +109,8 @@ def test_seeded_fixtures(tmp_path):
 
 KIT_PATH = "skills/deep-review/scripts/review_kit.py"
 RUN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d{6})-([0-9a-f]{7})-([0-9a-z]{4})$")
-PLAN_KEYS = ["_meta", "range", "base", "profile", "focus", "split", "split_at", "packet_size",
-             "changed_lines", "packets", "file_keys", "not_reviewed"]
+PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "profile", "focus", "split",
+             "split_at", "packet_size", "changed_lines", "packets", "file_keys", "not_reviewed"]
 PACKET_KEYS = ["id", "files", "changed_lines", "range", "reused_from"]
 
 
@@ -295,11 +295,8 @@ def _runs(root):
 def test_f01_non_utf8_path_is_a_kit_error(tmp_path):
     kit = _kit()
     name = os.fsdecode(b"caf\xe9.py")
-    root = _commit_repo(tmp_path, {"app/a.py": ""}, {"app/a.py": _lines(2), name: _lines(3)})
-    with pytest.raises(kit.KitError, match="UTF-8"):
-        kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
-    assert _runs(root) == []
-    # Auch der Schreiber selbst: KitError, keine Temp-Datei.
+    # Der Plan bricht daran nicht ab (G7); der Schreiber weist solchen Text ab: KitError,
+    # keine Temp-Datei.
     target = tmp_path / "out" / "x.json"
     with pytest.raises(kit.KitError, match="UTF-8"):
         kit.write_json(target, {"generated": "t"}, {"file": name})
@@ -335,14 +332,14 @@ def test_f03_range_resolved_once(tmp_path, monkeypatch):
     assert len(calls) == 2, calls
     assert plan["_meta"]["run"].split("-")[4] == _rev(root, "HEAD")[:7]
     stat = kit.numstat(root, "base..HEAD")
-    assert (stat.base, stat.merge_base, stat.target) == (_rev(root, "base"), _rev(root, "base"),
-                                                         _rev(root, "HEAD"))
+    assert (stat.span.base, stat.span.target, stat.span.log_base) == (
+        _rev(root, "base"), _rev(root, "HEAD"), _rev(root, "base"))
 
 
 def test_f04_test_files_case_insensitive():
     kit = _kit()
     for path in ("UnitTests/FooTests.pas", "Tests/FooTest.py", "pkg/Test_foo.py",
-                 "pkg/foo_TEST.py", "src/testfoo.pas", "src/FooTEST.pas"):
+                 "pkg/foo_TEST.py", "src/testfoo.pas", "src/FooTest.pas"):
         assert kit.classify(path, False) == kit.REASON_TEST, path
         assert kit.classify(path, True) is None, path
     for path in ("src/Latest.pas", "app/contest.py", "app/attest.py"):
@@ -362,7 +359,7 @@ def test_f05_root_commit_against_empty_tree(tmp_path):
     head = _rev(tmp_path, "HEAD")
     plan = kit.build_plan(tmp_path, "HEAD", "standard", "bugs", None, False)
     assert plan["changed_lines"] == 3
-    assert plan["range"] == f"{empty}..{head}" and plan["base"] == empty
+    assert plan["base"] == empty and plan["target"] == head and plan["log_base"] is None
 
 
 def test_f06_unknown_revision_names_it(tmp_path):
@@ -387,11 +384,10 @@ def test_f07_two_dot_range_counts_from_merge_base(tmp_path):
     git(root, "commit", "--quiet", "-m", "main wächst")
     stat = kit.numstat(root, "main..feature")
     assert stat.counts == {"app/f.py": 5}
-    assert stat.merge_base == fork and stat.base == _rev(root, "main")
+    assert stat.span.base == fork and stat.span.log_base == _rev(root, "main")
     plan = kit.build_plan(root, "main..feature", "standard", "bugs", None, False)
     assert plan["changed_lines"] == 5
     assert plan["range"] == f"{fork}..{_rev(root, 'feature')}"
-    assert plan["base"] == _rev(root, "main")
 
 
 def test_f08_nothing_to_review_refuses(tmp_path):
@@ -477,11 +473,12 @@ def test_f15_run_id_in_utc(monkeypatch):
     kit = _kit()
     assert kit._now().utcoffset() == dt.timedelta(0)
     sha = "0123456789abcdef0123456789abcdef01234567"
-    cest, cet = dt.timezone(dt.timedelta(hours=2)), dt.timezone(dt.timedelta(hours=1))
-    # Zeitumstellung 2026-10-25: 02:30 Sommerzeit liegt vor 02:10 Winterzeit.
-    monkeypatch.setattr(kit, "_now", lambda: dt.datetime(2026, 10, 25, 2, 30, tzinfo=cest))
+    utc = dt.timezone.utc
+    # Zeitumstellung 2026-10-25: 02:30 Sommerzeit (00:30 UTC) liegt vor 02:10 Winterzeit
+    # (01:10 UTC); in UTC sortiert die Lauf-ID richtig.
+    monkeypatch.setattr(kit, "_now", lambda: dt.datetime(2026, 10, 25, 0, 30, tzinfo=utc))
     first = kit.new_run_id(sha)
-    monkeypatch.setattr(kit, "_now", lambda: dt.datetime(2026, 10, 25, 2, 10, tzinfo=cet))
+    monkeypatch.setattr(kit, "_now", lambda: dt.datetime(2026, 10, 25, 1, 10, tzinfo=utc))
     second = kit.new_run_id(sha)
     assert first.startswith("2026-10-25-003000-") and second.startswith("2026-10-25-011000-")
     assert sorted([second, first]) == [first, second]
@@ -521,3 +518,174 @@ def test_f17_write_json_returns_normalized_data(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "x.json").read_text(encoding="utf-8")) == data
     with pytest.raises(kit.KitError):
         kit.write_json(tmp_path / "y.json", {"generated": "t"}, {"file": PurePosixPath("/abs")})
+
+
+# --- review_kit.py: Funde des zweiten Prüfpunkts nach Task 2 (G1–G10) ---------------------
+
+def _root_repo(root, files):
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "erster")
+    return root
+
+
+def test_g01_pas_test_rule_uses_word_boundaries():
+    kit = _kit()
+    for path in ("src/AppTest.pas", "src/FooTests.pas", "src/TestUtils.pas", "src/testfoo.pas",
+                 "src/TESTUNIT.pas", "src/MyTestUnit.pas", "src/MyTest2.pas"):
+        assert kit.classify(path, False) == kit.REASON_TEST, path
+    # `TEST` am Ende ist von LATEST nicht zu unterscheiden; `test` mitten im Wort ist keine
+    # Wortgrenze.
+    for path in ("src/LATEST.pas", "src/CONTEST.pas", "src/ATTEST.pas", "src/GREATEST.pas",
+                 "src/FooTEST.pas", "src/mytestunit.pas", "src/Latest.pas", "src/Contests.pas"):
+        assert kit.classify(path, False) is None, path
+
+
+def test_g02_root_commit_range_round_trips(tmp_path):
+    kit = _kit()
+    root = _root_repo(tmp_path, {"app/a.py": _lines(3)})
+    head = _rev(root, "HEAD")
+    plan = kit.build_plan(root, None, "standard", "bugs", None, False)
+    assert plan["range"] == head and plan["packets"][0]["range"] == head
+    assert kit.numstat(root, plan["range"]).counts == {"app/a.py": 3}
+    # Auch der normale Bereich lässt sich wieder einlesen.
+    git(root, "commit", "--quiet", "--allow-empty", "-m", "leer")
+    (root / "app" / "a.py").write_text(_lines(5), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "zwei")
+    again = kit.build_plan(root, "HEAD~2..HEAD", "standard", "bugs", None, False)
+    assert kit.numstat(root, again["range"]).counts == {"app/a.py": 2}
+
+
+def test_g03_write_json_follows_umask(tmp_path):
+    kit = _kit()
+    for mask, mode in ((0o022, 0o644), (0o027, 0o640)):
+        old = os.umask(mask)
+        try:
+            kit.write_json(tmp_path / f"{mask:o}.json", {"generated": "t"}, {"a": 1})
+        finally:
+            os.umask(old)
+        assert (tmp_path / f"{mask:o}.json").stat().st_mode & 0o777 == mode, oct(mask)
+
+
+def test_g04_git_failures_keep_their_cause(tmp_path, monkeypatch):
+    kit = _kit()
+    plain = tmp_path / "kein-repo"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    with pytest.raises(kit.KitError) as info:
+        kit.numstat(plain, None)
+    assert "unbekannt" not in str(info.value) and "Git-Repo" in str(info.value)
+
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"app/a.py": ""}, {"app/a.py": _lines(2)})
+    real = kit.subprocess.run
+
+    def missing(cmd, **kwargs):
+        if cmd[:2] == ["git", "rev-parse"] and any(a.endswith("^{commit}") for a in cmd):
+            raise FileNotFoundError("git")
+        return real(cmd, **kwargs)
+
+    monkeypatch.setattr(kit.subprocess, "run", missing)
+    with pytest.raises(kit.KitError) as info:
+        kit.numstat(root, "HEAD")
+    assert "unbekannt" not in str(info.value) and "nicht gestartet" in str(info.value)
+
+
+def test_g05_numstat_counts_from_top_level_like_subagent_dev(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"sub/a.py": "", "app/b.py": ""},
+                        {"sub/a.py": _lines(2), "app/b.py": _lines(3)})
+    assert kit.DIFF_PATHSPEC == (".", ":(exclude).skills")  # wie plan_to_tasks.changed_lines
+    seen = []
+    real = kit._git
+
+    def spy(repo, *args):
+        if args and args[0] == "diff":
+            seen.append(repo)
+        return real(repo, *args)
+
+    monkeypatch.setattr(kit, "_git", spy)
+    assert kit.numstat(root / "sub", None).counts == {"app/b.py": 3, "sub/a.py": 2}
+    assert [p.resolve() for p in seen] == [root.resolve()]
+
+
+def test_g06_plan_names_counted_base_target_and_log_base(tmp_path):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"app/f.py": ""}, {"app/f.py": _lines(1)})
+    fork = _rev(root, "HEAD")
+    git(root, "checkout", "--quiet", "-b", "feature")
+    (root / "app" / "f.py").write_text(_lines(6), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "feature")
+    git(root, "checkout", "--quiet", "main")
+    (root / "app" / "f.py").write_text(_lines(9), encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "main wächst")
+    plan = kit.build_plan(root, "main..feature", "standard", "bugs", None, False)
+    assert plan["base"] == fork
+    assert plan["target"] == _rev(root, "feature")
+    assert plan["log_base"] == _rev(root, "main")
+    assert plan["range"] == f"{plan['base']}..{plan['target']}"
+
+
+def test_g07_non_utf8_path_lands_in_not_reviewed(tmp_path):
+    kit = _kit()
+    name = os.fsdecode(b"assets/caf\xe9.png")
+    files = {f"app/m{i}.py": _lines(2, f"m{i}") for i in range(50)}
+    root = _commit_repo(tmp_path, {"app/m0.py": ""}, {**files, name: "x\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    _read_plan(root, plan)
+    assert kit.REASON_NOT_UTF8 == "Pfad ist kein UTF-8"
+    assert plan["not_reviewed"] == [{"file": "assets/caf\\xe9.png", "reason": kit.REASON_NOT_UTF8}]
+    assert len(plan["packets"][0]["files"]) == 50 and plan["changed_lines"] == 100
+
+
+def test_g08_write_json_rejects_nan_and_unwraps_subclasses(tmp_path):
+    import enum
+
+    kit = _kit()
+    for bad in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(kit.KitError):
+            kit.write_json(tmp_path / "x.json", {"generated": "t"}, {"v": bad})
+    assert list(tmp_path.iterdir()) == []
+
+    class Size(enum.IntEnum):
+        BIG = 7
+
+    class Name(str):
+        def __str__(self):
+            return "falsch"
+
+    class Ratio(float):
+        def __repr__(self):
+            return "falsch"
+
+    data = kit.write_json(tmp_path / "y.json", {"generated": "t"},
+                          {Name("k"): Size.BIG, "n": Name("wert"), "r": Ratio(0.5), "b": True})
+    assert [type(v) for v in (data["k"], data["n"], data["r"], data["b"])] == [int, str, float, bool]
+    assert all(type(k) is str for k in data)
+    assert json.loads((tmp_path / "y.json").read_text(encoding="utf-8")) == {
+        "_meta": data["_meta"], "k": 7, "n": "wert", "r": 0.5, "b": True}
+
+
+def test_g09_numstat_carries_its_span(tmp_path):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"app/a.py": ""}, {"app/a.py": _lines(4)})
+    stat = kit.numstat(root, "base..HEAD")
+    assert kit.Numstat._fields == ("counts", "span")
+    assert stat.span == kit.split_range(root, "base..HEAD")
+    assert kit.numstat(root, None).span == kit.split_range(root, "HEAD")
+
+
+def test_g10_non_utc_now_is_refused(monkeypatch):
+    kit = _kit()
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    for when in (dt.datetime(2026, 11, 2, 14, 5, 9),
+                 dt.datetime(2026, 11, 2, 14, 5, 9, tzinfo=dt.timezone(dt.timedelta(hours=1)))):
+        monkeypatch.setattr(kit, "_now", lambda when=when: when)
+        with pytest.raises(kit.KitError, match="UTC"):
+            kit.new_run_id(sha)
