@@ -224,15 +224,18 @@ Pfadmuster in `reversibility.md`:
 
 | Kategorie | Grad | Pfadmuster |
 | --- | --- | --- |
-| `dependency` | geprüft | `pyproject.toml`, `requirements*.txt`, `package.json`, `Cargo.toml`, `go.mod`, `Gemfile` |
+| `dependency` | teilweise | `**/pyproject.toml`, `**/requirements*.txt`, `**/setup.py`, `**/setup.cfg`, `**/Pipfile`, `**/package.json`, `**/Cargo.toml`, `**/go.mod`, `**/Gemfile` und ihre Lockfiles (`**/poetry.lock`, `**/uv.lock`, `**/Pipfile.lock`, `**/package-lock.json`, `**/yarn.lock`, `**/pnpm-lock.yaml`, `**/Cargo.lock`, `**/go.sum`, `**/Gemfile.lock`) — andere Ökosysteme und vendorte Abhängigkeiten sieht es nicht |
 | `migration` | teilweise | `**/migrations/`, `**/alembic/versions/`, `db/**/*.sql` — eine Spalte, die nur im Modell entfällt, sieht es nicht |
-| `permissions` | geprüft | `.github/workflows/`, `CODEOWNERS`, `.github/CODEOWNERS`, `.claude/settings.json` |
+| `permissions` | teilweise | `.github/workflows/`, `**/CODEOWNERS`, `.claude/settings.json` — Berechtigungen im Code sieht es nicht |
 | `api` | teilweise | `openapi.*`, `api/openapi.*` — eine öffentliche Python- oder JS-Schnittstelle erkennt es nicht |
 | `data-delete`, `unsaved-work`, `push`, `external`, `cost` | ungeprüft | stehen in keinem Diff |
 
 Gemeldet wird jede Stelle ohne Eintrag mit passendem Schlüssel und Status `freigegeben`, mit
 Datei, Kategorie und Grund; Exit 1 bei mindestens einer Stelle, sonst 0. Jede Ausgabe endet mit
-„ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration".
+„ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration,
+dependency, permissions" — die Zeile entsteht aus der Spalte Grad von `reversibility.md`.
+Keine Kategorie heißt „geprüft": Jedes Pfadmuster kennt nur die Orte, die es nennt
+(Review 2026-11-02).
 In diesem Repo meldet `check` auch Fixtures unter `evals/fixtures/*/migrations/`; eine
 Freigabe mit Schlüssel `migration:evals/fixtures/` deckt sie. Eine Freigabe gilt
 für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt `#<text>`.
