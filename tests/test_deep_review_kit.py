@@ -8,6 +8,7 @@ import datetime as dt
 import difflib
 import hashlib
 import inspect
+import io
 import json
 import os
 import re
@@ -2892,10 +2893,14 @@ def _since_repo(root):
 
 
 def _record(kit, root, plan, packet, findings, tool="test"):
-    """Ergebnis eines früheren Laufs so ablegen, wie `record` es später tut."""
-    path = root / ".skills/cache/deep-review" / plan["_meta"]["run"] / "results" / f"{packet}.json"
-    kit.write_json(path, {"generated": "test", "packet": packet, "tool": tool},
-                   {"findings": findings})
+    """Ergebnis eines früheren Laufs über `record` ablegen — dasselbe Format (`_meta.run`,
+    `_meta.plan`), das `audit` annimmt und `--since` liest. Ein vorhandenes Ergebnis des
+    Pakets wird vorher entfernt."""
+    directory = _run_path(root, plan)
+    (directory / "results" / f"{packet}.json").unlink(missing_ok=True)
+    payload = root.parent / f"payload-{plan['_meta']['run']}-{packet}.json"
+    payload.write_text(json.dumps(findings, ensure_ascii=False), encoding="utf-8")
+    kit.record(directory, packet, tool, payload)
 
 
 def _finding(path, line, summary):
@@ -3468,7 +3473,8 @@ def test_f9_plan_since_returns_what_it_wrote(tmp_path, monkeypatch):
 # --- review_kit.py: record, merge und audit (Task 7) ---------------------------------------
 
 FINDING_KEYS = ["file", "line", "summary", "failure_scenario", "packets", "reused_from", "sources"]
-AUDIT_KEYS = ["_meta", "complete", "missing", "stale", "lost_findings", "report_mismatch"]
+AUDIT_KEYS = ["_meta", "complete", "coverage", "missing", "stale", "lost_findings",
+              "report_mismatch"]
 
 
 def _payload(tmp_path, data, name="funde.json"):
@@ -3486,15 +3492,21 @@ def _cli_record(kit, root, run, packet, payload, tool="/code-review"):
     return _cli(kit, root, "record", "--run", run, "--packet", packet, "--tool", tool, payload)
 
 
-def _report(directory, run, findings, coverage, claim="vollständig", count=None):
-    """report.md wie nach assets/report-template.md: Kopfzeile, Funde, Abdeckung, je Fund eine
-    Zeile `datei:zeile — Zusammenfassung`."""
-    lines = [f"<!-- skill: deep-review | schema: 1 | generated: Hauptagent nach "
-             f"assets/report-template.md | run: {run} | range: base..HEAD | profile: standard | "
-             f"focus: bugs | tool: /code-review -->",
+def _report(directory, run, findings, coverage, claim="vollständig", count=None, header=None,
+            extra=()):
+    """report.md wie nach assets/report-template.md: Kopfzeile (Bereich, Profil und Fokus aus
+    plan.json, Werkzeug /code-review; `header` ersetzt Felder, None lässt eins weg), Funde,
+    Abdeckung, die Zeilen `extra`, je Fund eine Zeile `datei:zeile — Zusammenfassung`."""
+    plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    fields = {"skill": "deep-review", "schema": "1",
+              "generated": "Hauptagent nach assets/report-template.md", "run": run,
+              "range": plan["range"], "profile": plan["profile"], "focus": plan["focus"],
+              "tool": "/code-review", **(header or {})}
+    head = " | ".join(f"{k}: {v}" for k, v in fields.items() if v is not None)
+    lines = [f"<!-- {head} -->",
              "# deep-review", "",
              f"Funde: {len(findings) if count is None else count}",
-             f"Abdeckung: {coverage} — {claim}", ""]
+             f"Abdeckung: {coverage} — {claim}", *extra, ""]
     for f in findings:
         where = f["file"] if f["line"] is None else f"{f['file']}:{f['line']}"
         lines.append(f"- `{where}` — {f['summary']}")
@@ -3571,13 +3583,16 @@ def test_record_rejects_unknown_or_duplicate(tmp_path, capsys):
     text = (results / "p1.json").read_text(encoding="utf-8")
     assert json.loads(text) == written and "→" in text          # ensure_ascii=False
     assert sorted(p.name for p in results.iterdir()) == ["p1.json", "p2.json"]
-    # Das Format, das apply_since liest (Task 6): _meta.packet ist die Paket-ID.
-    assert kit._result_findings(results / "p1.json", "p1") == expected
+    # Das Format, das audit und apply_since annehmen (_read_result, Prüfpunkt 6 F5).
+    accepted, why = kit._read_result(results / "p1.json", "p1", run, kit._plan_digest(plan, run), root)
+    assert why is None and accepted.findings == expected and accepted.tool == "/code-review"
     # Ein Objekt mit `findings` (die Liste aus dem Brief) geht auch.
     plan2, run2 = _split_plan(kit, root)
     wrapped = _payload(tmp_path, {"findings": found[:1]}, "brief.json")
     assert _cli_record(kit, root, run2, "p1", wrapped, tool="review-brief") == 0
-    assert kit._result_findings(_run_path(root, plan2) / "results" / "p1.json", "p1") == expected[:1]
+    accepted, why = kit._read_result(_run_path(root, plan2) / "results" / "p1.json", "p1", run2,
+                                     kit._plan_digest(plan2, run2), root)
+    assert why is None and accepted.findings == expected[:1] and accepted.tool == "review-brief"
 
 
 def test_record_result_of_another_plan_is_not_reused(tmp_path, monkeypatch):
@@ -3894,3 +3909,385 @@ def test_main_subcommands_exit_codes(tmp_path, capsys):
     done = subprocess.run([sys.executable, str(REPO_ROOT / KIT_PATH), "merge", "--repo", str(root),
                            "--run", missing], capture_output=True, text=True)
     assert done.returncode == 1 and missing in done.stderr
+
+
+# --- Prüfpunkt 6: Funde F1–F16 zu record, merge und audit -----------------------------------
+
+def _single_run(kit, tmp_path, after, name="repo"):
+    """Repo mit zwei Commits (die Dateien aus `after` erst leer, dann mit Inhalt) und ein Lauf
+    über base..HEAD mit einem Paket p1 (`split: false`, der Anti-Zeremonie-Fall)."""
+    root = tmp_path / name
+    root.mkdir()
+    _commit_repo(root, {rel: "" for rel in after}, after)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    assert [p["id"] for p in plan["packets"]] == ["p1"] and plan["split"] is False
+    return root, plan, plan["_meta"]["run"], _run_path(root, plan)
+
+
+def test_cp6_f01_line_normalised_and_paths_with_spaces(tmp_path, capsys):
+    kit = _kit()
+    for raw, want in (("12-14", "12-14"), ("12 - 14", "12-14"), ("L12-L14", "12-14"),
+                      ("12 bis 14", "12-14"), ("L12 bis L14", "12-14"), ("12–14", "12-14"),
+                      ("14-12", "12-14"), ("3-3", 3), ("7", 7), ("L7", 7), (" 9 ", 9), (5, 5),
+                      (0, 0), ("", None), ("  ", None), (None, None)):
+        got = kit._clean_finding({"file": "a.py", "line": raw, "summary": "s"}, 1, tmp_path)
+        assert got["line"] == want, raw
+    for bad in ("irgendwo", "12, 40", "12-", "Zeile 12", "12-14-16", "L"):
+        with pytest.raises(kit.KitError, match="Fund 2"):
+            kit._clean_finding({"file": "a.py", "line": bad, "summary": "s"}, 2, tmp_path)
+
+    root, plan, run, directory = _single_run(kit, tmp_path, {"src/my module.py": _lines(5),
+                                                              "a.py": _lines(30)})
+    bad = _payload(tmp_path, [{"file": "a.py", "line": "irgendwo", "summary": "s"}], "bad.json")
+    assert _cli_record(kit, root, run, "p1", bad) == 1
+    assert "irgendwo" in capsys.readouterr().err
+    assert not (directory / "results").exists()
+    found = [{"file": "src/my module.py", "line": 3, "summary": "Leerzeichen im Pfad"},
+             {"file": "a.py", "line": "12 - 14", "summary": "Bereich"}]
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, found)) == 0
+    stored = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    assert [f["line"] for f in stored["findings"]] == [3, "12-14"]
+    merged = kit.merge(directory)["findings"]
+    report = _report(directory, run, merged, "1/1")
+    text = report.read_text(encoding="utf-8")
+    assert "- `src/my module.py:3` — Leerzeichen im Pfad" in text and "- `a.py:12-14` — " in text
+    data = kit.audit(directory, None)
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+    # Fehlt die Zeile mit dem Pfad mit Leerzeichen, meldet audit sie.
+    _report(directory, run, merged[:1], "1/1", count=2)
+    assert any("src/my module.py:3" in m for m in kit.audit(directory, None)["report_mismatch"])
+
+
+def test_cp6_f02_cli_output_and_stdin_are_utf8_safe(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+
+    def stream(data=b""):
+        return io.TextIOWrapper(io.BytesIO(data), encoding="cp1252")
+
+    out, err = stream(), stream()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    # stdout in cp1252: record schreibt das Ergebnis und endet mit 0, ohne UnicodeEncodeError.
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, [_finding("a/x.py", 3, "A")])) == 0
+    assert (directory / "results" / "p1.json").is_file()
+    out.flush()
+    assert "p1.json" in out.buffer.getvalue().decode("utf-8", errors="replace")
+
+    # stdin wird als UTF-8 gelesen, nicht in der Kodierung des Systems.
+    text = json.dumps([{"file": "b/y.py", "line": 2, "summary": "Lösung"}], ensure_ascii=False)
+    monkeypatch.setattr(sys, "stdin", stream(text.encode("utf-8")))
+    assert _cli_record(kit, root, run, "p2", "-") == 0
+    stored = json.loads((directory / "results" / "p2.json").read_text(encoding="utf-8"))
+    assert stored["findings"][0]["summary"] == "Lösung"
+
+    # Kein UTF-8 auf stdin: Exit 1 mit Meldung, kein Traceback, nichts geschrieben.
+    plan2, run2 = _split_plan(kit, root)
+    monkeypatch.setattr(sys, "stdin", stream(b'[{"file": "a/x.py", "line": 1, "summary": "\xff"}]'))
+    assert _cli_record(kit, root, run2, "p1", "-") == 1
+    err.flush()
+    message = err.buffer.getvalue().decode("utf-8", errors="replace")
+    assert "UTF-8" in message and "Traceback" not in message
+    assert not (_run_path(root, plan2) / "results").exists()
+
+
+def test_cp6_f03_report_with_a_bom_passes_the_header_check(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    report = _report(directory, run, [], "1/1")
+    report.write_text("﻿" + report.read_text(encoding="utf-8"), encoding="utf-8")
+    data = kit.audit(directory, None)
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+
+
+def test_cp6_f04_since_keeps_findings_outside_the_packet_files(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    id_a = run_a["_meta"]["run"]
+    assert [p["files"] for p in run_a["packets"]] == [["a.py", "b.py"]]
+    outside = _finding("c.py", 3, "Gegenstelle wirft")          # c.py steht in keinem Paket
+    _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A"), outside])
+
+    # Alle Dateien von p1 übernommen: der Fund zu c.py kommt mit, am ersten Eintrag (a.py).
+    again = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    done = kit.plan_since(root, again["_meta"]["run"], [id_a])
+    assert done["packets"] == []
+    assert done["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A"), outside]
+    assert done["file_keys"]["b.py"]["findings"] == []
+    merged = kit.merge(_run_path(root, done))["findings"]
+    assert [(f["file"], f["line"], f["reused_from"]) for f in merged] == [
+        ("a.py", 5, id_a), ("c.py", 3, id_a)]
+    # Ein Lauf, der den Fund von A übernommen hat, gibt ihn weiter.
+    third = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    chained = kit.apply_since(third, [_run_path(root, done)])
+    assert outside in chained["file_keys"]["a.py"]["findings"]
+
+    # Nur a.py übernommen (b.py hat sich geändert): der Fund zu c.py nicht; b.py neu reviewt.
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    applied = kit.apply_since(plan_b, [_run_path(root, run_a)])
+    assert applied["file_keys"]["a.py"]["reused_from"] == id_a
+    assert applied["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
+    assert [p["files"] for p in applied["packets"]] == [["b.py"]]
+
+
+def test_cp6_f05_since_accepts_results_like_audit(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    plan_b = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    directory = _run_path(root, run_a)
+    _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A")])
+    result = directory / "results" / "p1.json"
+    good = result.read_text(encoding="utf-8")
+    assert kit.apply_since(plan_b, [directory])["file_keys"]["a.py"]["reused_from"] == \
+        run_a["_meta"]["run"]
+
+    def without_meta(data):
+        del data["_meta"]
+
+    def without_run(data):
+        del data["_meta"]["run"]
+
+    def without_plan(data):
+        del data["_meta"]["plan"]
+
+    def negative_line(data):
+        data["findings"][0]["line"] = -1
+
+    for change in (without_meta, without_run, without_plan, negative_line):
+        data = json.loads(good)
+        change(data)
+        result.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        assert kit.apply_since(plan_b, [directory]) == plan_b, change.__name__
+        # audit nimmt dasselbe Ergebnis auch nicht an.
+        assert kit.audit(directory, None)["missing"] == ["p1"], change.__name__
+    assert not hasattr(kit, "_result_findings")
+
+    # _plan_digest einmal je früherem Plan, nicht je Paket.
+    (tmp_path / "zwei").mkdir()
+    root2 = _two_packet_repo(tmp_path / "zwei")
+    first, _run = _split_plan(kit, root2)
+    for pid in ("p1", "p2"):
+        kit.record(_run_path(root2, first), pid, "/code-review",
+                   _payload(tmp_path, [], f"{pid}.json"))
+    second, _run = _split_plan(kit, root2)
+    calls = []
+    real = kit._plan_digest
+    monkeypatch.setattr(kit, "_plan_digest", lambda *a: calls.append(a) or real(*a))
+    assert kit.apply_since(second, [_run_path(root2, first)])["packets"] == []
+    assert len(calls) == 1
+
+
+def test_cp6_f06_cli_paths_are_resolved_against_the_cwd(tmp_path, monkeypatch):
+    kit = _kit()
+    work = tmp_path / "work"
+    (work / "proj").mkdir(parents=True)
+    root = _commit_repo(work / "proj", {"a.py": ""}, {"a.py": _lines(5)})
+    (work / "specs").mkdir()
+    (work / "specs" / "s.md").write_text("# Soll\n", encoding="utf-8")
+    (work / "other").mkdir()
+    monkeypatch.chdir(work / "other")
+    assert kit.main(["plan", "--repo", str(root), "--profile", "checkpoint",
+                     "--soll-file", "../specs/s.md"]) == 0
+    (run,) = [p.name for p in (root / ".skills/cache/deep-review").iterdir()]
+    directory = kit.run_dir(root, run)
+    meta = json.loads((directory / "plan.json").read_text(encoding="utf-8"))["_meta"]
+    assert meta["soll_file"] == str(work / "specs" / "s.md")
+    assert meta["generated"].endswith(f"--soll-file {work / 'specs' / 's.md'}")
+
+    # audit --report report.md aus /work: gelesen wird /work/report.md, _meta.report absolut.
+    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    _report(directory, run, [], "1/1").replace(work / "report.md")
+    monkeypatch.chdir(work)
+    assert kit.main(["audit", "--repo", str(root), "--run", run, "--report", "report.md"]) == 0
+    data = json.loads((directory / "audit.json").read_text(encoding="utf-8"))
+    assert data["_meta"]["report"] == str(work / "report.md")
+    assert data["_meta"]["generated"].endswith(f"--report {work / 'report.md'}")
+    assert data["complete"] is True, data
+
+
+def test_cp6_f07_merge_groups_do_not_chain():
+    kit = _kit()
+
+    def groups(*lines):
+        sources = [kit._Source(_finding("a.py", n, f"L{n}"), "p1", None) for n in lines]
+        return [[s["line"] for s in f["sources"]] for f in kit._merge_sources(sources, {"p1": 0})]
+
+    assert groups(10, 12) == [[10, 12]]
+    assert groups(10, 13, 16) == [[10, 13], [16]]
+    assert groups(16, 13, 10) == [[10, 13], [16]]
+    assert groups(10, 15) == [[10], [15]]
+    assert groups(10, 11, 12, 13, 14) == [[10, 11, 12, 13], [14]]
+    assert groups("20-22", 25, 26) == [["20-22", 25], [26]]     # Abstand vom Ende des ersten
+
+
+def test_cp6_f08_claim_is_the_whole_word_and_not_negated(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    kit.record(directory, "p1", "/code-review",
+               _payload(tmp_path, [_finding("a/x.py", 3, "vollständige Validierung fehlt")]))
+    merged = kit.merge(directory)["findings"]
+    extra = ["Die Vollständigkeit ist nicht gegeben.", "Der Lauf ist nicht mehr vollständig.",
+             "Das Review ist nicht", "vollständig, p2 fehlt.", "Auch nicht  mehr\tvollständig.",
+             "Unvollständig, wie gesagt."]
+    _report(directory, run, merged, "1/2", claim="unvollständig", extra=extra)
+    data = kit.audit(directory, None)
+    assert data["missing"] == ["p2"] and data["report_mismatch"] == [], data
+    _report(directory, run, merged, "1/2", claim="vollständig")
+    assert any("vollständig" in m for m in kit.audit(directory, None)["report_mismatch"])
+    _report(directory, run, merged, "1/2", claim="unvollständig", extra=["Alles ist vollständig."])
+    assert any("vollständig" in m for m in kit.audit(directory, None)["report_mismatch"])
+
+
+def test_cp6_f09_header_names_range_profile_focus_and_tool(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    _report(directory, run, [], "1/1")
+    assert kit.audit(directory, None)["report_mismatch"] == []
+    for fields, needle in (({"range": None}, "range"), ({"tool": None}, "tool"),
+                           ({"tool": ""}, "tool"), ({"profile": None}, "profile"),
+                           ({"focus": None}, "focus"), ({"focus": "security"}, "focus"),
+                           ({"range": "base..HEAD"}, "range"),
+                           ({"tool": "/security-review"}, "tool")):
+        _report(directory, run, [], "1/1", header=fields)
+        mismatch = kit.audit(directory, None)["report_mismatch"]
+        assert any(needle in m for m in mismatch), (fields, mismatch)
+
+
+def test_cp6_f10_bad_reused_finding_is_a_kit_error(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+
+    def bad(data):
+        data["file_keys"]["a.py"].update(reused_from="2026-01-01-000000-abcdef0-zzzz",
+                                         findings=[{"summary": "x"}])
+
+    _rewrite_plan(root, plan, bad)
+    for command in ("merge", "audit"):
+        assert _cli(kit, root, command, "--run", run) == 1, command
+        err = capsys.readouterr().err
+        assert run in err and "a.py" in err and "Traceback" not in err, err
+    # Derselbe Plan als früherer Lauf (--since): derselbe KitError.
+    later = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    with pytest.raises(kit.KitError, match=re.escape(run)):
+        kit.apply_since(later, [directory])
+
+
+def test_cp6_f11_backslash_paths_are_posix(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    assert kit._clean_finding({"file": ".\\a\\x.py", "summary": "s"}, 1, root)["file"] == "a/x.py"
+    with pytest.raises(kit.KitError, match="kein Pfad im Repo"):
+        kit._clean_finding({"file": "..\\x.py", "summary": "s"}, 1, root)
+    kit.record(directory, "p1", "/code-review",
+               _payload(tmp_path, [_finding("a\\x.py", 3, "A")], "1.json"))
+    kit.record(directory, "p2", "/code-review",
+               _payload(tmp_path, [_finding("a/x.py", 4, "B")], "2.json"))
+    merged = kit.merge(directory)["findings"]
+    assert [(f["file"], f["line"], f["packets"]) for f in merged] == [("a/x.py", 3, ["p1", "p2"])]
+
+
+def test_cp6_f12_own_and_earlier_plans_share_one_check(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A")])
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    seen = []
+    real = kit._checked_plan
+    monkeypatch.setattr(kit, "_checked_plan", lambda d, r: seen.append(r) or real(d, r))
+    kit.apply_since(plan_b, [_run_path(root, run_a)])
+    kit.merge(_run_path(root, plan_b))
+    kit.audit(_run_path(root, plan_b), None)
+    assert seen == [run_a["_meta"]["run"], plan_b["_meta"]["run"], plan_b["_meta"]["run"]]
+
+
+def test_cp6_f13_line_spans_parsed_once(monkeypatch):
+    kit = _kit()
+    calls = []
+    real = kit._line_span
+    monkeypatch.setattr(kit, "_line_span", lambda line: calls.append(line) or real(line))
+    sources = [kit._Source(_finding("a.py", line, "s"), "p1", None) for line in (3, "5-6", None, 30)]
+    merged = kit._merge_sources(sources, {"p1": 0})
+    assert [f["line"] for f in merged] == [3, 30, None]
+    assert len(calls) == len(sources)
+
+
+def test_cp6_f14_cli_prints_what_audit_and_counterparts_return(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    callers = []
+    real = kit._load_plan
+
+    def spy(*args):
+        callers.append(sys._getframe(1).f_code.co_name)
+        return real(*args)
+
+    monkeypatch.setattr(kit, "_load_plan", spy)
+    assert _cli(kit, root, "counterparts", "--run", run) == 0
+    out = capsys.readouterr().out
+    on_disk = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    ranges = [p["range"] for p in on_disk["packets"]]
+    assert all(ranges)
+    for packet in on_disk["packets"]:
+        assert f"{packet['id']}: {packet['range']} · " in out
+    assert [w["range"] for w in kit.write_counterparts(root, run)] == ranges
+
+    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    assert _cli(kit, root, "audit", "--run", run) == 1
+    out = capsys.readouterr().out
+    data = json.loads((directory / "audit.json").read_text(encoding="utf-8"))
+    assert data["coverage"] == {"covered": 1, "total": 2}
+    assert "Abdeckung: 1/2" in out
+    assert not {"_cmd_counterparts", "_cmd_audit"} & set(callers), callers
+
+
+def test_cp6_f15_run_path_parameter_and_report_length(tmp_path):
+    kit = _kit()
+    for fn, arity in ((kit.record, 4), (kit.merge, 1), (kit.audit, 2)):
+        params = list(inspect.signature(fn).parameters)
+        assert params[0] == "run_path" and len(params) == arity, (fn.__name__, params)
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(40)})
+    kit.record(directory, "p1", "/code-review",
+               _payload(tmp_path, [_finding("a.py", n, f"F{n}") for n in (3, 13, 23)]))
+    merged = kit.merge(directory)["findings"]
+    assert len(merged) == 3
+    base = len(_report(directory, run, merged, "1/1").read_text(encoding="utf-8").splitlines())
+    for total, ok in ((24, True), (30, False)):
+        report = _report(directory, run, merged, "1/1",
+                         extra=[f"Zeile {i}" for i in range(total - base)])
+        assert len(report.read_text(encoding="utf-8").splitlines()) == total
+        mismatch = kit.audit(directory, None)["report_mismatch"]
+        if ok:
+            assert mismatch == [], mismatch
+        else:
+            assert any("30" in m and "24" in m for m in mismatch), mismatch
+    # Mit mehreren Paketen (split: true) gilt die Grenze des Anti-Zeremonie-Falls nicht.
+    (tmp_path / "zwei").mkdir()
+    root2 = _two_packet_repo(tmp_path / "zwei")
+    plan2, run2 = _split_plan(kit, root2)
+    dir2 = _run_path(root2, plan2)
+    for pid in ("p1", "p2"):
+        kit.record(dir2, pid, "/code-review", _payload(tmp_path, [], f"{pid}.json"))
+    kit.merge(dir2)
+    _report(dir2, run2, [], "2/2", extra=[f"Zeile {i}" for i in range(40)])
+    assert kit.audit(dir2, None)["report_mismatch"] == []
