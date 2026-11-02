@@ -1397,7 +1397,7 @@ def test_counterparts_python_except_and_raises(tmp_path):
               "app/groups.py": GROUPS,
               # gleichnamig, aber ohne Importbezug: nicht die Gegenstelle
               "tools/misc.py": "def group(x):\n    raise KeyError(x)\n",
-              # Syntaxfehler am ZIEL: übersprungen und gezählt
+              # Syntaxfehler am ZIEL, nicht im Paket: übersprungen und nur gezählt
               "tools/broken.py": "def kaputt(:\n"}
     after = {"app/groups.py": GROUPS.replace("(ValueError, TypeError, LookupError)",
                                              "(ValueError, LookupError)")}
@@ -1405,7 +1405,7 @@ def test_counterparts_python_except_and_raises(tmp_path):
     plan, found, block = _collect_block(kit, root)
 
     assert found.unresolved == 0
-    assert found.unparsed == ["tools/broken.py"]
+    assert found.unparsed == []
     assert [(e["file"], e["line"], e["kind"]) for e in found.entries] == [
         ("app/groups.py", 7, "except")]
     assert found.entries[0]["lines"] == [
@@ -1434,7 +1434,8 @@ def test_counterparts_python_except_and_raises(tmp_path):
     assert "- `app/groups.py`" in md
     assert "\n".join(found.entries[0]["lines"]) in md
     assert re.search(r"wirft:[^\n]*TypeError", md) and "vendor/lib.py" in md
-    assert "tools/broken.py" in md and "Syntaxfehler" in md
+    assert "tools/broken.py" not in md
+    assert "1 Python-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar (Syntaxfehler" in md
 
 
 PKG_MOD = (
@@ -1555,3 +1556,227 @@ def test_counterparts_cap():
     assert "gekappt" not in full and full.count("\n### ") == 400
     with pytest.raises(kit.KitError):
         kit.render_block(packet, entries, 0, 10)
+
+
+# --- Prüfpunkt nach Task 4: Funde L1–L11 -------------------------------------------------
+
+LIB_STRICT = (
+    "def f(x, strict=True):\n"
+    "    if not strict:\n"
+    "        return []\n"
+    "    raise ValueError(x)\n"
+    "\n"
+    "\n"
+    "def wrap(x, strict=True):\n"
+    "    if strict:\n"
+    "        raise TypeError(x)\n"
+    "    return x\n"
+)
+
+
+def _entries_at(found, rel, line):
+    return [e for e in found.entries if (e["file"], e["line"]) == (rel, line)]
+
+
+def test_l01_two_calls_on_one_line_keep_their_changed_keyword(tmp_path):
+    kit = _kit()
+    caller = ("from lib import f, wrap\n\n\n"
+              "def run(x):\n    return f(1) and f(2, strict=True)\n\n\n"
+              "def nest(x):\n    return wrap(wrap(x, strict=True))\n\n\n"
+              "def dup(x):\n    return f(5) + f(6)\n")
+    after = caller.replace("strict=True", "strict=False").replace("f(5) + f(6)", "f(7) + f(8)")
+    root = _commit_repo(tmp_path, {"lib.py": LIB_STRICT, "app/c.py": caller}, {"app/c.py": after})
+    _plan, found, _block = _collect_block(kit, root)
+
+    for line, flow in ((5, "lib.py:2: if not strict: return []"),
+                       (9, "lib.py:8: if strict: raise TypeError(x)")):
+        lines = [x for e in _entries_at(found, "app/c.py", line) for x in e["lines"]]
+        assert "  geändert: strict=False; Weg:" in lines, (line, lines)
+        assert f"    {flow}" in lines
+    # Zwei Aufrufe mit derselben Gegenstelle und ohne geändertes Argument: ein Eintrag.
+    assert len(_entries_at(found, "app/c.py", 13)) == 1
+    assert all(set(e) == {"file", "line", "kind", "lines"} for e in found.entries)
+
+
+def test_l02_upper_case_py_suffix_is_collected(tmp_path):
+    kit = _kit()
+    up = "from lib import f\n\n\ndef run():\n    return f(1)\n"
+    root = _commit_repo(tmp_path, {"lib.py": LIB_STRICT, "app/Up.PY": up},
+                        {"app/Up.PY": up.replace("f(1)", "f(2)")})
+    plan, found, block = _collect_block(kit, root)
+    assert plan["packets"][0]["files"] == ["app/Up.PY"]
+    assert [(e["file"], e["line"], e["kind"]) for e in found.entries] == [("app/Up.PY", 5, "call")]
+    assert "raise ValueError at lib.py:4" in block
+    assert "nicht gesammelt" not in block
+
+
+def test_l03_unreadable_packet_files_are_named(tmp_path):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"lib.py": LIB_STRICT, "app/x.py": "def ok():\n    return 1\n"},
+                        {"app/x.py": "def ok(:\n    return 2\n"})
+    os.symlink("../lib.py", root / "app" / "link.py")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "link")
+    plan, found, _block = _collect_block(kit, root)
+    assert plan["packets"][0]["files"] == ["app/link.py", "app/x.py"]
+    assert found.unparsed == [("app/link.py", "Symlink"), ("app/x.py", "Syntaxfehler")]
+
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    md = (kit.run_dir(root, run) / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert "- `app/x.py` — Datei am ZIEL nicht lesbar: Syntaxfehler" in md
+    assert "- `app/link.py` — Datei am ZIEL nicht lesbar: Symlink" in md
+    assert "2 Paketdatei(en) am ZIEL nicht lesbar" in md
+
+
+def test_l04_repo_wide_unreadable_files_only_as_a_number(tmp_path):
+    kit = _kit()
+    before = {"lib.py": LIB_STRICT, "app/c.py": "from lib import f\n\n\ndef run():\n    return f(1)\n",
+              "tools/broken.py": "def kaputt(:\n", "tools/also.py": "x = (\n"}
+    root = _commit_repo(tmp_path, before,
+                        {"app/c.py": before["app/c.py"].replace("f(1)", "f(2)")})
+    plan, found, _block = _collect_block(kit, root)
+    assert found.unparsed == []
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    md = (kit.run_dir(root, run) / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert "tools/broken.py" not in md and "tools/also.py" not in md
+    assert "2 Python-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar" in md
+
+
+def test_l05_flow_stopping_at_an_ambiguous_callee_is_counted(tmp_path):
+    kit = _kit()
+    load = "def _load(strict):\n    if strict:\n        raise KeyError()\n"
+    before = {f"m{d}/x.py": load for d in "abcd"}
+    before.update({
+        "svc/core.py": "class Svc:\n    def run(self, strict=True):\n"
+                       "        if strict:\n            pass\n"
+                       "        return self._load(strict=strict)\n",
+        "app/main.py": "from svc.core import Svc\n\n\ndef go():\n    return Svc().run(strict=True)\n",
+    })
+    root = _commit_repo(tmp_path, before, {"app/main.py": before["app/main.py"].replace(
+        "strict=True", "strict=False")})
+    _plan, found, _block = _collect_block(kit, root)
+    assert [(e["file"], e["line"]) for e in found.entries] == [("app/main.py", 5)]
+    assert "    svc/core.py:3: if strict: pass" in found.entries[0]["lines"]
+    assert found.unresolved == 1
+
+
+def test_l06_multi_line_keyword_value_changed_on_a_later_line(tmp_path):
+    kit = _kit()
+    lib = "def load(path, options=None):\n    if options:\n        return options\n    return path\n"
+    caller = ("from lib import load\n\n\n"
+              "def go(p):\n    return load(p, options=dict(\n        strict=True,\n    ))\n")
+    root = _commit_repo(tmp_path, {"lib.py": lib, "app/c.py": caller},
+                        {"app/c.py": caller.replace("strict=True", "strict=False")})
+    _plan, found, _block = _collect_block(kit, root)
+    assert [(e["file"], e["line"]) for e in found.entries] == [("app/c.py", 5)]
+    assert found.entries[0]["lines"][-2:] == [
+        "  geändert: options=dict(strict=False); Weg:",
+        "    lib.py:2: if options: return options",
+    ]
+
+
+def _many_files_packet(n):
+    return {"id": "p9", "range": "aaa..bbb",
+            "files": [f"a/rather/long/directory/name/{i:05}/module_{i}.py" for i in range(n)]}
+
+
+def test_l07_cap_holds_for_the_whole_block(tmp_path, monkeypatch):
+    kit = _kit()
+    entries = [{"file": "app/m.py", "line": i + 1, "kind": "call",
+                "lines": [f"### app/m.py:{i + 1} ruft f(...)", "- Gegenstelle f [lib/f.py:1]: def f()",
+                          "  wirft: ValueError", "    raise ValueError at lib/f.py:2"]}
+               for i in range(600)]
+    text = kit.render_block(_many_files_packet(3000), entries, 0, None)
+    assert len(text) <= kit.BLOCK_MAX_CHARS
+    assert "Dateien (3000):" in text
+    listed = text.count("\n- `a/rather/")
+    assert 0 < listed < 3000
+    assert f"- … und {3000 - listed} weitere Datei(en) (gekappt)" in text
+    shown = text.count("\n### ")
+    assert 0 < shown < 600 and f"gekappt: {600 - shown} von 600 Stellen" in text
+    # Wenige Stellen: die Dateiliste bekommt den Rest.
+    few = kit.render_block(_many_files_packet(3000), entries[:2], 0, None)
+    assert len(few) <= kit.BLOCK_MAX_CHARS and few.count("\n### ") == 2
+    assert few.count("\n- `a/rather/") > listed
+
+    # Das Artefakt packets/<id>.md mit Kopfzeile und Hinweisen bleibt unter der Grenze.
+    before = {"lib.py": LIB_STRICT, "tools/broken.py": "def kaputt(:\n"}
+    names = [f"pkg_with_a_rather_long_directory_name/module_number_{i:03}.py" for i in range(40)]
+    before.update({n: "from lib import f\n\n\ndef run():\n    return f(1)\n" for n in names})
+    root = _commit_repo(tmp_path, before, {n: before[n].replace("f(1)", "f(2)") for n in names})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    monkeypatch.setattr(kit, "BLOCK_MAX_CHARS", 1500)
+    kit.write_counterparts(root, plan["_meta"]["run"])
+    md = (kit.run_dir(root, plan["_meta"]["run"]) / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert len(md) <= 1500
+    assert "weitere Datei(en) (gekappt)" in md and "gekappt:" in md
+    assert "1 Python-Datei(en) außerhalb des Pakets" in md
+
+
+def test_l08_sources_come_as_bytes_from_git(tmp_path, monkeypatch):
+    kit = _kit()
+    latin = "# -*- coding: latin-1 -*-\nNAME = 'Müller'\n".encode("latin-1")
+    root = _commit_repo(tmp_path, {"a.py": "x = 1\n"}, {"a.py": "x = 2\n"})
+    (root / "b.py").write_bytes(latin)
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "latin")
+    head = _rev(root, "HEAD")
+    assert kit._git_bytes(root, "cat-file", "blob", f"{head}:b.py") == latin
+
+    plain = kit._git
+
+    def no_text_cat_file(repo, *args, **kwargs):
+        assert args[0] != "cat-file", "cat-file --batch geht über _git_bytes"
+        return plain(repo, *args, **kwargs)
+
+    monkeypatch.setattr(kit, "_git", no_text_cat_file)
+    sources, skipped = kit._python_sources(root, head)
+    assert sources == {"a.py": b"x = 2\n", "b.py": latin} and skipped == {}
+
+
+def test_l09_overlap_by_interval_against_sorted_lines():
+    kit = _kit()
+    lines = [2, 5, 9]
+    assert [kit._touches(lines, a, b) for a, b in ((3, 4), (3, 5), (9, 20), (10, 20), (0, 1),
+                                                    (2, 2), (6, 8), (1, 100))] == [
+        False, True, True, False, False, True, False, True]
+    assert kit._touches([], 1, 10) is False
+
+
+def test_l10_flow_line_from_the_source_not_unparsed(tmp_path):
+    kit = _kit()
+    deep = "+".join(["1"] * 500)
+    lib = ("def f(x, strict=True):\n    if not strict:\n"
+           f"        y = {deep}\n        return y\n    raise ValueError(x)\n")
+    caller = "from lib import f\n\n\ndef run():\n    return f(1, strict=True)\n"
+    root = _commit_repo(tmp_path, {"lib.py": lib, "app/c.py": caller},
+                        {"app/c.py": caller.replace("strict=True", "strict=False")})
+    _plan, found, _block = _collect_block(kit, root)
+    flow = [x for x in found.entries[0]["lines"] if x.startswith("    lib.py:2: ")]
+    assert len(flow) == 1 and flow[0].startswith("    lib.py:2: if not strict: y = 1+1+1")
+    assert len(flow[0]) <= 4 + len("lib.py:2: if not strict: ") + kit.DOC_CHARS + 1
+
+
+def test_l11_raises_memoized_per_definition(tmp_path, monkeypatch):
+    kit = _kit()
+    assert kit.INDEX_CACHE_SIZE == 1 and kit._python_index.cache_info().maxsize == 1
+    lib = "def helper(x):\n    raise ValueError(x)\n"
+    calls = "".join(f"        a{i} = helper({i})\n" for i in range(60))
+    caller = ("from lib import helper\n\n\ndef run():\n    try:\n" + calls
+              + "    except KeyError:\n        return None\n")
+    root = _commit_repo(tmp_path, {"lib.py": lib, "app/c.py": "x = 1\n"}, {"app/c.py": caller})
+    real = kit._raises_in
+    top = []
+
+    def counting(index, rel, node, depth, seen):
+        if depth == kit.RAISE_DEPTH:
+            top.append((rel, node.lineno))
+        return real(index, rel, node, depth, seen)
+
+    monkeypatch.setattr(kit, "_raises_in", counting)
+    _plan, found, _block = _collect_block(kit, root)
+    assert len([e for e in found.entries if e["kind"] == "call"]) == 60
+    assert [e["kind"] for e in found.entries].count("except") == 1
+    assert top == [("lib.py", 1)]
