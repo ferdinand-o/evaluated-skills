@@ -24,7 +24,7 @@ Unteragenten von `/code-review` unverändert mit (`review-brief.md`). Grenzwerte
 | Python | `.py` | Aufruf auf einer geänderten Zeile | eine erreichte Definition etwas wirft oder der Aufruf ein geändertes Schlüsselwort-Argument hat |
 | Python | | geänderte `except`-Klausel | ein Aufruf im `try`-Block eine Definition erreicht, die etwas wirft |
 | Delphi | `.pas`, `.dpr`, `.dpk` | Aufruf auf einer geänderten Zeile | die Implementierung etwas wirft oder ihr Kopf einen Default-Wert hat |
-| Delphi | | `Extract`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream` auf einer geänderten Zeile | der Typ des Empfängers auflösbar ist (Klasse im Repo oder Besitz-Default der RTL) |
+| Delphi | | `Extract`, `ExtractPair`, `ExtractKey`, `ExtractValue`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream` auf einer geänderten Zeile | der Typ des Empfängers auflösbar ist (Klasse im Repo oder Besitz-Default der RTL) |
 | Delphi | | geändertes `inherited Create(…)` im Konstruktor einer Klasse mit Besitz-Default der RTL | immer |
 | andere | alle übrigen Endungen | keine | nie: „Gegenstellen nicht gesammelt (Sprache)“ |
 
@@ -180,15 +180,15 @@ Der Diff ändert in `report/build.py` den Aufruf auf `summarize(points, skip_gap
 ### Besitz bei Delphi
 
 ```
-### Outbox.pas:88 Extract auf AQueue: TMailQueue
-- Gegenstelle TMailQueue [Mailer.pas:12]: TMailQueue = class(TObjectList<TMail>)
-  inherited Create(True) at Mailer.pas:40
-  Besitz (RTL): TObjectList<…>: OwnsObjects standardmäßig wahr (Create(AOwnsObjects: Boolean = True)) — Remove, Delete und Clear geben Elemente frei, Extract nicht
+### Outbox.pas:88 ExtractPair auf ABox: TMailBox
+- Gegenstelle TMailBox [Mailer.pas:12]: TMailBox = class(TObjectDictionary<string, TMail>)
+  inherited Create([doOwnsValues]) at Mailer.pas:40
+  Besitz (RTL): TObjectDictionary<…>: Besitz nur nach Ownerships im Konstruktor (doOwnsKeys, doOwnsValues; das geerbte Create ohne sie besitzt nichts) — Remove und Clear geben Besitztes frei, ExtractPair nicht
 ```
 
-- `inherited Create(True)` und `Besitz (RTL)` sagen, wer freigibt. Wechselt der Diff von
-  `Remove` auf `Extract`, gibt die Liste das Element nicht mehr frei. Ab dann muss es jemand
-  anderes freigeben.
+- `inherited Create(…)` und `Besitz (RTL)` sagen, wer freigibt. Wechselt der Diff von
+  `Remove` auf `ExtractPair`, gibt das Dictionary den Wert nicht mehr frei. Ab dann muss ihn
+  jemand anderes freigeben. Bei Listen, Queues und Stacks gilt dasselbe für `Extract`.
 - Bei einem Aufruf zeigt der Kopf die Default-Werte, `deklariert:` sagt, wo sie stehen.
   Weitere Delphi-Fragen stehen in `delphi.md`.
 
