@@ -464,6 +464,28 @@ Offen für known-limits:
   Sauberer wäre, wenn das Skript die datentragenden Zeilen selbst schreibt. Die Zahlen in der
   Pakettabelle prüft `audit` nicht. Das gehört zur Vorlage aus Task 11.
 
+Fix-Runde 1 ergab 1.753 Tests grün. Das Review des Fixes meldete 12 Funde. Davon gehen sechs
+mit falschem Ergebnis oder Absturz in Runde 2:
+
+- Eine Zeile wie `Fazit — vollständig` galt als Fundzeile, die Behauptung wurde nie geprüft.
+- Gebeugte Formen („vollständige Abdeckung“) rutschten durch.
+- Ehrliche Verneinungen („**nicht** vollständig“) galten als Behauptung.
+- Funde zu Dateien außerhalb des Pakets wanderten über mehrere `--since`-Läufe weiter, ohne
+  Prüfung der Datei selbst.
+- stdin mit BOM oder ohne stdin.
+- Überlappende Spannen beim `merge`.
+
+Ebenfalls offen für known-limits:
+
+- Pläne, die vor diesem Fix geschrieben wurden und übernommene Funde mit frei formulierter
+  Zeilenangabe enthalten („12, 14“), sind jetzt ein `KitError` für `merge`, `audit` und
+  `--since`. Das ist ein lauter Fehler, und solche Pläne gibt es nur aus dem Bau.
+- `_meta.generated` hält `--report`/`--soll-file` repo-relativ fest, aufgelöst wird aber
+  gegen das Arbeitsverzeichnis. Das notierte Kommando wiederholt sich nur aus der Repo-Wurzel
+  gleich.
+- `_line_span` parst die normalisierte Zeile ein zweites Mal. `_checked_plan` gibt
+  `file_keys` doppelt zurück.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
