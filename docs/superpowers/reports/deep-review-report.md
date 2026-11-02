@@ -435,6 +435,16 @@ Dateimodus galten Symlink und Datei mit gleichem Inhalt als gleich. Ebenfalls of
 - Doppelte Arbeit: `ls-tree` am ZIEL läuft für Schlüssel und Blobs zweimal. Die Prüfung
   „kann nicht auf sich selbst folgen“ steht zweimal, die Blob-Prüfung in `apply_since` doppelt.
   `split_range` reicht einen fertigen `Span` durch.
+- Gibt es mehrere Abdeckungsketten, nimmt `apply_since` die kürzeste, bei gleicher Länge die
+  über jüngere Läufe; Funde aus Läufen außerhalb dieser Kette werden nicht übernommen.
+
+Fix-Runde 2 behob die drei (`reused_chain` mit den Funden aller Kettenglieder, Auflösung Teil
+für Teil mit `LINK_MAX_HOPS = 40`, Marken als `<mode>:<sha>`); 1.731 Tests grün.
+
+**Lesson für subagent-dev:** Die Testdatei von Hand in die Markdown-Allowlist von `fix-task.md`
+einzutragen reicht nicht. `verify` liest den JSON-Block am Ende, also muss sie auch dort
+stehen. Sonst meldet `verify` FAIL wegen der Testdatei, obwohl der Fix sich an die Allowlist
+hielt. Das spricht dafür, dass `fix-task` die Testdatei selbst aufnimmt (Lesson 2 aus Prüfpunkt 4).
 
 ## Was nicht gemessen wurde
 
