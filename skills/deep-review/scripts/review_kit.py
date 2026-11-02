@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import fnmatch
+import functools
 import json
 import math
 import os
@@ -26,6 +27,7 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import string
 import subprocess
 import tempfile
@@ -65,6 +67,7 @@ HELPER_EMAIL = "deep-review@localhost"
 RUN_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{6}-[0-9a-f]{7}-[0-9a-z]{4}")
 NOTE_TARGET_NOT_HEAD = "target_not_head"
 NOTE_WORKTREE_DIFFERS = "worktree_differs"
+NOTE_WORKTREE_UNKNOWN = "worktree_unknown"
 PACKET_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 # Pfade je git-Aufruf als Pathspecs: unter der Grenze von cmd.exe (8191 Zeichen) und der
 # Windows-Kommandozeile (32767), mit Platz für git und die übrigen Argumente.
@@ -72,6 +75,7 @@ ARG_CHUNK_CHARS = 8000
 LOCK_NAME = "plan.lock"   # Sperrdatei im Laufordner, solange plan.json geändert wird
 LOCK_WAIT = 600           # Sekunden, die ein Aufruf auf die Sperre wartet
 LOCK_POLL = 0.05          # Sekunden zwischen zwei Versuchen
+MESSAGE_CACHE_SIZE = 64   # Commit-Messages so vieler Bereiche je Prozess zwischenspeichern
 
 PROFILES = ("standard", "checkpoint")
 FOCI = ("bugs", "security", "quality")
@@ -617,29 +621,122 @@ def _check_run_id(run_id) -> str:
     return run_id
 
 
+def _pid_alive(pid: int):
+    """Lebt der Prozess `pid` auf diesem Rechner? True, False oder None (nicht prüfbar).
+    POSIX: `os.kill(pid, 0)`; unter Windows über OpenProcess/GetExitCodeProcess, weil
+    `os.kill` dort den Prozess beenden würde."""
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+            if not handle:
+                return False if kernel32.GetLastError() == 87 else None  # INVALID_PARAMETER
+            try:
+                code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return None
+                return code.value == 259                        # STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except (OSError, AttributeError):
+            return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+    return True
+
+
+def _lock_owner(lock: Path):
+    """Inhalt der Sperrdatei und ihr Besitzer: (Text, PID oder None, lebt: True/False/None).
+    Der Besitzer zählt nur als tot, wenn die PID auf diesem Rechner nicht lebt; eine Sperre
+    eines anderen Rechners oder ohne lesbare PID gilt als belegt. Fehlt die Datei: None."""
+    try:
+        text = lock.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "", None, None
+    fields = text.split()
+    if not fields or not fields[0].isdigit():
+        return text, None, None
+    pid = int(fields[0])
+    host = fields[1] if len(fields) > 1 else None
+    if host is not None and host != socket.gethostname():
+        return text, pid, None
+    return text, pid, _pid_alive(pid)
+
+
+def _break_lock(lock: Path, text: str) -> bool:
+    """Die Sperre eines toten Besitzers entfernen, ohne eine frische zu treffen: umbenennen,
+    dann prüfen, dass der Inhalt noch der gelesene ist — sonst (ein anderer hat sie eben
+    übernommen) zurücklegen, wenn der Platz noch frei ist. False nur, wenn sie sich nicht
+    umbenennen lässt; dann wartet der Aufrufer wie bei einer belegten Sperre."""
+    grave = lock.with_name(f"{LOCK_NAME}.{os.getpid()}.{secrets.token_hex(4)}")
+    try:
+        os.rename(lock, grave)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    try:
+        moved = grave.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        moved = None
+    if moved != text:
+        try:
+            os.link(grave, lock)
+        except OSError:
+            pass
+    grave.unlink(missing_ok=True)
+    return True
+
+
 @contextlib.contextmanager
-def _plan_lock(directory: Path, run_id: str):
+def _plan_lock(directory: Path, run_id: str, wait=None):
     """Exklusive Sperre auf `plan.json` eines Laufs: Sperrdatei `plan.lock` im Laufordner,
-    angelegt mit O_EXCL, im `finally` wieder gelöscht. Wer sie nicht bekommt, wartet bis
-    `LOCK_WAIT` Sekunden; danach KitError mit dem Pfad der Sperrdatei (bleibt sie nach einem
-    Absturz liegen, löscht der Nutzer sie). Fehlt der Laufordner: KitError „hat keinen Plan"."""
+    angelegt mit O_EXCL, mit PID und Rechnername des Besitzers, im `finally` wieder
+    gelöscht. Lebt der Besitzer einer vorhandenen Sperre auf diesem Rechner nicht mehr
+    (abgestürzter Aufruf), wird sie übernommen. Sonst wartet der Aufruf bis `wait` Sekunden
+    (Default `LOCK_WAIT`); danach KitError „gesperrt" mit Pfad und Besitzer. Fehlt der
+    Laufordner: KitError „hat keinen Plan"."""
     lock = directory / LOCK_NAME
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-    deadline = time.monotonic() + LOCK_WAIT
+    deadline = time.monotonic() + (LOCK_WAIT if wait is None else wait)
     while True:
         try:
             fd = os.open(lock, flags, 0o666)
             break
         except FileExistsError:
+            owner = _lock_owner(lock)
+            if owner is None:
+                continue
+            text, pid, alive = owner
+            if alive is False and _break_lock(lock, text):
+                continue
             if time.monotonic() >= deadline:
-                raise KitError(f"Plan von Lauf {run_id} ist gesperrt ({lock}) — läuft noch ein "
-                               "Aufruf? Sonst die Sperrdatei löschen") from None
+                if alive is False:
+                    who = f"Sperre des beendeten Prozesses {pid} lässt sich nicht entfernen"
+                elif alive:
+                    who = f"Prozess {pid} hält sie noch; später erneut aufrufen"
+                elif pid is not None:
+                    who = f"Besitzer {text.strip()} ist von hier aus nicht prüfbar"
+                else:
+                    who = "Sperrdatei ohne PID; läuft kein Aufruf mehr, sie entfernen"
+                raise KitError(f"Plan von Lauf {run_id} ist gesperrt ({lock}) — {who}") from None
             time.sleep(LOCK_POLL)
         except FileNotFoundError:
             raise KitError(f"Lauf {run_id} hat keinen Plan ({directory / 'plan.json'})") from None
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(f"{os.getpid()}\n")
+            handle.write(f"{os.getpid()} {socket.gethostname()}\n")
         yield
     finally:
         lock.unlink(missing_ok=True)
@@ -649,8 +746,9 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
     """`plan.json` des Laufs, geprüft auf die Felder, die die Paket-Bereiche lesen: `_meta`
     ein Objekt, `base`/`target` Text, `log_base` Text oder null, `packets` eine Liste von
     Objekten mit eindeutiger `id` (Text aus Buchstaben, Ziffern, `_`, `-`), `files` (Liste
-    von Text) und `range` (Text oder null), `notes` eine Liste von Objekten. Alles andere ist
-    ein KitError, kein TypeError."""
+    von Text) und `range` (Text oder null), `notes` eine Liste von Objekten mit `packet`,
+    `kind`, `text` (Text) und `files` (Liste von Text). Alles andere ist ein KitError, kein
+    TypeError."""
     path = run_dir(repo, run_id) / "plan.json"
     try:
         plan = json.loads(path.read_text(encoding="utf-8"))
@@ -691,6 +789,12 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
     notes = plan.get("notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
         raise bad("notes ist keine Liste von Objekten")
+    for note in notes:
+        files = note.get("files")
+        if not (all(isinstance(note.get(k), str) for k in ("packet", "kind", "text"))
+                and isinstance(files, list) and all(isinstance(f, str) for f in files)):
+            raise bad(f"Hinweis {note!r} braucht packet, kind, text (Text) und files "
+                      "(Liste von Text)")
     return path, plan
 
 
@@ -728,18 +832,6 @@ def _head(repo: Path):
         return _commit(repo, "HEAD")
     except UnknownRevision:
         return None
-
-
-_RUN_CACHE: dict = {}
-
-
-def _run_cached(repo: Path, run_id: str, key, compute):
-    """Je Lauf einmal rechnen: HEAD beim ersten Paket-Bereich des Laufs in diesem
-    Prozess, die Commit-Messages des Bereichs (SHAs, also unveränderlich)."""
-    slot = (str(repo), run_id, key)
-    if slot not in _RUN_CACHE:
-        _RUN_CACHE[slot] = compute()
-    return _RUN_CACHE[slot]
 
 
 def _literal_chunks(paths):
@@ -784,17 +876,22 @@ def _worktree_differs(repo: Path, target: str, files, entries: dict) -> list:
     Filtern und der Symlink-Behandlung des Repos (auch `core.symlinks=false`); ein
     Submodul nur, wenn sein ausgecheckter Commit abweicht. `git diff` frischt den Index auf
     und schreibt ihn trotz `GIT_OPTIONAL_LOCKS=0` — deshalb läuft es auf einer Kopie des
-    Index (`GIT_INDEX_FILE`), der des Nutzers bleibt unberührt (E6). Dazu kommt, was git
+    Index (`GIT_INDEX_FILE`), der des Nutzers bleibt unberührt (E6). Die Kopie behält die
+    Zeit des Index (`copy2`): sonst gälten „racy" Einträge als sauber, und eine gleich
+    lange Änderung im selben Zeittakt fiele nicht auf. Dazu kommt, was git
     nicht sieht: eine Datei, die ZIEL gelöscht hat (`entries` = Einträge von ZIEL) und die
-    ungetrackt noch da liegt (ein Ordner an ihrer Stelle zählt nicht)."""
+    ungetrackt noch da liegt (ein Ordner an ihrer Stelle zählt nicht). Fehlt der Index des
+    Nutzers, ist nichts zu vergleichen — gegen einen leeren Index wiche jede Datei ab:
+    Rückgabe None (Arbeitsbaum nicht geprüft)."""
     files = sorted(set(files))
     index = Path(_git(repo, "rev-parse", "--git-path", "index").strip())
     index = index if index.is_absolute() else repo / index
+    if not index.is_file():
+        return None
     differs: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
         copy = Path(tmp) / "index"
-        if index.is_file():
-            shutil.copyfile(index, copy)
+        shutil.copy2(index, copy)
         env = dict(os.environ)
         env.update(GIT_INDEX_FILE=str(copy), GIT_OPTIONAL_LOCKS="0")
         for chunk in _literal_chunks(files):
@@ -818,16 +915,23 @@ def _range_notes(repo: Path, pid: str, head, target: str, files, entries: dict) 
                       "text": f"ZIEL {target[:SHORT_SHA_LEN]} ist nicht HEAD ({where}) — "
                               "der Reviewer liest den Arbeitsbaum, nicht ZIEL"})
     differs = _worktree_differs(repo, target, files, entries)
-    if differs:
+    if differs is None:
+        notes.append({"packet": pid, "kind": NOTE_WORKTREE_UNKNOWN, "files": [],
+                      "text": "Index fehlt, Arbeitsbaum nicht geprüft — der Reviewer liest "
+                              "den Arbeitsbaum, ob er ZIEL gleicht, ist offen"})
+    elif differs:
         notes.append({"packet": pid, "kind": NOTE_WORKTREE_DIFFERS, "files": differs,
                       "text": f"Arbeitsbaum weicht in {len(differs)} Paketdatei(en) von ZIEL "
                               "ab — der Reviewer liest den Arbeitsbaum"})
     return notes
 
 
+@functools.lru_cache(maxsize=MESSAGE_CACHE_SIZE)
 def _range_message(repo: Path, log_base, target: str) -> bytes:
     """Die Commit-Messages des Bereichs (das Soll): `git log log_base..target`, beim
-    Wurzel-Commit `git log target`."""
+    Wurzel-Commit `git log target`. Zwischengespeichert, begrenzt auf
+    `MESSAGE_CACHE_SIZE` Bereiche — `log_base` und `target` sind SHAs, das Ergebnis also
+    unveränderlich."""
     rev = target if log_base is None else f"{log_base}..{target}"
     out = _git(repo, "log", "--no-show-signature", "--format=%B", rev, "--")
     return out.encode("utf-8", errors="surrogateescape")
@@ -857,8 +961,7 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
     null = "0" * len(target)
     von_info = _index_info(files, _tree_entries(repo, plan["base"], files), null)
     bis_info = _index_info(files, target_entries, null)
-    message = _run_cached(repo, run_id, ("message", plan["log_base"], target),
-                          lambda: _range_message(repo, plan["log_base"], target))
+    message = _range_message(repo, plan["log_base"], target)
     with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
         env = _helper_env(Path(tmp) / "index")
         _git(repo, "read-tree", target, env=env)
@@ -931,9 +1034,10 @@ def make_packet_range(repo, run_id, packet, base, target):
     Laufs (`_plan_lock`); der Plan wird darin neu gelesen — zwei Aufrufe für verschiedene
     Pakete desselben Laufs, auch gleichzeitig, verlieren nichts. Ist ZIEL nicht HEAD oder
     weicht der Arbeitsbaum in Paketdateien von ZIEL ab, steht ein Hinweis unter `notes` im
-    Plan (`packet`, `kind` = `target_not_head` | `worktree_differs`, `files`, `text`), weil
-    der Reviewer den Arbeitsbaum liest; HEAD wird je Lauf und Prozess einmal gelesen, der
-    Arbeitsbaum bei jedem Aufruf; jeder Aufruf ersetzt die Hinweise seines Pakets. `notes`
+    Plan (`packet`, `kind` = `target_not_head` | `worktree_differs` | `worktree_unknown`
+    — Index fehlt, Arbeitsbaum nicht geprüft —, `files`, `text`), weil
+    der Reviewer den Arbeitsbaum liest; HEAD und Arbeitsbaum werden bei jedem Aufruf
+    gelesen; jeder Aufruf ersetzt die Hinweise seines Pakets. `notes`
     steht als letzter Schlüssel nach `not_reviewed`. Rückgabe: der Bereich `<von>..<bis>`
     (SHAs) oder der vorhandene."""
     repo = _toplevel(repo)
@@ -951,7 +1055,7 @@ def make_packet_range(repo, run_id, packet, base, target):
         target_sha = plan["target"]
         files = list(entry["files"])
         target_entries = _tree_entries(repo, target_sha, files)
-        head = _run_cached(repo, run_id, "head", lambda: _head(repo))
+        head = _head(repo)
         notes = _range_notes(repo, pid, head, target_sha, files, target_entries)
         rng = entry.get("range")
         if rng is not None and rng != plan.get("range") and not _refs_hold(repo, run_id, pid, rng):
@@ -959,7 +1063,7 @@ def make_packet_range(repo, run_id, packet, base, target):
         if rng is None:
             von, bis = _helper_commits(repo, run_id, pid, plan, files, target_entries)
             rng = entry["range"] = f"{von}..{bis}"
-        kinds = (NOTE_TARGET_NOT_HEAD, NOTE_WORKTREE_DIFFERS)
+        kinds = (NOTE_TARGET_NOT_HEAD, NOTE_WORKTREE_DIFFERS, NOTE_WORKTREE_UNKNOWN)
         kept = [n for n in plan.get("notes", []) if n.get("packet") != pid] + notes
         kept.sort(key=lambda n: (order.get(n.get("packet"), len(order)),
                                  kinds.index(n["kind"]) if n.get("kind") in kinds else len(kinds)))
@@ -969,9 +1073,10 @@ def make_packet_range(repo, run_id, packet, base, target):
 
 def _reset_ranges(repo: Path, deleted) -> None:
     """Nach dem Löschen: je Lauf, dessen `plan.json` in diesem Repo liegt, die Pakete, deren
-    `range` genau auf die gelöschten `von`/`bis` zeigte, wieder auf null — unter der Sperre
-    des Plans. Ein Lauf ohne Plan hier (anderer Worktree) oder mit unlesbarem Plan bleibt,
-    wie er ist; `make_packet_range` prüft die Refs ohnehin und baut dann neu."""
+    `range` genau auf die gelöschten `von`/`bis` zeigte, wieder auf null — nur nach Kräften:
+    unter der Sperre des Plans, ohne auf sie zu warten. Ein Lauf ohne Plan hier (anderer
+    Worktree), mit unlesbarem Plan oder mit belegter Sperre bleibt, wie er ist;
+    `make_packet_range` prüft die Refs ohnehin und baut dann neu (`_refs_hold`)."""
     built: dict[str, dict[str, dict[str, str]]] = {}
     for ref, sha in deleted:
         parts = ref.split("/")
@@ -981,20 +1086,20 @@ def _reset_ranges(repo: Path, deleted) -> None:
         directory = run_dir(repo, run_id)
         if not (directory / "plan.json").is_file():
             continue
-        with _plan_lock(directory, run_id):
-            try:
+        try:
+            with _plan_lock(directory, run_id, wait=0):
                 path, plan = _load_plan(repo, run_id)
-            except KitError:
-                continue
-            changed = False
-            for packet in plan["packets"]:
-                ends = packets.get(packet["id"], {})
-                if packet.get("range") is not None and \
-                        packet["range"] == f"{ends.get('von')}..{ends.get('bis')}":
-                    packet["range"] = None
-                    changed = True
-            if changed:
-                _write_plan(path, plan)
+                changed = False
+                for packet in plan["packets"]:
+                    ends = packets.get(packet["id"], {})
+                    if packet.get("range") is not None and \
+                            packet["range"] == f"{ends.get('von')}..{ends.get('bis')}":
+                        packet["range"] = None
+                        changed = True
+                if changed:
+                    _write_plan(path, plan)
+        except (KitError, OSError):
+            continue
 
 
 def cleanup(repo, run_id, stale):
@@ -1006,8 +1111,9 @@ def cleanup(repo, run_id, stale):
     eines Repos: `stale` löscht auch die eines Laufs, der in einem anderen Worktree noch
     läuft. Jede Ref wird nur mit ihrem gelesenen Wert gelöscht. Danach steht in jedem
     `plan.json` dieses Repos, dessen Bereiche auf gelöschte Refs zeigten, dort wieder
-    `range: null` (`_reset_ranges`). Objekte, HEAD, Index und Arbeitsbaum bleiben.
-    Rückgabe: die gelöschten Refs, sortiert."""
+    `range: null` (`_reset_ranges`, nach Kräften: eine belegte Sperre wird übersprungen,
+    nicht abgewartet). Objekte, HEAD, Index und Arbeitsbaum bleiben.
+    Rückgabe: die gelöschten Refs, sortiert — auch wenn ein Plan nicht zurückgesetzt wurde."""
     repo = _toplevel(repo)
     if run_id is not None:
         _check_run_id(run_id)

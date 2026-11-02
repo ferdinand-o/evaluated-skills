@@ -1196,7 +1196,7 @@ def test_j08_tree_entries_list_only_the_packet_paths(tmp_path, monkeypatch):
         assert "--" in call and list(call[call.index("--") + 1:]) == [":(literal)a/[x].py"]
 
 
-def test_j09_message_and_head_once_per_run(tmp_path, monkeypatch):
+def test_j09_message_once_per_run_head_per_call(tmp_path, monkeypatch):
     kit = _kit()
     (tmp_path / "repo").mkdir()
     root = _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": "", "c/z.py": ""},
@@ -1207,7 +1207,8 @@ def test_j09_message_and_head_once_per_run(tmp_path, monkeypatch):
         kit.make_packet_range(root, run, packet, plan["base"], plan["target"])
     assert len(plan["packets"]) == 3
     assert len([c for c in calls if c and c[0] == "log"]) == 1
-    assert len([c for c in calls if c and c[0] == "rev-parse" and "HEAD^{commit}" in c]) == 1
+    # HEAD bei jedem Aufruf (K3): ein Checkout zwischen zwei Paketen fällt sonst nicht auf.
+    assert len([c for c in calls if c and c[0] == "rev-parse" and "HEAD^{commit}" in c]) == 3
 
 
 def test_j11_base_and_target_may_be_none_or_the_typed_basis(tmp_path):
@@ -1231,3 +1232,118 @@ def test_j11_base_and_target_may_be_none_or_the_typed_basis(tmp_path):
         kit.make_packet_range(root, run, "p1", "main", None)
     with pytest.raises(kit.KitError, match="Plan"):
         kit.make_packet_range(root, run, "p1", None, "side")
+
+
+# --- review_kit.py: Funde des Prüfpunkts nach Task 3, zweite Runde (K1–K6) ---------------
+
+def _dead_pid():
+    """PID eines Prozesses, der schon beendet ist."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def _two_packet_repo(tmp_path):
+    (tmp_path / "repo").mkdir()
+    return _commit_repo(tmp_path / "repo", {"a/x.py": "", "b/y.py": ""},
+                        {"a/x.py": _lines(8), "b/y.py": _lines(8, "y")})
+
+
+def test_k1_cleanup_does_not_wait_on_a_leftover_lock(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    kit.make_packet_range(root, run, "p1", plan["base"], plan["target"])
+    _, other = _split_plan(kit, root)
+    # Lauf `run` brach in make_packet_range ab: seine Sperre bleibt liegen, ihr Besitzer
+    # lebt (dieser Prozess). cleanup darf darauf nicht warten und liefert die Refs.
+    lock = kit.run_dir(root, run) / "plan.lock"
+    lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    monkeypatch.setattr(kit, "LOCK_WAIT", 0.3)
+    deleted = kit.cleanup(root, other, True)
+    assert deleted == sorted(f"refs/deep-review/{run}/p1/{e}" for e in ("von", "bis"))
+    assert _refs(root) == [] and lock.exists()
+    # Der Plan steht noch auf dem alten Bereich; make_packet_range baut neu, weil die Refs fehlen.
+    lock.unlink()
+    rng = kit.make_packet_range(root, run, "p1", None, None)
+    assert rng.split("..")[0] == _rev(root, f"refs/deep-review/{run}/p1/von")
+
+
+def test_k2_lock_of_a_dead_process_is_taken_over(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    lock = kit.run_dir(root, run) / "plan.lock"
+    monkeypatch.setattr(kit, "LOCK_WAIT", 0.3)
+    lock.write_text(f"{_dead_pid()}\n", encoding="utf-8")
+    assert kit.make_packet_range(root, run, "p1", None, None)
+    assert not lock.exists()
+    assert sorted(p.name for p in kit.run_dir(root, run).iterdir()) == ["plan.json"]
+    # Lebt der Besitzer, wird gewartet — und die Meldung rät nicht zum Löschen.
+    lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    with pytest.raises(kit.KitError, match="gesperrt") as caught:
+        kit.make_packet_range(root, run, "p2", None, None)
+    assert "lösch" not in str(caught.value) and str(os.getpid()) in str(caught.value)
+    assert lock.read_text(encoding="utf-8") == f"{os.getpid()}\n"
+
+
+def test_k3_head_is_read_on_every_call(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    kit.make_packet_range(root, run, "p1", None, None)
+    assert _plan_on_disk(kit, root, run)["notes"] == []
+    git(root, "commit", "--quiet", "--allow-empty", "-m", "weiter")   # HEAD läuft weiter
+    kit.make_packet_range(root, run, "p2", None, None)
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [(n["packet"], n["kind"]) for n in notes] == [("p2", "target_not_head")]
+    assert not hasattr(kit, "_RUN_CACHE")
+    assert isinstance(kit._range_message.cache_info().maxsize, int)
+
+
+def test_k4_index_copy_keeps_racy_entries_racy(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    git(root, "config", "core.trustctime", "false")
+    plan, run = _split_plan(kit, root)
+    # Gleich lange Änderung im selben Zeittakt wie der Index: nur der Inhalt verrät sie.
+    # Datei und Index tragen eine alte Zeit, die Kopie entsteht Sekunden später.
+    path = root / "a" / "x.py"
+    then = (1_000_000_000, 1_000_000_000)
+    os.utime(path, then)
+    git(root, "update-index", "--refresh")
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("x", "q"), encoding="utf-8")
+    os.utime(path, then)
+    os.utime(root / ".git" / "index", then)
+    kit.make_packet_range(root, run, "p1", None, None)
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [(n["kind"], n["files"]) for n in notes] == [("worktree_differs", ["a/x.py"])]
+
+
+def test_k5_missing_index_is_one_unknown_note(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    (root / ".git" / "index").unlink()
+    kit.make_packet_range(root, run, "p1", None, None)
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [(n["packet"], n["kind"], n["files"]) for n in notes] == [("p1", "worktree_unknown", [])]
+    assert "Index fehlt" in notes[0]["text"]
+    assert not (root / ".git" / "index").exists()
+
+
+def test_k6_malformed_note_is_a_kit_error(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    path = kit.run_dir(root, run) / "plan.json"
+    good = json.loads(path.read_text(encoding="utf-8"))
+    note = {"packet": "p1", "kind": "worktree_differs", "files": ["a/x.py"], "text": "t"}
+    for broken in ({"packet": ["p1"]}, {"kind": {}}, {"files": "a/x.py"}, {"files": [1]},
+                   {"text": None}):
+        path.write_text(json.dumps({**good, "notes": [{**note, **broken}]}), encoding="utf-8")
+        with pytest.raises(kit.KitError, match="Plan"):
+            kit.make_packet_range(root, run, "p1", None, None)
+    path.write_text(json.dumps({**good, "notes": [note]}), encoding="utf-8")
+    kit.make_packet_range(root, run, "p1", None, None)
