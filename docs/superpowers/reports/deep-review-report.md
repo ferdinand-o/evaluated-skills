@@ -591,6 +591,12 @@ Offen für known-limits:
 - Der Werkzeugname „Review ohne /security-review“ steht noch nicht im Spec; er wird beim
   Nachziehen des Specs aufgenommen.
 
+Fix-Runde 2 behob die fünf. `audit` prüft jetzt die Zeilen Hinweise und Übernommen. Reine
+Kommentarzeilen zählen nicht zur Längengrenze. `DELPHI_RELEASES` kennt `ExtractPair`,
+`ExtractKey` und `ExtractValue`. 1.780 Tests grün. Zusätzlich offen: Ob `ExtractKey` und
+`ExtractValue` RTL-Methoden sind, ist ungeprüft. Sie greifen nur bei Besitz-Typen.
+`counterparts.md` nennt die neuen Namen noch nicht (Task 13).
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
