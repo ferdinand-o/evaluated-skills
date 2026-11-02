@@ -2205,3 +2205,398 @@ def test_counterparts_delphi_receiver_from_var_and_field(tmp_path):
     # Go auf unbekanntem Empfänger: vier gleichnamige Methoden in den uses-Units, nicht geraten
     assert found.unresolved == 1
     assert len(found.entries) == 4
+
+
+# --- review_kit.py: Funde des Prüfpunkts nach Task 5 (Delphi) -------------------------------
+
+def _delphi_found(kit, tmp_path, before, after, files=None):
+    """Repo aus `before`/`after` (wie `_commit_repo`), gesammelt über base..HEAD."""
+    root = _commit_repo(tmp_path, before, after)
+    return kit.collect_delphi(root, "base..HEAD", sorted(after) if files is None else files)
+
+
+def _by_head(found):
+    return {e["lines"][0]: e["lines"][1:] for e in found.entries}
+
+
+def _tree_head():
+    return (f"- Gegenstelle TQueryTree [Tree.pas:{_line_no(TREE_PAS, 'TQueryTree = class')}]: "
+            "TQueryTree = class(TObjectList<TNode>)")
+
+
+ESC_PAS = (
+    "unit Esc;\n\ninterface\n\nuses\n  Tree;\n\ntype\n"
+    "  TPair = record\n    &Begin, &End: TQueryTree;\n  end;\n\n"
+    "  TC = class\n  public\n    procedure Run(var P: TPair);\n"
+    "    procedure Check(A: Integer = 0);\n  end;\n\n"
+    "implementation\n\n"
+    "procedure TC.Run(var P: TPair);\nbegin\n  P.&End := nil;\nend;\n\n"
+    "procedure TC.Check(A: Integer);\nbegin\n  raise EParse.Create('c');\nend;\n\nend.\n")
+ESC_AFTER = ESC_PAS.replace("  P.&End := nil;\n", "  P.&End := nil;\n  P.&End.Free;\n  Check(1);\n")
+
+
+def test_n01_escaped_keywords_stay_identifiers(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Esc.pas": ESC_PAS},
+                          {"Esc.pas": ESC_AFTER})
+    free, check = _line_no(ESC_AFTER, "P.&End.Free"), _line_no(ESC_AFTER, "Check(1)")
+    heads = _by_head(found)
+    assert heads[f"### Esc.pas:{free} Free auf P.&End: TQueryTree"][0] == _tree_head()
+    assert "  wirft: EParse" in heads[f"### Esc.pas:{check} ruft Check(...)"]
+    assert len(found.entries) == 2
+
+
+BOX_PAS = (
+    "unit Box;\n\ninterface\n\nuses\n  Tree;\n\ntype\n"
+    "  TBox<T: record> = class\n  public\n    procedure Check(A: Integer = 0);\n  end;\n\n"
+    "procedure Run(B: TBox<Integer>);\n\nimplementation\n\n"
+    "procedure TBox<T>.Check(A: Integer);\nbegin\n  raise EParse.Create('b');\nend;\n\n"
+    "procedure Run(B: TBox<Integer>);\nbegin\n  B := nil;\nend;\n\nend.\n")
+BOX_AFTER = BOX_PAS.replace("  B := nil;\n", "  B := nil;\n  B.Check(1);\n")
+
+
+def test_n02_record_constraint_opens_no_block(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Box.pas": BOX_PAS},
+                          {"Box.pas": BOX_AFTER})
+    call = _by_head(found)[f"### Box.pas:{_line_no(BOX_AFTER, 'B.Check(1)')} ruft Check(...)"]
+    assert call[:3] == [
+        f"- Gegenstelle TBox.Check [Box.pas:{_line_no(BOX_PAS, 'procedure TBox<T>.Check')}]: "
+        "procedure Check(A: Integer = 0)",
+        f"  deklariert: Box.pas:{_line_no(BOX_PAS, 'procedure Check(A: Integer = 0)')}",
+        "  wirft: EParse"]
+
+
+def test_n02_generic_method_head_is_no_call(tmp_path):
+    kit = _kit()
+    after = BOX_PAS.replace("raise EParse.Create('b');", "raise EParse.Create('c');").replace(
+        "procedure TBox<T>.Check(A: Integer);", "procedure TBox<T>.Check(A: Integer); ")
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Box.pas": BOX_PAS},
+                          {"Box.pas": after})
+    assert found == kit.Collected([], 0, [])
+
+
+CALLS_PAS = (
+    "unit Calls;\n\ninterface\n\nuses\n  Tree;\n\ntype\n"
+    "  TC = class\n  public\n    procedure Check;\n    class procedure Make;\n    procedure Run;\n"
+    "  end;\n\n"
+    "procedure Validate;\nfunction Pick<T>(A: T): T;\nprocedure Wrap(A: Integer);\n\n"
+    "implementation\n\n"
+    "procedure Validate;\nbegin\n  raise EParse.Create('v');\nend;\n\n"
+    "function Pick<T>(A: T): T;\nbegin\n  raise EParse.Create('p');\nend;\n\n"
+    "procedure Wrap(A: Integer);\nbegin\n  Pick<Integer>(A);\nend;\n\n"
+    "procedure TC.Check;\nbegin\n  raise EParse.Create('c');\nend;\n\n"
+    "class procedure TC.Make;\nbegin\n  raise EParse.Create('m');\nend;\n\n"
+    "procedure TC.Run;\nvar\n  C: TC;\nbegin\n  C := nil;\nend;\n\nend.\n")
+CALLS_AFTER = CALLS_PAS.replace(
+    "  C := nil;\nend;",
+    "  C := nil;\n  Validate;\n  C.Check;\n  TC.Make;\n  Check;\n  Pick<Integer>(1);\n  Wrap(2);\n"
+    "  if C = nil then\n    C := nil;\nend;")
+
+
+def test_n03_calls_without_parentheses_and_generic_calls(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Calls.pas": CALLS_PAS},
+                          {"Calls.pas": CALLS_AFTER})
+    first = _line_no(CALLS_AFTER, "  Validate;\n  C.Check")
+    assert [e["lines"][0] for e in found.entries] == [
+        f"### Calls.pas:{first + i} ruft {name}(...)"
+        for i, name in enumerate(("Validate", "Check", "Make", "Check", "Pick", "Wrap"))]
+    assert all("  wirft: EParse" in e["lines"] for e in found.entries)
+    # Wrap wirft über den generischen Aufruf Pick<Integer>(A) — dieselbe Regel wie am Aufrufer.
+    assert (f"    raise EParse at Calls.pas:{_line_no(CALLS_PAS, 'Create(' + chr(39) + 'p')}"
+            in found.entries[-1]["lines"])
+    assert found.unresolved == 0
+
+
+HELPERS_PAS = (
+    "unit Helpers;\n\ninterface\n\nuses\n  Tree;\n\nprocedure Helper(A: Integer);\n\n"
+    "implementation\n\nprocedure Helper(A: Integer);\nbegin\n  raise EParse.Create('h');\nend;\n\n"
+    "end.\n")
+NESTED_PAS = (
+    "unit Nested;\n\ninterface\n\nuses\n  Tree, Helpers;\n\ntype\n"
+    "  ENested = class(EParse);\n\n"
+    "  TC = class\n  public\n    procedure Run;\n  end;\n\n"
+    "procedure Other;\nprocedure Wrap(A: Integer);\n\nimplementation\n\n"
+    "procedure Other;\n\n  procedure Helper(A: Integer);\n  begin\n"
+    "    raise ENested.Create('n');\n  end;\n\nbegin\n  Helper(0);\nend;\n\n"
+    "procedure Wrap(A: Integer);\nbegin\n  Helper(A);\nend;\n\n"
+    "procedure TC.Run;\nbegin\n  Wrap(0);\nend;\n\nend.\n")
+NESTED_AFTER = NESTED_PAS.replace("  Wrap(0);\n", "  Wrap(0);\n  Helper(1);\n  Wrap(2);\n")
+
+
+def test_n04_nested_routines_visible_only_inside_their_routine(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Helpers.pas": HELPERS_PAS,
+                                          "Nested.pas": NESTED_PAS}, {"Nested.pas": NESTED_AFTER})
+    impl = _line_no(HELPERS_PAS, "procedure Helper(A: Integer);\nbegin")
+    assert [e["lines"][:2] for e in found.entries] == [[
+        f"### Nested.pas:{_line_no(NESTED_AFTER, 'Helper(1)')} ruft Helper(...)",
+        f"- Gegenstelle Helper [Helpers.pas:{impl}]: procedure Helper(A: Integer)"]]
+    assert not any("ENested" in line for e in found.entries for line in e["lines"])
+
+
+FMT_PAS = (
+    "unit Fmt;\n\ninterface\n\nuses\n  Tree;\n\ntype\n  TFmt = class\n  public\n"
+    "    function Format(const S: string): string;\n  end;\n\nimplementation\n\n"
+    "function TFmt.Format(const S: string): string;\nbegin\n  raise EParse.Create(S);\nend;\n\n"
+    "end.\n")
+USEFMT_PAS = (
+    "unit UseFmt;\n\ninterface\n\nuses\n  System.SysUtils, Fmt;\n\nprocedure Run;\n\n"
+    "implementation\n\nprocedure Run;\nvar\n  S: string;\nbegin\n  S := '';\nend;\n\nend.\n")
+USEFMT_AFTER = USEFMT_PAS.replace(
+    "  S := '';\n",
+    "  S := System.SysUtils.Format('%d', [1]);\n  S := SysUtils.Format('%d', [2]);\n")
+
+
+def test_n05_unit_qualified_call_outside_the_repo_is_counted(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Fmt.pas": FMT_PAS,
+                                          "UseFmt.pas": USEFMT_PAS}, {"UseFmt.pas": USEFMT_AFTER})
+    assert found.entries == []
+    assert found.unresolved == 2
+
+
+OVL_PAS = (
+    "unit Ovl;\n\ninterface\n\nuses\n  Tree;\n\ntype\n  TC = class\n  public\n"
+    "    procedure Add(V: Integer); overload;\n    procedure Add(V: string); overload;\n  end;\n\n"
+    "procedure Run(C: TC);\n\nimplementation\n\n"
+    "procedure TC.Add(V: string);\nbegin\n  raise EParse.Create(V);\nend;\n\n"
+    "procedure TC.Add(V: Integer);\nbegin\nend;\n\n"
+    "procedure Run(C: TC);\nbegin\n  C := nil;\nend;\n\nend.\n")
+OVL_AFTER = OVL_PAS.replace("  C := nil;\n", "  C := nil;\n  C.Add('x');\n")
+
+
+def test_n06_overloads_match_by_parameter_types(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Ovl.pas": OVL_PAS},
+                          {"Ovl.pas": OVL_AFTER})
+    (entry,) = found.entries
+    lines = entry["lines"]
+    impl_s = _line_no(OVL_PAS, "procedure TC.Add(V: string)")
+    impl_i = _line_no(OVL_PAS, "procedure TC.Add(V: Integer)")
+    assert lines[1:3] == [f"- Gegenstelle TC.Add [Ovl.pas:{impl_s}]: procedure Add(V: string)",
+                          f"  deklariert: Ovl.pas:{_line_no(OVL_PAS, 'Add(V: string); overload')}"]
+    i = lines.index(f"- Gegenstelle TC.Add [Ovl.pas:{impl_i}]: procedure Add(V: Integer)")
+    assert lines[i + 1] == f"  deklariert: Ovl.pas:{_line_no(OVL_PAS, 'Add(V: Integer); overload')}"
+
+
+CLS_PAS = (
+    "unit Cls;\n\ninterface\n\nuses\n  Tree;\n\ntype\n  TFmt = class\n"
+    "    function Format(const S: string): string;\n    class function Make: TFmt;\n  end;\n\n"
+    "procedure Run(F: TFmt);\n\nimplementation\n\n"
+    "function TFmt.Format(const S: string): string;\nbegin\n  raise EParse.Create(S);\nend;\n\n"
+    "class function TFmt.Make: TFmt;\nbegin\n  raise EParse.Create('m');\nend;\n\n"
+    "procedure Run(F: TFmt);\nbegin\n  F := nil;\nend;\n\nend.\n")
+CLS_AFTER = CLS_PAS.replace("  F := nil;\n", "  F := nil;\n  F.Format('x');\n  F := TFmt.Make();\n")
+
+
+def test_n07_class_prefix_only_for_class_methods(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Cls.pas": CLS_PAS},
+                          {"Cls.pas": CLS_AFTER})
+    assert [e["lines"][1].split("]: ", 1)[1] for e in found.entries] == [
+        "function Format(const S: string): string", "class function Make: TFmt"]
+
+
+NODES_PAS = (
+    "unit Nodes;\n\ninterface\n\nuses\n  System.Generics.Collections;\n\ntype\n"
+    "  TNode = class;\n\n  TKids = class(TObjectList<TNode>)\n  end;\n\n"
+    "  TNode = class\n  public\n    Kids: TKids;\n  end;\n\nimplementation\n\nend.\n")
+TREES_PAS = (
+    "unit Trees;\n\ninterface\n\nuses\n  Nodes;\n\ntype\n  TTree = class\n  public\n"
+    "    Root: TNode;\n  end;\n\nimplementation\n\nend.\n")
+APP_PAS = (
+    "unit App;\n\ninterface\n\nuses\n  Trees;\n\nprocedure Run(T: TTree);\n\nimplementation\n\n"
+    "procedure Run(T: TTree);\nbegin\n  T := nil;\nend;\n\nend.\n")
+APP_AFTER = APP_PAS.replace("  T := nil;\n", "  T := nil;\n  T.Root.Kids.Remove(nil);\n")
+
+
+def test_n08_field_types_resolve_in_the_declaring_unit(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Nodes.pas": NODES_PAS, "Trees.pas": TREES_PAS,
+                                          "App.pas": APP_PAS}, {"App.pas": APP_AFTER})
+    owner = _by_head(found)[
+        f"### App.pas:{_line_no(APP_AFTER, 'T.Root.Kids')} Remove auf T.Root.Kids: TKids"]
+    assert owner[0] == (f"- Gegenstelle TKids [Nodes.pas:{_line_no(NODES_PAS, 'TKids = class')}]: "
+                        "TKids = class(TObjectList<TNode>)")
+    assert owner[1].startswith("  Besitz (RTL): TObjectList<…>")
+
+
+GLOB_PAS = (
+    "unit Glob;\n\ninterface\n\nuses\n  Tree;\n\nvar\n  GTree: TQueryTree;\n\nprocedure Run;\n\n"
+    "implementation\n\nvar\n  GLocal: TQueryTree;\n\n"
+    "procedure Run;\nbegin\n  GTree := nil;\nend;\n\nend.\n")
+GLOB_AFTER = GLOB_PAS.replace("  GTree := nil;\n",
+                              "  GTree := nil;\n  GTree.Free;\n  GLocal.Free;\n")
+GLOB2_PAS = (
+    "unit Glob2;\n\ninterface\n\nuses\n  Glob;\n\nprocedure Run2;\n\nimplementation\n\n"
+    "procedure Run2;\nbegin\n  Run;\nend;\n\nend.\n")
+GLOB2_AFTER = GLOB2_PAS.replace("  Run;\n", "  Run;\n  GTree.Remove(nil);\n")
+
+
+def test_n09_unit_level_variables_have_a_type(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Glob.pas": GLOB_PAS,
+                                          "Glob2.pas": GLOB2_PAS},
+                          {"Glob.pas": GLOB_AFTER, "Glob2.pas": GLOB2_AFTER})
+    heads = _by_head(found)
+    for rel, text, needle, head in (
+            ("Glob.pas", GLOB_AFTER, "GTree.Free", "Free auf GTree: TQueryTree"),
+            ("Glob.pas", GLOB_AFTER, "GLocal.Free", "Free auf GLocal: TQueryTree"),
+            ("Glob2.pas", GLOB2_AFTER, "GTree.Remove", "Remove auf GTree: TQueryTree")):
+        assert heads[f"### {rel}:{_line_no(text, needle)} {head}"][0] == _tree_head()
+
+
+COND_PAS = (
+    "unit Cond;\n\ninterface\n\nuses\n  Tree;\n\n"
+    "procedure Run(A, B: Boolean);\nprocedure Other(L: TQueryTree);\n\nimplementation\n\n"
+    "procedure Run(A, B: Boolean);\nbegin\n"
+    "  {$IF Defined(X)}\n  if A then begin\n"
+    "    {$IFDEF Y} Writeln('y'); {$ELSE} begin {$ENDIF}\n"
+    "  {$ELSEIF Defined(Z)}\n  if B then begin\n  {$IFEND}\n"
+    "    Writeln('x');\n  end;\nend;\n\n"
+    "procedure Other(L: TQueryTree);\nbegin\n  L := nil;\nend;\n\nend.\n")
+COND_AFTER = COND_PAS.replace("  L := nil;\n", "  L := nil;\n  L.Remove(nil);\n")
+BROKEN_PAS = (
+    "unit Broken;\n\ninterface\n\nuses\n  Tree;\n\nprocedure Run(A: Boolean; L: TQueryTree);\n\n"
+    "implementation\n\nprocedure Run(A: Boolean; L: TQueryTree);\nbegin\n"
+    "  {$IFDEF X}\n  if A then\n  {$ELSE}\n  if not A then begin\n  {$ENDIF}\n"
+    "    L := nil;\n  {$IFNDEF X}\n  end;\n  {$ENDIF}\nend;\n\nend.\n")
+BROKEN_AFTER = BROKEN_PAS.replace("    L := nil;\n", "    L := nil;\n    L.Remove(nil);\n")
+
+
+def test_n10_only_the_first_branch_of_conditional_code(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Cond.pas": COND_PAS,
+                                          "Broken.pas": BROKEN_PAS},
+                          {"Cond.pas": COND_AFTER, "Broken.pas": BROKEN_AFTER})
+    assert [e["lines"][:2] for e in found.entries] == [[
+        f"### Cond.pas:{_line_no(COND_AFTER, 'L.Remove')} Remove auf L: TQueryTree", _tree_head()]]
+    # Geht die Zählung auch im ersten Zweig nicht auf: nichts statt einer sicheren falschen Antwort.
+    assert found.unparsed == [("Broken.pas", kit.SKIP_UNBALANCED)]
+    assert kit.SKIP_UNBALANCED not in (kit.NOT_IN_TARGET, kit.SKIP_SYMLINK, kit.SKIP_SYNTAX)
+
+
+PLAIN_PAS = (
+    "unit Plain;\n\ninterface\n\ntype\n  TPlain = class\n  public\n    constructor Create;\n"
+    "  end;\n\nimplementation\n\nconstructor TPlain.Create;\nbegin\n  inherited Create;\nend;\n\n"
+    "end.\n")
+
+
+def test_n11_changed_inherited_create_of_an_owning_list(tmp_path):
+    kit = _kit()
+    tree_after = TREE_PAS.replace("inherited Create(True)", "inherited Create(False)")
+    plain_after = PLAIN_PAS.replace("inherited Create;", "inherited Create();")
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Plain.pas": PLAIN_PAS},
+                          {"Tree.pas": tree_after, "Plain.pas": plain_after})
+    line = _line_no(tree_after, "inherited Create(False)")
+    (entry,) = found.entries
+    assert entry["kind"] == "owner"
+    assert entry["lines"][:3] == [f"### Tree.pas:{line} inherited Create auf Self: TQueryTree",
+                                  _tree_head(), f"  inherited Create(False) at Tree.pas:{line}"]
+    assert entry["lines"][3].startswith("  Besitz (RTL): TObjectList<…>")
+
+
+SHARED_PAS = (
+    "unit Shared;\n\ninterface\n\nprocedure Check(A: Integer);\n\nimplementation\n\n"
+    "procedure Check(A: Integer);\nbegin\n  raise EShared.Create('s');\nend;\n\nend.\n")
+MAIN_PAS = (
+    "unit Main;\n\ninterface\n\nuses\n  Compat;\n\nprocedure Run;\n\nimplementation\n\n"
+    "procedure Run;\nbegin\n  Check(0);\nend;\n\nend.\n")
+
+
+def test_n12_delphi_symlinks_followed_and_outside_files_noted(tmp_path):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"lib/Shared.pas": SHARED_PAS, "app/Main.pas": MAIN_PAS},
+                        {"lib/Shared.pas": SHARED_PAS + "\n"})
+    _link_commit(root, {"app/Compat.pas": "../lib/Shared.pas", "app/Lost.pas": "../nirgends.pas"})
+    (root / "app" / "Main.pas").write_text(MAIN_PAS.replace("Check(0)", "Check(1)"),
+                                           encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "aufruf")
+    md = _counterparts_md(kit, root, "HEAD~1..HEAD")
+    impl = _line_no(SHARED_PAS, "procedure Check(A: Integer);\nbegin")
+    assert f"- Gegenstelle Check [app/Compat.pas:{impl}]: procedure Check(A: Integer)\n" in md
+    assert ("\n1 Delphi-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar (Symlink) — "
+            "dort keine Gegenstellen gesucht.\n") in md
+    assert "Python-Datei(en)" not in md
+
+
+RTL_PAS = (
+    "unit Rtl;\n\ninterface\n\nuses\n  System.Generics.Collections, Contnrs;\n\n"
+    "procedure Run(S: TObjectStack<TObject>; Q: TObjectQueue<TObject>; L: TObjectList);\n\n"
+    "implementation\n\n"
+    "procedure Run(S: TObjectStack<TObject>; Q: TObjectQueue<TObject>; L: TObjectList);\n"
+    "begin\n  S := nil;\nend;\n\nend.\n")
+RTL_AFTER = RTL_PAS.replace("  S := nil;\n", "  S := nil;\n  S.Extract;\n  Q.Extract;\n"
+                            "  L.Extract(nil);\n")
+
+
+def test_n13_object_stack_queue_and_contnrs_list(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Rtl.pas": RTL_PAS}, {"Rtl.pas": RTL_AFTER})
+    assert [(e["lines"][0], len(e["lines"])) for e in found.entries] == [
+        (f"### Rtl.pas:{_line_no(RTL_AFTER, 'S.Extract')} Extract auf S: TObjectStack<TObject>", 2),
+        (f"### Rtl.pas:{_line_no(RTL_AFTER, 'Q.Extract')} Extract auf Q: TObjectQueue<TObject>", 2),
+        (f"### Rtl.pas:{_line_no(RTL_AFTER, 'L.Extract')} Extract auf L: TObjectList", 2)]
+    stack, queue, plain = (e["lines"][1] for e in found.entries)
+    assert stack.startswith("  Besitz (RTL): TObjectStack<…>: OwnsObjects standardmäßig wahr")
+    assert queue.startswith("  Besitz (RTL): TObjectQueue<…>: OwnsObjects standardmäßig wahr")
+    assert plain.startswith("  Besitz (RTL): TObjectList (Contnrs")
+    assert "<…>" not in plain
+
+
+SCOPES_PAS = (
+    "unit Scopes;\n\ninterface\n\nuses\n  Tree, System.Classes, System.SysUtils, "
+    "System.Generics.Collections;\n\nprocedure Run;\n\nimplementation\n\n"
+    "procedure Run;\nvar\n  Proc: TProc<TQueryTree>;\nbegin\n"
+    "  begin\n    var L: TObjectList<TNode> := nil;\n    L := nil;\n  end;\n"
+    "  begin\n    var L: TStringList := nil;\n    L := nil;\n  end;\n"
+    "  Proc := procedure(L: TQueryTree)\n    begin\n      L := nil;\n    end;\nend;\n\nend.\n")
+SCOPES_AFTER = (SCOPES_PAS.replace("      L := nil;\n", "      L.Remove(nil);\n")
+                .replace("    L := nil;\n", "    L.Free;\n"))
+
+
+def test_n14_inline_and_anonymous_variables_by_visibility(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Scopes.pas": SCOPES_PAS},
+                          {"Scopes.pas": SCOPES_AFTER})
+    assert [e["lines"][0] for e in found.entries] == [
+        f"### Scopes.pas:{_line_no(SCOPES_AFTER, 'L.Free')} Free auf L: TObjectList<TNode>",
+        f"### Scopes.pas:{_line_no(SCOPES_AFTER, 'L.Remove')} Remove auf L: TQueryTree"]
+
+
+TRUNC_PAS = "unit Trunc;\n\ninterface\n\ntype\n  TR = record\n    case Tag:"
+
+
+def test_n15_truncated_variant_record_is_unparsed(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Trunc.pas": "unit Trunc;\n"}, {"Trunc.pas": TRUNC_PAS})
+    assert found == kit.Collected([], 0, [("Trunc.pas", kit.SKIP_UNBALANCED)])
+
+
+BIG_PAS = ("unit {};\n\ninterface\n\nprocedure X;\n\nimplementation\n\n"
+           "procedure X;\nbegin\nend;\n\nend.\n")
+LAZY_PAS = (
+    "unit Lazy;\n\ninterface\n\nuses\n  Big1, Big2, Big3;\n\nprocedure Check(A: Integer = 0);\n"
+    "procedure Run;\n\nimplementation\n\nprocedure Check(A: Integer);\nbegin\nend;\n\n"
+    "procedure Run;\nbegin\n  Check(0);\nend;\n\nend.\n")
+
+
+def test_n19_used_units_scanned_only_on_demand(tmp_path, monkeypatch):
+    kit = _kit()
+    scanned = []
+
+    class Spy(kit._PasUnit):
+        def __init__(self, rel, text):
+            scanned.append(rel)
+            super().__init__(rel, text)
+
+    monkeypatch.setattr(kit, "_PasUnit", Spy)
+    before = {f"Big{i}.pas": BIG_PAS.format(f"Big{i}") for i in (1, 2, 3)}
+    before["Lazy.pas"] = LAZY_PAS
+    found = _delphi_found(kit, tmp_path, before,
+                          {"Lazy.pas": LAZY_PAS.replace("Check(0)", "Check(1)")})
+    assert [e["lines"][0] for e in found.entries] == [
+        f"### Lazy.pas:{_line_no(LAZY_PAS, 'Check(0)')} ruft Check(...)"]
+    assert scanned == ["Lazy.pas"]
