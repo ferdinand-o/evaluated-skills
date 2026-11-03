@@ -37,6 +37,13 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
   Danach gilt die eigene Datei, dann die importierten Dateien und Pakete. Ohne Importbezug und
   mit mehr als `AMBIGUOUS_MAX` (3) gleichnamigen Definitionen gibt es nichts, die Stelle wird
   gezählt. Je Aufruf höchstens zwei Definitionen. Ein Klassenaufruf erreicht `__init__`.
+- **Attribut-Aufruf:** `modul.f()` und `Klasse.m()` gehen über den Import, auch wenn ein Modul
+  den Namen eine Ebene weiterreicht (`from .impl import load` in `pkg/__init__.py`). Ist der Typ
+  des Empfängers unbekannt (`finder.find()`, `self.x.m()`), gilt die einzige Klasse oder Methode
+  dieses Namens im Repo, markiert als „(Empfänger unbekannt, Name eindeutig)“ — nur wenn es genau
+  eine gibt und der Name keine Methode eingebauter oder Stdlib-Typen ist (`BUILTIN_METHOD_NAMES`:
+  `start`, `get`, `copy`, `append`, `items`, `join`, `read` …); sonst gibt es nichts, und die
+  Stelle wird gezählt. `m.start()` auf einem Regex-Treffer bleibt also ungelöst.
 - **Je Definition:** Signatur, erste Docstring-Zeile (`Doc:`, höchstens 240 Zeichen),
   `wirft:` und darunter bis zu acht `raise`-Zeilen. Die `raise`-Stellen werden transitiv über
   Aufrufe im selben Modul gesucht, `RAISE_DEPTH` (2) Ebenen tief.
@@ -75,7 +82,7 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
 | Aufrufe ohne Importbezug mit mehr als 3 gleichnamigen Definitionen | fehlen, gezählt als „nicht aufgelöst“ |
 | Aufrufe, deren Definition nichts wirft (Delphi: auch ohne Default) und ohne geändertes Argument | fehlen, nicht gezählt |
 | `raise` in anderen Modulen bzw. Units als der Definition | fehlen in `wirft:` |
-| Typinferenz: Ausdrücke, Funktionsergebnisse, Delphi-`with` und Indexer | Python löst `obj.name(...)` nur über ein Modul im Repo, `self`/`cls`/`super()`, eine bekannte Klasse oder `Klasse(...)` auf, sonst zählt die Stelle als nicht aufgelöst; Delphi zeigt keine Gegenstelle |
+| Typinferenz: Ausdrücke, Funktionsergebnisse, Delphi-`with` und Indexer | Python löst `obj.name(...)` mit unbekanntem Empfänger nur bei eindeutigem, nicht eingebautem Methodennamen auf (markiert), sonst zählt die Stelle; Delphi zeigt keine Gegenstelle |
 | Delphi: andere Zweige von `{$IFDEF}`, `{$I}`-Dateien | geänderte Zeilen dort stehen mit Zahl in der Dateiliste |
 | Dateien am ZIEL, die der Sammler nicht lesen kann | Dateiliste: „Datei am ZIEL nicht lesbar: <grund>“ |
 
