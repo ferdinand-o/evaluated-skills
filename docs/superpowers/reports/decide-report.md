@@ -120,7 +120,8 @@ enthalten.
 - **Worktree für Task 1 ging von `main` aus,** nicht vom Planstand; die Arbeit kam per
   Cherry-Pick in den Branch.
 - **Zwei Commit-Messages (29be62f, dd70964) nannten Planänderungen, die nicht gelandet waren.**
-  Nachgeholt (unter anderem ef8b08f, 950b05b); die Commits bleiben wie sie sind.
+  29be62f (Angleichung des Entwurfs) nachgeholt in 211c683, dd70964 (Planänderung zu Task 4)
+  nachgeholt in ef8b08f; die Commits bleiben wie sie sind.
 - **Der Merge von Task 7 kam vor dem `verify`-Verdikt.** Ursache war ein Planfehler in
   Files/Produces von Task 7; der Plan wurde danach angepasst (vgl. 076a258).
 - **`reversibility.md` beschrieb Eval 3.** Der Hauptagent hatte das selbst so verlangt; ersetzt
