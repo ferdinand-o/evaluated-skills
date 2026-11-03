@@ -2598,8 +2598,9 @@ def test_fix_task_verdict_rows_validated_by_id_and_file_line(tmp_path, capsys):
     assert _fix_main(ok, out, capsys)[0] == 0
     assert "F1" in _criteria((out / "fix-task.md").read_text(encoding="utf-8"))
     (out / "fix-task.md").unlink()
-    # Fehlende id in Dateizeile 4; dasselbe für leere und Nicht-Text-id.
-    for n, bad_id in enumerate((None, "", "  ", 7)):
+    # Fehlende id in Dateizeile 4; dasselbe für leere id und eine, die weder Text noch ganze Zahl ist
+    # (eine ganze Zahl nimmt fix-task an wie vor Spec 26, siehe test_final_b_f5_numeric_verdict_id).
+    for n, bad_id in enumerate((None, "", "  ", True, 1.5)):
         row = _verdict("X", "src/c.py", "plausibel")
         if bad_id is None:
             del row["id"]
@@ -2651,7 +2652,8 @@ def test_fix_task_repo_path_normalised_and_restricted(tmp_path, monkeypatch, cap
     block = ptt.parse_task_machine_block(ptt.fix_task_from_verdicts(list_file, out).read_text(encoding="utf-8"))
     assert block["allowlist"] == ["src/a.py"]
     shutil.rmtree(out)
-    for bad in (".", "./", "", "src/*", "src/a?.py", "src/[ab].py", "*.py", "src", "./src", "src/", "C:/x", "C:", "c:\\x"):
+    # `[`/`]` sind erlaubt (test_final_b_f2_brackets_in_path_are_a_file), `*` und `?` nicht.
+    for bad in (".", "./", "", "src/*", "src/a?.py", "*.py", "src", "./src", "src/", "C:/x", "C:", "c:\\x"):
         v = _write_rows(tmp_path / "bad.jsonl", [_verdict("F1", bad, "bestätigt")])
         code, err = _fix_main(v, out, capsys)
         assert code == 1 and err.startswith("fix-task: F1 (Zeile 1)"), (bad, err)
@@ -2701,7 +2703,9 @@ def test_fix_task_accepts_bare_findings_and_summary_null(tmp_path, capsys):
 
 
 def test_fix_task_line_normalised_like_review_kit(tmp_path, capsys):
-    """F4: line wird wie review_kit._clean_line gelesen (Zahl ≥ 0 oder `a-b`); sonst Exit 1 mit dem Fund."""
+    """F4: line wird wie review_kit._clean_line gelesen (Zahl ≥ 0 oder `a-b`). Ein falscher Typ ist in
+    jedem Format Exit 1 mit dem Fund; Freitext ist es nur in findings.json von merge — in der
+    /code-review-Liste und verdicts.jsonl bleibt er stehen wie vor Spec 26 (finaler Prüfpunkt, F4)."""
     out = tmp_path / "tasks"
 
     def criteria_for(line, **extra):
@@ -2719,7 +2723,21 @@ def test_fix_task_line_normalised_like_review_kit(tmp_path, capsys):
     merged = criteria_for(None, sources=[{"line": "L3 - L4", "summary": "a", "failure_scenario": None},
                                          {"line": "9 bis 10", "summary": "b", "failure_scenario": None}])
     assert "(src/a.py:3-10)" in merged and "- 3-4: a" in merged and "- 9-10: b" in merged
-    for bad in ("abc", -5, "L12 - ", "1-2-3", "12:14", [1], True, 1.5):
+    for text in ("abc", "L12 - ", "1-2-3", "12:14"):
+        assert f"(src/a.py:{text})" in criteria_for(text), text
+        assert f"- {text}: x" in criteria_for(1, sources=[{"line": text, "summary": "x"}]), text
+        row = _verdict("F1", "src/a.py", "bestätigt", lines=text)
+        crit = _criteria(ptt.fix_task_from_verdicts(_write_rows(tmp_path / "v.jsonl", [row]), out)
+                         .read_text(encoding="utf-8"))
+        assert f"(src/a.py:{text})" in crit, text
+        strict = _dr_write(tmp_path / "f.json", [{"file": "src/b.py", "line": 1, "summary": "ok"},
+                                                 {"file": "src/a.py", "line": text, "summary": "S"}])
+        code, err = _fix_main(strict, out, capsys)
+        assert code == 1 and err.startswith("fix-task: Fund 2: line "), (text, err)
+        strict = _dr_write(tmp_path / "f.json", [{"file": "src/a.py", "line": 1, "summary": "S",
+                                                  "sources": [{"line": text, "summary": "x"}]}])
+        assert _fix_main(strict, out, capsys)[1].startswith("fix-task: Fund 1: Quelle 1: line "), text
+    for bad in (-5, [1], True, 1.5):
         lst = tmp_path / "bad.json"
         lst.write_text(json.dumps([{"file": "src/b.py", "line": 1, "summary": "ok"},
                                    {"file": "src/a.py", "line": bad, "summary": "S"}]), encoding="utf-8")
@@ -2735,3 +2753,167 @@ def test_fix_task_line_normalised_like_review_kit(tmp_path, capsys):
     crit = _criteria(ptt.fix_task_from_verdicts(_write_rows(tmp_path / "v.jsonl", [row]), tmp_path / "t2")
                      .read_text(encoding="utf-8"))
     assert "(src/a.py:12-14)" in crit
+
+
+# --------------------------------------------------------------------------
+# Finaler Prüfpunkt, Paket B: fix-task nimmt an, was merge und die alten Formen schreiben
+# --------------------------------------------------------------------------
+
+
+def _fix_repo(path):
+    """Ein Git-Repo unter `path` (Wurzel für fix-task, wenn das Arbeitsverzeichnis darin liegt)."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True, capture_output=True)
+    return path
+
+
+def _fix_list(path, items):
+    path.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_final_b_f1_finding_without_summary_key(tmp_path, capsys):
+    """F1: ein Fund ohne Schlüssel `summary`, aber mit failure_scenario, ist kein KeyError."""
+    lst = _fix_list(tmp_path / "l.json", [{"file": "a.py", "line": 3, "failure_scenario": "f"}])
+    code, err = _fix_main(lst, tmp_path / "tasks", capsys)
+    assert code == 0, err
+    assert _criteria((tmp_path / "tasks" / "fix-task.md").read_text(encoding="utf-8")) == (
+        "- Fund F1 (a.py:3): behoben und mit Test belegt\n  f")
+
+
+def test_final_b_f2_brackets_in_path_are_a_file(tmp_path, capsys):
+    """F2: `[` und `]` sind Teil echter Dateinamen; `*` und `?` bleiben Muster und werden abgewiesen."""
+    findings = _dr_write(tmp_path / "findings.json", [
+        {"file": "app/[id]/page.tsx", "line": 3, "summary": "S", "failure_scenario": None, "sources": []}])
+    code, err = _fix_main(findings, tmp_path / "tasks", capsys)
+    assert code == 0, err
+    block = ptt.parse_task_machine_block((tmp_path / "tasks" / "fix-task.md").read_text(encoding="utf-8"))
+    assert block["allowlist"] == ["app/[id]/page.tsx"]
+    for bad in ("app/*/page.tsx", "app/pa?e.tsx"):
+        lst = _fix_list(tmp_path / "bad.json", [{"file": bad, "line": 1, "summary": "S"}])
+        code, err = _fix_main(lst, tmp_path / "t2", capsys)
+        assert code == 1 and "Glob-Zeichen" in err, (bad, err)
+
+
+def test_final_b_f3_absolute_path_inside_repo_becomes_relative(tmp_path, monkeypatch, capsys):
+    """F3: ein absoluter Pfad im Repo (Wurzel: git toplevel vom cwd aus) wird relativ; außerhalb Exit 1."""
+    repo = _fix_repo(tmp_path / "repo")
+    (repo / "sub").mkdir()
+    monkeypatch.chdir(repo / "sub")
+    lst = _fix_list(tmp_path / "l.json", [{"file": str(repo / "src" / "a.py"), "line": 1, "summary": "S"}])
+    code, err = _fix_main(lst, tmp_path / "tasks", capsys)
+    assert code == 0, err
+    block = ptt.parse_task_machine_block((tmp_path / "tasks" / "fix-task.md").read_text(encoding="utf-8"))
+    assert block["allowlist"] == ["src/a.py"]
+    row = _verdict("F1", str(repo / "src" / "b.py"), "bestätigt", [str(repo / "src" / "c.py")])
+    code, err = _fix_main(_write_rows(tmp_path / "v.jsonl", [row]), tmp_path / "t2", capsys)
+    assert code == 0, err
+    block = ptt.parse_task_machine_block((tmp_path / "t2" / "fix-task.md").read_text(encoding="utf-8"))
+    assert block["allowlist"] == ["src/b.py", "src/c.py"]
+    for outside in (str(tmp_path / "other.py"), str(repo / ".." / "other.py")):
+        lst = _fix_list(tmp_path / "out.json", [{"file": outside, "line": 1, "summary": "S"}])
+        code, err = _fix_main(lst, tmp_path / "t3", capsys)
+        assert code == 1 and err.startswith("fix-task: Fund 1: ") and "nicht im Repo" in err, (outside, err)
+    assert not (tmp_path / "t3").exists()
+    # Ohne Git-Repo gilt das Arbeitsverzeichnis als Wurzel.
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.chdir(plain)
+    lst = _fix_list(tmp_path / "p.json", [{"file": str(plain / "x.py"), "line": 1, "summary": "S"}])
+    code, err = _fix_main(lst, tmp_path / "t4", capsys)
+    assert code == 0, err
+    assert ptt.parse_task_machine_block(
+        (tmp_path / "t4" / "fix-task.md").read_text(encoding="utf-8"))["allowlist"] == ["x.py"]
+
+
+def test_final_b_f4_free_text_lines_pass_unchanged_in_old_forms(tmp_path, capsys):
+    """F4: Freitext in `lines`/`line` bleibt in verdicts.jsonl und der /code-review-Liste stehen wie früher;
+    findings.json von merge ist schon normalisiert und bleibt streng."""
+    row = _verdict("F1", "a.py", "bestätigt", lines="12, 14")
+    code, err = _fix_main(_write_rows(tmp_path / "v.jsonl", [row]), tmp_path / "t1", capsys)
+    assert code == 0, err
+    assert "- Fund F1 (a.py:12, 14): behoben" in _criteria((tmp_path / "t1" / "fix-task.md").read_text(encoding="utf-8"))
+    lst = _fix_list(tmp_path / "l.json", [{"file": "a.py", "line": "12, 14", "summary": "S"}])
+    code, err = _fix_main(lst, tmp_path / "t2", capsys)
+    assert code == 0, err
+    assert "- Fund F1 (a.py:12, 14): behoben" in _criteria((tmp_path / "t2" / "fix-task.md").read_text(encoding="utf-8"))
+    strict = _dr_write(tmp_path / "findings.json", [{"file": "a.py", "line": "12, 14", "summary": "S",
+                                                      "failure_scenario": None, "sources": []}])
+    code, err = _fix_main(strict, tmp_path / "t3", capsys)
+    assert code == 1 and err.startswith("fix-task: Fund 1: line "), err
+
+
+def test_final_b_f5_numeric_verdict_id(tmp_path, capsys):
+    """F5: eine ganze Zahl als id steht im Kriterium wie früher; bool bleibt abgewiesen."""
+    row = _verdict(1, "a.py", "bestätigt", lines=12)
+    code, err = _fix_main(_write_rows(tmp_path / "v.jsonl", [row]), tmp_path / "t1", capsys)
+    assert code == 0, err
+    assert "- Fund 1 (a.py:12): behoben" in _criteria((tmp_path / "t1" / "fix-task.md").read_text(encoding="utf-8"))
+    code, err = _fix_main(_write_rows(tmp_path / "v.jsonl", [_verdict(True, "a.py", "bestätigt")]),
+                          tmp_path / "t2", capsys)
+    assert code == 1 and err.startswith("fix-task: Zeile 1: id "), err
+
+
+def test_final_b_f6_directory_check_against_repo_root(tmp_path, monkeypatch, capsys):
+    """F6: Verzeichnis heißt Verzeichnis im Repo, nicht im cwd; Symlink und Submodul sind Einträge wie Dateien."""
+    repo = _fix_repo(tmp_path / "repo")
+    (repo / "sub" / "src" / "a.py").mkdir(parents=True)   # im cwd ein Ordner, im Repo nicht
+    (repo / "realdir").mkdir()
+    (repo / "link").symlink_to(repo / "realdir", target_is_directory=True)
+    (repo / "mod").mkdir()
+    (repo / "mod" / ".git").write_text("gitdir: ../.git/modules/mod\n", encoding="utf-8")
+    monkeypatch.chdir(repo / "sub")
+    lst = _fix_list(tmp_path / "l.json", [{"file": p, "line": 1, "summary": "S"} for p in ("src/a.py", "link", "mod")])
+    code, err = _fix_main(lst, tmp_path / "t1", capsys)
+    assert code == 0, err
+    assert ptt.parse_task_machine_block(
+        (tmp_path / "t1" / "fix-task.md").read_text(encoding="utf-8"))["allowlist"] == ["src/a.py", "link", "mod"]
+    for bad in ("realdir", "sub", "sub/src/a.py"):
+        lst = _fix_list(tmp_path / "bad.json", [{"file": bad, "line": 1, "summary": "S"}])
+        code, err = _fix_main(lst, tmp_path / "t2", capsys)
+        assert code == 1 and "ist ein Verzeichnis" in err, (bad, err)
+
+
+def test_final_b_f7_meta_only_object_is_findings_json_without_findings(tmp_path, capsys):
+    """F7: ein Objekt nur mit `_meta` ist ein findings.json ohne Funde, keine Verdikt-Zeile."""
+    meta_only = tmp_path / "findings.json"
+    meta_only.write_text(json.dumps({"_meta": {"skill": "deep-review"}}), encoding="utf-8")
+    code, err = _fix_main(meta_only, tmp_path / "t1", capsys)
+    assert code == 1 and "findings.json ohne Funde" in err, err
+    assert not (tmp_path / "t1").exists()
+
+
+def test_final_b_f8_line_suffix_in_file(tmp_path, monkeypatch, capsys):
+    """F8: `file: "a.py:12"` mit leerer `line` und vorhandener `a.py` wird getrennt; sonst Exit 1 mit Grund."""
+    repo = _fix_repo(tmp_path / "repo")
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "b.py:3").write_text("x = 1\n", encoding="utf-8")   # ein Dateiname mit Doppelpunkt bleibt
+    monkeypatch.chdir(repo)
+    lst = _fix_list(tmp_path / "l.json", [{"file": "a.py:12", "line": None, "summary": "S"},
+                                          {"file": "a.py:L3-L5", "line": "", "summary": "T"},
+                                          {"file": "b.py:3", "line": 7, "summary": "U"}])
+    code, err = _fix_main(lst, tmp_path / "t1", capsys)
+    assert code == 0, err
+    text = (tmp_path / "t1" / "fix-task.md").read_text(encoding="utf-8")
+    assert ptt.parse_task_machine_block(text)["allowlist"] == ["a.py", "b.py:3"]
+    assert "(a.py:12)" in _criteria(text) and "(a.py:3-5)" in _criteria(text) and "(b.py:3:7)" in _criteria(text)
+    row = _verdict("F1", "a.py:9", "bestätigt", lines=None)
+    code, err = _fix_main(_write_rows(tmp_path / "v.jsonl", [row]), tmp_path / "t2", capsys)
+    assert code == 0, err
+    assert "(a.py:9)" in _criteria((tmp_path / "t2" / "fix-task.md").read_text(encoding="utf-8"))
+    for item, reason in (({"file": "a.py:12", "line": 4, "summary": "S"}, "line"),
+                         ({"file": "missing.py:12", "line": None, "summary": "S"}, "missing.py")):
+        lst = _fix_list(tmp_path / "bad.json", [item])
+        code, err = _fix_main(lst, tmp_path / "t3", capsys)
+        assert code == 1 and err.startswith("fix-task: Fund 1: ") and "Zeilenangabe" in err and reason in err, err
+    assert not (tmp_path / "t3").exists()
+
+
+def test_final_b_f9_identical_sources_rendered_once(tmp_path):
+    """F9: gleiche Quellen aus zwei Paketen nennen den Fehler im Kriterium einmal."""
+    src = {"reused_from": None, "line": 3, "summary": "s", "failure_scenario": "f"}
+    findings = _dr_write(tmp_path / "findings.json", [
+        {"file": "a.py", "line": 3, "summary": "s", "failure_scenario": "f", "packets": ["p1", "p2"],
+         "reused_from": None, "sources": [{"packet": "p1", **src}, {"packet": "p2", **src}]}])
+    criteria = _criteria(ptt.fix_task_from_verdicts(findings, tmp_path / "tasks").read_text(encoding="utf-8"))
+    assert criteria == "- Fund F1 (a.py:3): behoben und mit Test belegt\n  - 3: s; f"
