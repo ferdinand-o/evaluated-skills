@@ -152,9 +152,15 @@ wörtlich kopierbar: `--` im Thema wird dort `‐‐` (U+2010), weil `--` in ein
 erlaubt ist und `-->` ihn schlösse. Große Fragen zum Thema nimmt brief aus dem Protokoll der Sitzung
 und direkt aus der Ablage — sie gehört dem Repo, nicht der Sitzung: jeder Block, dessen `Thema:` nach
 `_norm` gleich `--topic` ist, auch aus einer anderen Sitzung und ohne Protokollzeile; jede Frage
-(`D-<n>` und gleiche Frage) steht nur einmal da. Feste Vorgaben beginnen mit jeder offenen großen
+(`D-<n>` und gleiche Frage) steht nur einmal da. Ist die Ablage unlesbar oder überspringt die
+Konsumenten-Regel sie, beginnen Feste Vorgaben mit „- Ablage docs/big-decisions.md nicht gelesen
+(<Grund>) — offene große Fragen zum Thema möglich; nichts entscheiden, was teuer umkehrbar ist, sondern
+zurückgeben“ (fehlt sie, steht nichts da). Dann folgt jede offene große
 Frage des Themas als „- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen“ (Spec 28,
-Ablauf 4: bis zur Freigabe unterbleibt die ganze Antwort), dann alle Regeln mit Datei und Zeile
+Ablauf 4: bis zur Freigabe unterbleibt die ganze Antwort) und jeder offene Block ohne Thema (Zeile
+`Thema:` fehlt oder leer, etwa von Hand bearbeitet) als „- D-<n> offen, ohne Thema: <frage> — prüfen,
+ob sie das Thema betrifft“; ein Block mit abweichendem Thema bleibt draußen — ob das Thema passend
+gewählt ist, prüft das Skript nicht (G1). Dann alle Regeln mit Datei und Zeile
 (einmal gelesen über `read_rules`; unlesbare Regeldateien meldet brief wie add). Schon entschieden
 sind die Einträge der Sitzung mit gleichem Thema (nach `_norm`; `—`, wenn keiner) und die Blöcke des
 Themas aus der Ablage, die `freigegeben` sind — mit Antwort; bei Quelle „Auftrag: „<Zitat>““ statt
@@ -164,15 +170,18 @@ Themas aus der Ablage, die `freigegeben` sind — mit Antwort; bei Quelle „Auf
 D-<n> Status unbekannt (<grund>): <frage> — nicht entscheiden, nicht darauf aufbauen“ unter Feste
 Vorgaben. Rückgabe ist die feste Form `RETURN_FORM` und der Satz für Subagenten aus Spec 28, Ablauf 5,
 den `load_subagent_sentence` aus dem Abschnitt `## Der Satz für Subagenten` in `references/brief.md`
-liest (das eine Zitat, jede Zeile mit `> `); fehlt er oder parst er nicht, endet `brief --topic` mit
+liest (das eine Zitat, jede Zeile mit `> `; eine Zeile direkt danach, die mit ```` ``` ````, `~~~`,
+`- `, `* `, `+ `, einer Ziffer mit `. `, `#` oder `<!--` beginnt, beendet es wie in Markdown); fehlt er
+oder parst er nicht, endet `brief --topic` mit
 Exit 2 und schreibt nichts — die Meldung nach Ursache: „ungeprüft — references/brief.md nicht lesbar
 (<Ursache>)“, „… Satz für Subagenten mehrfach in references/brief.md“, „… Satz für Subagenten fehlt in
 references/brief.md“, „… references/brief.md:<n>: … ohne „>““ (eine Zeile ohne `>` mitten im Zitat
 kürzte den Satz still). Frage, Anlass und Wo nachsehen bleiben leer für den Hauptagenten. Bleiben
 dafür keine drei Zeilen mehr (mehr als 22 ohne Kopf), sagt die Ausgabe „Hinweis: Auftrag hat schon <n>
-Zeilen ohne Kopf, höchstens 25; für Frage, Anlass und Wo nachsehen bleiben <m> Zeilen, mindestens 3
-nötig — Regeln kürzen, die Zeilen zu offenen Fragen nie“ (Exit bleibt 0). Ist das Protokoll unlesbar
-oder überspringt es die Konsumenten-Regel, Exit 1, kein Auftrag. Den Pfad nennt die Ausgabe relativ
+Zeilen ohne Kopf, höchstens 25 (davon <r> Regeln, <d> unter Schon entschieden, <o> zu offenen Fragen);
+für Frage, Anlass und Wo nachsehen bleiben <m> Zeilen, mindestens 3 nötig — Regeln oder ältere Einträge
+unter Schon entschieden kürzen, die Zeilen zu offenen Fragen nie“ (Exit bleibt 0). Ist das Protokoll
+unlesbar oder überspringt es die Konsumenten-Regel, Exit 1, kein Auftrag. Den Pfad nennt die Ausgabe relativ
 zur Wurzel. `brief --check <datei>` (`check_brief`) löst einen relativen Pfad, der im
 Arbeitsverzeichnis fehlt, gegen die Repo-Wurzel auf (die `main` schon kennt) und meldet mehr als 25
 Zeilen mit Text ohne Kopfzeile (Leerzeilen zählen nicht), jede Überschrift außer den sechs Feldern —
@@ -182,7 +191,8 @@ egal; Grenze ist jedes Zeichen außer Buchstabe und Ziffer, auch `_`) — Exit 1
 sonst 0. Den Satz für Subagenten prüft es bewusst nicht (unterrichten, nicht prüfen; G1). Die
 Wortliste liest `load_wordlist` aus dem Abschnitt `## Wortliste` in `references/brief.md` — der einen
 Quelle für Mensch und Parser; dort ist jede nicht-leere Zeile ein Listenpunkt `- `/`* ` mit Wort in
-Backticks, jede andere ein Problem mit Zeilennummer. Beide Abschnitte liest `_section_lines`: bis zur
+Backticks, jede andere ein Problem mit Zeilennummer. Beide Abschnitte liest `_section_lines`: ab der
+ersten passenden Überschrift außerhalb eines Codezauns (ein Beispiel im Zaun zählt nicht) bis zur
 nächsten Überschrift außerhalb eines Codezauns, wie in check_brief. Fehlt sie oder parst sie nicht, ist die Datei
 nicht lesbar, fehlt ihr die Kopfzeile von decide oder ist `schema` höher als 1, endet `brief --check`
 mit Exit 2 „ungeprüft — …“ auf stderr, nie mit Erfolg.
@@ -269,9 +279,14 @@ SENTENCE_HEADING = "## Der Satz für Subagenten"
 RETURN_FORM = ("Je Option: Belege `datei:zeile`, Folgen, Umkehrbarkeit; dann eine Empfehlung mit Grund. "
                "Kleine Entscheidungen unterwegs mit Belegzeile `gesucht: … — Treffer: datei:zeile`.")
 NOT_DECIDED = "nicht entscheiden, nicht darauf aufbauen"
+LEDGER_UNREAD = ("offene große Fragen zum Thema möglich; nichts entscheiden, was teuer umkehrbar ist, "
+                 "sondern zurückgeben")
+NO_TOPIC_CHECK = "prüfen, ob sie das Thema betrifft"
 _HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<name>.*?)\s*#*\s*$")
 _FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 _QUOTE_RE = re.compile(r"^ {0,3}>\s?(?P<text>.*)$")
+# Beginnt eine Zeile direkt nach einem Zitat so, endet das Zitat wie in Markdown (load_subagent_sentence).
+_QUOTE_END_RE = re.compile(r"^ {0,3}(?:```|~~~|[-*+] |\d+\. |#|<!--)")
 
 
 class Category(NamedTuple):
@@ -1689,9 +1704,10 @@ def _fence_step(fence, line):
 
 
 def _section_lines(path, heading):
-    """(Zeilen, Problem) des Abschnitts `heading` (`## …`) in `path`, bei jedem Aufruf neu gelesen:
-    Zeilen als (Nummer, Zeile, außerhalb eines Codezauns) bis zur nächsten Überschrift außerhalb eines
-    Codezauns (`_fence_step`). Problem: None, oder „<datei> fehlt“, „<datei> nicht lesbar (<Ursache>)“,
+    """(Zeilen, Problem) des Abschnitts `heading` (`## …`) in `path`, bei jedem Aufruf neu gelesen; der
+    Abschnitt beginnt an der ersten Überschrift `heading` außerhalb eines Codezauns (ein Beispiel im Zaun
+    zählt nicht). Zeilen als (Nummer, Zeile, außerhalb eines Codezauns) bis zur nächsten Überschrift
+    außerhalb eines Codezauns (`_fence_step`). Problem: None, oder „<datei> fehlt“, „<datei> nicht lesbar (<Ursache>)“,
     „<datei>: kein Abschnitt „<heading>““; dann sind die Zeilen None. Für `load_wordlist` und
     `load_subagent_sentence`."""
     where = reference_shown(path)
@@ -1702,7 +1718,12 @@ def _section_lines(path, heading):
     if text is None:
         return None, f"{where} fehlt"
     lines = text.splitlines()
-    start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+    start, fence = None, None
+    for i, line in enumerate(lines):
+        fence, plain = _fence_step(fence, line)
+        if plain and line.strip() == heading:
+            start = i
+            break
     if start is None:
         return None, f"{where}: kein Abschnitt „{heading}“"
     section, fence = [], None
@@ -1755,7 +1776,9 @@ def load_subagent_sentence(path):
     fehlt“, „references/brief.md nicht lesbar (<Ursache>)“, „Satz für Subagenten fehlt in
     references/brief.md (<grund>)“ (kein Abschnitt, kein oder leeres Zitat), „Satz für Subagenten
     mehrfach in references/brief.md (Zeile <n> …)“, „references/brief.md:<n>: … ohne „>““ für eine
-    nicht-leere Zeile ohne `>` direkt im Zitat — sie würde den Satz sonst still kürzen."""
+    nicht-leere Zeile ohne `>` direkt im Zitat — sie würde den Satz sonst still kürzen. Beginnt diese
+    Zeile mit ```` ``` ````, `~~~`, `- `, `* `, `+ `, einer Ziffer mit `. `, `#` oder `<!--`
+    (`_QUOTE_END_RE`), endet das Zitat dort wie in Markdown; nur andere Textzeilen sind ein Problem."""
     where = reference_shown(path)
     missing = f"Satz für Subagenten fehlt in {where}"
     section, problem = _section_lines(path, SENTENCE_HEADING)
@@ -1771,7 +1794,7 @@ def load_subagent_sentence(path):
             quotes.append([])
         if quote:
             quotes[-1].append(quote.group("text"))
-        elif inside and line.strip():
+        elif inside and line.strip() and not _QUOTE_END_RE.match(line):
             return None, (f"{where}:{number}: „{line.strip()}“ setzt das Zitat ohne „>“ fort — jede Zeile "
                           "des Satzes beginnt mit „> “")
         inside = bool(quote)
@@ -1823,19 +1846,27 @@ def _block_line(did, question, group, unknown):
 
 
 def _entry_lines(root, entries, topic):
-    """(Schon entschieden, Feste Vorgaben zu großen Fragen, Hinweise) für das Thema `topic`: zuerst die
+    """(Schon entschieden, Feste Vorgaben zu großen Fragen, Hinweise, Zahl der Zeilen zur nicht gelesenen
+    Ablage am Anfang der Feste Vorgaben) für das Thema `topic`: zuerst die
     Einträge `entries` der Sitzung in Protokollreihenfolge, dann jeder weitere Block der Ablage, dessen
     Thema nach `_norm` gleich `topic` ist — die Ablage gehört dem Repo, eine offene Frage aus einer
     anderen Sitzung bindet den Subagenten genauso. Kleine und Annahmen sind entschieden
     (`_decided_line`); eine große Frage ist `D-<n>` mit gleicher Frage (nach einer verworfenen Ablage
     kehren Nummern wieder) und steht nur einmal da, eingeordnet von `_block_line`. Fehlt die Ablage,
     überspringt die Konsumenten-Regel sie (dann ein Hinweis), ist der Status großer Protokolleinträge
-    unbekannt."""
+    unbekannt. Ist die Ablage unlesbar oder übersprungen, beginnen die Feste Vorgaben mit „- Ablage
+    docs/big-decisions.md nicht gelesen (<Grund>) — offene große Fragen zum Thema möglich; nichts
+    entscheiden, was teuer umkehrbar ist, sondern zurückgeben“ (`LEDGER_UNREAD`); fehlt sie, nicht. Ein
+    offener Block ohne Thema (Zeile fehlt oder leer) steht als „- D-<n> offen, ohne Thema: <frage> —
+    prüfen, ob sie das Thema betrifft“ darunter; ein abweichendes Thema bleibt draußen — ob es passt,
+    ist G1."""
     blocks, problem, exists = _read_ledger(root)
-    notes, unknown = [], None
+    notes, unknown, unread = [], None, []
     if problem:
         notes.append(f"Hinweis: {problem}")
         unknown = f"{LEDGER_SHOWN} übersprungen"
+        why = problem.removeprefix(f"{LEDGER_SHOWN} ").removesuffix(SKIPPED)
+        unread.append(f"- Ablage {LEDGER_SHOWN} nicht gelesen ({why}) — {LEDGER_UNREAD}")
     elif not exists:
         unknown = f"{LEDGER_SHOWN} fehlt"
     groups = {}
@@ -1854,11 +1885,16 @@ def _entry_lines(root, entries, topic):
         (decided if ok else pending).append(line)
     wanted = _norm(topic)
     for key, group in groups.items():
-        if key not in done and any(_norm(b["topic"]) == wanted for b in group):
+        if key in done:
+            continue
+        if any(_norm(b["topic"]) == wanted for b in group):
             done.add(key)
             ok, line = _block_line(*key, group, None)
             (decided if ok else pending).append(line)
-    return decided, pending, notes
+        elif any(b["status"] == "offen" and line_value(b["topic"]) == NONE for b in group):
+            done.add(key)
+            pending.append(f"- {key[0]} offen, ohne Thema: {key[1]} — {NO_TOPIC_CHECK}")
+    return decided, unread + pending, notes, len(unread)
 
 
 def _comment_safe(text):
@@ -1896,17 +1932,20 @@ def _write_new(path, text):
 
 def write_brief(root, session, topic, home):
     """(exit, meldung): schreibt `.skills/cache/decide/<session>/brief-<n>.md` mit Kopfzeile und den
-    sechs Feldern aus `references/brief.md` als `## <Feld>`. Das Skript füllt Feste Vorgaben (zuerst
-    jede offene große Frage des Themas als „- D-<n> offen: <frage> — nicht entscheiden, nicht darauf
-    aufbauen“ und jede, deren Status die Ablage nicht sagt, als „Status unbekannt“; dann jede Regel aus
-    `read_rules` mit Datei und Zeile), Schon entschieden (Einträge der Sitzung, deren Thema nach `_norm`
+    sechs Feldern aus `references/brief.md` als `## <Feld>`. Das Skript füllt Feste Vorgaben (zuerst,
+    ist die Ablage unlesbar oder übersprungen, „- Ablage docs/big-decisions.md nicht gelesen (<Grund>) —
+    …“; dann jede offene große Frage des Themas als „- D-<n> offen: <frage> — nicht entscheiden, nicht
+    darauf aufbauen“, jede, deren Status die Ablage nicht sagt, als „Status unbekannt“ und jeden offenen
+    Block ohne Thema als „- D-<n> offen, ohne Thema: <frage> — prüfen, ob sie das Thema betrifft“; dann
+    jede Regel aus `read_rules` mit Datei und Zeile), Schon entschieden (Einträge der Sitzung, deren Thema nach `_norm`
     gleich `topic` ist, und freigegebene oder abgelehnte Blöcke des Themas aus der Ablage, aus jeder
     Sitzung — `_entry_lines`; `—`, wenn keiner) und Rückgabe (`RETURN_FORM` und der Satz aus
     `load_subagent_sentence`); Frage, Anlass und Wo nachsehen bleiben leer. `--` im Thema wird in der
     Kopfzeile `‐‐` (`_comment_safe`): Sie nennt den Befehl lesbar, bei Themen mit `--` nicht wörtlich
     kopierbar. Unlesbare Regeldateien meldet es wie add und schreibt trotzdem. Bleiben für die drei
     leeren Felder keine `BRIEF_EMPTY` Zeilen unter `BRIEF_LIMIT`, sagt ein Hinweis das mit den
-    verbleibenden Zeilen (Exit bleibt 0) und rät, Regeln zu kürzen, nie die Zeilen zu offenen Fragen.
+    verbleibenden Zeilen und ihrer Herkunft (Regeln, Schon entschieden, offene Fragen; Exit bleibt 0) und
+    rät, Regeln oder ältere Einträge unter Schon entschieden zu kürzen, nie die Zeilen zu offenen Fragen.
     Fehlt der Satz für Subagenten in `references/brief.md` oder parst er nicht: Exit 2 „ungeprüft — …“
     mit der Ursache aus `load_subagent_sentence`, nichts geschrieben. Ein unlesbares Protokoll oder eines ohne
     passende Kopfzeile: Exit 1, kein Auftrag — Schon entschieden wäre sonst still leer. Die Nummer ist
@@ -1931,7 +1970,7 @@ def write_brief(root, session, topic, home):
             return 1, problem
         entries = [e for e in parse_rows(text) if _norm(e["thema"]) == _norm(topic)]
     rules, _, notes = read_rules(root, home)
-    decided, pending, ledger_notes = _entry_lines(root, entries, topic)
+    decided, pending, ledger_notes, unread = _entry_lines(root, entries, topic)
 
     body = [f"<!-- skill: {SKILL} | schema: {SCHEMA} | generated: python decide_log.py brief "
             f"--topic {_comment_safe(shlex.quote(topic))} -->",
@@ -1954,15 +1993,19 @@ def write_brief(root, session, topic, home):
                    "kein Auftrag geschrieben.")
     path_shown = shown(brief_path(root, session, number), root)
     count = sum(1 for line in content.splitlines()[1:] if line.strip())
+    open_count = len(pending) - unread
     lines = notes + ledger_notes + [
         f"Auftrag geschrieben: {path_shown} — Schon entschieden: {len(decided)}, Feste Vorgaben: "
         f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}"
-        + (f", {len(pending)} große Frage{'' if len(pending) == 1 else 'n'} ohne Freigabe" if pending else "") + ".",
+        + (f", {open_count} große Frage{'' if open_count == 1 else 'n'} ohne Freigabe" if open_count else "")
+        + ".",
         f"Frage, Anlass und Wo nachsehen ausfüllen (Feste Vorgaben ergänzen), dann brief --check {path_shown}."]
     if count > BRIEF_LIMIT - BRIEF_EMPTY:
-        lines.append(f"Hinweis: Auftrag hat schon {count} Zeilen ohne Kopf, höchstens {BRIEF_LIMIT}; für Frage, "
-                     f"Anlass und Wo nachsehen bleiben {max(BRIEF_LIMIT - count, 0)} Zeilen, mindestens "
-                     f"{BRIEF_EMPTY} nötig — Regeln kürzen, die Zeilen zu offenen Fragen nie")
+        lines.append(f"Hinweis: Auftrag hat schon {count} Zeilen ohne Kopf, höchstens {BRIEF_LIMIT} (davon "
+                     f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}, {len(decided)} unter Schon entschieden, "
+                     f"{len(pending)} zu offenen Fragen); für Frage, Anlass und Wo nachsehen bleiben "
+                     f"{max(BRIEF_LIMIT - count, 0)} Zeilen, mindestens {BRIEF_EMPTY} nötig — Regeln oder ältere "
+                     "Einträge unter Schon entschieden kürzen, die Zeilen zu offenen Fragen nie")
     notice = unversioned_notice(root, existed, True)
     if notice:
         lines.append(notice)

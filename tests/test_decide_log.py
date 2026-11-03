@@ -2146,9 +2146,10 @@ def test_brief_big_questions_by_ledger_status(decide_repo, capsys):
     assert code == 0 and "schema 1 erwartet, 2 gefunden" in message, message
     sections = brief_sections(brief_file(root, 2).read_text(encoding="utf-8"))
     assert sections["Schon entschieden"] == ["—"]
-    assert len(sections["Feste Vorgaben"]) == 3
+    assert len(sections["Feste Vorgaben"]) == 4
+    assert sections["Feste Vorgaben"][0].startswith("- Ablage docs/big-decisions.md nicht gelesen (")   # R3-F1
     assert all("Status unbekannt" in line and "nicht darauf aufbauen" in line
-               for line in sections["Feste Vorgaben"]), sections
+               for line in sections["Feste Vorgaben"][1:]), sections
 
     ledger.unlink()
     code, message = dl.write_brief(root, SESSION, "CLI", home)
@@ -2184,7 +2185,7 @@ def test_brief_warns_when_rules_alone_exceed_limit(decide_repo):
     code, message = dl.write_brief(root, SESSION, "CLI", home)
     assert code == 0, message
     assert "Hinweis: Auftrag hat schon 27 Zeilen ohne Kopf, höchstens 25" in message, message
-    assert "bleiben 0 Zeilen" in message and "Regeln kürzen" in message, message
+    assert "bleiben 0 Zeilen" in message and "Regeln oder ältere Einträge" in message, message
     assert len(brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]) == 18
     write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(13)))   # 22 Zeilen: noch gut (R2-F4)
     code, message = dl.write_brief(root, SESSION, "CLI", home)
@@ -2397,7 +2398,7 @@ def test_brief_open_questions_first_and_never_cut(decide_repo, capsys):
     assert code == 0, message
     rows_ = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]
     assert rows_[0].startswith("- D-1 offen: ") and all(r.startswith("- Regel ") for r in rows_[1:]), rows_
-    assert "Regeln kürzen, die Zeilen zu offenen Fragen nie" in message, message
+    assert "Schon entschieden kürzen, die Zeilen zu offenen Fragen nie" in message, message   # R3-F3
 
 
 def test_brief_duplicate_block_is_named(decide_repo, capsys):
@@ -2433,3 +2434,95 @@ def test_subagent_sentence_problem_by_cause(decide_repo, tmp_path, monkeypatch):
         code, message = dl.write_brief(root, SESSION, "CLI", home)
         assert code == 2 and message.startswith(start), message
     assert not brief_file(root).exists()
+
+
+# --- Prüfpunkt 4, Runde 3: Funde F1–F5 an brief -------------------------------------------
+
+UNREAD = "offene große Fragen zum Thema möglich; nichts entscheiden, was teuer umkehrbar ist, sondern zurückgeben"
+
+
+def test_brief_names_unread_ledger_in_fixed_rules(decide_repo, capsys):
+    """R3-F1: Ist die Ablage unlesbar oder übersprungen, steht das am Anfang von Feste Vorgaben — der
+    Subagent darf nicht glauben, es gebe keine offenen großen Fragen. Fehlt sie, bleibt der Auftrag still."""
+    root, home = decide_repo
+    assert big("--session", "A", *TWO, topic="CLI", question="Neue Abhängigkeit für die CLI?") == 0
+    capsys.readouterr()
+    ledger = root / "docs" / "big-decisions.md"
+    ledger.write_text(ledger.read_text(encoding="utf-8").replace("schema: 1", "schema: 2"), encoding="utf-8")
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    fixed = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]
+    assert fixed == [f"- Ablage docs/big-decisions.md nicht gelesen (schema 1 erwartet, 2 gefunden) — {UNREAD}"], fixed
+
+    ledger.unlink()
+    ledger.mkdir()                                                        # ein Ordner: nicht lesbar
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    [line] = brief_sections(brief_file(root, 2).read_text(encoding="utf-8"))["Feste Vorgaben"]
+    assert line.startswith("- Ablage docs/big-decisions.md nicht gelesen (nicht lesbar (") and line.endswith(UNREAD), line
+
+    ledger.rmdir()
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    assert brief_sections(brief_file(root, 3).read_text(encoding="utf-8"))["Feste Vorgaben"] == []
+
+
+def test_brief_names_open_block_without_topic(decide_repo, capsys):
+    """R3-F2: Ein offener Block ohne Zeile Thema (von Hand bearbeitet) steht unter Feste Vorgaben mit
+    dem Auftrag, zu prüfen, ob er das Thema betrifft; ein abweichendes Thema bleibt draußen."""
+    root, home = decide_repo
+    write_ledger(root, ledger_block(4, "offen", "api:app/", question="Logformat wechseln?"),
+                 ledger_block(5, "offen", "migration:migrations/", question="Spalte löschen?").replace("Thema: T\n", ""),
+                 ledger_block(6, "offen", "api:app/", question="Konfig umbenennen?").replace("Thema: T\n", "Thema:\n"),
+                 ledger_block(7, "freigegeben", "api:app/", question="Alias?").replace("Thema: T\n", ""))
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    fixed = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]
+    assert fixed == ["- D-5 offen, ohne Thema: Spalte löschen? — prüfen, ob sie das Thema betrifft",
+                     "- D-6 offen, ohne Thema: Konfig umbenennen? — prüfen, ob sie das Thema betrifft"], fixed
+
+
+def test_brief_hint_names_where_lines_come_from(decide_repo, capsys):
+    """R3-F3: Füllen erledigte Blöcke zum Thema die Zeilen, rät der Hinweis nicht nur „Regeln kürzen“,
+    sondern nennt die Herkunft und auch ältere Einträge unter Schon entschieden."""
+    root, home = decide_repo
+    write_ledger(root, *[ledger_block(n, "abgelehnt", "api:app/", question=f"Frage {n}?").replace("Thema: T", "Thema: CLI")
+                         for n in range(1, 16)])
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0, message
+    assert "Hinweis: Auftrag hat schon 23 Zeilen ohne Kopf, höchstens 25" in message, message
+    assert "0 Regeln, 15 unter Schon entschieden" in message, message
+    assert ("Regeln oder ältere Einträge unter Schon entschieden kürzen, die Zeilen zu offenen Fragen nie"
+            in message), message
+
+
+def test_subagent_sentence_ends_at_fence_or_list(decide_repo, tmp_path, monkeypatch):
+    """R3-F4: Ein Codezaun, ein Listenpunkt, eine Überschrift oder ein HTML-Kommentar direkt nach dem
+    Zitat beendet es wie in Markdown; nur andere Textzeilen setzen es ohne `>` fort."""
+    root, home = decide_repo
+    reference = tmp_path / "references" / "brief.md"
+    reference.parent.mkdir()
+    monkeypatch.setattr(dl, "BRIEF_REFERENCE", reference)
+    for after in ("```\nbeispiel\n```", "~~~\nx\n~~~", "- Punkt", "* Punkt", "+ Punkt", "1. Punkt",
+                  "#hashtag", "<!-- Kommentar -->"):
+        reference.write_text(f"## Der Satz für Subagenten\n\n> Ein Satz.\n{after}\n", encoding="utf-8")
+        assert dl.load_subagent_sentence(reference) == ("Ein Satz.", None), after
+    reference.write_text("## Der Satz für Subagenten\n\n> Ein Satz.\n```\nx\n```\n", encoding="utf-8")
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    reference.write_text("## Der Satz für Subagenten\n\n> Ein Satz,\nweiter.\n", encoding="utf-8")
+    sentence, problem = dl.load_subagent_sentence(reference)
+    assert sentence is None and "references/brief.md:4" in problem, problem
+
+
+def test_section_heading_inside_fence_is_not_the_section(decide_repo, tmp_path, monkeypatch, capsys):
+    """R3-F5: Eine Überschrift in einem Beispiel-Codezaun ist nicht der Anfang des Abschnitts."""
+    root, _ = decide_repo
+    reference = tmp_path / "references" / "brief.md"
+    reference.parent.mkdir()
+    reference.write_text("# Auftrag\n\nBeispiel:\n\n```\n## Wortliste\n- `foo`\n```\n\n## Wortliste\n\n- `sollte`\n"
+                         "\n## Der Satz für Subagenten\n\n~~~\n## Der Satz für Subagenten\n> Beispiel.\n~~~\n\n"
+                         "> Echter Satz.\n", encoding="utf-8")
+    assert dl.load_wordlist(reference) == (("sollte",), None)
+    assert dl.load_subagent_sentence(reference) == ("Echter Satz.", None)
+    monkeypatch.setattr(dl, "BRIEF_REFERENCE", reference)
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    path.write_text(filled_brief(), encoding="utf-8")
+    code, out, err = brief_check(capsys, path)
+    assert code == 0, (out, err)

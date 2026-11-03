@@ -23,9 +23,10 @@ Zeile mit `#` Text des Feldes. Ein Auftrag hat höchstens 25 Zeilen mit Text ohn
 Leerzeilen zählen nicht. Die Grenze ist gesetzt, nicht gemessen: Ein längerer Auftrag nimmt dem
 Subagenten den Vorteil des frischen Kontexts. Bleiben in einem Auftrag, wie `brief --topic` ihn
 schreibt, für Frage, Anlass und Wo nachsehen keine drei Zeilen mehr (mehr als 22, etwa bei vielen
-Regeln), sagt es „Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf, höchstens 25; für Frage, Anlass
-und Wo nachsehen bleiben <m> Zeilen, mindestens 3 nötig — Regeln kürzen, die Zeilen zu offenen Fragen
-nie“; geschrieben wird er trotzdem.
+Regeln oder erledigten Fragen zum Thema), sagt es „Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf,
+höchstens 25 (davon <r> Regeln, <d> unter Schon entschieden, <o> zu offenen Fragen); für Frage, Anlass
+und Wo nachsehen bleiben <m> Zeilen, mindestens 3 nötig — Regeln oder ältere Einträge unter Schon
+entschieden kürzen, die Zeilen zu offenen Fragen nie“; geschrieben wird er trotzdem.
 
 ## Die sechs Felder
 
@@ -33,7 +34,7 @@ nie“; geschrieben wird er trotzdem.
 | --- | --- | --- |
 | Frage | ein Satz, neutral, ohne Wörter der Wortliste | Hauptagent |
 | Anlass | die laufende Aufgabe und ihr Ziel | Hauptagent |
-| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln, offene große Fragen —, je mit Quelle | Skript: zuerst jede offene große Frage des Themas aus `docs/big-decisions.md`, aus jeder Sitzung, als `- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen` (ohne lesbare Ablage, bei doppeltem Block oder anderem Status: `Status unbekannt`), dann jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile; Hauptagent: Nutzer, Spec, Plan |
+| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln, offene große Fragen —, je mit Quelle | Skript: zuerst, ist `docs/big-decisions.md` unlesbar oder übersprungen (Konsumenten-Regel), `- Ablage docs/big-decisions.md nicht gelesen (<Grund>) — offene große Fragen zum Thema möglich; nichts entscheiden, was teuer umkehrbar ist, sondern zurückgeben` (fehlt sie, nichts); dann jede offene große Frage des Themas aus der Ablage, aus jeder Sitzung, als `- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen` (ohne lesbare Ablage, bei doppeltem Block oder anderem Status: `Status unbekannt`) und jeder offene Block ohne Zeile `Thema:` (oder leer) als `- D-<n> offen, ohne Thema: <frage> — prüfen, ob sie das Thema betrifft`; ein Block mit anderem Thema bleibt draußen, ob das Thema passt, prüft das Skript nicht (G1); dann jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile; Hauptagent: Nutzer, Spec, Plan |
 | Schon entschieden | die Einträge der Sitzung mit demselben Thema und die Blöcke des Themas in `docs/big-decisions.md`, die freigegeben (mit Antwort; per Auftrag freigegeben: mit dem Zitat) oder abgelehnt sind, aus jeder Sitzung, jede Frage einmal | Skript, aus Protokoll und Ablage; `—`, wenn keiner |
 | Wo nachsehen | Pfade und Suchmuster, keine Inhalte | Hauptagent |
 | Rückgabe | Optionen mit Belegen `datei:zeile`, Folgen, Umkehrbarkeit, Empfehlung; dazu der Satz für Subagenten | Skript |
@@ -43,6 +44,10 @@ nie“; geschrieben wird er trotzdem.
 Unter Rückgabe steht wörtlich der Satz aus Spec 28, Ablauf 5. Das Skript liest ihn aus diesem
 Abschnitt (`load_subagent_sentence`): das eine Zitat `> …` bis zur nächsten Überschrift außerhalb
 eines Codezauns, über mehrere Zeilen zu einer zusammengezogen; jede Zeile des Zitats beginnt mit `> `.
+Der Abschnitt beginnt an der ersten Überschrift außerhalb eines Codezauns; ein Beispiel im Zaun zählt
+nicht. Eine Zeile direkt nach dem Zitat, die mit ```` ``` ````, `~~~`, `- `, `* `, `+ `, einer Ziffer
+mit `. `, `#` oder `<!--` beginnt, beendet es wie in Markdown; nur eine andere Textzeile ohne `>` gilt
+als Fortsetzung und ist ein Fehler.
 Sonst endet `brief --topic` mit Exit 2 und schreibt nichts; die Meldung nennt die Ursache:
 „ungeprüft — references/brief.md fehlt“ bzw. „… nicht lesbar (<Ursache>)“, „ungeprüft — Satz für
 Subagenten fehlt in references/brief.md (…)“ (kein Abschnitt, kein Zitat), „ungeprüft — Satz für
@@ -74,7 +79,7 @@ Rücksicht auf Groß- und Kleinschreibung (`Sollte` trifft, `verbessern` nicht).
 jedem Zeichen, das weder Buchstabe noch Ziffer ist, auch an `_` (`_sollte_` trifft, `sollte2`
 nicht); bei einer Wortfolge darf beliebig viel Leerraum zwischen den Wörtern stehen. Gebeugte
 Formen und andere Wertungen prüft es nicht (G1). Das Skript liest die Liste aus dem Abschnitt
-`## Wortliste` (`load_wordlist`): Dort steht bis zur nächsten Überschrift je Zeile nur ein
+`## Wortliste` (`load_wordlist`; die erste solche Überschrift außerhalb eines Codezauns): Dort steht bis zur nächsten Überschrift je Zeile nur ein
 Listenpunkt `- ` oder `* ` mit einem Wort oder einer Wortfolge in Backticks; Leerzeilen sind
 erlaubt. Fehlt die Datei, fehlt der Abschnitt oder steht darin eine andere Zeile — Prosa, ein
 Punkt mit `+ ` oder `1.`, ein Wort ohne Backticks —, endet `brief --check` mit Exit 2
