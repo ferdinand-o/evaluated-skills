@@ -675,6 +675,34 @@ Tests ändert, scheitert mit dem wiederhergestellten Bereich nicht. Alle Dateien
 übernommen, und es entsteht ein normaler Lauf. `--run none` bleibt für den echten Fall „nichts zu
 reviewen“.
 
+### Task 14, Task 15, Spec-Nachzug und Prüfpunkt 10 (C5)
+
+Task 14 (Sonnet) hat known-limits um den Abschnitt `## deep-review` mit 56 Grenzen in acht
+Themen erweitert. Was im Code inzwischen behoben ist, hat er weggelassen. Parallel dazu hat ein
+Opus-Agent Spec 26 an den Bau nachgezogen (lint-spec sauber).
+
+Task 15 (Sonnet) hat die SKILL.md (135 Zeilen, Lint ohne Befund), den Eintrag in
+`evaluated-dev` und die Projekt-Kopie angelegt. Seither nennt Claude Code deep-review als Skill.
+
+Der Bereich des Prüfpunkts hatte 6.981 Zeilen, davon 671 ohne die Projekt-Kopie. Die Kopie ist
+laut `sync --check` byte-gleich mit dem reviewten Original. `/code-review` bekam deshalb den
+Hinweis, sie zu überspringen. Ergebnis: 19 Funde, kein Absturz. In Fix-Runde 1 kamen alle,
+gebündelt als F1–F8:
+
+- Git Bash unter Windows schreibt `--tool /code-review` in einen Pfad um. `record` kanonisiert
+  das Werkzeug jetzt, und die SKILL.md übergibt es ohne Schrägstrich.
+- `_meta.generated` nennt den Pfad `review_kit.py` ohne Repo-Pfad.
+- Der Cache-Ordner bekommt eine eigene `.gitignore`.
+- SKILL.md nennt die Eiserne Regel wörtlich wie Spec 26 und sagt dazu: `cleanup --stale`
+  betrifft alle Läufe, `--split-at` steht im Aufruf, und die Übergabe nennt fix-task, debug-ledger
+  und test-first.
+- `/security-review` läuft nicht bei einem Folgelauf mit Übernahme.
+- Schon behobene übernommene Funde bleiben im Bericht. Sie fehlen nur in der Eingabe für den
+  nächsten `fix-task`.
+- Veraltete Stände (Task 23, „Task 15 offen“) sind berichtigt.
+
+Ergebnis: 1.792 Tests grün, SKILL.md mit 148 Zeilen.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
