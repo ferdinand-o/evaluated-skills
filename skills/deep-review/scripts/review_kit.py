@@ -113,9 +113,10 @@ MESSAGE_CACHE_SIZE = 64   # Commit-Messages so vieler Bereiche je Prozess zwisch
 
 PROFILES = ("standard", "checkpoint")
 FOCI = ("bugs", "security", "quality")
-# Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: checkpoint ist standard mit
-# `--soll-file` als Soll, also eine Obermenge — standard übernimmt aus beiden, checkpoint nur
-# aus checkpoint (ein standard-Lauf hatte kein Soll).
+# Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: Beide Profile reviewen denselben
+# Bereich; checkpoint hat als Soll die Datei aus `--soll-file` (Pflicht) statt der
+# Commit-Messages, ein Soll mindestens so genau. Also übernimmt standard aus beiden,
+# checkpoint nur aus checkpoint (ein standard-Lauf hatte nur die Commit-Messages).
 SINCE_PROFILES = {"standard": ("standard", "checkpoint"), "checkpoint": ("checkpoint",)}
 
 RUN_SUFFIX_CHARS = string.ascii_lowercase + string.digits
@@ -1928,7 +1929,10 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
 # gleichnamigen Unit-Namen. Was der Scanner nicht sicher zuordnen kann, steht nicht im Block —
 # lieber keine Gegenstelle und gezählt als eine falsche.
 
-DELPHI_RELEASES = frozenset({"extract", "extractpair", "remove", "free", "freeandnil",
+# Aufrufe, die besessene Objekte freigeben oder abgeben: Extract, ExtractPair und ExtractItem
+# geben ab; Remove, Delete, Clear, Dequeue und Pop geben bei OwnsObjects frei (OWNERSHIP_RTL).
+DELPHI_RELEASES = frozenset({"extract", "extractpair", "extractitem", "remove", "delete",
+                             "clear", "dequeue", "pop", "free", "freeandnil",
                              "setcontentstream"})
 CLASS_CHAIN_MAX = 4        # Klassen je Empfängertyp im Block (die Klasse und ihre Basisklassen)
 INHERITED_LINES_MAX = 4    # inherited-Zeilen je Klasse
@@ -3363,9 +3367,10 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
                   unresolved: set) -> list:
     """Die Stellen einer Delphi-Datei nach der Sammelregel (Spec 26, Schritt 3): je Aufruf auf
     einer geänderten Zeile (`call`: `Name(`, `Obj.Name(`, `Name<T>(`, ohne Klammer `_parenless`),
-    je `Extract`, `ExtractPair`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream`
-    (`DELPHI_RELEASES`; `ExtractKey` und `ExtractValue` gibt es an TDictionary nicht) und je
-    `inherited Create` im Konstruktor einer Klasse mit Besitz-Default der RTL (`owner`).
+    je `Extract`, `ExtractPair`, `ExtractItem`, `Remove`, `Delete`, `Clear`, `Dequeue`, `Pop`,
+    `Free`, `FreeAndNil`, `SetContentStream` (`DELPHI_RELEASES`; `ExtractKey` und
+    `ExtractValue` gibt es an TDictionary nicht) und je `inherited Create` im Konstruktor
+    einer Klasse mit Besitz-Default der RTL (`owner`).
     Mehrere Einträge gleicher Art und gleichen Namens auf einer Zeile tragen die Spalte wie bei Python. Gezählt
     (`unresolved`) wird jeder Aufruf, für den `resolve_call` nichts statt einer Vermutung
     liefert — ohne Klammer auch, wenn es auf unbekanntem Empfänger gleichnamige Methoden gibt
@@ -3452,9 +3457,10 @@ def collect_delphi(repo, rng, files):
     aus der Deklaration (interface-Teil oder Klassenrumpf; bei Überladungen nach Namen und
     Typen der Parameter) mit Default-Werten und ihre `raise`-Zeilen (transitiv in der Unit
     nach derselben Aufrufregel, `RAISE_DEPTH`); im Block, wenn sie etwas wirft oder einen
-    Default-Wert zeigt. Je `Extract`, `Remove`, `Free`, `FreeAndNil` oder `SetContentStream`
-    auf einer geänderten Zeile der Typ des Empfängers (Parameterliste, `var`-Abschnitt,
-    Inline-`var` und Parameter anonymer Methoden nach Sichtbarkeit an der Stelle, Feld oder
+    Default-Wert zeigt. Je Aufruf aus `DELPHI_RELEASES` (`Extract`, `Remove`, `Delete`,
+    `Clear`, `Dequeue`, `Pop`, `Free`, `FreeAndNil`, …) auf einer geänderten Zeile der Typ des
+    Empfängers (Parameterliste, `var`-Abschnitt, Inline-`var` und Parameter anonymer Methoden
+    nach Sichtbarkeit an der Stelle, Feld oder
     Property der Klasse, Variable der Unit, `Self`; jedes Feld einer Kette im Scope der Unit,
     die es deklariert), seine Klassendeklaration mit Basisklasse und den `inherited Create(…)`
     des Konstruktors, über die Basisklassen im Repo (`CLASS_CHAIN_MAX`); erbt sie von einer
@@ -3912,7 +3918,7 @@ def _checked_plan(directory, run_id: str) -> tuple[dict, dict]:
     Lauf (`merge`, `audit`) und die früheren Läufe von `--since` (`_earlier_plan`): der Plan
     wie `_read_plan`, `file_keys` wie `_check_file_keys`, und jeder übernommene Fund unter
     `file_keys[…].findings` und `file_keys[…].outside[…].finding` nach denselben Regeln wie in
-    `record` (`_clean_finding`; im Plan stehen danach die bereinigten Funde). Was nicht
+    `record`, dazu `run` (`_clean_reused`; im Plan stehen danach die bereinigten Funde). Was nicht
     besteht, ist ein KitError, der Lauf und Datei nennt. Fehlt `file_keys`: `{}`."""
     directory = Path(directory)
     path = directory / "plan.json"
@@ -3927,14 +3933,27 @@ def _checked_plan(directory, run_id: str) -> tuple[dict, dict]:
         field = "findings"
         try:
             if "findings" in info:
-                info["findings"] = [_clean_finding(f, i, repo)
+                info["findings"] = [_clean_reused(f, i, repo)
                                     for i, f in enumerate(info["findings"], 1)]
             field = "outside"
             for i, item in enumerate(info.get("outside", []), 1):
-                item["finding"] = _clean_finding(item["finding"], i, repo)
+                item["finding"] = _clean_reused(item["finding"], i, repo)
         except KitError as exc:
             raise _plan_error(run_id, path, f"file_keys[{file!r}].{field}: {exc}") from None
     return plan, keyed
+
+
+def _clean_reused(item, index: int, repo: Path) -> dict:
+    """Ein übernommener Fund im Plan: wie `_clean_finding`, dazu `run` — die Lauf-ID des Laufs,
+    der ihn gemeldet hat (`apply_since`). Fehlt `run` (Plan von vor dieser Regel), fehlt es
+    auch danach; ein `run`, das keine Lauf-ID ist, ist ein KitError."""
+    clean = _clean_finding(item, index, repo)
+    if "run" in item:
+        if not isinstance(item["run"], str) or not RUN_ID_RE.fullmatch(item["run"]):
+            raise KitError(f"Fund {index} ({clean['file']}): run ist keine Lauf-ID: "
+                           f"{item['run']!r}")
+        clean["run"] = item["run"]
+    return clean
 
 
 def _earlier_plan(directory) -> tuple[str, dict]:
@@ -3974,7 +3993,9 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
     angenommenen Ergebnisses zu einer Datei außerhalb seines Pakets ein Element mit den
     Dateien des Pakets und dem Stand der Fund-Datei am ZIEL dieses Laufs (`_file_blobs`, ein
     git-Aufruf je Lauf); dazu die `outside`-Elemente seiner übernommenen Einträge, wie sie
-    sind. `plan` ist geprüft (`_earlier_plan`)."""
+    sind. Jeder Fund trägt `run`: bei einem Ergebnis dieser Lauf, bei einem übernommenen sein
+    `run`, wie es ist (fehlt es, der `reused_from` des Eintrags). `plan` ist geprüft
+    (`_earlier_plan`)."""
     directory = Path(directory)
     keyed = plan.get("file_keys") or {}
     run_id = directory.name
@@ -3991,20 +4012,25 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
         if result is None:
             continue
         own = set(packet["files"])
+        found = [{**f, "run": run_id} for f in result.findings]
         for path in packet["files"]:
             if path in keyed:
-                files[path] = reviewed(keyed[path], [f for f in result.findings if f["file"] == path])
+                files[path] = reviewed(keyed[path], [f for f in found if f["file"] == path])
         outside += [{"finding": f, "packet_files": list(packet["files"]), "file_blob": None}
-                    for f in result.findings if f["file"] not in own]
+                    for f in found if f["file"] not in own]
     if outside:
         blobs = _file_blobs(repo, plan["target"], {item["finding"]["file"] for item in outside})
         for item in outside:
             item["file_blob"] = blobs[item["finding"]["file"]]
     for path, info in keyed.items():
         if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
-            mine = [f for f in info["findings"] if f["file"] == path]
+            # Ohne `run` (Plan von vor dieser Regel) gilt der Lauf, aus dem er übernahm.
+            mine = [{**f, "run": f.get("run", info["reused_from"])} for f in info["findings"]
+                    if f["file"] == path]
             files.setdefault(path, reviewed(info, mine))
-            outside += copy.deepcopy(info.get("outside", []))
+            for item in copy.deepcopy(info.get("outside", [])):
+                item["finding"]["run"] = item["finding"].get("run", info["reused_from"])
+                outside.append(item)
     return _Earlier(files, outside)
 
 
@@ -4056,10 +4082,11 @@ def apply_since(plan, run_dirs):
     nicht besteht, ist ein KitError mit seiner Lauf-ID.
 
     Es zählen nur frühere Läufe mit demselben Fokus und einem Profil aus `SINCE_PROFILES`:
-    Profil `checkpoint` ist `standard` mit `--soll-file` als Soll (eine Obermenge), also
+    Beide Profile reviewen denselben Bereich, `checkpoint` mit der Datei aus `--soll-file`
+    (Pflicht) als Soll statt der Commit-Messages, einem Soll mindestens so genau. Also
     übernimmt ein `standard`-Plan aus `standard`- und `checkpoint`-Läufen, ein
-    `checkpoint`-Plan nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte kein Soll); eine
-    Kette darf Läufe beider erlaubten Profile mischen. Darin gilt eine
+    `checkpoint`-Plan nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte nur die
+    Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen. Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
     oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
@@ -4087,7 +4114,10 @@ def apply_since(plan, run_dirs):
     wäre sonst als reviewt gemeldet, ohne dass ein Review lief. In `file_keys` steht die Datei
     dann mit `reused_from` = Lauf-ID des passenden Laufs aus `run_dirs`, `reused_chain` = die
     Lauf-IDs der Kette, der jüngste zuerst (ohne Kette nur `[reused_from]`), und `findings` =
-    den Funden (Kopien der Einträge, `file`, `line`, `summary`, `failure_scenario`).
+    den Funden (Kopien der Einträge, `file`, `line`, `summary`, `failure_scenario` und `run`:
+    die Lauf-ID des Laufs, der den Fund gemeldet hat — das Glied der Kette, nicht
+    `reused_from` —, über weitere Folgeläufe unverändert weitergegeben; ebenso am `finding`
+    jedes `outside`-Elements). `merge` schreibt diesen Lauf nach `sources[].reused_from`.
     Angenommen ist ein Ergebnis nach derselben Regel wie in `audit` (`_read_result`).
 
     Funde eines früheren Pakets zu Dateien außerhalb seiner eigenen Dateien (etwa zur
@@ -4497,7 +4527,7 @@ def record(run_path, packet, tool, payload_path):
 
 class _Source(NamedTuple):
     """Ein Fund vor dem Vereinigen: aus dem Ergebnis eines Pakets (`packet`) oder aus
-    `file_keys` übernommen (`reused_from`, Lauf-ID)."""
+    `file_keys` übernommen (`reused_from`: Lauf-ID des Laufs, der ihn gemeldet hat)."""
     finding: dict
     packet: str | None
     reused_from: str | None
@@ -4532,13 +4562,13 @@ def _results(directory: Path, plan: dict, run_id: str, repo: Path) -> tuple[dict
 def _sources(accepted: dict, keyed: dict) -> list:
     """Alle Funde, die in `findings.json` stehen müssen: die der angenommenen Ergebnisse, dann
     die übernommenen aus `file_keys` (Dateien mit `reused_from` und `findings`, dazu die Funde
-    ihrer `outside`-Elemente mit demselben `reused_from`; geprüft von `_checked_plan`)."""
+    ihrer `outside`-Elemente; geprüft von `_checked_plan`), je mit dem Lauf, der ihn gemeldet
+    hat (`run` des Funds; fehlt es, der `reused_from` des Eintrags)."""
     out = [_Source(f, pid, None) for pid, result in accepted.items() for f in result.findings]
     for info in keyed.values():
         if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
-            out += [_Source(dict(f), None, info["reused_from"]) for f in info["findings"]]
-            out += [_Source(dict(item["finding"]), None, info["reused_from"])
-                    for item in info.get("outside", [])]
+            found = [*info["findings"], *(item["finding"] for item in info.get("outside", []))]
+            out += [_Source(dict(f), None, f.get("run", info["reused_from"])) for f in found]
     return out
 
 
@@ -4614,11 +4644,13 @@ def merge(run_path):
     `MERGE_LINE_GAP` Zeilen Abstand zum ersten Fund ihrer Gruppe oder in der Spanne eines ihrer
     Glieder werden einer (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die
     des ersten), `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
-    `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (Lauf-ID aus
-    `file_keys` oder null) und `sources` (jeder ursprüngliche Fund mit `packet` oder
-    `reused_from`). Pakete ohne angenommenes Ergebnis fehlen — das meldet `audit`. `_meta`
-    trägt `run` und `plan` (`_plan_digest`). Ein Plan, den `_checked_plan` nicht annimmt (auch
-    ein ungültiger übernommener Fund), ist ein KitError. Rückgabe: das geschriebene Objekt."""
+    `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (der Lauf der
+    ersten übernommenen Quelle oder null) und `sources` (jeder ursprüngliche Fund mit `packet`
+    oder `reused_from` — bei einem übernommenen der Lauf, der ihn gemeldet hat, aus `run` des
+    Funds, nicht der `reused_from` des Eintrags in `file_keys`; `_sources`). Pakete ohne
+    angenommenes Ergebnis fehlen — das meldet `audit`. `_meta` trägt `run` und `plan`
+    (`_plan_digest`). Ein Plan, den `_checked_plan` nicht annimmt (auch ein ungültiger
+    übernommener Fund), ist ein KitError. Rückgabe: das geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
     with _plan_lock(directory, run_id):
@@ -4650,7 +4682,8 @@ def _merged_findings(path: Path, run_id: str, digest: str) -> list:
 
 def _lost(sources: list, merged: list) -> list:
     """Funde aus den Ergebnissen und aus `file_keys`, die in keinem Eintrag von `findings.json`
-    unter `sources` stehen (mit passendem `packets` bzw. `reused_from`)."""
+    unter `sources` stehen (mit passendem `packets`; eine übernommene Quelle mit ihrem Lauf
+    in `reused_from` und nur in einem Eintrag, der selbst `reused_from` trägt)."""
     present = Counter()
     for finding in merged:
         packets = finding.get("packets") if isinstance(finding.get("packets"), list) else []
@@ -4659,7 +4692,7 @@ def _lost(sources: list, merged: list) -> list:
                 continue
             pid, reused = source.get("packet"), source.get("reused_from")
             if (pid is not None and pid not in packets) or \
-                    (reused is not None and reused != finding.get("reused_from")):
+                    (reused is not None and finding.get("reused_from") is None):
                 continue
             present[_source_key(finding.get("file"), pid, reused,
                                 *(source.get(k) for k in SOURCE_FIELDS[2:]))] += 1
@@ -4897,6 +4930,9 @@ def audit(run_path, report_path):
 # --- Kommandozeile ---------------------------------------------------------------------------
 
 def _cmd_plan(args) -> int:
+    if args.profile == "checkpoint" and args.soll_file is None:
+        # SINCE_PROFILES setzt voraus, dass jeder checkpoint-Lauf ein Soll hatte.
+        raise KitError("Profil checkpoint braucht --soll-file <datei> (das Soll des Bereichs)")
     repo = _toplevel(args.repo)
     since = None
     if args.since is not None:
@@ -5011,7 +5047,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--focus", choices=FOCI, default="bugs")
     plan.add_argument("--split-at", type=int, default=None, help=f"Default {SPLIT_AT}")
     plan.add_argument("--since", help="frühere Läufe, durch Komma getrennt")
-    plan.add_argument("--soll-file", help="Soll für das Profil checkpoint")
+    plan.add_argument("--soll-file", help="Soll für das Profil checkpoint (dort Pflicht)")
     plan.add_argument("--with-tests", action="store_true", help="Testdateien mit reviewen")
     plan.set_defaults(func=_cmd_plan)
 

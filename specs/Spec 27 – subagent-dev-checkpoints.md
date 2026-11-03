@@ -1,6 +1,6 @@
 # Spec 27: subagent-dev-checkpoints — Reviews dort, wo ein Fehler wandern kann, und das Modell je Task aus dem Plan
 
-Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags; Abgleich mit Spec 26: `runs` statt `last_run`, finaler Prüfpunkt mit `--since` über alle Läufe, Wiederverwendungsschlüssel statt Paket, `offen` am finalen Prüfpunkt, Profil als `--profile`/`--depth`; vor dem Bau von Spec 26 (nach ihrem Task 1): Basislinie als Wiederholung auf gemergter Historie statt drei neu gebauter Pläne, Task-Datei trägt den Text der Steps; nach dem Bau von Spec 26 (2026-11-02): `--profile standard` statt `--depth`, `findings.json` statt `verdicts.jsonl`, `--since` je Datei nur aus Läufen desselben Profils, keine Grenze von 15 Verifikationen; nach Prüfpunkt 9 (2026-11-02): `standard` übernimmt auch aus `checkpoint`-Läufen, Profil wie `checkpoint.json` es meldet, Nachprüfung eines Fixes über die Fix-Commits ohne `--since`)
+Skill-Spezifikation · Zyklus 27 · Entscheidung: das Gate von subagent-dev legt beim Planen aus dem ganzen Plan je Task das Implementierungsmodell und die Review-Prüfpunkte fest; zwischen den Prüfpunkten prüfen `verify` (erweitert um Abnehmer-Check und Hinweise) und ein Haiku-Agent nur den Vertrag, am Prüfpunkt reviewt deep-review im Profil `checkpoint` den Bereich seit dem letzten Prüfpunkt · Abgeglichen mit Spec 00, Spec 09, Spec 24 und Spec 26 · Überarbeitet nach unabhängigem Review (2026-10-30, Opus, mit Nachreview der Eval-Tabelle: Schlüsselreihenfolge der Prüfpunkte, Fixture-Dateien als `touch`, `unchecked` nie `pass`, eine Arity-Regel für `verify`, Soll am Prüfpunkt, Ersatz ohne deep-review; Pflicht- und Verifikations-Tasks zählen nicht als Abnehmer, Schnittstelle von `checkpoint` mit init/status/mark und Git-Refs, finaler Prüfpunkt über den Plan mit übernommenen Urteilen, Arity mit Default-Parametern, Nicht-Python ungeprüft, Regeln aus dem ganzen Plan trotz `--tasks`, Fix-Pfad nach einem Prüfpunkt, Lauf-ID für `--since`, Projekt-Kopie, Basislinie vor dem Bau, runlog committet mit Tokens, Fixtures mit `.gitignore` und Tags; Abgleich mit Spec 26: `runs` statt `last_run`, finaler Prüfpunkt mit `--since` über alle Läufe, Wiederverwendungsschlüssel statt Paket, `offen` am finalen Prüfpunkt, Profil als `--profile`/`--depth`; vor dem Bau von Spec 26 (nach ihrem Task 1): Basislinie als Wiederholung auf gemergter Historie statt drei neu gebauter Pläne, Task-Datei trägt den Text der Steps; nach dem Bau von Spec 26 (2026-11-02): `--profile standard` statt `--depth`, `findings.json` statt `verdicts.jsonl`, `--since` je Datei nur aus Läufen desselben Profils, keine Grenze von 15 Verifikationen; nach Prüfpunkt 9 (2026-11-02): `standard` übernimmt auch aus `checkpoint`-Läufen, Profil wie `checkpoint.json` es meldet, Nachprüfung eines Fixes über die Fix-Commits ohne `--since`; nach der zweiten Runde von Prüfpunkt 9 (2026-11-03): Nachprüfung wieder über den Bereich des Prüfpunkts bis `HEAD` mit `--since` auf seinen Lauf, übernommene und schon bearbeitete Funde nach der Kopie von `fix-task.md` verworfen, Soll-Dateien mit festem Namen)
 
 ## Problem
 
@@ -145,15 +145,19 @@ Prüfpunkt reviewt `base..HEAD`, übernimmt aber mit deep-review `--since` über
 geänderten Stellen, ohne Soll; Spec 26) sich seither nicht geändert hat — ein einzelner Lauf
 reichte nicht, weil jeder Prüfpunkt nur seinen eigenen Abschnitt kennt. Neu geprüft werden nur
 der Rest und die Aufrufer über Task-Grenzen. deep-review übernimmt nur aus Läufen mit
-demselben Fokus; das Profil `checkpoint` ist `standard` mit `--soll-file` als Soll (Spec 26),
-also übernimmt ein `standard`-Lauf aus `standard`- und `checkpoint`-Läufen, ein
-`checkpoint`-Lauf nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte kein Soll). Der
+demselben Fokus; beide Profile reviewen denselben Bereich, `checkpoint` mit der Datei aus
+`--soll-file` statt der Commit-Messages als Soll, einem Soll mindestens so genau (Spec 26).
+Also übernimmt ein `standard`-Lauf aus `standard`- und `checkpoint`-Läufen, ein
+`checkpoint`-Lauf nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte nur die
+Commit-Messages). Der
 finale Prüfpunkt übernimmt so aus allen Läufen in `runs`, auch aus den Zwischen-Prüfpunkten.
 Übernommene Funde können schon behoben sein: Wurde ein Fund in `a.py` in der aufgerufenen
 `b.py` behoben, ohne die Gegenstellen-Zeilen von `a.py` zu ändern, bringt `--since` ihn mit
 dem unveränderten Schlüssel zurück. Vor einer Fix-Runde am finalen Prüfpunkt gleicht der
-Hauptagent die übernommenen Funde mit den Fix-Runden der Läufe in `since_runs` ab und
-verwirft die, die eine Fix-Runde schon bearbeitet hat.
+Hauptagent die übernommenen Funde mit den Fix-Runden der Läufe in `since_runs` ab
+(`sources[].reused_from` in `findings.json` nennt den Lauf, der den Fund gemeldet hat; die
+Kopie `fix-task-<prüfpunkt>-<runde>.md` seiner Runde die bearbeiteten Funde) und verwirft
+die, die eine Fix-Runde schon bearbeitet hat.
 
 ### `checkpoint`
 
@@ -180,13 +184,21 @@ verwirft die, die eine Fix-Runde schon bearbeitet hat.
 Bringt ein Prüfpunkt Funde, schreibt `fix-task --verdicts <lauf>/findings.json` eine
 Task-Datei (Allowlist: die Dateien der Funde; Akzeptanz: je Fund behoben und mit Test belegt).
 Ein Agent arbeitet sie in einem frischen Worktree vom integrierten Stand ab, mit dem höchsten
-Modell der betroffenen Tasks. Danach `verify`, Merge, Gesamttests und die Nachprüfung:
-deep-review über den Fix als eigenen Bereich, vom Commit vor dem Fix-Merge bis `HEAD`, im
-selben Profil und ohne `--since`. Mit `--since` über `last_reviewed..HEAD` kämen Dateien, die
-der Fix nicht berührt hat, mit ihren alten Funden zurück (ein Fund in `a.py`, behoben in
-`b.py`) und begännen eine unnötige zweite Fix-Runde; am finalen Prüfpunkt wäre der Bereich
-zudem schmaler als das reviewte `base..HEAD`. Dann `checkpoint mark` je Lauf: erst der Lauf des
-Prüfpunkts mit dem Commit vor dem Fix-Merge, dann die Nachprüfung mit ihrem Ende, damit `runs`
+Modell der betroffenen Tasks; `fix-task.md` wird gleich nach
+`.skills/cache/tasks/fix-task-<prüfpunkt>-<runde>.md` kopiert, weil die nächste Runde sie
+überschreibt. Danach `verify`, Merge, Gesamttests und die Nachprüfung. Vor dem Fix notiert
+der Hauptagent den `range` aus `checkpoint status`, `<prüfpunkt-basis>..<vor-fix>`;
+`<vor-fix>` ist das ZIEL des reviewten Bereichs. deep-review reviewt
+`<prüfpunkt-basis>..HEAD` im selben Profil mit `--since <lauf des Prüfpunkts>` (ab der zweiten
+Runde dazu die Nachprüfungen davor): Neu reviewt wird, was der Fix geändert hat, samt den
+Aufrufern, deren Gegenstellen sich geändert haben (ein Fund in `a.py`, behoben in der
+aufgerufenen `b.py`: `a.py` kommt wieder dran, wenn sich ihr Schlüssel geändert hat). Einen
+übernommenen Fund, den die Kopie einer Runde dieses Prüfpunkts nennt (gleiche Datei und
+`summary`, die Zeile kann sich verschoben haben), verwirft der Hauptagent; die übrigen
+Funde sind die nächste Runde. Ein Fix nur an Tests oder Doku ändert keinen Schlüssel, und
+`plan` übernimmt alle Dateien. Lehnt `plan` mit „nichts zu reviewen“ ab, bekommt die
+Nachprüfung `--run none`, und die Übergabe sagt es. Dann `checkpoint mark` je Lauf: erst der
+Lauf des Prüfpunkts mit `<vor-fix>`, dann die Nachprüfung mit ihrem Ende, damit `runs`
 den ganzen Bereich für die Abdeckungskette am finalen Prüfpunkt deckt. Höchstens zwei
 Fix-Runden je Prüfpunkt, dann Eskalation an den Nutzer. Die Allowlist umfasst `path` und `related` jedes Funds (`findings.json` und die Liste
 von `/code-review` tragen nur `file`). deep-review hat keine Grenze von Verifikationen und
@@ -194,9 +206,12 @@ keinen Status `offen`: `merge` vereinigt alle Funde in `findings.json`, und jede
 `fix-task` liest daneben die JSON-Liste von `/code-review` und `verdicts.jsonl` (nur
 `bestätigt`/`plausibel`).
 
-**Soll am Prüfpunkt:** subagent-dev schreibt die Task-Dateien des Bereichs in eine Datei unter
-`.skills/cache/tasks/` und übergibt sie deep-review im Profil `checkpoint` als `--soll-file`
-(Spec 26); im Profil `standard` ist das Soll die Commit-Messages des Bereichs.
+**Soll am Prüfpunkt:** Das Soll sind die Task-Dateien des Bereichs. subagent-dev schreibt sie
+nach `.skills/cache/tasks/soll-<prüfpunkt>.md` und übergibt die Datei deep-review im Profil
+`checkpoint` als `--soll-file` (Spec 26; dort Pflicht). Bei der Nachprüfung einer Fix-Runde
+kommt die Kopie `fix-task-<prüfpunkt>-<runde>.md` dazu, beide zusammen in
+`soll-<prüfpunkt>-<runde>.md`, denn `_meta.soll_file` hält nur den Pfad. Im Profil `standard`
+ist das Soll die Commit-Messages des Bereichs.
 
 **Ersatz ohne deep-review:** `/code-review` über den Bereich; `mark` bekommt `--run none`, die
 Nachprüfung nach einem Fix reviewt nur den Bereich des Fix-Commits, und die Übergabe sagt
@@ -401,9 +416,9 @@ keinen Fund der Schwere „hoch", aber 31 „mittel" und 76 „niedrig"
 (2026-11-02): Am Prüfpunkt reviewt deep-review mit dem Profil aus `checkpoint.json`;
 `/code-review --max-findings all` bleibt nur der Ersatz in einem Repo ohne die Skill. Nach
 Prüfpunkt 9 übernimmt `standard` mit `--since` auch aus `checkpoint`-Läufen, der finale
-Prüfpunkt meldet immer `standard`, und die Nachprüfung eines Fixes reviewt nur die
-Fix-Commits ohne `--since`; übernommene Funde, die eine Fix-Runde schon bearbeitet hat,
-verwirft der Hauptagent.
+Prüfpunkt meldet immer `standard`, und die Nachprüfung eines Fixes reviewt den Bereich des
+Prüfpunkts bis `HEAD` mit `--since` auf seinen Lauf; übernommene Funde, die eine Fix-Runde
+schon bearbeitet hat, verwirft der Hauptagent.
 
 Vor dem Bau: Basislinie als Wiederholung auf gemergter Historie, nicht mit drei neu
 gebauten Plänen (Entscheidung des Nutzers 2026-10-30: Limit sparen). Drei fertige Pläne unter

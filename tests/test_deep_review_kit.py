@@ -2911,6 +2911,11 @@ def _run_path(root, plan):
     return root / ".skills/cache/deep-review" / plan["_meta"]["run"]
 
 
+def _found(plan, finding):
+    """`finding`, wie ein Folgelauf ihn übernimmt: mit `run` = Lauf von `plan`, der ihn meldete."""
+    return {**finding, "run": plan["_meta"]["run"]}
+
+
 def test_since_per_file(tmp_path, monkeypatch):
     kit = _kit()
     _tick(kit, monkeypatch)
@@ -2944,7 +2949,7 @@ def test_since_per_file(tmp_path, monkeypatch):
             "base_blob": kit.ABSENT_MARK, "target_blob": "100644:" + _blob(root, "t2", "a.py"),
             "reused_from": run_a2["_meta"]["run"],       # der jüngere Lauf gilt
             "reused_chain": [run_a2["_meta"]["run"]],
-            "findings": [_finding("a.py", 5, "neu A2")]}
+            "findings": [_found(run_a2, _finding("a.py", 5, "neu A2"))]}
         assert applied["file_keys"]["b.py"] == {
             "key": plan_b["file_keys"]["b.py"]["key"], "changed_lines": 7,
             "base_blob": kit.ABSENT_MARK, "target_blob": "100644:" + _blob(root, "t2", "b.py"),
@@ -3006,8 +3011,9 @@ def test_since_chain_all_reused_and_focus(tmp_path, monkeypatch):
     plan_c = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     applied = kit.apply_since(plan_c, [_run_path(root, done_b)])
     assert applied["file_keys"]["a.py"]["reused_from"] == done_b["_meta"]["run"]
-    assert applied["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
-    assert applied["file_keys"]["b.py"]["findings"] == [_finding("b.py", 3, "B")]
+    # Jeder Fund nennt den Lauf, der ihn meldete: a.py:5 bleibt bei A, b.py:3 kommt von B.
+    assert applied["file_keys"]["a.py"]["findings"] == [_found(run_a, _finding("a.py", 5, "A"))]
+    assert applied["file_keys"]["b.py"]["findings"] == [_found(done_b, _finding("b.py", 3, "B"))]
     assert applied["packets"] == [] and applied["split"] is True
 
     # Anderer Fokus: andere Schlüssel (kein Gegenstellen-Teil bei quality) und kein Übernehmen.
@@ -3108,7 +3114,8 @@ def test_f1_since_reuses_only_when_coverage_chain_closes(tmp_path, monkeypatch):
         assert applied["file_keys"]["x.py"]["reused_chain"] == [run_a["_meta"]["run"],
                                                                 run_a0["_meta"]["run"]]
         assert applied["file_keys"]["x.py"]["findings"] == [
-            _finding("x.py", 5, "A"), both, _finding("x.py", 9, "A0")]
+            _found(run_a, _finding("x.py", 5, "A")), _found(run_a, both),
+            _found(run_a0, _finding("x.py", 9, "A0"))]
         assert applied["packets"] == []
     # Ohne Kette (A deckt alles selbst) besteht sie nur aus A.
     run_full = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
@@ -3116,7 +3123,7 @@ def test_f1_since_reuses_only_when_coverage_chain_closes(tmp_path, monkeypatch):
     alone = kit.apply_since(plan_b, [*dirs, _run_path(root, run_full)])["file_keys"]["x.py"]
     assert alone["reused_from"] == run_full["_meta"]["run"]
     assert alone["reused_chain"] == [run_full["_meta"]["run"]]
-    assert alone["findings"] == [_finding("x.py", 3, "voll")]
+    assert alone["findings"] == [_found(run_full, _finding("x.py", 3, "voll"))]
 
     # Ein früherer Plan ohne die Blob-Felder übernimmt nichts und trägt keine Kette.
     def drop(data):
@@ -3179,7 +3186,7 @@ def test_cp9_f1_since_standard_reuses_checkpoint_runs(tmp_path, monkeypatch):
     assert plan_b["file_keys"]["a.py"]["key"] == cp["file_keys"]["a.py"]["key"]
     alone = kit.apply_since(plan_b, [_run_path(root, cp)])["file_keys"]["a.py"]
     assert alone["reused_from"] == cp["_meta"]["run"]
-    assert alone["findings"] == [_finding("a.py", 5, "cp")]
+    assert alone["findings"] == [_found(cp, _finding("a.py", 5, "cp"))]
     # Beide passen: der jüngere gilt, wie bei Läufen eines Profils.
     for order in ([cp, std], [std, cp]):
         both = kit.apply_since(plan_b, [_run_path(root, p) for p in order])["file_keys"]["a.py"]
@@ -3910,7 +3917,9 @@ def test_main_subcommands_exit_codes(tmp_path, capsys):
     (second,) = [p.name for p in cache.iterdir() if p.name != run]
     meta = json.loads((cache / second / "plan.json").read_text(encoding="utf-8"))["_meta"]
     assert meta["soll_file"] == "soll.md" and "--soll-file soll.md" in meta["generated"]
-    assert _cli(kit, root, "plan", "--profile", "checkpoint", "--focus", "security") == 1
+    assert _cli(kit, root, "plan", "--profile", "checkpoint", "--focus", "security",
+                "--soll-file", soll) == 1
+    assert "nur Fokus bugs" in capsys.readouterr().err
     assert _cli(kit, root, "plan", "--range", "gibtsnicht..HEAD") == 1
     assert len(list(cache.iterdir())) == 2
 
@@ -4046,9 +4055,9 @@ def test_cp6_f04_since_keeps_findings_outside_the_packet_files(tmp_path, monkeyp
     again = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     done = kit.plan_since(root, again["_meta"]["run"], [id_a])
     assert done["packets"] == []
-    item = {"finding": outside, "packet_files": ["a.py", "b.py"],
+    item = {"finding": _found(run_a, outside), "packet_files": ["a.py", "b.py"],
             "file_blob": "100644:" + _blob(root, "t1", "c.py")}
-    assert done["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
+    assert done["file_keys"]["a.py"]["findings"] == [_found(run_a, _finding("a.py", 5, "A"))]
     assert done["file_keys"]["a.py"]["outside"] == [item]
     assert done["file_keys"]["b.py"]["findings"] == []
     merged = kit.merge(_run_path(root, done))["findings"]
@@ -4058,13 +4067,13 @@ def test_cp6_f04_since_keeps_findings_outside_the_packet_files(tmp_path, monkeyp
     third = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     chained = kit.apply_since(third, [_run_path(root, done)])
     assert chained["file_keys"]["a.py"]["outside"] == [item]
-    assert outside not in chained["file_keys"]["a.py"]["findings"]
+    assert item["finding"] not in chained["file_keys"]["a.py"]["findings"]
 
     # Nur a.py übernommen (b.py hat sich geändert): der Fund zu c.py nicht; b.py neu reviewt.
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     applied = kit.apply_since(plan_b, [_run_path(root, run_a)])
     assert applied["file_keys"]["a.py"]["reused_from"] == id_a
-    assert applied["file_keys"]["a.py"]["findings"] == [_finding("a.py", 5, "A")]
+    assert applied["file_keys"]["a.py"]["findings"] == [_found(run_a, _finding("a.py", 5, "A"))]
     assert [p["files"] for p in applied["packets"]] == [["b.py"]]
 
 
@@ -4406,8 +4415,9 @@ def test_cp6b_f4_outside_findings_are_rechecked_on_every_hop(tmp_path, monkeypat
     id_a = run_a["_meta"]["run"]
     assert [p["files"] for p in run_a["packets"]] == [["a.py", "b.py"]]
     _record(kit, root, run_a, "p1", [own, outside])
-    item = {"finding": outside, "packet_files": ["a.py", "b.py"],
+    item = {"finding": _found(run_a, outside), "packet_files": ["a.py", "b.py"],
             "file_blob": "100644:" + _blob(root, "t1", "def.py")}
+    own = _found(run_a, own)            # übernommen trägt der Fund den Lauf, der ihn meldete
 
     # B --since A übernimmt beide Dateien: def.py:5 kommt mit, getrennt von den eigenen Funden.
     run_b = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
@@ -4963,6 +4973,238 @@ def test_cp8b_f3_audit_checks_notes_reused_and_comment_lines(tmp_path, monkeypat
         assert len(other) == kit.REPORT_BASE_LINES + (not ok), len(other)
         mismatch = kit.audit(directory, None)["report_mismatch"]
         assert (mismatch == []) is ok, mismatch
+
+
+# --- Funde der zweiten Runde von Prüfpunkt 9 (F1–F5) --------------------------------------
+
+def _doc(rel):
+    return (REPO_ROOT / rel).read_text(encoding="utf-8")
+
+
+def _fix_path_step(text, n):
+    """Zeile `| n | … |` der Tabelle „Fix-Pfad nach einem Prüfpunkt" in checkpoints.md."""
+    section = text[text.index("## Fix-Pfad nach einem Prüfpunkt"):]
+    [row] = [ln for ln in section.splitlines() if ln.startswith(f"| {n} |")]
+    return row
+
+
+def _commit_only(root, message, rel, text):
+    """Nur `rel` committen: Die Laufordner unter `.skills/` bleiben ungetrackt liegen."""
+    (root / rel).write_text(text, encoding="utf-8")
+    git(root, "add", rel)
+    git(root, "commit", "--quiet", "-m", message)
+
+
+def test_cp9b_f1_fix_rereview_spans_the_checkpoint_range_with_since(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    git(root, "checkout", "--quiet", "-b", "fix", "t1")
+    # Prüfpunkt über base..t1 (Profil checkpoint): ein Fund in a.py, dem Aufrufer von c.load.
+    cp = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
+    id_cp, dir_cp = cp["_meta"]["run"], _run_path(root, cp)
+    held = _finding("a.py", 5, "load wirft ungefangen")
+    _record(kit, root, cp, "p1", [held])
+    kit.merge(dir_cp)
+    fix_task = load_script("skills/subagent-dev/scripts/plan_to_tasks.py").fix_task_from_verdicts(
+        dir_cp / "findings.json", tmp_path / "tasks")
+    listed = fix_task.read_text(encoding="utf-8")
+
+    # Fix in der aufgerufenen c.py mit neuer raise-Stelle: Die Nachprüfung über
+    # <prüfpunkt-basis>..HEAD mit --since <lauf des Prüfpunkts> reviewt a.py wieder (ihr
+    # Schlüssel hat sich geändert) und c.py; b.py bleibt übernommen.
+    _commit_only(root, "fix c", "c.py", SINCE_C_CHANGED)
+    again = kit.build_plan(root, "base..HEAD", "checkpoint", "bugs", None, False)
+    done = kit.plan_since(root, again["_meta"]["run"], [id_cp])
+    assert sorted(f for p in done["packets"] for f in p["files"]) == ["a.py", "c.py"]
+    assert done["file_keys"]["b.py"]["reused_from"] == id_cp
+    # Der alte Bereich <vor-fix>..HEAD sähe nur c.py, nicht den Aufrufer a.py.
+    narrow = kit.build_plan(root, "t1..HEAD", "checkpoint", "bugs", None, False)
+    assert [p["files"] for p in narrow["packets"]] == [["c.py"]]
+
+    # Fix ohne neue Gegenstellen-Zeilen: a.py kommt mit dem alten Fund zurück; fix-task.md
+    # dieser Runde nennt ihn mit Datei und summary (die Zeile darf sich verschoben haben).
+    git(root, "checkout", "--quiet", "-b", "fix2", "t1")
+    _commit_only(root, "fix c2", "c.py", SINCE_C + "# geprüft\n")
+    other = kit.build_plan(root, "base..HEAD", "checkpoint", "bugs", None, False)
+    reused = kit.plan_since(root, other["_meta"]["run"], [id_cp])
+    [back] = reused["file_keys"]["a.py"]["findings"]
+    assert (back["file"], back["summary"]) == (held["file"], held["summary"])
+    assert f"Fund F1 ({held['file']}:{held['line']})" in listed and held["summary"] in listed
+    assert [p["files"] for p in reused["packets"]] == [["c.py"]]
+
+    # Fix nur an Tests: kein Schlüssel ändert sich, alles übernommen — trotzdem ein Lauf.
+    git(root, "checkout", "--quiet", "-b", "fix3", "t1")
+    (root / "tests").mkdir()
+    _commit_only(root, "nur Test", "tests/test_a.py", "def test_a():\n    assert True\n")
+    tests_only = kit.build_plan(root, "base..HEAD", "checkpoint", "bugs", None, False)
+    all_reused = kit.plan_since(root, tests_only["_meta"]["run"], [id_cp])
+    assert all_reused["packets"] == []
+    assert all(info["reused_from"] == id_cp for info in all_reused["file_keys"].values())
+    assert kit.merge(_run_path(root, all_reused))["findings"][0]["summary"] == held["summary"]
+
+    # checkpoints.md und Spec 27: Bereich und --since wie oben, verwerfen nach fix-task.md,
+    # --run none bei „nichts zu reviewen", <vor-fix> nur einmal definiert.
+    checkpoints = _doc("skills/subagent-dev/references/checkpoints.md")
+    step4, step5 = _fix_path_step(checkpoints, 4), _fix_path_step(checkpoints, 5)
+    assert "deep-review über `<prüfpunkt-basis>..HEAD`" in step4
+    assert "`--since <lauf des Prüfpunkts>`" in step4 and "ohne `--since`" not in step4
+    assert "fix-task-<prüfpunkt>-<runde>.md" in step4 and "`summary`" in step4
+    assert "nichts zu reviewen" in step4 and "`--run none`" in step4
+    assert "`--run none`" in step5 and "`--commit <vor-fix> --run <lauf des Prüfpunkts>`" in step5
+    assert checkpoints.count("`<vor-fix>` ist") == 1
+    assert "Commit vor dem Fix-Merge" not in checkpoints
+    spec = _doc("specs/Spec 27 – subagent-dev-checkpoints.md")
+    fix = spec[spec.index("### Fix-Pfad nach einem Prüfpunkt"):]
+    fix = fix[:fix.index("### Abnehmer-Check")]
+    assert "Commit vor dem Fix-Merge" not in fix and "ohne `--since`" not in fix
+    assert "--since" in fix and "nichts zu reviewen" in fix and "`--run none`" in fix
+    assert "fix-task-<prüfpunkt>-<runde>.md" in fix
+    assert "Fix-Commits ohne `--since`" not in spec[spec.index("## Problem"):]   # Kopf: Verlauf
+    skill = _doc("skills/subagent-dev/SKILL.md")
+    assert "ohne `--since`" not in skill and len(skill.splitlines()) <= 145
+
+
+def test_cp9b_f4_one_soll_rule_with_a_stable_copy_of_fix_task(tmp_path):
+    checkpoints = _doc("skills/subagent-dev/references/checkpoints.md")
+    [row] = [ln for ln in checkpoints.splitlines() if ln.startswith("| `--soll-file <datei>` |")]
+    assert row.count("Das Soll sind die Task-Dateien des Bereichs") == 1, row
+    assert "fix-task-<prüfpunkt>-<runde>.md" in row and "soll-<prüfpunkt>-<runde>.md" in row
+    assert "`_meta.soll_file` hält nur den Pfad" in row
+    assert "fix-task-<prüfpunkt>-<runde>.md" in _fix_path_step(checkpoints, 1)
+    assert "PROFILES" not in checkpoints.replace("SINCE_PROFILES", "")
+    assert "`standard` geht vor `checkpoint`" in checkpoints
+    spec = _doc("specs/Spec 27 – subagent-dev-checkpoints.md")
+    soll = spec[spec.index("**Soll am Prüfpunkt:**"):]
+    soll = soll[:soll.index("\n\n")]
+    assert "fix-task-<prüfpunkt>-<runde>.md" in soll and "_meta.soll_file" in soll
+
+
+def test_cp9b_f2_reused_findings_name_the_run_that_found_them(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _fresh_repo(tmp_path / "chain")
+    v1 = _lines(100, "v1")
+    _commit_files(root, "t0", {"x.py": _lines(100, "v0"), "README.md": "# x\n"})
+    git(root, "tag", "t0")
+    _commit_files(root, "t1", {"x.py": v1})
+    git(root, "tag", "t1")
+    _commit_files(root, "t2", {"x.py": v1.replace("v1_4 = 4\n", "v1_4 = 44\n")})
+    git(root, "tag", "t2")
+    run_a = kit.build_plan(root, "t0..t1", "standard", "bugs", None, False)
+    run_b = kit.build_plan(root, "t1..t2", "standard", "bugs", None, False)
+    id_a, id_b = run_a["_meta"]["run"], run_b["_meta"]["run"]
+    _record(kit, root, run_a, "p1", [_finding("x.py", 9, "A9"), _finding("x.py", 7, "A7")])
+    _record(kit, root, run_b, "p1", [_finding("x.py", 5, "B5")])
+
+    def origins(directory):
+        merged = kit.merge(directory)["findings"]
+        assert kit.audit(directory, None)["lost_findings"] == []
+        return [(f["line"], f["reused_from"], [(s["line"], s["reused_from"]) for s in f["sources"]])
+                for f in merged]
+
+    # Kette [B, A]: jeder übernommene Fund trägt den Lauf, der ihn gemeldet hat.
+    plan_c = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
+    done_c = kit.plan_since(root, plan_c["_meta"]["run"], [id_a, id_b])
+    id_c, entry = done_c["_meta"]["run"], done_c["file_keys"]["x.py"]
+    assert entry["reused_from"] == id_b and entry["reused_chain"] == [id_b, id_a]
+    assert entry["findings"] == [{**_finding("x.py", 5, "B5"), "run": id_b},
+                                 {**_finding("x.py", 9, "A9"), "run": id_a},
+                                 {**_finding("x.py", 7, "A7"), "run": id_a}]
+    expected = [(5, id_b, [(5, id_b), (7, id_a)]), (9, id_a, [(9, id_a)])]
+    assert origins(_run_path(root, done_c)) == expected
+
+    # Ein dritter Lauf --since C übernimmt aus dem Plan von C: x.py:9 bleibt bei A.
+    plan_d = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
+    done_d = kit.plan_since(root, plan_d["_meta"]["run"], [id_c])
+    assert done_d["file_keys"]["x.py"]["reused_from"] == id_c
+    assert [f["run"] for f in done_d["file_keys"]["x.py"]["findings"]] == [id_b, id_a, id_a]
+    assert origins(_run_path(root, done_d)) == expected
+
+    # Ein Plan von vor dieser Regel (Funde ohne `run`): Herkunft ist der Eintrag, wie bisher.
+    def untag(data):
+        for finding in data["file_keys"]["x.py"]["findings"]:
+            del finding["run"]
+    _rewrite_plan(root, done_d, untag)
+    assert {s for *_, sources in origins(_run_path(root, done_d)) for _, s in sources} == {id_c}
+    # `run` muss eine Lauf-ID sein.
+    _rewrite_plan(root, done_d, lambda data: data["file_keys"]["x.py"]["findings"][0].update(
+        run="../x"))
+    with pytest.raises(kit.KitError, match="run"):
+        kit.merge(_run_path(root, done_d))
+
+    # Funde außerhalb der Paketdateien ebenso: def.py:5 von A, über B weiter an C.
+    root = _outside_repo(tmp_path / "outside")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    id_a = run_a["_meta"]["run"]
+    _record(kit, root, run_a, "p1", [_finding("a.py", 2, "A"), _finding("def.py", 5, "Def")])
+    run_b = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    done_b = kit.plan_since(root, run_b["_meta"]["run"], [id_a])
+    assert done_b["file_keys"]["a.py"]["outside"][0]["finding"]["run"] == id_a
+    run_c = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    done_c = kit.plan_since(root, run_c["_meta"]["run"], [done_b["_meta"]["run"]])
+    assert done_c["file_keys"]["a.py"]["reused_from"] == done_b["_meta"]["run"]
+    assert done_c["file_keys"]["a.py"]["outside"][0]["finding"]["run"] == id_a
+    assert origins(_run_path(root, done_c)) == [(2, id_a, [(2, id_a)]), (5, id_a, [(5, id_a)])]
+
+
+def test_cp9b_f3_checkpoint_profile_needs_a_soll_file(tmp_path, capsys):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a.py": ""}, {"a.py": _lines(5)})
+    cache = root / ".skills/cache/deep-review"
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint") == 1
+    err = capsys.readouterr().err
+    assert "--soll-file" in err and "checkpoint" in err, err
+    assert not cache.exists() or list(cache.iterdir()) == []
+    soll = root / "soll.md"
+    soll.write_text("# Soll\n", encoding="utf-8")
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint",
+                "--soll-file", soll) == 0
+    assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
+    assert len(list(cache.iterdir())) == 2
+    # Die Begründung für SINCE_PROFILES: gleicher Bereich, Soll mindestens so genau — keine
+    # Obermenge, denn im Profil checkpoint ersetzt das Soll die Commit-Messages.
+    assert "Obermenge" not in _doc("skills/deep-review/references/packets.md")
+    assert "Obermenge" not in _doc(KIT_PATH)
+    assert "Commit-Messages" in inspect.getdoc(kit.apply_since)
+
+
+DROP_PAS = (
+    "unit Drop;\n\ninterface\n\nuses\n  Tree, System.Generics.Collections;\n\ntype\n"
+    "  TDrop = class\n  private\n    FList: TQueryTree;\n    FQueue: TObjectQueue<TNode>;\n"
+    "    FStack: TObjectStack<TNode>;\n  public\n    procedure Run;\n  end;\n\n"
+    "implementation\n\nprocedure TDrop.Run;\nvar\n  S: string;\nbegin\n  S := '';\nend;\n\nend.\n")
+DROP_AFTER = DROP_PAS.replace(
+    "  S := '';\n",
+    "  S := '';\n  FList.Delete(0);\n  FList.Clear;\n  FList.ExtractItem(nil, TDirection.FromEnd);\n"
+    "  FQueue.Dequeue;\n  FStack.Pop;\n  Delete(S, 1, 1);\n")
+
+
+def test_cp9b_f5_delete_clear_extractitem_dequeue_pop_get_owner_entries(tmp_path):
+    kit = _kit()
+    found = _delphi_found(kit, tmp_path, {"Tree.pas": TREE_PAS, "Drop.pas": DROP_PAS},
+                          {"Drop.pas": DROP_AFTER}, files=["Drop.pas"])
+    heads = _by_head(found)
+    at = {needle: _line_no(DROP_AFTER, needle) for needle in (
+        "FList.Delete", "FList.Clear", "FList.ExtractItem", "FQueue.Dequeue", "FStack.Pop",
+        "  Delete(S")}
+    tree = [_tree_head(), f"  inherited Create(True) at Tree.pas:{_line_no(TREE_PAS, 'inherited')}"]
+    for name in ("Delete", "Clear", "ExtractItem"):
+        body = heads[f"### Drop.pas:{at['FList.' + name]} {name} auf FList: TQueryTree"]
+        assert body[:2] == tree, body
+        assert body[2].startswith("  Besitz (RTL): TObjectList<…>: OwnsObjects standardmäßig wahr")
+    queue = heads[f"### Drop.pas:{at['FQueue.Dequeue']} Dequeue auf FQueue: TObjectQueue<TNode>"]
+    assert len(queue) == 1 and queue[0].startswith("  Besitz (RTL): TObjectQueue<…>")
+    stack = heads[f"### Drop.pas:{at['FStack.Pop']} Pop auf FStack: TObjectStack<TNode>"]
+    assert len(stack) == 1 and stack[0].startswith("  Besitz (RTL): TObjectStack<…>")
+    # Delete der RTL auf einem String hat keinen Empfänger: kein Besitz-Eintrag.
+    assert not [e for e in found.entries if e["line"] == at["  Delete(S"] and e["kind"] == "owner"]
+    # Die Auslöser-Tabelle in counterparts.md nennt die fünf.
+    [row] = [ln for ln in _doc("skills/deep-review/references/counterparts.md").splitlines()
+             if ln.startswith("| Delphi |") and "`Extract`" in ln]
+    for name in ("Delete", "Clear", "ExtractItem", "Dequeue", "Pop"):
+        assert f"`{name}`" in row, (name, row)
 
 
 # --- Evals und Fixtures (Task 12) ---------------------------------------------------------

@@ -36,7 +36,8 @@ Am Kopf von `review_kit.py` (E7). Der Bericht nennt sie.
 - `plan.json` hält den Bereich aufgelöst fest: `range` als SHAs `<basis>..<ziel>` (beim
   Wurzel-Commit nur `<ziel>`, dazu `root: true`), `base` (Merge-Basis oder leerer Baum),
   `target`, `log_base` (aufgelöste BASIS, beim Wurzel-Commit `null`).
-- Profil `checkpoint` geht nur mit Fokus `bugs`. `--soll-file` steht danach in
+- Profil `checkpoint` geht nur mit Fokus `bugs` und nur mit `--soll-file`. Ohne die Datei
+  bricht `plan` mit Exit 1 ab und legt keinen Lauf an. `--soll-file` steht danach in
   `_meta.soll_file`.
 - Ohne reviewte Datei bricht `plan` mit „nichts zu reviewen“ ab und legt keinen Lauf an.
 
@@ -161,11 +162,13 @@ noch frisch ist: nicht schon mit `--since` geplant, ohne `results/`, `packets/` 
 
 Eine Datei wird übernommen, wenn alles zutrifft:
 
-1. Der frühere Lauf hat denselben Fokus und ein passendes Profil (`SINCE_PROFILES`). Profil
-   `checkpoint` ist `standard` mit `--soll-file` als Soll, also eine Obermenge: Ein
-   `standard`-Plan übernimmt aus `standard`- und `checkpoint`-Läufen, ein `checkpoint`-Plan
-   nur aus `checkpoint`-Läufen, denn ein `standard`-Lauf hatte kein Soll. Eine Kette darf
-   Läufe beider erlaubten Profile mischen. Andere Läufe werden still übergangen.
+1. Der frühere Lauf hat denselben Fokus und ein passendes Profil (`SINCE_PROFILES`). Beide
+   Profile reviewen denselben Bereich. Im Profil `checkpoint` ersetzt die Datei aus
+   `--soll-file` die Commit-Messages als Soll, und dieses Soll ist mindestens so genau. Darum
+   übernimmt ein `standard`-Plan aus `standard`- und `checkpoint`-Läufen, ein
+   `checkpoint`-Plan nur aus `checkpoint`-Läufen, denn ein `standard`-Lauf hatte nur die
+   Commit-Messages. Eine Kette darf Läufe beider erlaubten Profile mischen. Andere Läufe
+   werden still übergangen.
 2. Er hat die Datei reviewt, das heißt ihr Paket hat ein angenommenes `results/<id>.json` (oder
    er hat sie selbst übernommen), und zwar mit demselben `key`.
 3. Die **Abdeckungskette** schließt sich. Der `base_blob` des passenden Laufs gleicht dem
@@ -183,6 +186,8 @@ Was im Plan steht:
 - Die übernommene Datei hat `reused_from` (der passende Lauf), `reused_chain` (alle Läufe der
   Kette, der jüngste zuerst) und `findings`. Das sind die Funde aller Kettenglieder zu dieser
   Datei. Gleiche `file`, `line` und `summary` kommen nur einmal vor, dann der jüngere Fund.
+  Jeder Fund trägt `run`, den Lauf, der ihn gemeldet hat. Ein weiterer Folgelauf gibt `run`
+  unverändert weiter, auch an den Funden unter `outside`.
 - Funde eines früheren Pakets zu einer Datei außerhalb des Pakets (etwa zur Definition einer
   Gegenstelle) stehen getrennt unter `outside`, je `{finding, packet_files, file_blob}`. Bei
   jedem Folgelauf wird neu geprüft: Übernommen wird ein solcher Fund nur, wenn alle
@@ -207,6 +212,12 @@ Ein Fund eröffnet eine Gruppe. Ein späterer kommt hinein, wenn sein Anfang hö
 `MERGE_LINE_GAP` Zeilen nach dem Ende dieses ersten Funds liegt oder seine Spanne die eines
 Glieds überschneidet. 10 und 12 werden ein Fund. Aus 10, 13 und 16 werden zwei: 10 mit 13,
 dann 16. `20-22` und 25 werden einer. Funde ohne Zeile bleiben für sich.
+
+Bei einem übernommenen Fund nennt `sources[].reused_from` den Lauf, der ihn gemeldet hat
+(`run` im Plan), nicht den Lauf, aus dem der Folgelauf die Datei übernahm. So lässt sich der
+Fund mit der Fix-Runde genau dieses Laufs abgleichen. Das `reused_from` des vereinigten Funds
+ist das seiner ersten übernommenen Quelle. Pläne ohne `run` an den Funden (vor dieser Regel
+geschrieben) nennen weiter den Lauf aus `file_keys`.
 
 ## Fortsetzen eines Laufs
 

@@ -73,7 +73,7 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
    `--soll-file`); ohne die Skill `/code-review --max-findings all <range>`, und die
    Übergabe sagt „Review ohne Abdeckungsnachweis". Funde (`findings.json` von deep-review,
    im Ersatz die JSON-Liste von `/code-review`) → `fix-task`, Fix in frischem Worktree,
-   `verify`, Merge, Review nur der Fix-Commits ohne `--since`, dann `checkpoint mark` je
+   `verify`, Merge, Nachprüfung bis `HEAD` mit `--since <lauf>`, dann `checkpoint mark` je
    Lauf ([references/checkpoints.md](references/checkpoints.md)); höchstens zwei
    Fix-Runden je Prüfpunkt, je Runde und Prüfpunkt eine Zeile über `plan_to_tasks.py log`.
    Zum Schluss der finale Prüfpunkt über `base..HEAD`. Ein Interface-Bruch zwischen zwei
