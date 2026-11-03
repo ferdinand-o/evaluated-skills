@@ -1,6 +1,6 @@
 # Spec 28: decide — eigene Fragen nach Umkehrbarkeit einordnen, belegt statt still
 
-Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Überarbeitet nach unabhängigem Review (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
+Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Überarbeitet nach unabhängigem Review und nach dem Bau (2026-11-03: `#-<text>` für entfernte Zeilen, finaler Prüfpunkt) (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
 
 ## Problem
 
@@ -199,8 +199,11 @@ die Datei sichtbar („docs/big-decisions.md schema 1 erwartet, 2 gefunden — F
 es auf `/`, ist es ein Präfix; sonst ein Glob, den das Skript selbst in eine Regex übersetzt —
 `*` ohne `/`, `**/` null oder mehr Ordner — statt `fnmatch` (trifft `/` mit `*`) oder
 `PurePath.full_match` (erst ab Python 3.13). Eine Stelle ist eine Datei im Diff. Mit `#<text>`
-gibt ein Eintrag eine Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten —
-weitere Änderungen in derselben Datei gibt er dann mit frei.
+gibt ein Eintrag eine Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten; mit
+`#-<text>` nur, wenn ihre entfernten Zeilen `<text>` enthalten (Entfernen einer Abhängigkeit,
+Löschen einer Migration) — eine Freigabe zum Hinzufügen gibt nie das Entfernen frei. Weitere
+Änderungen in derselben Datei gibt ein passender Eintrag mit frei. Ein führendes `./` im
+Pfadmuster entfällt, ein absoluter Pfad oder `..` wird abgewiesen.
 
 **Belegzeile** `--evidence`: `gesucht: <ort oder muster> — Treffer: <datei:zeile>` oder
 `gesucht: <…> — nichts gefunden`. Das Skript normalisiert ` - ` und ` -- ` zu ` — `, ein
