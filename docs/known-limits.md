@@ -1341,9 +1341,9 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
 - **C3 hängt an der höchsten ID der Gruppe**, wie die Spec es sagt. In einem Plan, dessen
   IDs nicht aufsteigen, kann der Gruppen-Prüfpunkt vor dem letzten Gruppenmitglied
   fällig werden. Ein Prüfpunkt hinter `final` wird mit `final` zusammengelegt.
-- **Review am Prüfpunkt ohne Abdeckungsnachweis.** Solange deep-review (Spec 26) pausiert
-  ist, läuft `/code-review`; der finale Prüfpunkt reviewt `base..HEAD` dann vollständig
-  neu, weil `/code-review` kein `--since` kennt.
+- **Review am Prüfpunkt ohne Abdeckungsnachweis.** In Repos ohne deep-review (Spec 26)
+  läuft `/code-review`; der finale Prüfpunkt reviewt `base..HEAD` dann vollständig neu,
+  weil `/code-review` kein `--since` kennt.
 - **Tokens aus `modelUsage`.** Bei `/code-review` über `claude -p` ist der `usage`-Block 0
   (`local_command`, `num_turns: 0`); Kosten und Tokens stehen nur in `modelUsage`. Ob das
   Agent-Werkzeug überall `model` annimmt und Tokens zurückgibt, ist nur in Claude Code
