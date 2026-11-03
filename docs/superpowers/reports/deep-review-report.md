@@ -811,6 +811,54 @@ Liste der Stdlib-Namen, weil `finder.find()` aufgelöst werden soll. Als Shallow
 nur ein Eintrag mit Vorgänger. 1.821 Tests grün. Den finalen Prüfpunkt markiert `mark --run
 none`, weil der deep-review-Lauf im Scratch-Klon lag. Die offenen Punkte stehen in known-limits.
 
+## Abnahme (Task 16, 2026-11-03)
+
+Der Nutzer hat eine reduzierte Abnahme mit rund 15 USD gewählt. Geplant waren je ein Lauf
+deep-review auf `py-diff` und `dl-diff`, je einer auf `dr-contract` und `dr-delphi` und die 6
+Evals mit Skill. Abschaltungen und Evals ohne Skill sind entfallen. Die Bench-Läufe nutzen
+`run.sh <repo> dr 1`: Claude Code 2.1.317, headless, die Skill als Kopie im Workspace,
+Lesesperre wie in README beschrieben, Nachkontrolle `probe=0` bei beiden Läufen.
+
+| Lauf | Pakete | Funde | Treffer (am Text geprüft) | Kosten | Dauer | Audit |
+| --- | --- | --- | --- | --- | --- | --- |
+| `py-diff-dr-1` | 4 (2.178 Zeilen; 15 Doku, 46 Tests nicht geprüft) | 31 | **6/6 eingebaut (P1–P6), dazu R1**; R2 nicht | 5,87 USD | 15 min | 4/4, aber `report_mismatch`: Bericht fehlt |
+| `dl-diff-dr-1` | 4 (1.988 Zeilen) | 54 | **6/6 (D1–D6)** | 7,43 USD | 20 min | 4/4, vollständig |
+
+**Gegen die Schwellen aus dem Spec:**
+
+| Schwelle | Ergebnis |
+| --- | --- |
+| Treffer mindestens wie die Basislinie (`py-diff` 4,5, `dl-diff` 5,0 von 6) | erfüllt (6 und 6) |
+| P2 oder P4 in mindestens einem Lauf | erfüllt, beide |
+| Kosten höchstens 2× Basislinie (2,12 bzw. 4,66 USD) | **verfehlt** (5,5× und 3,2×) |
+
+- **P2 zum ersten Mal gefunden:** In 17 früheren Läufen mit `cr`, `crc`, `crx`, `eng` und `sp`
+  hatte kein Werkzeug P2 gefunden. Der Fund lautet: „`_resolve_all_groups` catches only
+  ValueError and LookupError, but `DependencyGroupResolver.resolve` also raises TypeError when a
+  group is not a list“. Er nennt also genau den Vertrag der Gegenstelle, den der Paketblock
+  liefert. P4 hatte vorher nur `py-diff-cr-1` gefunden. Die Paket-Läufe des Prototyps aus dem
+  Entscheidungsexperiment fanden P2 und P4 je einmal, aber nie beide im selben Lauf.
+- **Funde sind zeilengenau:** P1 141, P3 77, P4 143, P5 760, P6 903, D2 308, D3 645, D5 848,
+  D6 188.
+- **Kosten:** Ein Lauf kostet etwa ein `/code-review` je Paket plus den Rahmen: Plan,
+  Gegenstellen, Bericht, Audit. Bei 4 Paketen sind das 3- bis 5,5-mal so viel wie ein einzelnes
+  `/code-review`. Die Schwelle „höchstens 2×“ ist mit einem Review je Paket nicht zu halten. Der
+  Spec sollte sie an Paketzahl × Basis knüpfen oder die Wahl dem Nutzer lassen.
+- **Abweichungen im Lauf:**
+  - `py-diff`: Der Agent durfte `report.md` nicht in den Laufordner schreiben. `run.sh` gibt
+    nur `Edit(./.skills/cache/deep-review/**)` frei, das Anlegen einer Datei ist aber `Write`.
+    Das Audit war deshalb unvollständig, obwohl alle Pakete reviewt waren. Der Agent nannte
+    das in der Übergabe korrekt „unvollständig“, nicht „fertig“. Das ist ein Fehler im Bench,
+    nicht in der Skill.
+  - `dl-diff`: Der Agent hat den Paketblock nicht ausdrücklich an `/code-review` übergeben. Der
+    Reviewer lief als Fork und kannte den Block nur aus dem Gesprächsverlauf. Der Agent hat das
+    in der Übergabe selbst eingeräumt. Es ist genau die Rationalisierung, die die
+    Anti-Rationalisierungs-Tabelle nennt („den Block lasse ich weg“). Hier schadete es nicht,
+    weil der Fork den Verlauf erbt; bei einem Unteragenten ohne Verlauf ginge der Block verloren.
+  - `match.py` erwartet `findings.json` direkt im Ordner `.kit`. `run.sh` legt dort aber den
+    ganzen Cache-Ordner ab, also liegt die Datei unter `.kit/<lauf>/`. Die Vorauswahl lief
+    deshalb über das Textfenster. Die Treffer oben sind von Hand am `findings.json` geprüft.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
