@@ -31,6 +31,7 @@ from pathlib import Path
 PROJECT_SKILLS = [
     "architecture-map",
     "debug-ledger",
+    "deep-review",
     "dev-report",
     "feature-spec",
     "handoff",
