@@ -36,8 +36,8 @@ führendem `-` als `--decision=-v`.
    freigegeben — ablegen, dann ausführen:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross --topic "<thema>" \
-     --question "<frage>" --key "dependency:pyproject.toml#httpx" \
-     --approved-by-request "nimm httpx als Abhängigkeit auf"
+     --question "<frage>" --key "<kategorie>:<pfad>" \
+     --approved-by-request "<auftrag wörtlich>"
    ```
    Ein Auftrag mit offenem Ergebnis („überarbeite die Hilfe zu --verbose“) gibt die Aufgabe
    frei, nicht die Wahl darin. Nur wegen einer Regel groß:
@@ -83,7 +83,7 @@ führendem `-` als `--decision=-v`.
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" brief --check "<datei>"
    ```
 7. **Übergabe.** Hat die Aufgabe Dateien geändert, prüft `check` den Diff seit dem Commit vor
-   der Aufgabe (`<rev>`; auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die
+   der Aufgabe (`<rev>`; ohne eigenen Commit `HEAD`; auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die
    Antwort mit Grund, die Zeile „ungeprüft: data-delete, …“ wörtlich. Dann `summary` — nur wenn
    es Einträge gibt — und `open`:
    ```bash

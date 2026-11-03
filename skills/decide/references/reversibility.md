@@ -87,6 +87,7 @@ hat keine Pfadmuster und steht deshalb nicht in der Tabelle; check vergleicht si
 
 ## Bis zur Freigabe bleibt alles stehen
 
-Bis zur Freigabe unterbleibt die ganze Antwort auf eine große Frage, nicht nur ihr teuerster Teil —
-auch eine Änderung, die check nicht sieht (Grad `teilweise`), gehört dazu. Die übrige Arbeit läuft
-weiter.
+Bis zur Freigabe unterbleibt die ganze Antwort auf eine große Frage, nicht nur ihr teuerster Teil.
+Wer über das Löschen einer Spalte entscheiden lässt, entfernt auch das Feld im Modell nicht, obwohl
+check eine Spalte, die nur im Modell entfällt, nicht sieht; dasselbe gilt für jede Änderung, die
+check nicht oder nur teilweise sieht. Die übrige Arbeit läuft weiter.
