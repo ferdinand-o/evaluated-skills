@@ -791,6 +791,26 @@ Urteil BESTÄTIGT, WIDERLEGT oder UNKLAR mit Befehl und Ausgabe als Beleg.
   Stufe liefert also meist echte Funde; die Prüfung lohnt sich vor allem, wenn eine teure
   Fix-Runde von einem Fund abhängt. Gemessen ist das an einem einzigen Review.
 
+**Fix-Runde 2 (belegte Funde).** In drei Paketen parallel, alle mit `verify` PASS:
+
+- A: Attribut-Aufrufe bekommen wieder Gegenstellen, bei unbekanntem Empfänger nur mit
+  eindeutigem Namen, der nicht eingebaut ist, und dann markiert. Der Shallow-Hinweis kommt nur
+  bei echter Grenze.
+- B: `fix-task` liest den Diff mit `--inter-hunk-context=0`. Eine `verdicts.jsonl` nur mit
+  `_meta` bekommt die richtige Meldung.
+- C (Bench):
+  - Die Lesesperre trifft nur fremde Projektordner und beachtet `CLAUDE_CONFIG_DIR`.
+  - `BENCH` wird geprüft, bevor irgendetwas angelegt wird.
+  - Die Probe zählt ganze Pfade.
+  - `dr` läuft nur auf Bereichen.
+  - Die Muster sind enger.
+  - Bei `.kit` wird je Fund abgeglichen.
+
+Zwei Abweichungen von A stimmen; die Vorgaben dazu waren meine. `find` steht nicht in der
+Liste der Stdlib-Namen, weil `finder.find()` aufgelöst werden soll. Als Shallow-Grenze zählt
+nur ein Eintrag mit Vorgänger. 1.821 Tests grün. Den finalen Prüfpunkt markiert `mark --run
+none`, weil der deep-review-Lauf im Scratch-Klon lag. Die offenen Punkte stehen in known-limits.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,

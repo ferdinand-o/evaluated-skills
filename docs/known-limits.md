@@ -2178,10 +2178,10 @@ prüft die Web-Plugins mit diesen Regeln.
 Gebaut nach Spec 26 (2026-11-02). Tier 1: `scripts/review_kit.py` schneidet einen Bereich in
 Pakete, sammelt die Gegenstellen der geänderten Zeilen, nimmt die Ergebnisse je Paket an und
 prüft die Abdeckung; reviewt wird mit `/code-review`. Stand: Bau bis Task 15, mit SKILL.md,
-Plugin-Eintrag und Projekt-Kopie. Die Abnahmemessung (Task 16) steht aus, also ist keine
-Grenze unten an einem Lauf der Skill gemessen. Die Liste hat zwei Quellen: die offenen Fragen
-der Spec und die Funde der Prüfpunkte 1 bis 10, die nach der Linie von subagent-dev (zwei
-Fix-Runden) offen blieben.
+Plugin-Eintrag und Projekt-Kopie. Der finale Prüfpunkt lief mit deep-review selbst über den
+Branch (6 Pakete, 31 Funde); die Abnahmemessung (Task 16) steht aus. Die Liste hat zwei
+Quellen: die offenen Fragen der Spec und die Funde der Prüfpunkte 1 bis 10 und des finalen
+Prüfpunkts, die nach der Linie von subagent-dev (zwei Fix-Runden) offen blieben.
 Was inzwischen behoben ist, steht nicht hier. Je Grenze: was nicht geht, und wo es einen
 gibt, der Umgang damit.
 
@@ -2331,6 +2331,10 @@ gibt, der Umgang damit.
   die Kopien können auseinanderlaufen.
 - **Ein Fund aus `findings.json` mit nur einer Quelle erscheint auch in der Quellenform,** die
   Zeile steht dann doppelt in der Task-Datei.
+- **`verify` liest `[` als Glob-Zeichen** (`GLOB_CHARS`). Steht `app/[id]/page.tsx` in der
+  Allowlist, erlaubt `verify` jede Änderung unter `app/`. `fix-task` nimmt solche Pfade an.
+- **Bricht ein Löschen der Sperre mit `OSError` ab** (Windows, Datei offen), endet der Befehl mit
+  Exit 1 und der rohen Meldung, statt zu warten.
 - **`fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die Testdatei,** obwohl
   die Akzeptanz „mit Test belegt“ verlangt. Von Hand in die Markdown-Allowlist und in den
   JSON-Block am Ende eintragen; `verify` liest den Block.
@@ -2361,6 +2365,17 @@ gibt, der Umgang damit.
 - **Die Runlog-Zeile zu Prüfpunkt 8 zählt „5 von 18“ für Runde 2.** Gemeint sind fünf Funde aus
   dem Review des Fixes, das wieder 18 meldete.
 
+**Review-Bench**
+
+- **Prototyp `counterparts.py` (`crx`) nicht nachgezogen:** `__init__` steht doppelt, Attribute
+  werden über den bloßen Namen aufgelöst, das Präfix `b/` ist fest. `crx` läuft nur auf
+  Python-Bereichen. Die Skill nutzt `review_kit.py`, nicht den Prototyp.
+- **Lesesperre mit Lücken:** `Bash(python3:*)` bei `dr` umgeht jede Sperre. Bash-Regeln
+  vergleichen nur den Anfang des Befehls. Projektordner, die während des Laufs entstehen, sind
+  nicht gesperrt. Gegenmittel ist die Nachkontrolle `probe=` in `status.txt`.
+- **Eval 2 und 5 können zwei Läufe mischen,** wenn der Agent neu plant: Die Globs nehmen den
+  alphabetisch ersten Lauf, für Plan und Audit getrennt.
+
 **Pflege des Skripts**
 
 - **Doppelte Aufrufe und Auflösungen:** `rev-parse --show-toplevel` läuft je Plan zweimal
@@ -2375,6 +2390,14 @@ gibt, der Umgang damit.
 - **Toter Code:** `COUNTERPART_SUFFIXES` und `_PasUnit.local_type` werden nirgends gebraucht.
 - **Zwei Codeausdrücke stehen über einen Zeilenumbruch** (`delphi.md`, `review-brief.md`),
   und ein Test-Block wiederholt einen anderen.
+- **Aufwand je Paket und Auflösung:** `_worktree_differs` kopiert den Index je Paket.
+  `_factory` läuft je `raise` erneut über die ganze Funktion. `import_names` und
+  `import_prefixes` gehen dieselben Importe zweimal durch.
+- **Eine Datei wird nie geteilt:** Ein neues Modul mit 5.000 Zeilen ist ein Paket und damit wieder
+  ein Review über tausende Zeilen. Gesehen am finalen Prüfpunkt (`review_kit.py` als p5).
+- **Unbekannter Empfänger mit eindeutigem Namen:** `s.find()` auf einem String kann eine
+  eindeutige Methode `find` im Repo treffen. Der Eintrag ist dann als „Empfänger unbekannt, Name
+  eindeutig“ markiert.
 
 ## Verweise
 
