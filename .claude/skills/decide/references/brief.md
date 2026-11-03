@@ -14,10 +14,10 @@ Skript gibt es nicht.
 ## Form
 
 Zeile 1 ist die Kopfzeile `<!-- skill: decide | schema: 1 | generated: … -->`; sie zählt nicht
-zu den Feldern und nicht zu den Zeilen. Sie nennt den Befehl lesbar, bei einem Thema mit `--` aber
-nicht wörtlich kopierbar: `--` steht dort als `‐‐` (U+2010), weil `--` in einem HTML-Kommentar nicht
-erlaubt ist. Danach genau die sechs Felder unten, jedes als
-Überschrift `## <Feld>`, der Inhalt in den Zeilen darunter. Jede Überschrift außerhalb eines
+zu den Feldern und nicht zu den Zeilen. Sie nennt den Befehl wörtlich, auch bei einem Thema mit
+`--`; nur `-->` (und `--!>`) im Thema, das den HTML-Kommentar schlösse, steht dort als `-- >`
+(`--! >`) — nur dann sucht der kopierte Befehl ein anderes Thema. Danach genau die sechs Felder
+unten, jedes als Überschrift `## <Feld>`, der Inhalt in den Zeilen darunter. Jede Überschrift außerhalb eines
 Codezauns ist ein Feld, auch eine `###`; in einem Codezaun (```` ``` ```` oder `~~~`) ist eine
 Zeile mit `#` Text des Feldes. Ein Auftrag hat höchstens 25 Zeilen mit Text ohne die Kopfzeile;
 Leerzeilen zählen nicht. Die Grenze ist gesetzt, nicht gemessen: Ein längerer Auftrag nimmt dem

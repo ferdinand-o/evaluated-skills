@@ -58,24 +58,33 @@ Jede große Frage in `docs/big-decisions.md` trägt einen Schlüssel
 
 - `dependency:pyproject.toml` — jede Änderung an `pyproject.toml` an der Wurzel
 - `dependency:pyproject.toml#python-dateutil` — `pyproject.toml` nur, wenn eine hinzugefügte
-  Zeile `python-dateutil` enthält; weitere Änderungen in derselben Datei gibt der Eintrag dann
-  mit frei
+  oder entfernte Zeile `python-dateutil` enthält (Aufnehmen wie Entfernen); weitere Änderungen in
+  derselben Datei gibt der Eintrag dann mit frei
 - `migration:migrations/` — jede Datei unter `migrations/` (ebenso `migration:migrations/**/`)
 - `migration:evals/fixtures/` — die Fixtures unter `evals/fixtures/*/migrations/` in diesem Repo
 
 check gibt eine Stelle frei, wenn ein Block mit Status `freigegeben` einen Schlüssel derselben
 Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer
-hinzugefügten Zeile steht). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
+hinzugefügten oder entfernten Zeile steht; eine unversionierte Datei ist ganz hinzugefügt). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
 Freigabe gilt für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt
 `#<text>`. Ein `#` ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
 („hat leeren Text nach #“), und einer, der von Hand so in der Ablage steht, gibt nichts frei —
-`add` und check prüfen die Form mit derselben Funktion.
+`add` und check prüfen die Form mit derselben Funktion. Das Pfadmuster ist relativ zur
+Repo-Wurzel wie die Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil
+`..` träfe nie eine Datei — `add` weist ihn ab („Pfadmuster muss relativ zur Repo-Wurzel sein“),
+und von Hand in der Ablage gibt er nichts frei (Hinweis in der Ausgabe von check).
 
-Woher die Freigaben kommen: bei einer einzelnen Revision (`--range <rev>`) aus der Arbeitskopie
-von `docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum (`<a>..<b>`, `<rev>^!` — auch auf
-dem ersten Commit —, `<rev>^-<n>`, und `<a>...<b>` wie `git diff <a>...<b>`: Basis die Merge-Base,
-Ende `<b>`, die übliche Form für einen PR-Diff) aus der Ablage im Ende, aufgelöst auf seinen Commit
-(`<b>^{commit}:docs/big-decisions.md`). Fehlt sie dort, ist sie wie eine fehlende Ablage. Meldungen
+Basis und Ende eines Bereichs bestimmt check aus der Ausgabe von `git rev-parse` und vergleicht
+immer `git diff <basis> <ende>`, nie die rohe Angabe: `<a>..<b>` und `<rev>^-<n>` mit der negativen
+Revision als Basis; `<rev>^!` mit dem Elternteil als Basis — bei einem Merge-Commit mit dem ersten
+Elternteil (wie `<rev>^1..<rev>`, Hinweis „Merge: verglichen mit erstem Elternteil“), auf dem ersten
+Commit mit dem leeren Baum; `<a>...<b>` wie `git diff <a>...<b>` mit der Merge-Base als Basis und
+`<b>` als Ende, die übliche Form für einen PR-Diff. Eine einzelne Revision (`--range <rev>`) wird
+mit dem Arbeitsbaum verglichen, unversionierte Dateien zählen dazu.
+
+Woher die Freigaben kommen: bei einer einzelnen Revision aus der Arbeitskopie von
+`docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum aus der Ablage im Ende, aufgelöst auf
+seinen Commit (`<b>^{commit}:docs/big-decisions.md`). Fehlt sie dort, ist sie wie eine fehlende Ablage. Meldungen
 nennen das Ende so, wie es angegeben wurde (`v2`, nicht ein Hash). Fehlt die Ablage, ist sie unlesbar oder wird
 sie übersprungen, sagt jede Stelle „Freigaben nicht gelesen (<Grund>)“.
 
