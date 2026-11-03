@@ -2317,9 +2317,10 @@ gibt, der Umgang damit.
   sagt, der Bericht nenne die Grenzwerte.
 - **`REPORT_BASE_LINES (20)` steht als Zahl in der Vorlage,** ohne dass ein Test sie gegen die
   Konstante prüft.
-- **`_meta.generated` hält `--report` und `--soll-file` repo-relativ fest,** aufgelöst werden
-  sie aber gegen das Arbeitsverzeichnis. Das notierte Kommando wiederholt sich nur aus der
-  Repo-Wurzel gleich.
+- **Das notierte Kommando ist relativ zum Skill-Ordner** (`python scripts/review_kit.py …` in
+  `_meta.generated`) und nennt `--repo` nicht; `--report` und `--soll-file` stehen darin
+  repo-relativ, aufgelöst werden sie aber gegen das Arbeitsverzeichnis. Erneut eintippen lässt
+  es sich im Skill-Ordner, mit `--repo <repo>` dazu und den beiden Pfaden absolut.
 
 **Schnittstelle zu subagent-dev**
 

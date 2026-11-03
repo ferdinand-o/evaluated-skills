@@ -158,7 +158,9 @@ Hauptagent die übernommenen Funde mit den Fix-Runden der Läufe in `since_runs`
 (`sources[].reused_from` in `findings.json` nennt den Lauf, der den Fund gemeldet hat; die
 Kopie `fix-task-<prüfpunkt>-<runde>.md` seiner Runde die bearbeiteten Funde). Die, die eine
 Fix-Runde schon bearbeitet hat, lässt er nur aus der Eingabe des nächsten `fix-task` weg: Er
-schreibt eine gekürzte Kopie von `findings.json`. In `findings.json` und im Bericht des Laufs
+schreibt eine gekürzte Kopie von `findings.json` nach
+`.skills/cache/tasks/findings-<prüfpunkt>-<runde>.json` (`<runde>` die Runde, die sie
+bearbeitet); das `findings.json` des Laufs ändert er nicht. In `findings.json` und im Bericht des Laufs
 bleiben sie, sonst meldet `audit` `lost_findings` oder `report_mismatch`; der Bericht darf sie
 mit „laut fix-task-<prüfpunkt>-<runde> behoben“ kennzeichnen.
 
@@ -198,7 +200,9 @@ Aufrufern, deren Gegenstellen sich geändert haben (ein Fund in `a.py`, behoben 
 aufgerufenen `b.py`: `a.py` kommt wieder dran, wenn sich ihr Schlüssel geändert hat). Einen
 übernommenen Fund, den die Kopie einer Runde dieses Prüfpunkts nennt (gleiche Datei und
 `summary`, die Zeile kann sich verschoben haben), lässt der Hauptagent nur aus der Eingabe
-des nächsten `fix-task` weg (eine gekürzte Kopie von `findings.json`, die er schreibt); in
+des nächsten `fix-task` weg (eine gekürzte Kopie von `findings.json`, die er nach
+`.skills/cache/tasks/findings-<prüfpunkt>-<runde>.json` schreibt; das `findings.json` des
+Laufs ändert er nicht); in
 `findings.json` und im Bericht bleibt er, sonst meldet `audit` `lost_findings` oder
 `report_mismatch`, und der Bericht darf ihn „laut fix-task-<prüfpunkt>-<runde> behoben“
 nennen. Die übrigen Funde sind die nächste Runde. Ein Fix nur an Tests oder Doku ändert keinen Schlüssel, und

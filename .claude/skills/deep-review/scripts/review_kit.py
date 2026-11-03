@@ -76,14 +76,18 @@ REPORT_BASE_LINES = 20    # Anti-Zeremonie: Bericht höchstens so viele Zeilen p
 SKILL_NAME = "deep-review"
 SCHEMA_VERSION = 1
 RESERVED_META = ("skill", "schema")
-# `_meta.generated` nennt das Skript ohne Pfad, wie die References (`review_kit.py <befehl> …`):
-# Ein Repo-Pfad gälte nur in diesem Repo, nicht in einer Plugin-Installation oder Projekt-Kopie.
-SCRIPT_CMD = "review_kit.py"
+# `_meta.generated` nennt das Kommando relativ zum Skill-Ordner (`python scripts/review_kit.py
+# <befehl> …`), so wie man es dort erneut eintippt (docs/artifact-header.md). Ein Repo-Pfad
+# gälte nur in diesem Repo, nicht in einer Plugin-Installation oder Projekt-Kopie.
+SCRIPT_CMD = "python scripts/review_kit.py"
 CACHE_DIR = PurePosixPath(".skills/cache/deep-review")
 # Legt `plan` in den Cache-Ordner, wenn sie fehlt: `*` blendet die Läufe und sich selbst aus
 # Git aus. Die .gitignore des Repos bleibt unberührt.
 CACHE_IGNORE = ".gitignore"
 CACHE_IGNORE_TEXT = "*\n"
+# Damit kündigt `plan` die Datei an, wenn es sie anlegt (docs/artifact-header.md,
+# Bootstrap-Regel: der erste Lauf nennt, was er anlegt, mit Pfad).
+CACHE_CREATED = f"Angelegt: {(CACHE_DIR / CACHE_IGNORE).as_posix()} (ignoriert den Cache)"
 DEFAULT_RANGE = "HEAD"    # ohne Bereich: der letzte Commit
 # Dieselbe Pathspec wie subagent-dev (plan_to_tasks.py, changed_lines); `numstat` ruft git
 # immer aus der Repo-Wurzel auf, `.` ist also das ganze Repo. Der Unterschied bleibt die
@@ -575,7 +579,8 @@ def run_dir(repo, run_id) -> Path:
 def _ignore_cache(repo: Path) -> None:
     """Den Cache-Ordner anlegen und `<cache>/.gitignore` mit `*` schreiben, wenn sie fehlt —
     so stehen die Läufe nicht als ungetrackt im Status und kommen nicht über `git add -A` in
-    einen Commit. Eine vorhandene Datei bleibt, wie sie ist; die .gitignore des Repos auch."""
+    einen Commit. Eine vorhandene Datei bleibt, wie sie ist; die .gitignore des Repos auch.
+    Angekündigt wird eine neu angelegte Datei in `_cmd_plan` (`CACHE_CREATED`)."""
     cache = Path(repo) / CACHE_DIR
     cache.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(FileExistsError):
@@ -1269,10 +1274,10 @@ def cleanup(repo, run_id, stale):
     """Hilfscommit-Refs löschen, in einer Transaktion über `git update-ref --stdin`.
 
     `stale` falsch: alle Refs unter `refs/deep-review/<run_id>/` (`run_id` Pflicht).
-    `stale` wahr: die Refs aller anderen Läufe — abgebrochener —, die von `run_id` bleiben;
-    `run_id` None löscht alle unter `refs/deep-review/`. Refs gelten für alle Worktrees
-    eines Repos: `stale` löscht auch die eines Laufs, der in einem anderen Worktree noch
-    läuft. Jede Ref wird nur mit ihrem gelesenen Wert gelöscht. Danach steht in jedem
+    `stale` wahr: die Refs aller anderen Läufe, auch die noch offener, die von `run_id`
+    bleiben; `run_id` None löscht alle unter `refs/deep-review/`. Refs gelten für alle
+    Worktrees eines Repos: `stale` löscht, mit oder ohne `run_id`, auch die eines Laufs, der
+    in einem anderen Worktree noch läuft. Jede Ref wird nur mit ihrem gelesenen Wert gelöscht. Danach steht in jedem
     `plan.json` dieses Repos, dessen Bereiche auf gelöschte Refs zeigten, dort wieder
     `range: null` (`_reset_ranges`, nach Kräften: eine belegte Sperre wird übersprungen,
     nicht abgewartet). Objekte, HEAD, Index und Arbeitsbaum bleiben.
@@ -4764,12 +4769,15 @@ def _header_mismatch(head, run_id: str, plan: dict, tools: set) -> list:
     """Was an der Kopfzeile (`_report_header` von Zeile 1) nicht passt: zuerst `skill`,
     `schema`, `generated` mit den festen Werten; dann Pflicht `run` (= Lauf), `range`,
     `profile`, `focus` (je wie im Plan) und `tool` (nicht leer; gibt es angenommene
-    Ergebnisse, eins ihrer Werkzeuge aus `_meta.tool`)."""
+    Ergebnisse, eins ihrer Werkzeuge aus `_meta.tool`). `tool` wird auf beiden Seiten nach
+    `_canonical_tool` verglichen: `code-review` gleicht `/code-review`, ebenso ein von Hand
+    oder vor dieser Regel gespeichertes `C:/Program Files/Git/code-review`."""
     if head is None:
         return ["Kopfzeile fehlt oder falsch in Zeile 1 (erwartet <!-- skill: deep-review | "
                 "schema: 1 | generated: … | run: <lauf> | range: … | profile: … | focus: … | "
                 "tool: … -->)"]
     out = []
+    tools = {_canonical_tool(tool) for tool in tools}
     if tuple(head)[:len(REPORT_HEADER_FIRST)] != REPORT_HEADER_FIRST:
         out.append("Kopfzeile: zuerst skill, schema, generated")
     for key, want in (("skill", SKILL_NAME), ("schema", str(SCHEMA_VERSION))):
@@ -4783,7 +4791,7 @@ def _header_mismatch(head, run_id: str, plan: dict, tools: set) -> list:
             out.append(f"Kopfzeile nennt Lauf {value!r}, nicht {run_id}")
         elif key in ("range", "profile", "focus") and value != plan.get(key):
             out.append(f"Kopfzeile: {key} {value!r}, der Plan sagt {plan.get(key)!r}")
-        elif key == "tool" and tools and value not in tools:
+        elif key == "tool" and tools and _canonical_tool(value) not in tools:
             out.append(f"Kopfzeile: tool {value!r}, die Ergebnisse nennen "
                        f"{', '.join(sorted(tools))}")
     return out
@@ -4988,7 +4996,11 @@ def _cmd_plan(args) -> int:
         if not soll_path.is_file():
             raise KitError(f"--soll-file {args.soll_file}: Datei fehlt ({soll_path})")
         soll = _shown_path(repo, soll_path)
+    ignore = repo / CACHE_DIR / CACHE_IGNORE
+    fresh = not os.path.lexists(ignore)
     plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at, args.with_tests)
+    # build_plan legt die .gitignore des Cache-Ordners an, wenn sie fehlte; das sagt plan.
+    created = fresh and os.path.lexists(ignore)
     run_id = plan["_meta"]["run"]
     directory = run_dir(repo, run_id)
     try:
@@ -5003,9 +5015,13 @@ def _cmd_plan(args) -> int:
     except BaseException:
         # Kein halber Lauf: build_plan hat noch keine Refs gebaut, der Ordner ist alles.
         shutil.rmtree(directory, ignore_errors=True)
+        if created:
+            print(CACHE_CREATED)        # die Datei bleibt, auch ohne Lauf
         raise
     print(f"Lauf: {run_id}")
     print(f"Plan: {(CACHE_DIR / run_id / 'plan.json').as_posix()}")
+    if created:
+        print(CACHE_CREATED)
     print(f"Bereich: {plan['range']} · Profil {plan['profile']} · Fokus {plan['focus']} · "
           f"split: {'true' if plan['split'] else 'false'} · {plan['changed_lines']} Zeilen")
     for packet in plan["packets"]:
@@ -5112,7 +5128,9 @@ def _parser() -> argparse.ArgumentParser:
 
     clean = sub.add_parser("cleanup", parents=[common], help="Hilfscommit-Refs löschen")
     clean.add_argument("--run", default=None)
-    clean.add_argument("--stale", action="store_true", help="Refs abgebrochener Läufe")
+    clean.add_argument("--stale", action="store_true",
+                       help="Refs aller anderen Läufe löschen, auch noch offener in anderen "
+                            "Worktrees (ohne --run: die aller Läufe)")
     clean.set_defaults(func=_cmd_cleanup)
     return parser
 

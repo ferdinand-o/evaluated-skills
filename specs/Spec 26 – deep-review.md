@@ -59,7 +59,9 @@ Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`. 
 die Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>` (UTC). Fehlt
 `.skills/cache/deep-review/.gitignore`, schreibt `plan` sie mit `*`, damit die Läufe in einem
 Repo ohne passenden Eintrag nicht als ungetrackt erscheinen; die `.gitignore` des Repos bleibt
-unberührt. `_meta.generated` nennt das Skript ohne Pfad (`review_kit.py <befehl> …`). Dazu schreibt
+unberührt; der erste `plan`, der sie anlegt, nennt sie in einer Zeile `Angelegt: …`.
+`_meta.generated` nennt das Kommando relativ zum Skill-Ordner
+(`python scripts/review_kit.py <befehl> …`), so wie man es dort erneut eintippt. Dazu schreibt
 `counterparts` Hilfscommits unter `refs/deep-review/<lauf>/` in das Repo des Nutzers;
 `cleanup` löscht sie, und der Bootstrap nennt beide Orte.
 
