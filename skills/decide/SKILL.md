@@ -13,11 +13,15 @@ niemanden an, einen Hook gibt es nicht.
 
 ## Ablauf
 
-`D="${CLAUDE_SKILL_DIR}/scripts/decide_log.py"` — Aufrufe mit `python "$D" …`. Werte mit
+Jeder Aufruf unten steht mit vollem Pfad und läuft so, wie er dasteht, sobald `<…>` und `…`
+ersetzt sind; keine Shell-Variable, sie überlebt den nächsten Bash-Aufruf nicht. Werte mit
 führendem `-` als `--decision=-v`.
 
-0. **Regeln lesen.** Einmal je Sitzung vor der ersten Einordnung `python "$D" rules`. Das
-   Thema eines Eintrags wählt Claude, wo eins passt, wörtlich aus dieser Liste.
+0. **Regeln lesen.** Einmal je Sitzung vor der ersten Einordnung:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" rules
+   ```
+   Das Thema eines Eintrags wählt Claude, wo eins passt, wörtlich aus dieser Liste.
 1. **Untergrenze.** decide gilt nur für eine eigene Frage, bei der mindestens zwei Lesarten
    zu verschiedener Arbeit führen: Die Wahl merkt jemand außerhalb der geänderten Stelle (ein
    Test, ein Aufrufer, ein Leser des Logs, ein anderes Modul). Reihenfolge von Funktionen
@@ -28,24 +32,39 @@ führendem `-` als `--decision=-v`.
 2. **Einordnen.** Groß ist, was eine Handlung aus `references/reversibility.md` auslöst oder
    dessen Thema eine Regel `immer fragen` trifft; alles andere ist klein. Vorrang: konkreter
    Auftrag vor Regel vor eigener Einordnung. Hat der Nutzer genau diesen Schritt beauftragt
-   (Handlung und Gegenstand stehen im Auftrag), ist er freigegeben:
-   `python "$D" add --class gross --topic <t> --key <kategorie>:<pfad> --approved-by-request "<Zitat>"`,
-   dann ausführen. Ein Auftrag mit offenem Ergebnis („mach die Meldung verständlicher“) gibt
-   die Aufgabe frei, nicht die Wahl darin. Nur wegen einer Regel groß: `add --class gross
-   --topic <regelthema> --key rule:<regelthema> --option … --recommendation …`.
+   (Handlung und Gegenstand stehen im Auftrag, etwa „lösch den Branch release/1.0“), ist er
+   freigegeben — ablegen, dann ausführen:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross --topic "<thema>" \
+     --question "<frage>" --key "<kategorie>:<pfad>" --approved-by-request "<Zitat>"
+   ```
+   Ein Auftrag mit offenem Ergebnis („überarbeite die Hilfe zu --verbose“) gibt die Aufgabe
+   frei, nicht die Wahl darin. Nur wegen einer Regel groß:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross --topic "<regelthema>" \
+     --question "<frage>" --key "rule:<regelthema>" --option "A: …" --option "B: …" --recommendation "…"
+   ```
 3. **Klein.** Beleg suchen in Repo, Spec, Tests, Doku. Müsste die Suche voraussichtlich
    mehr als zwei Dateien lesen, erarbeitet sie ein Sonnet-Subagent mit einem Auftrag (6).
-   Dann `python "$D" add --class klein --topic <t> --question <frage> --decision <wahl>
-   --evidence "gesucht: … — Treffer: <datei:zeile>"` und weiterarbeiten. Ohne Treffer
-   meldet das Skript den Eintrag als Annahme.
+   Dann eintragen und weiterarbeiten; ohne Treffer meldet das Skript den Eintrag als Annahme:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class klein --topic "<thema>" \
+     --question "<frage>" --decision "<wahl>" --evidence "gesucht: … — Treffer: <datei:zeile>"
+   ```
 4. **Groß.** Vorlage nach `references/option-memo.md`: zwei bis vier Optionen mit Folgen und
-   Umkehrbarkeit, Empfehlung mit Grund. `python "$D" add --class gross --topic <t> --key
-   <kategorie>:<pfad> --option "A: …" --option "B: …" --recommendation "…"` legt Block `D-<n>`
-   in `docs/big-decisions.md` an (erste Anlage: „angelegt: docs/big-decisions.md“). Bis zur
-   Freigabe unterbleibt die ganze Antwort auf die große Frage, nicht nur ihr teuerster Teil;
-   die übrige Arbeit läuft weiter, große Fragen sammeln.
+   Umkehrbarkeit, Empfehlung mit Grund. Der Aufruf legt Block `D-<n>` in `docs/big-decisions.md`
+   an (erste Anlage: „angelegt: docs/big-decisions.md“):
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross --topic "<thema>" \
+     --question "<frage>" --key "<kategorie>:<pfad>" --option "A: …" --option "B: …" --recommendation "…"
+   ```
+   Bis zur Freigabe unterbleibt die ganze Antwort auf die große Frage, nicht nur ihr teuerster
+   Teil; die übrige Arbeit läuft weiter, große Fragen sammeln.
    - **Beaufsichtigt** (`AskUserQuestion` in der Werkzeugliste): gebündelt stellen, Antwort
-     mit `python "$D" resolve D-<n> --answer "…"` (`--reject` für abgelehnt) eintragen, handeln.
+     eintragen (`--reject` statt `--answer "…"` für abgelehnt), handeln:
+     ```bash
+     python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" resolve D-<n> --answer "…"
+     ```
    - **Unbeaufsichtigt** (`claude -p` ohne Permission-Host, jeder Subagent): Block bleibt
      offen, der teure Schritt unterbleibt, die Übergabe nennt `D-<n>`.
 5. **Subagenten tragen nichts ein.** Jeder Auftrag an einen Subagenten, den der Hauptagent
@@ -53,15 +72,25 @@ führendem `-` als `--decision=-v`.
    > Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.
 
    Liest ein Subagent diese Datei selbst, gilt derselbe Satz.
-6. **Auftrag aus `brief`.** `python "$D" brief --topic <thema>` schreibt
-   `.skills/cache/decide/<session>/brief-<n>.md` mit sechs Feldern als Überschriften
-   `## <Feld>` (`references/brief.md`). Das Skript füllt Schon entschieden, Feste Vorgaben und
-   Rückgabe (mit dem Satz aus 5); der Hauptagent füllt Frage (neutral, keine Empfehlung),
-   Anlass und Wo nachsehen. Vor dem Dispatch `python "$D" brief --check <datei>`.
-7. **Übergabe.** Hat die Aufgabe Dateien geändert: `python "$D" check --range <commit vor der
-   Aufgabe>` (auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die Antwort mit
-   Grund, die Zeile „ungeprüft: data-delete, …“ wörtlich. Dann `python "$D" summary` — nur wenn es
-   Einträge gibt — und `python "$D" open`. Ohne Git meldet `check` „ungeprüft — kein Git“.
+6. **Auftrag aus `brief`.** Der erste Aufruf schreibt `.skills/cache/decide/<session>/brief-<n>.md`
+   mit sechs Feldern als Überschriften `## <Feld>` (`references/brief.md`) und nennt den Pfad.
+   Das Skript füllt Schon entschieden, Feste Vorgaben und Rückgabe (mit dem Satz aus 5); der
+   Hauptagent füllt Frage (neutral, keine Empfehlung), Anlass und Wo nachsehen. Der zweite prüft
+   die Datei vor dem Dispatch:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" brief --topic "<thema>"
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" brief --check "<datei>"
+   ```
+7. **Übergabe.** Hat die Aufgabe Dateien geändert, prüft `check` den Diff seit dem Commit vor
+   der Aufgabe (`<rev>`; auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die
+   Antwort mit Grund, die Zeile „ungeprüft: data-delete, …“ wörtlich. Dann `summary` — nur wenn
+   es Einträge gibt — und `open`:
+   ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" check --range "<rev>"
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" summary
+   python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" open
+   ```
+   Ohne Git meldet `check` „ungeprüft — kein Git“.
    Fehlt das Skript, sagt die Übergabe „ungeprüft — decide_log.py nicht verfügbar“ und nennt
    die Entscheidungen aus dem Gedächtnis als solche.
 

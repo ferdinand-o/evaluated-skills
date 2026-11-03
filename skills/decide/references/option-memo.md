@@ -53,9 +53,10 @@ Antwort: —
 Quelle der Antwort: —
 ```
 
-Aufruf dazu (`decide_log.py` mit dem Pfad aus der SKILL.md):
+Aufruf dazu. `decide_log.py` steht in dieser Datei für den Aufruf mit vollem Pfad, wie ihn die
+SKILL.md nennt; der Rest der Zeile gilt wörtlich:
 
-```
+```bash
 decide_log.py add --class gross \
   --topic Abhängigkeiten \
   --question "Datumsangaben mit einer neuen Abhängigkeit parsen oder mit der Stdlib?" \
@@ -93,15 +94,15 @@ Jeder Block nennt, woher die Antwort kommt. Genau drei Werte:
 | `add --class gross --approved-by-request "<Zitat>"` | `--topic`, `--question`, `--key`, Zitat | keine; der Block nennt „Optionen: — (Auftrag)" | wie oben |
 | `add --class klein`, von `immer fragen` hochgestuft | `--topic`, `--question`, `--decision`, `--evidence` | zwei bis vier `--option`, sonst Exit 1; `--decision` wird die Empfehlung | `rule:<thema>`, von `check` nie verglichen |
 
-`--approved-by-request` gilt nur, wenn Handlung und Gegenstand im Auftrag stehen („entferne die
-Spalte `alt_kennung`"). Ein Auftrag, der das Ergebnis offen lässt, gibt die Aufgabe frei, nicht die
+`--approved-by-request` gilt nur, wenn Handlung und Gegenstand im Auftrag stehen („lösch den
+Branch `release/1.0`"). Ein Auftrag, der das Ergebnis offen lässt, gibt die Aufgabe frei, nicht die
 Wahl darin.
 
 ## Antwort eintragen
 
-Beaufsichtigt, nach `AskUserQuestion`:
+Beaufsichtigt, nach `AskUserQuestion`, einer der beiden Aufrufe:
 
-```
+```bash
 decide_log.py resolve D-1 --answer "B, wie empfohlen"
 decide_log.py resolve D-1 --reject
 ```

@@ -4,13 +4,14 @@ evals/decide/evals.json an dessen Ausgaben — so greifen sie an echten Protokol
 check-Zeilen, nicht an gedachten. Die Muster werden aus der Datei gelesen, nie kopiert."""
 
 import ast
+import functools
 import re
 import shutil
 import subprocess
 import sys
 
-from conftest import REPO_ROOT, decide_add_small, decide_commit, decide_log_file, decide_script, git
-from evalkit.assertions import ARTIFACT_HEADER_RE, check
+from conftest import REPO_ROOT, decide_add_small, decide_log_file, decide_script, git
+from evalkit.assertions import ARTIFACT_HEADER_RE, GIT_HEAD_KEY, check
 from evalkit.schema import load_evals
 from evalkit.workspace import prepare
 
@@ -24,6 +25,7 @@ LOG_GLOB = ".skills/cache/decide/*/log.md"
 DC = ("dc-loaders", "dc-logging", "dc-models", "dc-rules")
 
 
+@functools.cache
 def _evals():
     return {ev.id: ev for ev in load_evals(EVALS_PATH)}
 
@@ -45,13 +47,11 @@ def _hits(pattern, text):
 
 
 def _seed(tmp_path, monkeypatch, name, fixture):
-    """Wegwerf-Repo mit dem Inhalt der Fixture, ein Commit, Arbeitsverzeichnis dorthin."""
-    root = tmp_path / name
-    shutil.copytree(FIXTURES / fixture, root, ignore=shutil.ignore_patterns("fixture.json"))
-    git(root, "init", "-q")
-    base = decide_commit(root, "fixture")
-    monkeypatch.chdir(root)
-    return root, base
+    """Workspace wie im Eval-Lauf (`evalkit.workspace.prepare`, ohne Skill), Arbeitsverzeichnis
+    dorthin; (Wurzel, Hash des Fixture-Commits)."""
+    ws = prepare(tmp_path / name, None, FIXTURES / fixture)
+    monkeypatch.chdir(ws.root)
+    return ws.root, ws.baseline[GIT_HEAD_KEY]
 
 
 def _line_of(path, needle):
@@ -159,16 +159,36 @@ def test_models_fixture_is_red_for_the_import_and_green_for_the_field(tmp_path):
     assert not check(import_gone, ws.root, ws.baseline).ok
 
 
-def test_fixtures_hold_what_the_evals_assume():
+def _leaks(fixture, dest):
+    """Was eine Fixture nicht mitbringen darf, im Workspace aus `prepare` unter `dest`: Pfade unter
+    `.skills/cache/` oder die Ablage, und deren Erwähnung in einer von git erfassten Datei (jede
+    einmal gelesen, als Bytes — ein Bytecode-Rest außerhalb von git zählt nicht)."""
+    ws = prepare(dest, None, fixture)
+    rels = [rel for rel in ws.baseline if rel != GIT_HEAD_KEY]
+    problems = [rel for rel in rels if rel.startswith(".skills/cache/") or rel == LEDGER]
+    for rel in filter(None, git(ws.root, "ls-files", "-z").split("\0")):
+        data = (ws.root / rel).read_bytes()
+        problems.extend(f"{rel}: {needle}" for needle in (".skills/cache/", LEDGER) if needle.encode() in data)
+    return problems
+
+
+def test_evals_are_parsed_once():
+    assert _evals() is _evals()
+
+
+def test_leak_scan_skips_untracked_bytecode(tmp_path):
+    """Ein liegengebliebenes `__pycache__/*.pyc` (von der .gitignore der Fixture ausgenommen) ist
+    kein Text und kein Fund."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURES / "dc-models", fixture)
+    (fixture / "app" / "__pycache__").mkdir()
+    (fixture / "app" / "__pycache__" / "models.cpython-312.pyc").write_bytes(b"\x00\xff\xfe\x80 .skills/cache/")
+    assert _leaks(fixture, tmp_path / "ws") == []
+
+
+def test_fixtures_hold_what_the_evals_assume(tmp_path):
     for name in DC:
-        fixture = FIXTURES / name
-        files = [p for p in fixture.rglob("*") if p.is_file()]
-        rels = [p.relative_to(fixture).as_posix() for p in files]
-        assert not any(r.startswith(".skills/cache/") for r in rels), name
-        assert LEDGER not in rels, name
-        for path in files:
-            assert ".skills/cache/" not in path.read_text(encoding="utf-8"), path
-            assert LEDGER not in path.read_text(encoding="utf-8"), path
+        assert _leaks(FIXTURES / name, tmp_path / name) == [], name
 
     loaders = (FIXTURES / "dc-loaders" / "app" / "loaders.py").read_text(encoding="utf-8")
     assert "def load_users(" in loaders and "def load_orders(" in loaders and "load_products" not in loaders
@@ -198,11 +218,10 @@ def test_fixtures_hold_what_the_evals_assume():
 
 
 def test_python_fixtures_are_importable(tmp_path):
-    """Jedes Modul der Fixtures importiert ohne Fremdpaket; geprüft in einer Kopie, damit kein
-    `__pycache__` in der Fixture landet."""
+    """Jedes Modul der Fixtures importiert ohne Fremdpaket; geprüft im Workspace aus `prepare`, damit
+    kein `__pycache__` in der Fixture landet."""
     for name in DC:
-        root = tmp_path / name
-        shutil.copytree(FIXTURES / name, root, ignore=shutil.ignore_patterns("fixture.json"))
+        root = prepare(tmp_path / name, None, FIXTURES / name).root
         modules = [p.relative_to(root).with_suffix("").as_posix().replace("/", ".")
                    for p in sorted((root / "app").glob("*.py")) if p.name != "__init__.py"]
         code = "import importlib, sys\nfor m in sys.argv[1:]: importlib.import_module(m)\n"
