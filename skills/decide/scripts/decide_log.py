@@ -144,24 +144,41 @@ für `#<text>`), ein Bereich, den Git nicht kennt, und „ungeprüft — referen
 fehlt“ bzw. der Grund, warum sie nicht parst (dann ohne Schlusszeile — sie käme aus der Datei).
 
 Auftrag an einen Subagenten: `brief --topic T` (`write_brief`) schreibt
-`.skills/cache/decide/<session>/brief-<n>.md` (höchste Nummer plus eins, exklusiv angelegt):
+`.skills/cache/decide/<session>/brief-<n>.md` (höchste Nummer plus eins, exklusiv angelegt und über
+denselben Deskriptor geschrieben; ein Abbruch entfernt die Datei, keine leere bleibt liegen):
 Kopfzeile, dann die sechs Felder aus `references/brief.md` als `## <Feld>` — Frage, Anlass, Feste
-Vorgaben, Schon entschieden, Wo nachsehen, Rückgabe. Feste Vorgaben sind alle Regeln mit Datei und
-Zeile (unlesbare Regeldateien meldet brief wie add über `rule_problems`), Schon entschieden die
-Einträge der Sitzung mit gleichem Thema (nach `_norm`; `—`, wenn keiner), Rückgabe die feste Form
-`RETURN_FORM` und `SUBAGENT_SENTENCE`, der Satz für Subagenten aus Spec 28, Ablauf 5, wörtlich;
-Frage, Anlass und Wo nachsehen bleiben leer für den Hauptagenten. Ist das Protokoll unlesbar oder
-überspringt es die Konsumenten-Regel, Exit 1, kein Auftrag. `brief --check <datei>`
-(`check_brief`) meldet mehr als 25 Zeilen mit Text ohne Kopfzeile (Leerzeilen zählen nicht), jede
-Überschrift außer den sechs Feldern, Text vor dem ersten Feld, fehlende und doppelte Felder und
-Wörter der Wortliste in der Frage (ganzes Wort, Groß/klein egal) — Exit 1, Befunde auf stdout, sonst
-0. Den Satz für Subagenten prüft es bewusst nicht (unterrichten, nicht prüfen; G1). Die Wortliste
-liest `load_wordlist` aus dem Abschnitt `## Wortliste` in `references/brief.md` — der einen Quelle
-für Mensch und Parser; fehlt sie oder parst sie nicht, ist die Datei nicht lesbar, fehlt ihr die
-Kopfzeile von decide oder ist `schema` höher als 1, endet `brief --check` mit Exit 2 „ungeprüft — …“
-auf stderr, nie mit Erfolg.
+Vorgaben, Schon entschieden, Wo nachsehen, Rückgabe. In der Kopfzeile wird `--` im Thema `‐‐`
+(U+2010), damit `-->` den Kommentar nicht schließt. Feste Vorgaben sind alle Regeln mit Datei und
+Zeile (einmal gelesen über `read_rules`; unlesbare Regeldateien meldet brief wie add), dann jede
+offene große Frage des Themas als „- D-<n> offen: <frage> — nicht entscheiden, nicht darauf
+aufbauen“ (Spec 28, Ablauf 4: bis zur Freigabe unterbleibt die ganze Antwort). Schon entschieden
+sind die Einträge der Sitzung mit gleichem Thema (nach `_norm`; `—`, wenn keiner); ein großer nur,
+wenn sein Block (`D-<n>` und gleiche Frage) in der Ablage `freigegeben` ist — mit Antwort — oder
+`abgelehnt`. Fehlt die Ablage, überspringt die Konsumenten-Regel sie (Hinweis in der Ausgabe), fehlt
+der Block oder trägt er einen anderen Status, steht die Frage als „- D-<n> Status unbekannt (<grund>):
+<frage> — nicht entscheiden, nicht darauf aufbauen“ unter Feste Vorgaben. Rückgabe ist die feste
+Form `RETURN_FORM` und der Satz für Subagenten aus Spec 28, Ablauf 5, den `load_subagent_sentence`
+aus dem Abschnitt `## Der Satz für Subagenten` in `references/brief.md` liest (das eine Zitat `> …`);
+fehlt er oder parst er nicht, endet `brief --topic` mit Exit 2 „ungeprüft — Satz für Subagenten in
+references/brief.md fehlt (<grund>)“ und schreibt nichts. Frage, Anlass und Wo nachsehen bleiben leer
+für den Hauptagenten. Hat der Auftrag schon so mehr als 25 Zeilen ohne Kopf, sagt die Ausgabe
+„Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf, höchstens 25 — Feste Vorgaben kürzen“ (Exit bleibt
+0). Ist das Protokoll unlesbar oder überspringt es die Konsumenten-Regel, Exit 1, kein Auftrag. Den
+Pfad nennt die Ausgabe relativ zur Wurzel. `brief --check <datei>` (`check_brief`) löst einen
+relativen Pfad, der im Arbeitsverzeichnis fehlt, gegen die Repo-Wurzel auf und meldet mehr als 25
+Zeilen mit Text ohne Kopfzeile (Leerzeilen zählen nicht), jede Überschrift außer den sechs Feldern —
+außerhalb von Codezäunen (```` ``` ````, `~~~`); darin ist `#` Text des Feldes —, Text vor dem ersten
+Feld, fehlende und doppelte Felder und Wörter der Wortliste in der Frage (ganzes Wort, Groß/klein
+egal; Grenze ist jedes Zeichen außer Buchstabe und Ziffer, auch `_`) — Exit 1, Befunde auf stdout,
+sonst 0. Den Satz für Subagenten prüft es bewusst nicht (unterrichten, nicht prüfen; G1). Die
+Wortliste liest `load_wordlist` aus dem Abschnitt `## Wortliste` in `references/brief.md` — der einen
+Quelle für Mensch und Parser; dort ist jede nicht-leere Zeile ein Listenpunkt `- `/`* ` mit Wort in
+Backticks, jede andere ein Problem mit Zeilennummer. Fehlt sie oder parst sie nicht, ist die Datei
+nicht lesbar, fehlt ihr die Kopfzeile von decide oder ist `schema` höher als 1, endet `brief --check`
+mit Exit 2 „ungeprüft — …“ auf stderr, nie mit Erfolg.
 
-Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse).
+Das Skript meldet; es hält niemanden an. Exit 2 bei falschem Aufruf (argparse) und bei jedem
+„ungeprüft — …“ oben.
 """
 import argparse
 import errno
@@ -235,16 +252,15 @@ BRIEF_REFERENCE = SKILL_DIR / "references" / "brief.md"
 BRIEF_FIELDS = ("Frage", "Anlass", "Feste Vorgaben", "Schon entschieden", "Wo nachsehen", "Rückgabe")
 BRIEF_LIMIT = 25                # Zeilen mit Text ohne Kopfzeile
 WORDLIST_HEADING = "## Wortliste"
+# Der Satz für Subagenten (Spec 28, Ablauf 5) steht nur in references/brief.md, als Zitat in diesem
+# Abschnitt (load_subagent_sentence); `brief --check` prüft ihn bewusst nicht.
+SENTENCE_HEADING = "## Der Satz für Subagenten"
 RETURN_FORM = ("Je Option: Belege `datei:zeile`, Folgen, Umkehrbarkeit; dann eine Empfehlung mit Grund. "
                "Kleine Entscheidungen unterwegs mit Belegzeile `gesucht: … — Treffer: datei:zeile`.")
-# Spec 28, Ablauf 5, wörtlich; brief.md zitiert ihn. `brief --check` prüft ihn bewusst nicht.
-SUBAGENT_SENTENCE = (
-    "Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und "
-    "schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf "
-    "einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und "
-    "handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, "
-    "Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.")
+NOT_DECIDED = "nicht entscheiden, nicht darauf aufbauen"
 _HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<name>.*?)\s*#*\s*$")
+_FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+_QUOTE_RE = re.compile(r"^ {0,3}>\s?(?P<text>.*)$")
 
 
 class Category(NamedTuple):
@@ -1652,10 +1668,11 @@ def brief_path(root, session, number):
 
 def load_wordlist(path):
     """(Wörter, Problem) aus dem Abschnitt `## Wortliste` in `references/brief.md` (`path`), bei jedem
-    Aufruf neu gelesen. Wörter: Tupel in Dateireihenfolge, klein, Leerraum zusammengezogen; je
-    Listenpunkt (`- ` oder `* `) bis zur nächsten Überschrift ein Wort oder eine Wortfolge in
-    Backticks, Prosa im Abschnitt zählt nicht. Problem: None, oder eine Zeile Grund (fehlt, nicht
-    lesbar, kein Abschnitt, Listenpunkt anderer Form, doppelt, keine Listenpunkte); dann ()."""
+    Aufruf neu gelesen. Wörter: Tupel in Dateireihenfolge, klein, Leerraum zusammengezogen. Im
+    Abschnitt steht bis zur nächsten Überschrift nur ein Listenpunkt je Zeile (`- ` oder `* `, dann ein
+    Wort oder eine Wortfolge in Backticks) oder eine Leerzeile. Problem: None, oder eine Zeile Grund
+    (fehlt, nicht lesbar, kein Abschnitt, eine Zeile anderer Form — auch Prosa oder `+ ` — mit ihrer
+    Nummer, doppelt, keine Listenpunkte); dann (). Nichts wird still verworfen."""
     where = reference_shown(path)
     try:
         text = read_file(path)
@@ -1672,12 +1689,15 @@ def load_wordlist(path):
         stripped = line.strip()
         if _HEADING_RE.match(line):
             break
-        if not stripped.startswith(("- ", "* ")):
+        if not stripped:
             continue
         match = re.fullmatch(r"[-*]\s+`([^`]+)`", stripped)
         word = " ".join(match.group(1).split()).lower() if match else ""
         if not word:
-            return (), f"{where}:{number}: Listenpunkt „{stripped}“ — erwartet ein Wort in Backticks"
+            if re.match(r"(?:[-*+]|\d+[.)])(?:\s|$)", stripped):
+                return (), f"{where}:{number}: Listenpunkt „{stripped}“ — erwartet „- `<wort>`“ oder „* `<wort>`“"
+            return (), (f"{where}:{number}: „{stripped}“ ist kein Listenpunkt — im Abschnitt "
+                        f"„{WORDLIST_HEADING}“ stehen nur Listenpunkte „- `<wort>`“")
         if word in words:
             return (), f"{where}:{number}: `{word}` steht doppelt"
         words.append(word)
@@ -1686,26 +1706,143 @@ def load_wordlist(path):
     return tuple(words), None
 
 
+def load_subagent_sentence(path):
+    """(Satz, Problem) aus dem Abschnitt `## Der Satz für Subagenten` in `references/brief.md` (`path`),
+    bei jedem Aufruf neu gelesen — der einen Quelle des Satzes aus Spec 28, Ablauf 5. Der Satz ist das
+    eine Zitat (`> …`, auch über mehrere Zeilen, zu einer Zeile zusammengezogen) bis zur nächsten
+    Überschrift; Prosa davor und danach zählt nicht. Problem: None, oder der Grund (Datei fehlt, nicht
+    lesbar, kein Abschnitt, kein oder leeres Zitat, mehr als ein Zitat); dann ist der Satz None."""
+    try:
+        text = read_file(path)
+    except Unreadable as error:
+        return None, unreadable_problem(error, "Datei", "")
+    if text is None:
+        return None, "Datei fehlt"
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == SENTENCE_HEADING), None)
+    if start is None:
+        return None, f"kein Abschnitt „{SENTENCE_HEADING}“"
+    quotes, inside = [], False
+    for number, line in enumerate(lines[start + 1:], start + 2):
+        if _HEADING_RE.match(line):
+            break
+        quote = _QUOTE_RE.match(line)
+        if quote and not inside:
+            if quotes:
+                return None, f"Zeile {number}: ein zweites Zitat — genau eines erwartet"
+            quotes.append([])
+        if quote:
+            quotes[-1].append(quote.group("text"))
+        inside = bool(quote)
+    sentence = " ".join(" ".join(quotes[0]).split()) if quotes else ""
+    if not sentence:
+        return None, f"kein Zitat „> …“ im Abschnitt „{SENTENCE_HEADING}“"
+    return sentence, None
+
+
+def klasse_label(entry):
+    """Anzeige der Klasse eines Protokolleintrags: `klein`, `Annahme`, `groß` — für summary und brief."""
+    return {"annahme": "Annahme", "gross": "groß"}.get(entry["klasse"], "klein")
+
+
 def _decided_line(entry):
-    kind = {"annahme": "Annahme", "gross": "groß"}.get(entry["klasse"], "klein")
-    where = f"{LEDGER_SHOWN}" if entry["klasse"] == "gross" else entry["beleg"]
-    return f"- [{kind}] {entry['frage']} → {entry['entscheidung']} ({where})"
+    return f"- [{klasse_label(entry)}] {entry['frage']} → {entry['entscheidung']} ({entry['beleg']})"
+
+
+def _entry_lines(root, entries):
+    """(Schon entschieden, Feste Vorgaben, Hinweise) für die Einträge `entries` in Protokollreihenfolge.
+    Kleine und Annahmen sind entschieden (`_decided_line`); große (Klasse `gross`) ordnet der Status
+    ihres Blocks in der Ablage ein — gesucht nach `D-<n>` und gleicher Frage, weil nach einer
+    verworfenen Ablage Nummern wiederkehren. `freigegeben` mit Antwort und `abgelehnt` sind entschieden;
+    `offen` steht unter Feste Vorgaben als „nicht entscheiden, nicht darauf aufbauen“ (Spec 28, Ablauf 4:
+    bis zur Freigabe unterbleibt die ganze Antwort); fehlt die Ablage, überspringt die Konsumenten-Regel
+    sie, fehlt der Block oder trägt er einen anderen Status, ist der Status unbekannt — ebenfalls dort."""
+    blocks, problem, exists, notes, unknown = [], None, True, [], None
+    if any(e["klasse"] == "gross" for e in entries):
+        blocks, problem, exists = _read_ledger(root)
+    if problem:
+        notes.append(f"Hinweis: {problem}")
+        unknown = f"{LEDGER_SHOWN} übersprungen"
+    elif not exists:
+        unknown = f"{LEDGER_SHOWN} fehlt"
+    decided, pending = [], []
+    for entry in entries:
+        if entry["klasse"] != "gross":
+            decided.append(_decided_line(entry))
+            continue
+        did, question = entry["entscheidung"], entry["frage"]
+        found = [b for b in blocks if b["id"] == did and cell(b["question"]) == question]
+        status = found[0]["status"] if len(found) == 1 and not unknown else None
+        answer = line_value(found[0]["answer"]) if status else NONE
+        if status == "freigegeben":
+            decided.append(f"- [groß] {question} → {did} freigegeben: {answer} ({LEDGER_SHOWN})")
+        elif status == "abgelehnt":
+            told = f": {answer}" if answer not in (NONE, "abgelehnt") else ""
+            decided.append(f"- [groß] {question} → {did} abgelehnt{told} ({LEDGER_SHOWN})")
+        elif status == "offen":
+            pending.append(f"- {did} offen: {question} — {NOT_DECIDED}")
+        else:
+            why = unknown or (f"Status „{status}“ in {LEDGER_SHOWN}" if status else f"nicht in {LEDGER_SHOWN}")
+            pending.append(f"- {did} Status unbekannt ({why}): {question} — {NOT_DECIDED}")
+    return decided, pending, notes
+
+
+def _comment_safe(text):
+    """Nutzertext für den generated-Teil einer Kopfzeile: `--` wird `‐‐` (U+2010), damit `-->` oder
+    `<!--` im Text den HTML-Kommentar nicht vorzeitig schließt oder öffnet."""
+    return text.replace("--", "‐‐")
+
+
+def _write_new(path, text):
+    """Legt `path` exklusiv an und schreibt `text` über denselben Deskriptor (`utf-8`, `\\n`); False,
+    wenn die Datei schon steht. Bricht das Schreiben ab — Fehler oder Unterbrechung —, wird die Datei
+    entfernt und der Fehler weitergereicht: keine leere oder halbe brief-<n>.md bleibt liegen."""
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o666)
+    except FileExistsError:
+        return False
+    try:
+        try:
+            handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+        except BaseException:
+            os.close(fd)
+            raise
+        with handle:
+            handle.write(text)
+    except BaseException:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return True
 
 
 def write_brief(root, session, topic, home):
     """(exit, meldung): schreibt `.skills/cache/decide/<session>/brief-<n>.md` mit Kopfzeile und den
     sechs Feldern aus `references/brief.md` als `## <Feld>`. Das Skript füllt Feste Vorgaben (jede
-    Regel aus `load_rules` mit Datei und Zeile), Schon entschieden (Einträge der Sitzung, deren Thema
-    nach `_norm` gleich `topic` ist; `—`, wenn keiner) und Rückgabe (`RETURN_FORM` und
-    `SUBAGENT_SENTENCE` wörtlich); Frage, Anlass und Wo nachsehen bleiben leer. Unlesbare
-    Regeldateien meldet es wie add (`rule_problems`) und schreibt trotzdem. Ein unlesbares
-    Protokoll oder eines ohne passende Kopfzeile: Exit 1, kein Auftrag — Schon entschieden wäre
-    sonst still leer. Die Nummer ist die höchste vorhandene plus eins, per exklusivem Anlegen
-    reserviert (zwei gleichzeitige Aufrufe bekommen zwei Nummern)."""
+    Regel aus `read_rules` mit Datei und Zeile, dann jede offene große Frage des Themas als
+    „- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen“ und jede, deren Status die
+    Ablage nicht sagt, als „Status unbekannt“), Schon entschieden (Einträge der Sitzung, deren Thema
+    nach `_norm` gleich `topic` ist — große nur, wenn ihr Block freigegeben oder abgelehnt ist
+    (`_entry_lines`); `—`, wenn keiner) und Rückgabe (`RETURN_FORM` und der Satz aus
+    `load_subagent_sentence`); Frage, Anlass und Wo nachsehen bleiben leer. `--` im Thema wird in der
+    Kopfzeile `‐‐` (`_comment_safe`). Unlesbare Regeldateien meldet es wie add und schreibt trotzdem.
+    Liegt der Auftrag schon so über `BRIEF_LIMIT`, sagt ein Hinweis das (Exit bleibt 0). Fehlt der Satz
+    für Subagenten in `references/brief.md` oder parst er nicht: Exit 2 „ungeprüft — Satz für Subagenten
+    in references/brief.md fehlt (…)“, nichts geschrieben. Ein unlesbares Protokoll oder eines ohne
+    passende Kopfzeile: Exit 1, kein Auftrag — Schon entschieden wäre sonst still leer. Die Nummer ist
+    die höchste vorhandene plus eins, exklusiv angelegt und über denselben Deskriptor geschrieben
+    (`_write_new`; zwei gleichzeitige Aufrufe bekommen zwei Nummern, ein Abbruch hinterlässt keine
+    Datei)."""
     root, home = Path(root), Path(home)
     topic = " ".join((topic or "").split())
     if not topic:
         return 1, "brief: es fehlt --topic; kein Auftrag geschrieben."
+    sentence, problem = load_subagent_sentence(BRIEF_REFERENCE)
+    if problem:
+        return 2, (f"ungeprüft — Satz für Subagenten in {reference_shown(BRIEF_REFERENCE)} fehlt ({problem}); "
+                   "kein Auftrag geschrieben.")
     try:
         text = read_log(root, session)
     except Unreadable as error:
@@ -1716,42 +1853,38 @@ def write_brief(root, session, topic, home):
         if problem:
             return 1, problem
         entries = [e for e in parse_rows(text) if _norm(e["thema"]) == _norm(topic)]
-    rules = load_rules(root, home)
-    notes = rule_problems(root, home)
+    rules, _, notes = read_rules(root, home)
+    decided, pending, ledger_notes = _entry_lines(root, entries)
 
     body = [f"<!-- skill: {SKILL} | schema: {SCHEMA} | generated: python decide_log.py brief "
-            f"--topic {shlex.quote(topic)} -->",
+            f"--topic {_comment_safe(shlex.quote(topic))} -->",
             "", "## Frage", "", "## Anlass", "",
-            "## Feste Vorgaben", *[f"- Regel {rule_label(r)} ({r.source}:{r.line})" for r in rules], "",
-            "## Schon entschieden", *([_decided_line(e) for e in entries] or [NONE]), "",
+            "## Feste Vorgaben", *[f"- Regel {rule_label(r)} ({r.source}:{r.line})" for r in rules], *pending, "",
+            "## Schon entschieden", *(decided or [NONE]), "",
             "## Wo nachsehen", "",
-            "## Rückgabe", RETURN_FORM, SUBAGENT_SENTENCE]
+            "## Rückgabe", RETURN_FORM, sentence]
+    content = "\n".join(body) + "\n"
     folder = log_path(root, session).parent
     existed = cache_exists(root)
     try:
         folder.mkdir(parents=True, exist_ok=True)
         taken = [int(m.group(1)) for p in folder.iterdir() if (m := re.fullmatch(r"brief-(\d+)\.md", p.name))]
         number = max(taken, default=0) + 1
-        while True:
-            path = brief_path(root, session, number)
-            try:
-                os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-                break
-            except FileExistsError:
-                number += 1
-        try:
-            write_atomic(path, "\n".join(body) + "\n")
-        except OSError:
-            path.unlink(missing_ok=True)
-            raise
+        while not _write_new(brief_path(root, session, number), content):
+            number += 1
     except OSError as error:
         return 1, (f"Auftrag unter {shown(folder, root)} nicht schreibbar ({error.strerror or error}); "
                    "kein Auftrag geschrieben.")
-    path_shown = shown(path, root)
-    lines = notes + [
-        f"Auftrag geschrieben: {path_shown} — Schon entschieden: {len(entries)}, Feste Vorgaben: "
-        f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}.",
+    path_shown = shown(brief_path(root, session, number), root)
+    count = sum(1 for line in content.splitlines()[1:] if line.strip())
+    lines = notes + ledger_notes + [
+        f"Auftrag geschrieben: {path_shown} — Schon entschieden: {len(decided)}, Feste Vorgaben: "
+        f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}"
+        + (f", {len(pending)} große Frage{'' if len(pending) == 1 else 'n'} ohne Freigabe" if pending else "") + ".",
         f"Frage, Anlass und Wo nachsehen ausfüllen (Feste Vorgaben ergänzen), dann brief --check {path_shown}."]
+    if count > BRIEF_LIMIT:
+        lines.append(f"Hinweis: Auftrag hat schon {count} Zeilen ohne Kopf, höchstens {BRIEF_LIMIT} — "
+                     "Feste Vorgaben kürzen")
     notice = unversioned_notice(root, existed, True)
     if notice:
         lines.append(notice)
@@ -1759,41 +1892,66 @@ def write_brief(root, session, topic, home):
 
 
 def _word_re(word):
-    return re.compile(r"(?<!\w)" + r"\s+".join(re.escape(w) for w in word.split()) + r"(?!\w)", re.IGNORECASE)
+    """Ein Wort der Wortliste als ganzes Wort: davor und danach kein Buchstabe und keine Ziffer — `_`
+    grenzt ab wie Leerraum (`_sollte_` trifft); Groß/klein egal, Leerraum in Wortfolgen beliebig."""
+    return re.compile(r"(?<![^\W_])" + r"\s+".join(re.escape(w) for w in word.split()) + r"(?![^\W_])",
+                      re.IGNORECASE)
+
+
+def _resolve_brief(path):
+    """Ein relativer Pfad, der im Arbeitsverzeichnis nicht steht, gilt relativ zur Repo-Wurzel —
+    so nennt ihn `brief --topic`."""
+    if path.is_absolute() or path.exists():
+        return path
+    candidate = repo_root(Path.cwd()) / path
+    return candidate if candidate.exists() else path
 
 
 def check_brief(path):
     """(exit, meldung) für einen Auftrag: Exit 1 mit je Befund einer Zeile — mehr als `BRIEF_LIMIT`
     Zeilen mit Text ohne Kopfzeile (Leerzeilen zählen nicht), eine Überschrift außer den sechs
     Feldern, Text vor dem ersten Feld, ein fehlendes oder doppeltes Feld, Wörter aus
-    `load_wordlist(BRIEF_REFERENCE)` in der Frage (ganzes Wort, Groß/klein egal) —, sonst 0. Den
-    Satz für Subagenten prüft es bewusst nicht. Exit 2 „ungeprüft — …“, wenn die Wortliste nicht
-    gelesen werden kann, die Datei fehlt oder nicht lesbar ist, oder die Konsumenten-Regel sie
-    überspringt (Kopfzeile von decide fehlt, `schema` höher als 1)."""
-    path = Path(path)
+    `load_wordlist(BRIEF_REFERENCE)` in der Frage (`_word_re`) —, sonst 0. Zeilen in einem Codezaun
+    (```` ``` ```` oder `~~~`, bis zum schließenden Zaun derselben Art und mindestens gleicher Länge)
+    sind Text des Feldes, keine Überschriften; nur außerhalb eines Zauns beginnt eine Überschrift ein
+    Feld. Ein relativer Pfad, der im Arbeitsverzeichnis fehlt, wird gegen die Repo-Wurzel aufgelöst
+    (`_resolve_brief`). Den Satz für Subagenten prüft es bewusst nicht. Exit 2 „ungeprüft — …“, wenn
+    die Wortliste nicht gelesen werden kann, die Datei fehlt oder nicht lesbar ist, oder die
+    Konsumenten-Regel sie überspringt (Kopfzeile von decide fehlt, `schema` höher als 1)."""
+    given = Path(path)
     words, problem = load_wordlist(BRIEF_REFERENCE)
     if problem:
         return 2, f"ungeprüft — {problem}"
-    where = f"Auftrag {path}"
+    path = _resolve_brief(given)
+    where = f"Auftrag {given}"
     try:
         text = read_file(path)
     except Unreadable as error:
         return 2, "ungeprüft — " + unreadable_problem(error, where, "")
     if text is None:
         return 2, f"ungeprüft — {where} fehlt"
-    problem = header_problem(text, str(path))
+    problem = header_problem(text, str(given))
     if problem:
         return 2, f"ungeprüft — {problem}"
 
     lines = text.splitlines()
     head = next(i for i, line in enumerate(lines) if line.strip())
     findings, seen, question = [], [], []
-    count, current, outside = 0, None, False
+    count, current, outside, fence = 0, None, False, None
     for number, line in enumerate(lines[head + 1:], head + 2):
         if not line.strip():
             continue
         count += 1
-        heading = _HEADING_RE.match(line)
+        marker = _FENCE_RE.match(line)
+        heading = None
+        if fence:
+            if marker and marker.group("fence")[0] == fence[0] and len(marker.group("fence")) >= len(fence) \
+                    and not marker.group("info").strip():
+                fence = None
+        elif marker and not (marker.group("fence")[0] == "`" and "`" in marker.group("info")):
+            fence = marker.group("fence")
+        else:
+            heading = _HEADING_RE.match(line)
         if heading:
             name = " ".join(heading.group("name").split())
             if name not in BRIEF_FIELDS:
@@ -1855,8 +2013,7 @@ def summary(root, session, home):
         lines.append(f"die {SUMMARY_LIMIT} jüngsten von {len(shown_entries)}, alle im Protokoll")
         shown_entries = shown_entries[-SUMMARY_LIMIT:]
     for e in shown_entries:
-        kind = {"annahme": "Annahme", "gross": "groß"}.get(e["klasse"], "klein")
-        lines.append(f"- [{kind}] {e['thema']}: {e['frage']} → {e['entscheidung']} ({e['beleg']})")
+        lines.append(f"- [{klasse_label(e)}] {e['thema']}: {e['frage']} → {e['entscheidung']} ({e['beleg']})")
     lines.append(f"Protokoll: {path_shown}")
     return 0, "\n".join(lines)
 
@@ -1960,7 +2117,8 @@ def main(argv):
                 warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
                            f"--class gross — {what}")
     # check und brief --check: Stellen und Befunde sind ein Bericht
-    report = code == 0 or (code == 1 and (args.action == "check" or getattr(args, "check", None) is not None))
+    report = code == 0 or (code == 1 and (args.action == "check"
+                                          or (args.action == "brief" and args.check is not None)))
     print(message, file=sys.stdout if report else sys.stderr)
     if warning:
         print(warning, file=sys.stderr)

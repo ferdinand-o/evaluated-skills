@@ -5,18 +5,23 @@ dem Subagenten, was er klären soll und wo er nachsieht, nicht, was der Hauptage
 Sonst bestätigt der Subagent nur die Sicht des Hauptagenten.
 
 `decide_log.py brief --topic <thema>` schreibt den Auftrag nach
-`.skills/cache/decide/<session>/brief-<n>.md` (Nummer: die höchste plus eins). Vor dem Dispatch
-prüft ihn `decide_log.py brief --check <datei>`. Die Wortliste unten liest das Skript aus dieser
-Datei; eine zweite Liste im Skript gibt es nicht.
+`.skills/cache/decide/<session>/brief-<n>.md` (Nummer: die höchste plus eins) und nennt den Pfad
+relativ zur Repo-Wurzel. Vor dem Dispatch prüft ihn `decide_log.py brief --check <datei>`; ein
+relativer Pfad, der im Arbeitsverzeichnis fehlt, gilt relativ zur Repo-Wurzel. Den Satz für
+Subagenten und die Wortliste unten liest das Skript aus dieser Datei; eine zweite Fassung im
+Skript gibt es nicht.
 
 ## Form
 
 Zeile 1 ist die Kopfzeile `<!-- skill: decide | schema: 1 | generated: … -->`; sie zählt nicht
 zu den Feldern und nicht zu den Zeilen. Danach genau die sechs Felder unten, jedes als
-Überschrift `## <Feld>`, der Inhalt in den Zeilen darunter. Jede Überschrift ist ein Feld, auch
-eine `###`. Ein Auftrag hat höchstens 25 Zeilen mit Text ohne die Kopfzeile; Leerzeilen zählen
-nicht. Die Grenze ist gesetzt, nicht gemessen: Ein längerer Auftrag nimmt dem Subagenten den
-Vorteil des frischen Kontexts.
+Überschrift `## <Feld>`, der Inhalt in den Zeilen darunter. Jede Überschrift außerhalb eines
+Codezauns ist ein Feld, auch eine `###`; in einem Codezaun (```` ``` ```` oder `~~~`) ist eine
+Zeile mit `#` Text des Feldes. Ein Auftrag hat höchstens 25 Zeilen mit Text ohne die Kopfzeile;
+Leerzeilen zählen nicht. Die Grenze ist gesetzt, nicht gemessen: Ein längerer Auftrag nimmt dem
+Subagenten den Vorteil des frischen Kontexts. Liegt ein Auftrag schon so, wie `brief --topic` ihn
+schreibt, darüber (viele Regeln), sagt es „Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf,
+höchstens 25 — Feste Vorgaben kürzen“; geschrieben wird er trotzdem.
 
 ## Die sechs Felder
 
@@ -24,20 +29,25 @@ Vorteil des frischen Kontexts.
 | --- | --- | --- |
 | Frage | ein Satz, neutral, ohne Wörter der Wortliste | Hauptagent |
 | Anlass | die laufende Aufgabe und ihr Ziel | Hauptagent |
-| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln —, je mit Quelle | Skript: jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile; Hauptagent: Nutzer, Spec, Plan |
-| Schon entschieden | die Einträge der Sitzung mit demselben Thema | Skript, aus dem Protokoll; `—`, wenn keiner |
+| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln, offene große Fragen —, je mit Quelle | Skript: jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile, dann jede offene große Frage des Themas als `- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen` (ohne lesbare Ablage: `Status unbekannt`); Hauptagent: Nutzer, Spec, Plan |
+| Schon entschieden | die Einträge der Sitzung mit demselben Thema; eine große Frage nur, wenn ihr Block in `docs/big-decisions.md` freigegeben (mit Antwort) oder abgelehnt ist | Skript, aus Protokoll und Ablage; `—`, wenn keiner |
 | Wo nachsehen | Pfade und Suchmuster, keine Inhalte | Hauptagent |
 | Rückgabe | Optionen mit Belegen `datei:zeile`, Folgen, Umkehrbarkeit, Empfehlung; dazu der Satz für Subagenten | Skript |
 
 ## Der Satz für Subagenten
 
-Unter Rückgabe steht wörtlich der Satz aus Spec 28, Ablauf 5:
+Unter Rückgabe steht wörtlich der Satz aus Spec 28, Ablauf 5. Das Skript liest ihn aus diesem
+Abschnitt (`load_subagent_sentence`): das eine Zitat `> …` bis zur nächsten Überschrift, über
+mehrere Zeilen zu einer zusammengezogen. Fehlt die Datei, der Abschnitt oder das Zitat, oder stehen
+zwei Zitate darin, endet `brief --topic` mit Exit 2 „ungeprüft — Satz für Subagenten in
+references/brief.md fehlt (…)“ und schreibt nichts.
 
 > Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.
 
 Derselbe Satz beendet jeden anderen Auftrag an einen Subagenten, solange decide geladen ist —
 wörtlich, nicht sinngemäß. `brief --check` prüft ihn bewusst nicht: Ob er dasteht und ob der
-Subagent sich daran hält, bleibt G1.
+Subagent sich daran hält, bleibt G1. Eine offene große Frage ist für den Subagenten keine
+Entscheidung: Bis zur Freigabe unterbleibt die ganze Antwort darauf (Spec 28, Ablauf 4).
 
 ## Was nicht hinein gehört
 
@@ -49,15 +59,20 @@ Subagent sich daran hält, bleibt G1.
 - Der Verlauf der Sitzung oder eine Zusammenfassung des bisherigen Gesprächs.
 - Eine Anweisung, selbst etwas mit `decide_log.py` einzutragen.
 
-## Wortliste
+## Wertende Wörter
 
-`brief --check` meldet jedes dieser Wörter in der Frage — als ganzes Wort, ohne Rücksicht auf
-Groß- und Kleinschreibung (`Sollte` trifft, `verbessern` nicht); bei einer Wortfolge darf
-beliebig viel Leerraum zwischen den Wörtern stehen. Gebeugte Formen und andere Wertungen prüft
-es nicht (G1). Das Skript liest die Liste aus diesem Abschnitt (`load_wordlist`): je Listenpunkt
-ein Wort oder eine Wortfolge in Backticks, bis zur nächsten Überschrift. Fehlt die Datei, fehlt
-der Abschnitt oder steht ein anderer Listenpunkt darin, endet `brief --check` mit Exit 2
-„ungeprüft — …“, nie mit Erfolg.
+`brief --check` meldet jedes Wort der Wortliste unten in der Frage — als ganzes Wort, ohne
+Rücksicht auf Groß- und Kleinschreibung (`Sollte` trifft, `verbessern` nicht). Ein Wort endet an
+jedem Zeichen, das weder Buchstabe noch Ziffer ist, auch an `_` (`_sollte_` trifft, `sollte2`
+nicht); bei einer Wortfolge darf beliebig viel Leerraum zwischen den Wörtern stehen. Gebeugte
+Formen und andere Wertungen prüft es nicht (G1). Das Skript liest die Liste aus dem Abschnitt
+`## Wortliste` (`load_wordlist`): Dort steht bis zur nächsten Überschrift je Zeile nur ein
+Listenpunkt `- ` oder `* ` mit einem Wort oder einer Wortfolge in Backticks; Leerzeilen sind
+erlaubt. Fehlt die Datei, fehlt der Abschnitt oder steht darin eine andere Zeile — Prosa, ein
+Punkt mit `+ ` oder `1.`, ein Wort ohne Backticks —, endet `brief --check` mit Exit 2
+„ungeprüft — …“ und der Zeilennummer, nie mit Erfolg.
+
+## Wortliste
 
 - `sollte`
 - `besser`
@@ -69,7 +84,8 @@ der Abschnitt oder steht ein anderer Listenpunkt darin, endet `brief --check` mi
 ## Was brief --check meldet
 
 - mehr als 25 Zeilen mit Text ohne die Kopfzeile;
-- ein Feld außer den sechs, Text vor dem ersten Feld, ein fehlendes oder doppeltes Feld;
+- ein Feld außer den sechs, Text vor dem ersten Feld, ein fehlendes oder doppeltes Feld
+  (Überschriften in Codezäunen zählen nicht);
 - Wörter der Wortliste in der Frage.
 
 Exit 1 bei mindestens einem Befund, sonst 0. Exit 2 „ungeprüft — …“, wenn die Datei fehlt oder
