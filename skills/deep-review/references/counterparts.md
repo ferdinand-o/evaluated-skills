@@ -75,7 +75,7 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
 | Aufrufe ohne Importbezug mit mehr als 3 gleichnamigen Definitionen | fehlen, gezählt als „nicht aufgelöst“ |
 | Aufrufe, deren Definition nichts wirft (Delphi: auch ohne Default) und ohne geändertes Argument | fehlen, nicht gezählt |
 | `raise` in anderen Modulen bzw. Units als der Definition | fehlen in `wirft:` |
-| Typinferenz: Ausdrücke, Funktionsergebnisse, Delphi-`with` und Indexer | Python löst `obj.name(...)` über den Namen auf; Delphi zeigt keine Gegenstelle |
+| Typinferenz: Ausdrücke, Funktionsergebnisse, Delphi-`with` und Indexer | Python löst `obj.name(...)` nur über ein Modul im Repo, `self`/`cls`/`super()`, eine bekannte Klasse oder `Klasse(...)` auf, sonst zählt die Stelle als nicht aufgelöst; Delphi zeigt keine Gegenstelle |
 | Delphi: andere Zweige von `{$IFDEF}`, `{$I}`-Dateien | geänderte Zeilen dort stehen mit Zahl in der Dateiliste |
 | Dateien am ZIEL, die der Sammler nicht lesen kann | Dateiliste: „Datei am ZIEL nicht lesbar: <grund>“ |
 
