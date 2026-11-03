@@ -1,11 +1,23 @@
 #!/bin/bash
 # run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|eng|sp|dr|drnc
 set -uo pipefail
-B=$(readlink -f "${BENCH:?BENCH auf das Arbeitsverzeichnis setzen}")
-HERE=$(dirname "$(readlink -f "$0")")
-REPO=$1; TOOL=$2; N=$3
+REPO=${1:?Repo fehlt}; TOOL=${2:?Werkzeug fehlt}; N=${3:?Lauf-Nummer fehlt}
 NAME=$REPO-$TOOL-$N
-EXTRA=()
+HERE=$(dirname "$(readlink -f "$0")")
+ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
+COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir)
+if [ -z "$ROOT" ] || [ -z "$COMMON" ]; then echo "Repo von run.sh nicht gefunden" >&2; exit 2; fi
+MAIN=$(dirname "$COMMON")
+# Bis zum ersten mkdir wird nur geprüft, ohne Seiteneffekt. readlink -f gibt nichts aus, wenn mehr
+# als die letzte Komponente von BENCH fehlt; ohne diese Prüfung entstünden out/ und work/ unter /.
+BENCH_ARG=${BENCH:?BENCH auf das Arbeitsverzeichnis setzen}
+B=$(readlink -f -- "$BENCH_ARG")
+if [ -z "$B" ] || [ "$B" = / ] || [ ! -d "$(dirname "$B")" ] || { [ -e "$B" ] && [ ! -d "$B" ]; }; then
+  echo "BENCH=$BENCH_ARG: Elternordner fehlt oder kein Ordner; nichts angelegt" >&2; exit 2
+fi
+case "$B/" in
+  "$ROOT"/*|"$MAIN"/*) echo "BENCH=$B darf nicht im Repo $MAIN liegen; nichts angelegt" >&2; exit 2 ;;
+esac
 # Lesesperre (README, Abschnitt „Lesesperre"): eine Deny-Regel schlägt jede Allow-Regel und kennt
 # keine Ausnahme, also darf der eigene Workspace unter keinem gesperrten Ordner liegen. Gruppe
 # py (pip) und dl (DMVC) laufen je für sich nacheinander (flock), die andere Gruppe ist gesperrt.
@@ -14,17 +26,22 @@ case $REPO in
   dl-*) GROUP=dl; OTHER=py ;;
   *) echo "unbekanntes Repo: $REPO" >&2; exit 2 ;;
 esac
+case $TOOL in
+  cr|crc|crx|eng|sp) ;;
+  dr|drnc)
+    # deep-review gibt einen Pfad ohne Plan direkt an /code-review (SKILL.md, Schritt 1); auf
+    # py-path/dl-path wäre nur /code-review gemessen.
+    case $REPO in
+      *-path) echo "dr/drnc nur für Bereiche (py-diff, dl-diff, py-c*), nicht für $REPO: deep-review gibt einen Pfad ohne Plan an /code-review" >&2; exit 2 ;;
+    esac ;;
+  *) echo "unbekanntes Werkzeug: $TOOL" >&2; exit 2 ;;
+esac
+EXTRA=()
 OUT=$B/out; mkdir -p "$OUT" "$B/work/$GROUP" "$B/work/$OTHER"
 exec 9> "$B/work/$GROUP.lock"
 flock 9
 rm -rf "${B:?}/work/${GROUP:?}"/*   # Reste abgebrochener Läufe derselben Gruppe
 W=$B/work/$GROUP/$NAME
-ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
-COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir)
-MAIN=$(dirname "$COMMON")
-case "$W/" in
-  "$ROOT"/*|"$MAIN"/*) echo "BENCH darf nicht im Repo $MAIN liegen" >&2; exit 2 ;;
-esac
 git clone -q "$B/repos/$REPO" "$W"
 git -C "$W" fetch -q --tags
 git -C "$W" remote remove origin
@@ -73,14 +90,38 @@ esac
 # Gesperrt für Read/Grep/Glob (//pfad = absolut): System-Python, Caches und Nutzer-Installs
 # (installiertes pip), Upstream-Klone, gebaute Repos, Ausgaben früherer Läufe, Workspaces der
 # anderen Gruppe, Paket-Patches von build.sh, dieses Repo (seeds.py, truth.json, Berichte) und
-# die Transkripte früherer Sitzungen.
+# die Transkripte anderer Sitzungen.
 P="/$B"
 DENY=()
-for d in //usr //opt "/$HOME/.cache" "/$HOME/.local" "/$HOME/.claude/projects" \
+deny() { DENY+=("Read($1)" "Grep($1)" "Glob($1)"); }
+for d in //usr //opt "/$HOME/.cache" "/$HOME/.local" \
          "$P/pip-up" "$P/dmvc-up" "$P/repos" "$P/out" "$P/work/$OTHER" "/$ROOT" "/$MAIN"; do
-  DENY+=("Read($d/**)" "Grep($d/**)" "Glob($d/**)")
+  deny "$d/**"
 done
-DENY+=("Read($P/*.patch)" "Grep($P/*.patch)" "Glob($P/*.patch)")
+deny "$P/*.patch"
+# Transkripte: Claude Code legt je Arbeitsordner $CFG/projects/<ordner> an (jedes Zeichen außer
+# A-Z, a-z, 0-9 wird '-') und dort zu große Werkzeugausgaben unter <sitzung>/tool-results/ ab. Der
+# eigene Ordner bleibt lesbar, damit der Lauf seine eigenen tool-results liest; gesperrt sind alle
+# anderen, die beim Start da sind, und im eigenen die Einträge früherer Läufe gleichen Namens.
+# Ordner, die erst während des Laufs entstehen, sind nicht gesperrt (README).
+CFG=$(readlink -m -- "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
+OWN=$(printf %s "$W" | sed 's/[^A-Za-z0-9]/-/g')
+PROJ=$CFG/projects/$OWN
+OLD=()
+shopt -s nullglob dotglob
+for d in "$CFG/projects"/*; do
+  if [ "${d##*/}" != "$OWN" ]; then
+    deny "/$d/**"
+    continue
+  fi
+  for e in "$d"/*; do
+    OLD+=("${e##*/}")
+    if [ -d "$e" ]; then deny "/$e/**"; else deny "/$e"; fi
+  done
+done
+shopt -u nullglob dotglob
+# Mit eigenem CLAUDE_CONFIG_DIR liegen die Transkripte unter ~/.claude/projects nicht im Weg.
+[ "$CFG" != "$(readlink -m -- "$HOME/.claude")" ] && deny "/$HOME/.claude/projects/**"
 # git, das ein anderes Repo liest oder holt
 DENY+=("Bash(git -C:*)" "Bash(git --git-dir:*)" "Bash(git --work-tree:*)" "Bash(git diff --no-index:*)"
        "Bash(git fetch:*)" "Bash(git pull:*)" "Bash(git clone:*)" "Bash(git remote:*)"
@@ -100,14 +141,42 @@ if [ -d "$W/.skills/cache/deep-review" ]; then
 fi
 # Nachkontrolle der Sperre: gesperrte Pfade im Transkript dieses Laufs (auch abgewiesene Versuche
 # und Python-Aufrufe, die keine Regel sieht). probe>0 heißt: $NAME.probe.txt von Hand lesen.
-PROJ=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf %s "$W" | sed 's/[^A-Za-z0-9]/-/g')
+# Ein Pfad zählt nur ganz: danach '/' oder ein Zeichen, das keinen Namen fortsetzt, sonst passt
+# $ROOT=/x/repo auch auf ein $BENCH=/x/repo-bench daneben. Pfade im eigenen Projektordner (die
+# tool-results dieses Laufs) zählen nicht, die Einträge früherer Läufe darin schon.
+# shellcheck disable=SC2016  # Python-Quelltext, keine Shell-Variablen
+PROBE_PY='
+import re, sys
+own, projects, b, other, root, main, *old = sys.argv[1:]
+names = sys.stdin.buffer.read().decode("utf-8", "replace").split("\0")
+text = "\n".join(open(n, encoding="utf-8", errors="replace").read() for n in names if n)
+END = r"(?![\w.-])"
+counts = {}
+def count(label, pattern):
+    n =len(re.findall(pattern, text))
+    if n:
+        counts[label] = counts.get(label, 0) + n
+for e in old:
+    count(f"{own}/{e}", re.escape(f"{own}/{e}") + END)
+text = re.sub(re.escape(own) + r"(?:/[^\s\"\x27\\]*)?" + END,
+              lambda m: m[0] if "/.." in m[0] else "", text)
+for s in ("pip-up", "dmvc-up", "repos/py-", "repos/dl-"):
+    count(s, re.escape(s))
+for p in dict.fromkeys((f"{b}/repos", f"{b}/out", f"{b}/work/{other}", f"{b}/c1.patch",
+                        f"{b}/c2.patch", f"{b}/c3.patch", root, main, projects)):
+    count(p, re.escape(p) + END)
+for label in sorted(counts):
+    print(f"{counts[label]:7d} {label}")
+'
 if [ -d "$PROJ" ]; then
-  find "$PROJ" -name '*.jsonl' -newer "$STAMP" -exec cat {} + 2>/dev/null \
-    | grep -oF -e pip-up -e dmvc-up -e "$B/repos" -e repos/py- -e repos/dl- -e "$B/out" \
-        -e "$B/work/$OTHER" -e "$B/c1.patch" -e "$B/c2.patch" -e "$B/c3.patch" -e "$ROOT" -e "$MAIN" \
-        -e /.claude/projects \
-    | sort | uniq -c > "$OUT/$NAME.probe.txt"
-  PROBE=$(awk '{s+=$1} END {print s+0}' "$OUT/$NAME.probe.txt")
+  find "$PROJ" -name '*.jsonl' -newer "$STAMP" -print0 2>/dev/null \
+    | python3 -I -c "$PROBE_PY" "$PROJ" "$CFG/projects" "$B" "$OTHER" "$ROOT" "$MAIN" ${OLD[@]+"${OLD[@]}"} \
+    > "$OUT/$NAME.probe.txt"
+  if [ "${PIPESTATUS[1]}" -eq 0 ]; then
+    PROBE=$(awk '{s+=$1} END {print s+0}' "$OUT/$NAME.probe.txt")
+  else
+    PROBE=fehler   # Probe selbst gescheitert: Transkript von Hand lesen
+  fi
 else
   PROBE=n/a
 fi
