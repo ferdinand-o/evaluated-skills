@@ -21,6 +21,7 @@
       "skills": [
         "./skills/architecture-map",
         "./skills/debug-ledger",
+        "./skills/decide",
         "./skills/dev-report",
         "./skills/feature-spec",
         "./skills/handoff",

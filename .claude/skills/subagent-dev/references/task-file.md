@@ -29,7 +29,13 @@ schreibt sie nach `.skills/cache/tasks/task-<id>-<slug>.md` (Ephemera, Spec 00
    schon hat). Jeder Task-Vertrag schließt sie implizit ein.
 7. **Nicht-Ziele** — alles außerhalb der Allowlist, plus die Titel der übrigen
    Tasks dieses Plans (damit ein Agent weiß, wessen Arbeit er nicht mit
-   erledigen soll).
+   erledigen soll). Darunter steht in jeder Task-Datei wörtlich der feste Satz
+   für Subagenten (Spec 28, Ablauf 5; Konstante `SUBAGENT_QUESTIONS_SENTENCE`):
+   „Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in
+   dieser Task stehen, entscheidest und trägst du nicht selbst ein; nenn sie in
+   deinem Bericht mit Frage, Optionen, Folgen und Empfehlung. Der Hauptagent
+   ordnet sie ein." Er nennt keine Skill, weil subagent-dev auch ohne decide
+   läuft; eingeordnet wird beim Hauptagenten.
 
 Danach folgt ein eingebetteter ` ```json `-Block — die maschinenlesbare
 Fassung, die `verify` zurückliest (`task_id`, `plan`, `allowlist`, `produces`
@@ -93,6 +99,8 @@ Alles außerhalb der Datei-Allowlist oben. Andere Tasks dieses Plans gehören
 nicht hierher:
 
 - Task 2 – CLI
+
+Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in dieser Task stehen, entscheidest und trägst du nicht selbst ein; nenn sie in deinem Bericht mit Frage, Optionen, Folgen und Empfehlung. Der Hauptagent ordnet sie ein.
 
 ```json
 {
