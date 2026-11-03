@@ -88,11 +88,12 @@ GRADES = ("geprüft", "teilweise", "ungeprüft")
 TAIL_GRADES = ("ungeprüft", "teilweise")       # die Schlusszeile von check nennt diese
 RULE_CATEGORY = "rule"
 GIT_TIMEOUT = 60
-KEY_FORM = "<kategorie>:<pfadmuster>[#<text>]"
+KEY_FORM = "<kategorie>:<pfadmuster>[#[+|-]<text>]"
 STATUSES = ("offen", "freigegeben", "abgelehnt")
 SOURCE_USER = "Nutzer in Sitzung"
 OPTIONS_BY_REQUEST = "— (Auftrag)"
 ANSWER_BY_REQUEST = "wie im Auftrag"
+_REQUEST_SOURCE_RE = re.compile(r"^Auftrag: „.*“$")      # Quelle eines Blocks per Auftrag
 BLOCK_RE = re.compile(r"^## (?P<id>D-(?P<number>\d+)) · (?P<date>\S+) · (?P<status>\S+)\s*$")
 BLOCK_NUMBER_RE = re.compile(r"(?m)^## D-(\d+)\b")
 SKIPPED = " — Freigaben übersprungen"
@@ -749,9 +750,32 @@ def _asked_before(block, fields):
 def _answered(block, status, fields):
     """Steht die Frage mit gleichem Schlüssel schon freigegeben da (`_asked_before`)? Eine offene Frage nur
     bei gleichen Optionen und gleicher Empfehlung (`_difference`), ein Auftrag (`status` freigegeben)
-    immer. Eine Ablehnung beantwortet nichts: danach ist ein add eine neue Frage oder ein neuer Auftrag."""
+    immer; ein Block per Auftrag (Quelle „Auftrag: „…““) beantwortet sie unabhängig von den Optionen.
+    Eine Ablehnung beantwortet nichts: danach ist ein add eine neue Frage oder ein neuer Auftrag."""
     return (block["status"] == "freigegeben" and _asked_before(block, fields)
-            and (status != "offen" or _difference(block, "offen", fields) is None))
+            and (status != "offen" or _REQUEST_SOURCE_RE.match(line_value(block["source"]))
+                 or _difference(block, "offen", fields) is None))
+
+
+def _pair(block):
+    """Frage und Schlüssel eines Blocks nach `line_value` — wofür nur der jüngste Block gilt."""
+    return line_value(block["question"]), line_value(block["key"])
+
+
+def _latest(blocks):
+    """(gültig, überholt): für Frage plus Schlüssel gilt nur der jüngste Block (Spec 28). `gültig`: die
+    Blöcke ohne jüngeren mit gleichem `_pair`, in Dateireihenfolge (zwei mit derselben höchsten Nummer
+    bleiben beide); `überholt`: je gültigem Block (`id(block)`) die IDs der älteren, die er überholt."""
+    top = {}
+    for block in blocks:
+        if _pair(block) not in top or block["number"] > top[_pair(block)]["number"]:
+            top[_pair(block)] = block
+    valid = [block for block in blocks if block["number"] == top[_pair(block)]["number"]]
+    older = {}
+    for block in blocks:
+        if block["number"] < top[_pair(block)]["number"]:
+            older.setdefault(id(top[_pair(block)]), []).append(block["id"])
+    return valid, older
 
 
 def append_block(root, status, fields):
@@ -760,7 +784,8 @@ def append_block(root, status, fields):
     None oder der letzte beantwortete Block derselben Frage, auf den eine neue offene Frage folgt). Steht
     derselbe Block schon (`_same_block`) oder die Frage schon beantwortet (`_answered`), wird nichts
     geschrieben und „schon da“ ist dieser Block; weichen bei einer offenen Frage nur Optionen oder
-    Empfehlung ab (`_same_question`), wird nichts geschrieben und das Problem nennt das Feld. Wirft
+    Empfehlung ab (`_same_question`), wird nichts geschrieben und das Problem nennt das Feld. Verglichen
+    wird nur mit dem jüngsten Block gleicher Frage und gleichen Schlüssels (`_latest`). Wirft
     `LockBusy`, `Unreadable` oder OSError."""
     path = ledger_path(root)
     earlier = None
@@ -770,20 +795,18 @@ def append_block(root, status, fields):
             problem = ledger_problem(text, "nichts geschrieben")
             if problem:
                 return None, False, problem, unlocked, None, None
-            blocks = parse_blocks(text)
-            same = next((b for b in blocks if _same_block(b, status, fields)), None) \
-                or next((b for b in blocks if _answered(b, status, fields)), None)
-            if same:
-                return same["number"], False, None, unlocked, same, None
-            other = next((b for b in blocks if _same_question(b, status, fields)), None)
+            prior = max((b for b in parse_blocks(text) if _asked_before(b, fields)),
+                        key=lambda b: b["number"], default=None)
+            if prior and (_same_block(prior, status, fields) or _answered(prior, status, fields)):
+                return prior["number"], False, None, unlocked, prior, None
+            other = prior if prior and _same_question(prior, status, fields) else None
             if other:
                 how = " oder mit resolve beantworten" if status == "offen" else ""
                 return None, False, (f"{other['id']} steht {status} mit {_difference(other, status, fields)} — "
                                      f"von Hand ändern{how} "
                                      f"({LEDGER_SHOWN}); nichts geschrieben."), unlocked, None, None
-            if status == "offen":
-                earlier = next((b for b in reversed(blocks) if b["status"] in ("freigegeben", "abgelehnt")
-                                and _asked_before(b, fields)), None)
+            if status == "offen" and prior and prior["status"] in ("freigegeben", "abgelehnt"):
+                earlier = prior
         number = max((int(n) for n in BLOCK_NUMBER_RE.findall(text or "")), default=0) + 1
         created = text is None
         base = ledger_template() if created else text
@@ -800,7 +823,7 @@ def store_big(root, session, status, fields, row):
     """Legt einen Block in der Ablage an und die Protokollzeile `gross` mit `D-<n>`; (exit, Zeilen).
     Das Protokoll wird vorher geprüft, damit ein unlesbares nicht erst nach dem Block auffällt.
     Steht der Block schon (ein Wiederholungsaufruf) oder die Frage schon beantwortet („D-<n> ist schon
-    <status> (Antwort: …)“), wird nur eine fehlende Protokollzeile ergänzt; ob sie fehlt, prüft
+    <status> (Antwort: …)“, per Auftrag „(Auftrag: „…“)“), wird nur eine fehlende Protokollzeile ergänzt; ob sie fehlt, prüft
     `append_row` unter der Sperre des Protokolls."""
     root = Path(root)
     log_rel = shown(log_path(root, session), root)
@@ -831,7 +854,9 @@ def store_big(root, session, status, fields, row):
     pending = (f"Bis zur Freigabe unterbleibt der Schritt; Antwort mit `resolve {did} --answer \"…\"` "
                "oder `--reject`.")
     if existing and not _same_block(existing, status, fields):          # schon beantwortet (`_answered`)
-        lines.append(f"{did} ist schon {existing['status']} (Antwort: {line_value(existing['answer'])}) in "
+        source = line_value(existing["source"])
+        told = source if _REQUEST_SOURCE_RE.match(source) else f"Antwort: {line_value(existing['answer'])}"
+        lines.append(f"{did} ist schon {existing['status']} ({told}) in "
                      f"{LEDGER_SHOWN}: {line_value(fields['topic'])} — „{line_value(fields['question'])}“; "
                      "kein neuer Block.")
     elif existing:
@@ -874,19 +899,22 @@ def store_big(root, session, status, fields, row):
 
 
 def parse_key(key):
-    """((Kategorie, Muster, Text), None) eines Schlüssels `<kategorie>:<pfadmuster>[#<text>]`, oder
-    (None, Grund), wenn er die Form nicht hat — die eine Prüfung der Form für `add` (`check_key`) und
-    check. `#<text>` meint hinzugefügte Zeilen, `#-<text>` entfernte; der Text behält dann sein
-    führendes `-`. Leerraum um Kategorie, Pfadmuster und Text fällt weg, Leerraum im Text wird
-    zusammengezogen; Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler,
-    ebenso ein `#` oder `#-` ohne Text (der gäbe sonst die ganze Datei frei). Das Pfadmuster ist relativ zur Repo-Wurzel wie die
+    """((Kategorie, Muster, Richtung, Text), None) eines Schlüssels `<kategorie>:<pfadmuster>[#[+|-]<text>]`,
+    oder (None, Grund), wenn er die Form nicht hat — die eine Prüfung der Form für `add` (`check_key`) und
+    check. Richtung `"+"` (hinzugefügte Zeilen: `#+<text>`, Kurzform `#<text>`) oder `"-"` (entfernte:
+    `#-<text>`), getrennt vom Text; nur das erste Zeichen nach `#` ist ein Vorzeichen
+    (`#+--extra-index-url` → `"+"`, `"--extra-index-url"`). Leerraum um Kategorie, Pfadmuster und Text
+    fällt weg, Leerraum im Text wird zusammengezogen; Leerzeichen im Pfadmuster bleiben, Tab und
+    Zeilenumbruch darin sind ein Fehler, ebenso ein `#`, `#+` oder `#-` ohne Text (der gäbe sonst die
+    ganze Datei frei). Das Pfadmuster ist relativ zur Repo-Wurzel wie die
     Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil `..` träfe nie eine
     Datei und ist ein Fehler („Pfadmuster muss relativ zur Repo-Wurzel sein“). Bei `rule:<thema>` ist
-    alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`), der Text leer."""
+    alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`), der Text leer; ohne Text ist die
+    Richtung `"+"`."""
     category, sep, rest = (key or "").strip().partition(":")
     category = category.strip()
     if category == RULE_CATEGORY and sep and rest.strip():
-        return (category, rest.strip(), ""), None
+        return (category, rest.strip(), "+", ""), None
     pattern, hash_, text = rest.partition("#")
     pattern = pattern.strip()
     while pattern.startswith("./"):
@@ -897,11 +925,12 @@ def parse_key(key):
         return None, f"hat Tab oder Zeilenumbruch im Pfadmuster „{line_value(pattern)}“"
     if re.match(r"[/\\]|[A-Za-z]:[/\\]", pattern) or ".." in re.split(r"[/\\]", pattern):
         return None, "hat ein Pfadmuster außerhalb der Repo-Wurzel — Pfadmuster muss relativ zur Repo-Wurzel sein"
-    sign = "-" if text.strip().startswith("-") else ""
-    words = " ".join(text.strip()[len(sign):].split())
+    text = text.strip()
+    sign = text[:1] if text[:1] in ("+", "-") else ""
+    words = " ".join(text[len(sign):].split())
     if hash_ and not words:
         return None, f"hat leeren Text nach #{sign}"
-    return (category, pattern, sign + words), None
+    return (category, pattern, sign or "+", words), None
 
 
 def check_key(key, topic, rules):
@@ -913,7 +942,7 @@ def check_key(key, topic, rules):
     parts, why_not = parse_key(key)
     if parts is None:
         return None, f"Schlüssel „{shown_key}“ {why_not}; nichts geschrieben."
-    category, pattern, text = parts
+    category, pattern, sign, text = parts
     if category == RULE_CATEGORY:
         hits = [r for r in match_rules(rules, pattern)[0] if r.kind == "immer fragen"]
         if not hits:
@@ -930,7 +959,9 @@ def check_key(key, topic, rules):
         return None, (f"Schlüssel „{shown_key}“: Kategorie „{category}“ unbekannt — erlaubt: "
                       f"{', '.join(categories)}, oder rule:<thema> bei einer Regel immer fragen; "
                       "nichts geschrieben.")
-    return f"{category}:{pattern}{'#' + text if text else ''}", None
+    if sign == "+" and not text.startswith(("+", "-")):
+        sign = ""                                       # Kurzform `#<text>`, wo sie eindeutig ist
+    return f"{category}:{pattern}{'#' + sign + text if text else ''}", None
 
 
 def _options(args):
@@ -1289,11 +1320,31 @@ def _top_level(rev):
     return re.sub(r"\{[^{}]*\}", lambda match: "{" + "_" * (len(match.group()) - 2) + "}", rev)
 
 
+def _work_tree(top):
+    """(Wurzel, Problem): `git rev-parse --is-bare-repository --is-inside-work-tree --git-dir` in einem
+    Aufruf — scheitert er, ist es kein Repo („kein Git“). Nur in einem Arbeitsbaum folgt
+    `git rev-parse --show-toplevel` in einem eigenen Aufruf, die Wurzel ist dann dessen Ausgabe; im
+    Bare-Repo oder in `.git` ist sie None (kein Arbeitsbaum), Git läuft weiter in `top`."""
+    probe = _git(top, "rev-parse", "--is-bare-repository", "--is-inside-work-tree", "--git-dir")
+    flags = probe.stdout.split("\n")
+    if probe.returncode != 0 or len(flags) < 3:
+        return None, "kein Git"
+    if flags[0].strip() == "true" or flags[1].strip() != "true":
+        return None, None
+    shown = _git(top, "rev-parse", "--show-toplevel")
+    path = shown.stdout.rstrip("\n")
+    if shown.returncode != 0 or not path:
+        return None, f"git rev-parse --show-toplevel fehlgeschlagen: {_git_error(shown)}"
+    return Path(path), None
+
+
 def _revision_ends(top, rev):
-    """(einzeln, Ende, Revisionen für `git diff`, Hinweise, Problem, Wurzel) aus einem Aufruf
-    `git rev-parse --git-dir --show-toplevel --symbolic <rev> --`: Basis und Ende stehen ausdrücklich in
-    dessen Ausgabe, `git diff` bekommt nie die rohe Angabe; die Wurzel (`--show-toplevel`, sonst `top`)
-    nimmt `changed_files` statt `top`. Fehlt die erste Zeile (`--git-dir`), ist es kein Repo.
+    """(einzeln, Ende, Revisionen für `git diff`, Hinweise, Problem, Wurzel): zuerst `_work_tree`, dann
+    `git rev-parse --symbolic <rev> --` in einem eigenen Aufruf — Wurzel und Revisionen kommen nie aus
+    derselben Ausgabe. Basis und Ende stehen ausdrücklich in dessen Ausgabe, `git diff` bekommt nie die
+    rohe Angabe; die Wurzel (im Arbeitsbaum `--show-toplevel`, sonst `top`) nimmt `changed_files` statt
+    `top`. Ohne Arbeitsbaum (Bare-Repo, CI-Hook, `.git`) nur Bereiche; eine Einzelrevision ist ein
+    Problem („Einzelrevision braucht einen Arbeitsbaum“).
     Eine positive und eine negative Revision (`<a>..<b>`, `<rev>^-<n>`, `<rev>^!` mit einem Elternteil):
     Basis die negative, Ende die positive. Eine positive und mehrere negative (`<merge>^!`): Basis der
     erste Elternteil, wie `<merge>^1..<merge>`, mit Hinweis `MERGE_NOTE`. Zwei positive mit negativen
@@ -1303,14 +1354,14 @@ def _revision_ends(top, rev):
     Angabe enthält `^!` oder `^-` außerhalb von `{…}`: der Root-Commit, Basis der leere Baum. Mehrere
     positive ohne negative (`HEAD^@` bei einem Merge) oder keine: Problem. Das Ende heißt, wie rev-parse
     `--symbolic` es nennt — wie angegeben (`v2`, nicht der Hash des Tag-Objekts)."""
-    result = _git(top, "rev-parse", "--git-dir", "--show-toplevel", "--symbolic", rev, "--")
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if not lines:
-        return False, None, (), (), "kein Git", top
+    tree, problem = _work_tree(top)
+    if problem:
+        return False, None, (), (), problem, top
+    top = tree or top
+    result = _git(top, "rev-parse", "--symbolic", rev, "--")
     if result.returncode != 0:
         return False, None, (), (), f"git rev-parse {rev} fehlgeschlagen: {_git_error(result)}", top
-    top = Path(lines[1]) if len(lines) > 1 else top
-    names = [name for name in lines[2:] if name != "--"]
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip() and line.strip() != "--"]
     positive = [name for name in names if not name.startswith("^")]
     negative = [name[1:] for name in names if name.startswith("^")]
     if len(positive) == 1 and len(negative) == 1:
@@ -1331,6 +1382,9 @@ def _revision_ends(top, rev):
         if empty.returncode != 0:
             return False, None, (), (), f"git hash-object fehlgeschlagen: {_git_error(empty)}", top
         return False, positive[0], (empty.stdout.strip(), positive[0]), (), None, top
+    if tree is None:
+        return False, None, (), (), (f"Einzelrevision braucht einen Arbeitsbaum ({rev}; ohne Arbeitsbaum "
+                                     "nur <a>..<b>)"), top
     return True, None, (positive[0],), (), None, top
 
 
@@ -1338,14 +1392,16 @@ def changed_files(root, rev):
     """(Dateien, Problem): die Stellen des Bereichs als `Changes` — eine Liste der Pfade relativ
     zur Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked`, `end`, `revs` und `notes`. Die eine
     Quelle für check. `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; `top`
-    ist die Wurzel, die Git im selben `rev-parse` wie Basis und Ende nennt (`_revision_ends`) — fiel
-    `repo_root` auf ein Unterverzeichnis zurück, liest check trotzdem an der Wurzel.
+    ist die Wurzel, die Git vor Basis und Ende in einem eigenen `rev-parse` nennt (`_revision_ends`) —
+    fiel `repo_root` auf ein Unterverzeichnis zurück, liest check trotzdem an der Wurzel; ohne
+    Arbeitsbaum (Bare-Repo) bleibt es `root`, und nur ein Bereich ist erlaubt.
     Basis und Ende sagt `_revision_ends`. Eine einzelne Revision: `git diff <rev>` (Commits seit `<rev>`
     und Arbeitsbaum) plus `git ls-files --others --exclude-standard`, Ablage aus der Arbeitskopie (`end`
     None). Ein Bereich: nur `git diff <basis> <ende>`, `end` ist das Ende, wie angegeben.
     Problem: None, „kein Git“ (kein `git` oder kein Repo), „git antwortet nicht in <n> s“, ein
     ungültiger Bereich (leer, mit Leerraum oder führendem `-`), einer mit mehreren Enden, einer ohne
-    gemeinsame Basis oder der Grund, mit dem Git abbricht; dann sind die Dateien leer."""
+    gemeinsame Basis, eine Einzelrevision ohne Arbeitsbaum oder der Grund, mit dem Git abbricht; dann
+    sind die Dateien leer."""
     rev = (rev or "").strip()
     if not rev or rev.startswith("-") or re.search(r"\s", rev):
         return Changes(), f"Bereich „{rev}“ ungültig — erwartet <rev> oder <a>..<b>"
@@ -1387,12 +1443,13 @@ DIFF_CHUNK = 200
 
 
 class DiffFailed(Exception):
-    """`git diff` für die Zeilen der `#<text>`-Freigaben lieferte keinen Diff; die Ursache als Text."""
+    """`git diff` für die Zeilen der `#<text>`-Freigaben (beide Richtungen) lieferte keinen Diff; die Ursache
+    als Text."""
 
 
 def changed_lines(top, revs, paths, untracked):
     """{Pfad: {"+": hinzugefügte Zeilen, "-": entfernte}} jeder Datei aus `paths` im Bereich (`revs` aus
-    `changed_files`), Leerraum zusammengezogen — für `#<text>` und `#-<text>`. Eine unversionierte Datei
+    `changed_files`), Leerraum zusammengezogen — für `#[+]<text>` und `#-<text>`. Eine unversionierte Datei
     ist ganz hinzugefügt. Die anderen kommen aus `git diff -U0`, je höchstens `DIFF_CHUNK` Pfade ein
     Aufruf, aufgeteilt an den Köpfen `diff --git a/<p> b/<p>`, die das Skript je Pfad selbst so bildet,
     wie Git sie schreibt (`_git_quoted`). Liefert Git einen Block nicht, `DiffFailed`; antwortet es
@@ -1450,7 +1507,8 @@ def check(root, rev):
     in dessen End-Revision. Exit 1 bei mindestens einer Stelle, sonst 0; Exit 2 bei fehlender oder
     kaputter Reference („ungeprüft — references/reversibility.md fehlt“), ohne Git („ungeprüft —
     kein Git“), wenn Git nicht in `GIT_TIMEOUT` Sekunden antwortet („ungeprüft — git antwortet
-    nicht in <n> s“) oder bei einem Bereich, den Git nicht kennt. Jede Ausgabe außer der ohne
+    nicht in <n> s“), bei einem Bereich, den Git nicht kennt, oder bei einer Einzelrevision ohne
+    Arbeitsbaum („ungeprüft — Einzelrevision braucht einen Arbeitsbaum“). Jede Ausgabe außer der ohne
     Reference endet mit `tail_line` („ungeprüft: data-delete, …; teilweise: api, migration,
     dependency, permissions“)."""
     categories, problem = load_categories(REFERENCE)
@@ -1465,7 +1523,7 @@ def check(root, rev):
     except GitTimeout:
         return 2, f"ungeprüft — {timeout_problem()}\n{tail}"
     except DiffFailed as error:
-        return 2, f"ungeprüft — git diff für #-Freigaben gescheitert ({error})\n{tail}"
+        return 2, f"ungeprüft — git diff für #<text>-Freigaben gescheitert ({error})\n{tail}"
     except NoGit:
         return 2, f"ungeprüft — kein Git\n{tail}"
 
@@ -1486,8 +1544,9 @@ def _check(changes, rev, categories, tail):
     elif not exists:
         unread = f"{LEDGER_SHOWN} fehlt" + (f" in {end}" if end is not None else "")
         notes.append(f"{unread} — keine Freigaben.")
+    valid, older = _latest(blocks)                      # je Frage und Schlüssel gilt nur der jüngste Block
     entries = []
-    for block in blocks:
+    for block in valid:
         parsed, why_not = parse_key(block["key"])
         if parsed is None:
             if block["status"] == "freigegeben":
@@ -1519,17 +1578,16 @@ def _check(changes, rev, categories, tail):
         with_category += bool(hit)
         for category, matching in hit:
             why = []
-            for block, _, pattern, text in matching:
+            for block, _, pattern, sign, text in matching:
                 label = f"{block['id']} {block['key']}"
                 if block["status"] != "freigegeben":
-                    why.append(f"{label} steht {block['status']}")
+                    gone = older.get(id(block))
+                    why.append(f"{label} steht {block['status']}" + (f", {', '.join(gone)} überholt" if gone else ""))
                     continue
-                sign = text[:1] if text.startswith("-") else "+"
-                needle = text[1:] if sign == "-" else text
-                if not text or any(needle in line for line in lines.get(path, {}).get(sign, ())):
+                if not text or any(text in line for line in lines.get(path, {}).get(sign, ())):
                     break
                 where_lines = "entfernten" if sign == "-" else "hinzugefügten"
-                why.append(f"{label} freigegeben, aber „{needle}“ in keiner {where_lines} Zeile")
+                why.append(f"{label} freigegeben, aber „{text}“ in keiner {where_lines} Zeile")
             else:
                 reason = "; ".join(why) or (f"Freigaben nicht gelesen ({unread})" if unread else
                                             f"kein Eintrag mit passendem Schlüssel in {where}")
@@ -1752,8 +1810,6 @@ def _decided_line(entry):
     return f"- [{klasse_label(entry)}] {entry['frage']} → {entry['entscheidung']} ({entry['beleg']})"
 
 
-_REQUEST_SOURCE_RE = re.compile(r"^Auftrag: „.*“$")
-
 
 def _block_line(did, question, group, unknown):
     """(entschieden, Zeile) für die große Frage `did`/`question` mit ihren Blöcken `group` aus der Ablage.
@@ -1808,23 +1864,26 @@ def _entry_lines(root, entries, topic):
         unread.append(f"- Ablage {LEDGER_SHOWN} nicht gelesen ({why}) — {LEDGER_UNREAD}")
     elif not exists:
         unknown = f"{LEDGER_SHOWN} fehlt"
-    groups = {}
+    current = {id(b) for b in _latest(blocks)[0]}
+    groups, superseded = {}, set()
     for block in blocks:
         groups.setdefault((block["id"], cell(block["question"])), []).append(block)
+        if id(block) not in current:
+            superseded.add((block["id"], cell(block["question"])))
     decided, pending, done = [], [], set()
     for entry in entries:
         if entry["klasse"] != "gross":
             decided.append(_decided_line(entry))
             continue
         key = (entry["entscheidung"], entry["frage"])
-        if key in done:
+        if key in done or key in superseded:            # ein jüngerer Block derselben Frage gilt
             continue
         done.add(key)
         ok, line = _block_line(*key, groups.get(key, []), unknown)
         (decided if ok else pending).append(line)
     wanted = _norm(topic)
     for key, group in groups.items():
-        if key in done:
+        if key in done or key in superseded:
             continue
         if any(_norm(b["topic"]) == wanted for b in group):
             done.add(key)

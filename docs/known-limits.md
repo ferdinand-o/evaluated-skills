@@ -2184,6 +2184,25 @@ Themen:
   (eine Freigabe zum Hinzufügen gibt das Löschen derselben Migration nicht frei); ein Text, der in
   einer Datei passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel
   vergleicht `check` nie.
+- **Eine geänderte Zeile trifft `#-<text>` und `#<text>`.** Git zeigt sie als entfernte und
+  hinzugefügte Zeile. Eine Freigabe zum Entfernen (`#-python-dateutil`) gibt so auch das Ändern der
+  Zeile frei, eine zum Hinzufügen (`migration:migrations/#add_index`) das Umschreiben einer schon
+  angewandten Migration. Gemessen von Hand: `add_index('t','c')` → `add_index('t','d')` unter
+  `#-add_index` meldet `check` nicht.
+- **`schema` der Ablage blieb 1, obwohl sich die Bedeutung der Schlüssel während des Baus änderte.**
+  `#-<text>` hieß in einer Zwischenfassung „Text mit `-`“, `#+<text>` bis Final-R3 „Text mit `+`“.
+  Vertretbar, weil decide vorher nirgends veröffentlicht war; eine Ablage aus einer Zwischenfassung
+  würde ohne Hinweis anders gelesen.
+- **Ein Pfad, der nicht UTF-8 ist, bekommt keine Zeilen.** `changed_lines` sucht den Kopf
+  `diff --git`, den `_git_quoted` aus dem dekodierten Pfad nachbildet; Bytes, die kein UTF-8 sind,
+  liest das Skript als Ersatzzeichen, und so findet es den Block des Pfads nicht. Die Zeilen bleiben
+  still leer statt Exit 2: Eine passende
+  `#<text>`-Freigabe meldet „in keiner hinzugefügten Zeile“ (Exit 1). Gemessen von Hand mit dem
+  Ordner `x\xff/`.
+- **Die Gesamtzeit von `check` ist nicht begrenzt.** Jeder `git`-Aufruf hat seine eigene Grenze
+  (`GIT_TIMEOUT`, 60 s), auch jeder Block à `DIFF_CHUNK` (200) Pfade für `#<text>`. Beißt in einem
+  großen Monorepo-Diff mit vielen `#<text>`-Freigaben: `check` kann ein Vielfaches von 60 s laufen,
+  bevor es endet.
 - **Fixtures unter `evals/fixtures/*/migrations/` meldet `check` in diesem Repo.** Das Muster
   `**/migrations/` trifft `evals/fixtures/dc-models/migrations/0001_initial.py`. Wer die Fixture
   ändert und `check` über den Diff laufen lässt, bekommt eine Stelle `migration` für Testdaten.

@@ -54,7 +54,7 @@ Eine **Stelle** ist eine Datei im Diff: geändert, neu, gelöscht oder unversion
 ## Schlüssel
 
 Jede große Frage in `docs/big-decisions.md` trägt einen Schlüssel
-`<kategorie>:<pfadmuster>[#<text>]`, zum Beispiel:
+`<kategorie>:<pfadmuster>[#[+|-]<text>]`, zum Beispiel:
 
 - `dependency:pyproject.toml` — jede Änderung an `pyproject.toml` an der Wurzel
 - `dependency:pyproject.toml#python-dateutil` — `pyproject.toml` nur, wenn eine hinzugefügte
@@ -63,15 +63,21 @@ Jede große Frage in `docs/big-decisions.md` trägt einen Schlüssel
 - `dependency:pyproject.toml#-python-dateutil` — `pyproject.toml` nur, wenn eine entfernte Zeile
   `python-dateutil` enthält (Entfernen); eine Freigabe zum Hinzufügen gibt nie das Entfernen frei,
   auch nicht das Löschen einer Migration, die `migration:migrations/#add_index` angelegt hat
+- `dependency:requirements.txt#+--extra-index-url` — `#+<text>` ist die ausdrückliche Form für
+  hinzugefügte Zeilen, `#<text>` ihre Kurzform; nötig, wenn der Text selbst mit `-` oder `+`
+  beginnt (`#--extra-index-url` hieße: eine entfernte Zeile mit `-extra-index-url`)
 - `migration:migrations/` — jede Datei unter `migrations/` (ebenso `migration:migrations/**/`)
 - `migration:evals/fixtures/` — die Fixtures unter `evals/fixtures/*/migrations/` in diesem Repo
 
 check gibt eine Stelle frei, wenn ein Block mit Status `freigegeben` einen Schlüssel derselben
 Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer
 hinzugefügten, dessen `#-<text>` in einer entfernten Zeile steht; eine unversionierte Datei ist ganz
-hinzugefügt). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
-Freigabe gilt für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt
-`#<text>`. Ein `#` oder `#-` ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
+hinzugefügt; eine geänderte Zeile steht als entfernte und hinzugefügte im Diff und trifft beide
+Formen). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Für Frage plus Schlüssel gilt nur
+der jüngste Block: Ist eine freigegebene Frage neu gestellt und offen, gibt der ältere Block nichts
+mehr frei („D-<neu> … steht offen, D-<alt> überholt“). Eine Freigabe gilt für ihren Schlüssel,
+nicht für eine einzelne Änderung — wer sie enger will, nimmt `#<text>`. Ein `#`, `#+` oder `#-`
+ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
 („hat leeren Text nach #“), und einer, der von Hand so in der Ablage steht, gibt nichts frei —
 `add` und check prüfen die Form mit derselben Funktion. Das Pfadmuster ist relativ zur
 Repo-Wurzel wie die Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil
@@ -84,7 +90,9 @@ Revision als Basis; `<rev>^!` mit dem Elternteil als Basis — bei einem Merge-C
 Elternteil (wie `<rev>^1..<rev>`, Hinweis „Merge: verglichen mit erstem Elternteil“), auf dem ersten
 Commit mit dem leeren Baum; `<a>...<b>` wie `git diff <a>...<b>` mit der Merge-Base als Basis und
 `<b>` als Ende, die übliche Form für einen PR-Diff. Eine einzelne Revision (`--range <rev>`) wird
-mit dem Arbeitsbaum verglichen, unversionierte Dateien zählen dazu.
+mit dem Arbeitsbaum verglichen, unversionierte Dateien zählen dazu; ohne Arbeitsbaum (Bare-Repo
+eines CI-Hooks, aus `.git` heraus) geht nur ein Bereich, eine Einzelrevision endet mit Exit 2
+(„ungeprüft — Einzelrevision braucht einen Arbeitsbaum“).
 
 Woher die Freigaben kommen: bei einer einzelnen Revision aus der Arbeitskopie von
 `docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum aus der Ablage im Ende, aufgelöst auf

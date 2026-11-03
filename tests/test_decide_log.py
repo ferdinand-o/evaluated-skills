@@ -2777,8 +2777,9 @@ def test_check_one_diff_for_all_hash_keys(decide_repo, monkeypatch, capsys):
 
 
 def test_check_asks_git_for_root_once(decide_repo, monkeypatch, capsys):
-    """Final-F9: Die Wurzel bestimmt main einmal (`repo_root`); changed_files fragt nicht in einem eigenen
-    Aufruf erneut, sondern liest sie im selben `rev-parse` wie Basis und Ende (Final-R2-F6)."""
+    """Final-F9, seit Final-R3-F3: changed_files fragt zuerst in einem Aufruf, ob es einen Arbeitsbaum gibt,
+    dann die Wurzel allein (`--show-toplevel`), dann Basis und Ende — Wurzel und Revisionen kommen nie aus
+    derselben Ausgabe."""
     root, _ = decide_repo
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     (root / "README.md").write_text("x\n", encoding="utf-8")
@@ -2787,7 +2788,10 @@ def test_check_asks_git_for_root_once(decide_repo, monkeypatch, capsys):
     calls = git_calls(monkeypatch, lambda argv: "rev-parse" in argv)
     code, out, _ = check_out(capsys, base)
     assert code == 1 and reported(out) == ["pyproject.toml"], out
-    assert len(calls) == 2 and "--git-dir" in calls[1] and "--show-toplevel" in calls[1], calls
+    assert len(calls) == 4, calls                                           # repo_root, dann changed_files
+    assert calls[1][-3:] == ["--is-bare-repository", "--is-inside-work-tree", "--git-dir"], calls
+    assert calls[2][-2:] == ["rev-parse", "--show-toplevel"], calls
+    assert "--symbolic" in calls[3] and "--show-toplevel" not in calls[3], calls
 
 
 def test_brief_header_command_stays_copyable(decide_repo):
@@ -2841,8 +2845,8 @@ def test_hash_minus_key_frees_only_removed_line(decide_repo, monkeypatch, capsys
     code, out, _ = check_out(capsys, base)
     assert code == 1 and reported(out) == ["pyproject.toml"], out
     assert "„python-dateutil“ in keiner entfernten Zeile" in out, out
-    assert dl.parse_key("dependency:pyproject.toml#- python-dateutil")[0] == (
-        "dependency", "pyproject.toml", "-python-dateutil")
+    assert dl.parse_key("dependency:pyproject.toml#- python-dateutil")[0] == (     # Final-R3-F4: Richtung getrennt
+        "dependency", "pyproject.toml", "-", "python-dateutil")
     assert dl.parse_key("dependency:pyproject.toml#-  ") == (None, "hat leeren Text nach #-")
 
 
@@ -2910,7 +2914,7 @@ def test_check_hash_diff_in_chunks_and_failure_is_visible(decide_repo, monkeypat
     monkeypatch.setattr(dl.subprocess, "run", broken)
     code, out, err = check_out(capsys, base)
     assert code == 2, (out, err)
-    assert "ungeprüft — git diff für #-Freigaben gescheitert (Argumentliste zu lang)" in err, err
+    assert "ungeprüft — git diff für #<text>-Freigaben gescheitert (Argumentliste zu lang)" in err, err
     assert err.splitlines()[-1] == TAIL
 
 
@@ -2944,3 +2948,95 @@ def test_check_range_without_common_base(decide_repo, monkeypatch, capsys):
     code, out, err = check_out(capsys, f"waise...{main_branch}")
     assert code == 2, (out, err)
     assert f"ungeprüft — keine gemeinsame Basis (waise...{main_branch})" in err, err
+
+
+# --- Funde des finalen Prüfpunkts, Runde 3 (Mini-Runde F1–F4) ------------------------------
+
+def test_repeated_add_on_request_approval_asks_nothing(decide_repo, capsys):
+    """Final-R3-F1: Steht die Frage mit gleichem Schlüssel per Auftrag freigegeben, legt ein späteres add
+    mit Optionen keinen offenen Block an — die leeren Optionen des Auftragsblocks zählen nicht."""
+    root, _ = decide_repo
+    assert big("--approved-by-request", "nimm python-dateutil auf") == 0
+    capsys.readouterr()
+    assert big(*TWO) == 0
+    out = capsys.readouterr().out
+    assert "D-1 ist schon freigegeben (Auftrag: „nimm python-dateutil auf“)" in out, out
+    assert "Bis zur Freigabe" not in out and "D-2" not in out, out
+    assert blocks_in(root) == ["D-1"]
+
+
+def test_only_newest_block_per_question_and_key_counts(decide_repo, capsys):
+    """Final-R3-F2: Wird eine freigegebene Frage mit anderen Optionen neu gestellt, gilt nur der jüngste
+    Block: check gibt den Schlüssel nicht mehr frei, add nimmt nicht den älteren als Antwort, brief
+    zeigt ihn nicht mehr unter Schon entschieden."""
+    root, home = decide_repo
+    assert big(*TWO) == 0
+    assert dl.main(["resolve", "D-1", "--answer", "B: strptime"]) == 0
+    assert big("--option", "A: x", "--option", "B: y", "--recommendation", "A") == 0
+    assert "D-1 war freigegeben; neue Frage D-2" in capsys.readouterr().out
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "D-2 dependency:pyproject.toml steht offen, D-1 überholt" in out, out
+
+    assert big(*TWO) == 1                                     # alte Optionen: nicht D-1, sondern D-2 offen
+    assert "D-2 steht offen mit anderen Optionen" in capsys.readouterr().err
+    assert blocks_in(root) == ["D-1", "D-2"]
+
+    code, message = dl.write_brief(root, SESSION, "Abhängigkeiten", home)
+    assert code == 0, message
+    sections = brief_sections(brief_file(root).read_text(encoding="utf-8"))
+    assert sections["Schon entschieden"] == ["—"], sections
+    assert [line for line in sections["Feste Vorgaben"] if "D-" in line] == [
+        "- D-2 offen: Datumsangaben parsen? — nicht entscheiden, nicht darauf aufbauen"], sections
+
+
+def test_check_in_bare_clone_and_git_dir(decide_repo, monkeypatch, tmp_path, capsys):
+    """Final-R3-F3: Im Bare-Clone (CI-Hook) und aus `.git` heraus läuft check über einen Bereich und liest
+    die Ablage aus dessen Ende; eine Einzelrevision braucht einen Arbeitsbaum (Exit 2 mit diesem Grund)."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    commit(root, "Basis")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"),
+                 ledger_block(2, "freigegeben", "dependency:requirements.txt#requests"))
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("flask\n", encoding="utf-8")
+    commit(root, "Abhängigkeiten")
+    bare = tmp_path / "bare.git"
+    git(tmp_path, "clone", "-q", "--bare", str(root), str(bare))
+    for where in (bare, root / ".git"):
+        monkeypatch.chdir(where)
+        code, out, err = check_out(capsys, "HEAD~1..HEAD")
+        assert code == 1 and reported(out) == ["requirements.txt"], (where, out, err)
+        assert "„requests“ in keiner hinzugefügten Zeile" in out and "Freigaben aus HEAD;" in out, out
+        assert out.splitlines()[-1] == TAIL
+        code, out, err = check_out(capsys, "HEAD")
+        assert code == 2, (where, out, err)
+        assert "ungeprüft — Einzelrevision braucht einen Arbeitsbaum" in err, err
+        assert err.splitlines()[-1] == TAIL
+
+
+def test_hash_plus_key_for_added_line_with_leading_dash(decide_repo, capsys):
+    """Final-R3-F4: `#+<text>` ist die ausdrückliche Form für hinzugefügte Zeilen und nötig, wenn der Text
+    selbst mit `-` beginnt; parse_key liefert Richtung und Text getrennt; add schreibt `#<text>`, wo die
+    Kurzform eindeutig ist, sonst `#+<text>`."""
+    root, _ = decide_repo
+    key = "dependency:requirements.txt#+--extra-index-url https://x"
+    assert dl.parse_key(key)[0] == ("dependency", "requirements.txt", "+", "--extra-index-url https://x")
+    assert dl.parse_key("dependency:requirements.txt#--extra-index-url https://x")[0] == (
+        "dependency", "requirements.txt", "-", "-extra-index-url https://x")
+    assert dl.parse_key("dependency:requirements.txt#requests")[0] == ("dependency", "requirements.txt", "+", "requests")
+    assert dl.parse_key("dependency:requirements.txt#+ ") == (None, "hat leeren Text nach #+")
+    assert dl.KEY_FORM == "<kategorie>:<pfadmuster>[#[+|-]<text>]"
+
+    assert big("--approved-by-request", "Index ergänzen", question="Index?", key=key) == 0
+    assert big("--approved-by-request", "nimm dateutil", key="dependency:pyproject.toml#+python-dateutil") == 0
+    text = ledger_text(root)
+    assert f"Schlüssel: {key}\n" in text and "Schlüssel: dependency:pyproject.toml#python-dateutil\n" in text, text
+    (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "requirements.txt").write_text("--extra-index-url https://x\nrequests\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
