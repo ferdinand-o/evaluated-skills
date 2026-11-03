@@ -5363,12 +5363,14 @@ def test_cp10_f1_record_canonicalises_the_tool(tmp_path):
 def test_cp10_f2_generated_names_the_script_without_repo_path(tmp_path):
     kit = _kit()
     root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
-    assert plan["_meta"]["generated"].startswith("review_kit.py plan "), plan["_meta"]
+    # Relativ zum Skill-Ordner, wie man es dort erneut eintippt (Runde 2, F4).
+    cmd = "python scripts/review_kit.py"
+    assert plan["_meta"]["generated"].startswith(f"{cmd} plan "), plan["_meta"]
     assert _cli_record(kit, root, run, "p1", _payload(tmp_path, [])) == 0
     record = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
-    assert record["_meta"]["generated"].startswith(f"review_kit.py record --run {run} ")
-    assert kit.merge(directory)["_meta"]["generated"] == f"review_kit.py merge --run {run}"
-    assert kit.audit(directory, None)["_meta"]["generated"] == f"review_kit.py audit --run {run}"
+    assert record["_meta"]["generated"].startswith(f"{cmd} record --run {run} ")
+    assert kit.merge(directory)["_meta"]["generated"] == f"{cmd} merge --run {run}"
+    assert kit.audit(directory, None)["_meta"]["generated"] == f"{cmd} audit --run {run}"
     metas = [json.loads(p.read_text(encoding="utf-8"))["_meta"] for p in directory.rglob("*.json")]
     assert len(metas) == 4 and "skills/deep-review/scripts" not in json.dumps(metas)
 
@@ -5450,10 +5452,102 @@ def test_cp10_f4_to_f8_docs_follow_the_kit():
         flat = _flat(text)
         assert "verwirft" not in flat and "lost_findings" in flat and "gekürzte Kopie" in flat
         assert "nächsten `fix-task`" in flat
-    # F8: Stand nach Task 15, Abnahme in Task 16.
+    # F8: Stand nach Task 15, Abnahme in Task 16. Geprüft sind die Stellen, die den jetzigen
+    # Stand beschreiben (Einleitung und „Was nicht gemessen wurde" des Reports, der Absatz mit
+    # „Stand:" in known-limits, Next steps der Spec); eine Notiz im Bau-Teil darf den alten
+    # Stand nennen, den sie berichtigt.
     unmeasured = _doc_section(report, "## Was nicht gemessen wurde")
-    for text in (limits, unmeasured, report, spec26):
+    intro = report[:report.index("\n## ")]
+    [stand] = [p for p in re.split(r"\n\s*\n", limits) if "Stand:" in p]
+    next_steps = _doc_section(spec26, "## Next steps")
+    for text in (intro, unmeasured, stand, next_steps):
         assert "Task 23" not in text and "noch nicht gebaut" not in text
-    assert "Offen: Task 15" not in spec26 and "Offen: Task 16" in _flat(spec26)
-    assert "Task 16" in unmeasured and "bis Task 15" in limits
+    assert "Offen: Task 15" not in spec26 and "Offen: Task 16" in _flat(next_steps)
+    assert "Task 16" in unmeasured and "bis Task 15" in stand and "Task 15" in intro
     assert "steht noch nicht in der Spec" not in limits and "Spec-Nachzug in Task 16" not in limits
+
+
+# --- Prüfpunkt 10, zweite Runde: Funde F2–F6 -----------------------------------------------
+
+def test_cp10b_f2_header_tool_compared_in_canonical_form(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, []), tool="code-review") == 0
+    kit.merge(directory)
+    # Kopfzeile `tool: code-review`, gespeichert ist `/code-review`: passt.
+    _report(directory, run, [], "1/1", header={"tool": "code-review"})
+    data = kit.audit(directory, None)
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+    # Ein Ergebnis mit der MSYS-Form des Werkzeugs passt zur Kopfzeile `/code-review`.
+    result = directory / "results" / "p1.json"
+    stored = json.loads(result.read_text(encoding="utf-8"))
+    stored["_meta"]["tool"] = "C:/Program Files/Git/code-review"
+    result.write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+    _report(directory, run, [], "1/1")
+    data = kit.audit(directory, None)
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+    # Ein anderes Werkzeug bleibt ein Widerspruch.
+    _report(directory, run, [], "1/1", header={"tool": "something-else"})
+    data = kit.audit(directory, None)
+    assert any("tool 'something-else'" in m for m in data["report_mismatch"]), data
+    # Die Vorlage sagt, das Werkzeug stehe so wie in den Ergebnissen gespeichert.
+    template = _flat(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    assert "tool wie bei record" not in template
+    assert "tool wie in results/<id>.json unter _meta.tool gespeichert, etwa /code-review" \
+        in template
+
+
+def test_cp10b_f3_stale_says_it_removes_open_runs(capsys):
+    kit = _kit()
+    with pytest.raises(SystemExit) as exit_info:
+        kit.main(["cleanup", "--help"])
+    assert exit_info.value.code == 0
+    usage = _flat(capsys.readouterr().out)
+    assert "abgebrochen" not in usage
+    assert "Refs aller anderen Läufe löschen, auch noch offener" in usage, usage
+    assert "abgebrochen" not in kit.cleanup.__doc__
+    assert "auch die noch offener" in _flat(kit.cleanup.__doc__)
+    skill = _flat(_doc("skills/deep-review/SKILL.md"))
+    assert "beide auch die eines Laufs, der in einem anderen Worktree noch offen ist" in skill
+    assert "`--stale` nur, wenn kein anderer Lauf offen ist" in skill
+
+
+def test_cp10b_f4_generated_can_be_retyped(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    assert plan["_meta"]["generated"].startswith("python scripts/review_kit.py plan "), plan
+    assert kit.write_counterparts(root, run)
+    first = (directory / "packets" / "p1.md").read_text(encoding="utf-8").splitlines()[0]
+    assert f"generated: python scripts/review_kit.py counterparts --run {run} " in first, first
+    limits = _flat(_doc_section(_doc("docs/known-limits.md"), "## deep-review"))
+    assert "wiederholt sich nur aus der Repo-Wurzel" not in limits
+    assert "Das notierte Kommando ist relativ zum Skill-Ordner" in limits
+    spec26 = _flat(_doc("specs/Spec 26 – deep-review.md"))
+    assert "`python scripts/review_kit.py <befehl> …`" in spec26
+    assert "nennt das Skript ohne Pfad" not in spec26
+
+
+def test_cp10b_f5_plan_announces_the_cache_ignore(tmp_path, capsys):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a.py": ""}, {"a.py": _lines(5)})
+    line = "Angelegt: .skills/cache/deep-review/.gitignore (ignoriert den Cache)"
+    assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("Lauf: ") and line in out, out
+    assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("Lauf: ") and not any(o.startswith("Angelegt:") for o in out), out
+
+
+def test_cp10b_f6_length_limit_and_reduced_copy():
+    contract = _flat(_doc_section(_doc("skills/deep-review/SKILL.md"), "## Contract"))
+    assert "bei Fokus `security` (immer ein Paket), prüft" not in contract
+    assert "Nach `--since` mit Übernahme steht `split: true`, auch bei einem Paket" in contract
+    assert "dort prüft `audit` die Länge nicht" in contract
+    copy_path = "`.skills/cache/tasks/findings-<prüfpunkt>-<runde>.json`"
+    for rel in ("skills/subagent-dev/references/checkpoints.md",
+                "specs/Spec 27 – subagent-dev-checkpoints.md"):
+        flat = _flat(_doc(rel))
+        assert copy_path in flat, rel
+        assert "das `findings.json` des Laufs ändert er nicht" in flat, rel

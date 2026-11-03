@@ -27,9 +27,8 @@ Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner). Die Skill legt
 Cache-Ordner schreibt `plan` eine `.gitignore` mit `*`, wenn sie fehlt, damit `git add -A`
 keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD bleiben unberührt.
 
-1. **Bereich, Profil, Fokus.** Bereich `BASIS..ZIEL`, Standard `HEAD`; Profil und Fokus aus
-   der Tabelle unten. Ein Pfad statt eines Bereichs geht direkt an `/code-review <pfad>`,
-   ohne Plan.
+1. **Bereich, Profil, Fokus.** Bereich `BASIS..ZIEL`, Standard `HEAD`; Profil und Fokus aus der
+   Tabelle unten. Ein Pfad statt eines Bereichs geht direkt an `/code-review <pfad>`, ohne Plan.
 2. **Plan:**
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" plan --range <bereich> [--profile …] [--focus …] [--split-at N] [--soll-file <datei>] [--since <lauf>[,<lauf>…]] [--with-tests]
@@ -77,8 +76,9 @@ keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD b
    ```
    `audit` endet mit Exit 1 bei einer Lücke; `audit.json` ist trotzdem geschrieben. Meldet es
    `report_mismatch`, korrigierst du den Bericht und prüfst erneut. `cleanup --stale --run
-   <lauf>` löscht die Refs aller anderen Läufe; `cleanup --stale` ohne `--run` löscht die
-   Refs **jedes** Laufs, auch eines, der in einem anderen Worktree noch offen ist.
+   <lauf>` löscht die Refs aller anderen Läufe, `cleanup --stale` ohne `--run` löscht die
+   Refs **jedes** Laufs; beide auch die eines Laufs, der in einem anderen Worktree noch offen
+   ist. Also `--stale` nur, wenn kein anderer Lauf offen ist.
 
 ## Profile und Fokus
 
@@ -118,10 +118,10 @@ test-first für den Regressionstest.
 - **Nichts wird ausgeführt, nichts behoben.** Das Skript startet keinen Zielcode, die Skill
   schreibt weder Fixes noch Commits; Hilfscommits liegen nur unter `refs/deep-review/`.
 - **Anti-Zeremonie-Fall.** Bis `--split-at` (Standard 800) geänderte Zeilen ist der Plan ein
-  Paket (`split: false`). Für jeden Plan mit `split: false`, auch beim Wurzel-Commit und bei
-  Fokus `security` (immer ein Paket), prüft `audit` den Bericht auf höchstens 20 Zeilen plus
-  eine je Fund. Ohne
-  Wurzel-Commit läuft ein `/code-review` über den Originalbereich, ohne Hilfscommits.
+  Paket (`split: false`); ohne Wurzel-Commit läuft ein `/code-review` über den Originalbereich,
+  ohne Hilfscommits. Für jeden Plan mit `split: false`, auch beim Wurzel-Commit, prüft `audit`
+  den Bericht auf höchstens 20 Zeilen plus eine je Fund. Nach `--since` mit Übernahme steht
+  `split: true`, auch bei einem Paket (etwa Fokus `security`); dort prüft `audit` die Länge nicht.
 
 ## Anti-Rationalisierung
 
