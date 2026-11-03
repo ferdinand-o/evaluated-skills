@@ -156,8 +156,11 @@ finale Prüfpunkt übernimmt so aus allen Läufen in `runs`, auch aus den Zwisch
 dem unveränderten Schlüssel zurück. Vor einer Fix-Runde am finalen Prüfpunkt gleicht der
 Hauptagent die übernommenen Funde mit den Fix-Runden der Läufe in `since_runs` ab
 (`sources[].reused_from` in `findings.json` nennt den Lauf, der den Fund gemeldet hat; die
-Kopie `fix-task-<prüfpunkt>-<runde>.md` seiner Runde die bearbeiteten Funde) und verwirft
-die, die eine Fix-Runde schon bearbeitet hat.
+Kopie `fix-task-<prüfpunkt>-<runde>.md` seiner Runde die bearbeiteten Funde). Die, die eine
+Fix-Runde schon bearbeitet hat, lässt er nur aus der Eingabe des nächsten `fix-task` weg: Er
+schreibt eine gekürzte Kopie von `findings.json`. In `findings.json` und im Bericht des Laufs
+bleiben sie, sonst meldet `audit` `lost_findings` oder `report_mismatch`; der Bericht darf sie
+mit „laut fix-task-<prüfpunkt>-<runde> behoben“ kennzeichnen.
 
 ### `checkpoint`
 
@@ -194,8 +197,11 @@ Runde dazu die Nachprüfungen davor): Neu reviewt wird, was der Fix geändert ha
 Aufrufern, deren Gegenstellen sich geändert haben (ein Fund in `a.py`, behoben in der
 aufgerufenen `b.py`: `a.py` kommt wieder dran, wenn sich ihr Schlüssel geändert hat). Einen
 übernommenen Fund, den die Kopie einer Runde dieses Prüfpunkts nennt (gleiche Datei und
-`summary`, die Zeile kann sich verschoben haben), verwirft der Hauptagent; die übrigen
-Funde sind die nächste Runde. Ein Fix nur an Tests oder Doku ändert keinen Schlüssel, und
+`summary`, die Zeile kann sich verschoben haben), lässt der Hauptagent nur aus der Eingabe
+des nächsten `fix-task` weg (eine gekürzte Kopie von `findings.json`, die er schreibt); in
+`findings.json` und im Bericht bleibt er, sonst meldet `audit` `lost_findings` oder
+`report_mismatch`, und der Bericht darf ihn „laut fix-task-<prüfpunkt>-<runde> behoben“
+nennen. Die übrigen Funde sind die nächste Runde. Ein Fix nur an Tests oder Doku ändert keinen Schlüssel, und
 `plan` übernimmt alle Dateien. Lehnt `plan` mit „nichts zu reviewen“ ab, bekommt die
 Nachprüfung `--run none`, und die Übergabe sagt es. Dann `checkpoint mark` je Lauf: erst der
 Lauf des Prüfpunkts mit `<vor-fix>`, dann die Nachprüfung mit ihrem Ende, damit `runs`
@@ -418,7 +424,8 @@ keinen Fund der Schwere „hoch", aber 31 „mittel" und 76 „niedrig"
 Prüfpunkt 9 übernimmt `standard` mit `--since` auch aus `checkpoint`-Läufen, der finale
 Prüfpunkt meldet immer `standard`, und die Nachprüfung eines Fixes reviewt den Bereich des
 Prüfpunkts bis `HEAD` mit `--since` auf seinen Lauf; übernommene Funde, die eine Fix-Runde
-schon bearbeitet hat, verwirft der Hauptagent.
+schon bearbeitet hat, bleiben in `findings.json` und im Bericht und fehlen nur in der Eingabe
+des nächsten `fix-task`.
 
 Vor dem Bau: Basislinie als Wiederholung auf gemergter Historie, nicht mit drei neu
 gebauten Plänen (Entscheidung des Nutzers 2026-10-30: Limit sparen). Drei fertige Pläne unter

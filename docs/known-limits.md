@@ -2177,10 +2177,11 @@ prüft die Web-Plugins mit diesen Regeln.
 
 Gebaut nach Spec 26 (2026-11-02). Tier 1: `scripts/review_kit.py` schneidet einen Bereich in
 Pakete, sammelt die Gegenstellen der geänderten Zeilen, nimmt die Ergebnisse je Paket an und
-prüft die Abdeckung; reviewt wird mit `/code-review`. Stand: Bau bis Task 13. Die SKILL.md
-(Task 15) und die Abnahmemessung (Task 23) stehen aus, also ist keine Grenze unten an einem
-Lauf der Skill gemessen. Die Liste hat zwei Quellen: die offenen Fragen der Spec und die Funde
-der Prüfpunkte 1 bis 9, die nach der Linie von subagent-dev (zwei Fix-Runden) offen blieben.
+prüft die Abdeckung; reviewt wird mit `/code-review`. Stand: Bau bis Task 15, mit SKILL.md,
+Plugin-Eintrag und Projekt-Kopie. Die Abnahmemessung (Task 16) steht aus, also ist keine
+Grenze unten an einem Lauf der Skill gemessen. Die Liste hat zwei Quellen: die offenen Fragen
+der Spec und die Funde der Prüfpunkte 1 bis 10, die nach der Linie von subagent-dev (zwei
+Fix-Runden) offen blieben.
 Was inzwischen behoben ist, steht nicht hier. Je Grenze: was nicht geht, und wo es einen
 gibt, der Umgang damit.
 
@@ -2281,8 +2282,13 @@ gibt, der Umgang damit.
 **Folgeläufe (`--since`)**
 
 - **`--since` kann Funde zurückbringen, deren Fix in einer anderen Datei landete.** Der Schlüssel
-  einer Datei kennt den Fix nicht, wenn er woanders steht. Der Hauptagent gleicht übernommene
-  Funde gegen die Fix-Runden ab und verwirft die, die laut `fix-task.md` behoben sind.
+  einer Datei kennt den Fix nicht, wenn er woanders steht. Verwerfen kann der Hauptagent einen
+  solchen Fund in deep-review nicht: Jeder übernommene Fund muss in `findings.json` und im
+  Bericht stehen, sonst meldet `audit` `lost_findings` oder `report_mismatch`. Er bleibt also
+  dort, und der Bericht darf ihn mit „laut fix-task-<…> behoben“ kennzeichnen. Der Hauptagent
+  gleicht übernommene Funde gegen die Fix-Runden ab und lässt die, die laut `fix-task.md`
+  behoben sind, nur aus der Eingabe des nächsten `fix-task` weg: Er schreibt dafür eine
+  gekürzte Kopie von `findings.json` und gibt sie statt des Originals an `fix-task`.
 - **Gibt es mehrere Abdeckungsketten, nimmt `apply_since` die kürzeste,** bei gleicher Länge
   die über die jüngeren Läufe. Funde aus Läufen außerhalb dieser Kette werden nicht übernommen.
 - **Ein kaputter oder alter Plan in `--since` bricht den ganzen Folgelauf ab,** auch wenn er
@@ -2314,13 +2320,9 @@ gibt, der Umgang damit.
 - **`_meta.generated` hält `--report` und `--soll-file` repo-relativ fest,** aufgelöst werden
   sie aber gegen das Arbeitsverzeichnis. Das notierte Kommando wiederholt sich nur aus der
   Repo-Wurzel gleich.
-- **Der Werkzeugname „Review ohne /security-review“ steht noch nicht in der Spec.** Die
-  References und die Vorlage kennen ihn.
 
 **Schnittstelle zu subagent-dev**
 
-- **`plan_to_tasks.py fix-task` liest weiter `verdicts.jsonl`.** Die Spec wollte es aus
-  Docstring und `--help` streichen; das ist ein Spec-Nachzug in Task 16.
 - **Hat ein eingerücktes `findings.json` einen Syntaxfehler, nennt die Meldung die Position aus
   dem jsonl-Versuch (Zeile 1),** nicht die echte.
 - **`fix-task` kopiert Zeilen- und Pfadregeln aus `review_kit.py`** (`FIX_LINE_RE`,
@@ -2345,7 +2347,7 @@ gibt, der Umgang damit.
   Skript.
 - **Die Streuung bleibt.** Mit Gegenstellen fand je Lauf einer von zwei schwer erkennbaren
   Fehlern, nicht beide; zwei Läufe je Zelle sind kein Mittelwert. Die Skill selbst ist bis zur
-  Abnahme in Task 23 nicht gemessen.
+  Abnahme in Task 16 nicht gemessen.
 - **Drei Tests prüfen weniger, als ihr Name sagt.** Der Test der gemischten Kette prüft nur
   `reused_chain`, nicht die vereinigten Funde. Der Test zu `ExtractPair` prüft nicht, dass
   `ExtractKey` weiter als gewöhnlicher Aufruf gesammelt wird. Die Doku-Funde zu `review-brief.md`

@@ -2,9 +2,10 @@
 # deep-review — Abschlussbericht
 
 Gebaut nach `specs/Spec 26 – deep-review.md` und
-`docs/superpowers/plans/2026-10-30-deep-review.md`. Stand: Task 1 (Messfixture und
-Basislinie, 2026-10-30). Die Skill selbst gibt es noch nicht; dieser Bericht hält fest,
-woran sie sich in Task 23 messen lassen muss.
+`docs/superpowers/plans/2026-10-30-deep-review.md`. Begonnen mit Task 1 (Messfixture und
+Basislinie, 2026-10-30); gebaut ist die Skill bis Task 15 (SKILL.md, Plugin-Eintrag,
+Projekt-Kopie; Abschnitt „Bau“). Dieser Bericht hält fest, woran sie sich in der Abnahme
+(Task 16) messen lassen muss.
 
 ## Was entstanden ist
 
@@ -516,7 +517,7 @@ wichtigsten Abweichungen:
 - `plan` hat kein `--run`. Ein Lauf wird über `counterparts`, `record`, `merge` und `audit`
   fortgesetzt.
 - Die Paket-Bereiche baut `counterparts`.
-- `s1` bekommt beim Wurzel-Commit und nach `--since` doch Hilfscommits.
+- `s1` bekommt beim Wurzel-Commit und nach `--since` mit Übernahme doch Hilfscommits.
 - `--since` hat Abdeckungskette, Fokus- und Profilgleichheit und `outside`.
 - `merge` ist nicht transitiv.
 - `audit.json` hat zusätzlich `coverage`.
@@ -676,8 +677,10 @@ reviewen“.
 
 ## Was nicht gemessen wurde
 
-**deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
-die Abschaltungen und der Vergleich mit dieser Basislinie folgen in Task 23.
+**deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
+SKILL.md, Plugin-Eintrag, Projekt-Kopie), aber noch nicht gemessen; ihre Läufe auf beiden
+Fixtures, die Abschaltungen und der Vergleich mit dieser Basislinie folgen in der Abnahme,
+Task 16.
 
 **Eine Fixture jenseits des Kontextfensters** — beide Fassungen sind klein genug, dass ein
 Agent alles lesen kann. Den Effekt, auf den die Spec zielt (eine Stelle liegt außerhalb
