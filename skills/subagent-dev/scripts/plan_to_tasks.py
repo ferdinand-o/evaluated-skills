@@ -1078,8 +1078,9 @@ def check_consumers(worktree: Path, allowlist: list[str], consumers: list[dict] 
 
 
 HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-DIFF_ARGS = ("-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff",
-             "--src-prefix=a/", "--dst-prefix=b/")  # fest, unabhängig von diff.mnemonicPrefix
+DIFF_ARGS = ("-c", "core.quotepath=off", "diff", "-U0", "--inter-hunk-context=0", "--no-color",
+             "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
+# fest, unabhängig von diff.mnemonicPrefix und diff.interHunkContext (sonst Kontextzeilen im Hunk)
 DEBUG_RE = re.compile(r"\b(?:print|console\.log|(?i:writeln)|(?i:outputdebugstring))\(")
 TDD_LOG_PATH = Path(".skills") / "cache" / "test-first" / "log.md"
 
@@ -1687,7 +1688,8 @@ def _read_findings(path: Path) -> list[dict]:
     je Fund; nur `bestätigt` und `plausibel` zählen) oder aus der JSON-Liste von
     `/code-review` (`file`, `line`, `summary`; ohne Status gilt jeder übernommene Fund).
     Ein `json.loads` über die ganze Datei (BOM erlaubt) entscheidet: Liste, Objekt mit
-    `findings` oder nur mit `_meta` (findings.json ohne Funde), eine einzelne Verdikt-Zeile;
+    `findings` oder nur mit `_meta` (mit `_meta.skill` deep-review ein findings.json ohne Funde,
+    sonst die `_meta`-Zeile einer verdicts.jsonl ohne Funde), eine einzelne Verdikt-Zeile;
     nur wenn es scheitert, gilt die Datei als jsonl. Pfade gelten ab `_fix_root`. Jede
     Meldung nennt das Format, an dem sie scheitert."""
     text = path.read_text(encoding="utf-8-sig")
@@ -1706,7 +1708,10 @@ def _read_findings(path: Path) -> list[dict]:
         if not whole:
             raise PlanParseError(f"{path}: /code-review-Liste ohne Funde")
         return _list_findings(whole, root, free=True)
-    if isinstance(whole, dict) and ("findings" in whole or set(whole) == {"_meta"}):
+    meta_only = isinstance(whole, dict) and set(whole) == {"_meta"}
+    if meta_only and not (isinstance(whole["_meta"], dict) and whole["_meta"].get("skill") == "deep-review"):
+        return _verdict_findings(path, [(1, whole)], root)  # nur die `_meta`-Zeile einer verdicts.jsonl
+    if isinstance(whole, dict) and ("findings" in whole or meta_only):
         if "_meta" not in whole:  # wie die /code-review-Liste, nur in `findings` verpackt
             return _findings_list(path, whole, "`findings`", root, free=True)
         return _deep_review_findings(path, whole, root)

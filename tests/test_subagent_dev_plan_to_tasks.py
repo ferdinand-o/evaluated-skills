@@ -2917,3 +2917,39 @@ def test_final_b_f9_identical_sources_rendered_once(tmp_path):
          "reused_from": None, "sources": [{"packet": "p1", **src}, {"packet": "p2", **src}]}])
     criteria = _criteria(ptt.fix_task_from_verdicts(findings, tmp_path / "tasks").read_text(encoding="utf-8"))
     assert criteria == "- Fund F1 (a.py:3): behoben und mit Test belegt\n  - 3: s; f"
+
+
+def test_final2_b_f1_added_lines_ignore_diff_inter_hunk_context(tmp_path):
+    """F1 (Runde 2): `diff.interHunkContext` verschmilzt -U0-Hunks mit Kontextzeilen; DIFF_ARGS
+    setzt `--inter-hunk-context=0`, sonst zählt `_added_lines` falsch und nimmt `+++ ` mit."""
+    wt, _ = _hint_repo(tmp_path)
+    (wt / "a.txt").write_text("".join(f"a{n}\n" for n in range(1, 11)), encoding="utf-8")
+    (wt / "b.txt").write_text("b1\nb2\nb3\nb4\n", encoding="utf-8")
+    git(wt, "add", "-A")
+    git(wt, "commit", "--quiet", "-m", "inhalt")
+    base = _rev(wt)
+    git(wt, "config", "diff.interHunkContext", "10")
+    lines = [f"a{n}\n" for n in range(1, 11)]
+    lines[4], lines[8] = "neu5\n", "neu9\n"
+    (wt / "a.txt").write_text("".join(lines), encoding="utf-8")
+    (wt / "b.txt").write_text("b1\nb2\nprint(3)\nb4\n", encoding="utf-8")
+    git(wt, "commit", "--quiet", "-am", "Task")
+    diff = ptt._git(wt, *ptt.DIFF_ARGS, f"{base}...HEAD")
+    assert ptt._added_lines(diff) == [("a.txt", 5, "neu5"), ("a.txt", 9, "neu9"), ("b.txt", 3, "print(3)")]
+    hints = [(h["path"], h["line"]) for h in ptt.collect_hints(wt, base) if h["kind"] == "debug-ausgabe"]
+    assert hints == [("b.txt", 3)]
+
+
+def test_final2_b_f2_meta_only_object_of_other_skill_is_verdicts_without_findings(tmp_path, capsys):
+    """F2 (Runde 2): nur `_meta` mit `skill` subagent-dev ist verdicts.jsonl ohne Funde, nicht
+    „kein findings.json von deep-review“; mit `skill` deep-review bleibt es findings.json ohne Funde."""
+    meta_only = tmp_path / "v.jsonl"
+    meta_only.write_text(json.dumps({"_meta": {"skill": "subagent-dev", "schema": 1}}) + "\n", encoding="utf-8")
+    code, err = _fix_main(meta_only, tmp_path / "t1", capsys)
+    assert code == 1 and "keine Funde mit Status bestätigt/plausibel" in err, err
+    assert "deep-review" not in err, err
+    dr = tmp_path / "findings.json"
+    dr.write_text(json.dumps({"_meta": {"skill": "deep-review"}}), encoding="utf-8")
+    code, err = _fix_main(dr, tmp_path / "t2", capsys)
+    assert code == 1 and "findings.json ohne Funde" in err, err
+    assert not (tmp_path / "t1").exists() and not (tmp_path / "t2").exists()
