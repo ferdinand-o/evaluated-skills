@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -295,9 +296,14 @@ def _rev(root, rev):
     return git(root, "rev-parse", rev).strip()
 
 
+def _entries(cache):
+    """Inhalt des Cache-Ordners ohne die `.gitignore`, die `plan` dort anlegt (Prüfpunkt 10, F3)."""
+    return [p for p in cache.iterdir() if p.name != ".gitignore"]
+
+
 def _runs(root):
     cache = root / ".skills" / "cache" / "deep-review"
-    return sorted(p.name for p in cache.iterdir()) if cache.exists() else []
+    return sorted(p.name for p in _entries(cache)) if cache.exists() else []
 
 
 def test_f01_non_utf8_path_is_a_kit_error(tmp_path):
@@ -3717,7 +3723,7 @@ def test_merge_without_results_and_with_reused_findings(tmp_path, monkeypatch):
     shutil.rmtree(_run_path(root, plan_b))
     # Mit --since: die übernommenen Funde aus file_keys kommen mit, Herkunft reused_from.
     assert _cli(kit, root, "plan", "--range", "base..t2", "--since", run_a) == 0
-    runs = sorted(p.name for p in (root / ".skills/cache/deep-review").iterdir())
+    runs = sorted(p.name for p in _entries(root / ".skills/cache/deep-review"))
     assert runs[0] == run_a and len(runs) == 2
     directory = kit.run_dir(root, runs[1])
     plan_c = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
@@ -3886,7 +3892,7 @@ def test_main_subcommands_exit_codes(tmp_path, capsys):
 
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--split-at", "10") == 0
     out = capsys.readouterr().out
-    (run,) = [p.name for p in cache.iterdir()]
+    (run,) = [p.name for p in _entries(cache)]
     assert run in out and "p2" in out
     plan = json.loads((cache / run / "plan.json").read_text(encoding="utf-8"))
     assert plan["split"] is True and [p["id"] for p in plan["packets"]] == ["p1", "p2"]
@@ -3895,33 +3901,33 @@ def test_main_subcommands_exit_codes(tmp_path, capsys):
     missing = "2026-01-01-000000-abcdef0-zzzz"
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--since", missing) == 1
     assert missing in capsys.readouterr().err
-    assert [p.name for p in cache.iterdir()] == [run]
+    assert [p.name for p in _entries(cache)] == [run]
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--since", "kaputt") == 1
-    assert [p.name for p in cache.iterdir()] == [run]
+    assert [p.name for p in _entries(cache)] == [run]
     # --since auf einen Lauf, der schon Ergebnisse hat, ist erlaubt; scheitert plan_since erst
     # nach build_plan (hier: der frühere Plan ist kaputt), bleibt kein neuer Lauf liegen.
     broken = cache / missing
     broken.mkdir()
     (broken / "plan.json").write_text("{kaputt", encoding="utf-8")
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--since", missing) == 1
-    assert sorted(p.name for p in cache.iterdir()) == sorted([run, missing])
+    assert sorted(p.name for p in _entries(cache)) == sorted([run, missing])
     shutil.rmtree(broken)
     # --soll-file: muss es geben; steht in _meta.
     assert _cli(kit, root, "plan", "--soll-file", tmp_path / "fehlt.md") == 1
-    assert [p.name for p in cache.iterdir()] == [run]
+    assert [p.name for p in _entries(cache)] == [run]
     soll = root / "soll.md"
     soll.write_text("# Soll\n", encoding="utf-8")
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint",
                 "--soll-file", soll) == 0
     capsys.readouterr()
-    (second,) = [p.name for p in cache.iterdir() if p.name != run]
+    (second,) = [p.name for p in _entries(cache) if p.name != run]
     meta = json.loads((cache / second / "plan.json").read_text(encoding="utf-8"))["_meta"]
     assert meta["soll_file"] == "soll.md" and "--soll-file soll.md" in meta["generated"]
     assert _cli(kit, root, "plan", "--profile", "checkpoint", "--focus", "security",
                 "--soll-file", soll) == 1
     assert "nur Fokus bugs" in capsys.readouterr().err
     assert _cli(kit, root, "plan", "--range", "gibtsnicht..HEAD") == 1
-    assert len(list(cache.iterdir())) == 2
+    assert len(list(_entries(cache))) == 2
 
     # counterparts baut Paketblöcke und Hilfscommits; cleanup räumt sie weg.
     assert _cli(kit, root, "counterparts", "--run", run) == 0
@@ -4137,7 +4143,7 @@ def test_cp6_f06_cli_paths_are_resolved_against_the_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(work / "other")
     assert kit.main(["plan", "--repo", str(root), "--profile", "checkpoint",
                      "--soll-file", "../specs/s.md"]) == 0
-    (run,) = [p.name for p in (root / ".skills/cache/deep-review").iterdir()]
+    (run,) = [p.name for p in _entries(root / ".skills/cache/deep-review")]
     directory = kit.run_dir(root, run)
     meta = json.loads((directory / "plan.json").read_text(encoding="utf-8"))["_meta"]
     assert meta["soll_file"] == str(work / "specs" / "s.md")
@@ -5156,13 +5162,13 @@ def test_cp9b_f3_checkpoint_profile_needs_a_soll_file(tmp_path, capsys):
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint") == 1
     err = capsys.readouterr().err
     assert "--soll-file" in err and "checkpoint" in err, err
-    assert not cache.exists() or list(cache.iterdir()) == []
+    assert not cache.exists() or list(_entries(cache)) == []
     soll = root / "soll.md"
     soll.write_text("# Soll\n", encoding="utf-8")
     assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint",
                 "--soll-file", soll) == 0
     assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
-    assert len(list(cache.iterdir())) == 2
+    assert len(list(_entries(cache))) == 2
     # Die Begründung für SINCE_PROFILES: gleicher Bereich, Soll mindestens so genau — keine
     # Obermenge, denn im Profil checkpoint ersetzt das Soll die Commit-Messages.
     assert "Obermenge" not in _doc("skills/deep-review/references/packets.md")
@@ -5316,3 +5322,138 @@ def test_evals_and_fixtures(tmp_path, capsys):
             assert re.search(r"^### Query\.pas:\d+ Extract auf ATree: TQueryTree$", block, re.M)
         if ev.id == "routing-large-branch-without-skill-name":
             assert plan["split"] is False and len(plan["packets"]) == 1
+
+
+# --- Prüfpunkt 10: Funde F1–F3 zu record, _meta.generated und dem Cache-Ordner ---------------
+
+def test_cp10_f1_record_canonicalises_the_tool(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    # Git Bash (MSYS) schreibt `/code-review` in einen Windows-Pfad um; ohne Schrägstrich
+    # bleibt der Name, wie er ist. record legt beides auf dieselbe Form.
+    cases = (("code-review", "/code-review"),
+             ("security-review", "/security-review"),
+             ("/code-review", "/code-review"),
+             (" code-review ", "/code-review"),
+             ("C:/Program Files/Git/code-review", "/code-review"),
+             ("C:\\Program Files\\Git\\security-review", "/security-review"),
+             ("d:/msys64/code-review", "/code-review"),
+             ("Review ohne /code-review", "Review ohne /code-review"),
+             ("Review ohne /security-review", "Review ohne /security-review"),
+             ("C:/tools/my-code-review", "C:/tools/my-code-review"),
+             ("code-review-light", "code-review-light"))
+    for given, want in cases:
+        plan, run = _split_plan(kit, root)
+        directory = _run_path(root, plan)
+        assert _cli_record(kit, root, run, "p1", _payload(tmp_path, []), tool=given) == 0, given
+        meta = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))["_meta"]
+        assert meta["tool"] == want, given
+        assert f"--tool {shlex.quote(want)} " in meta["generated"], meta["generated"]
+
+    # Der ganze Lauf mit `--tool code-review`: Kopfzeile `tool: /code-review`, Audit vollständig.
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)}, name="eins")
+    found = [{"file": "a.py", "line": 2, "summary": "Grenze falsch"}]
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, found), tool="code-review") == 0
+    merged = kit.merge(directory)["findings"]
+    _report(directory, run, merged, "1/1")
+    data = kit.audit(directory, None)
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+
+
+def test_cp10_f2_generated_names_the_script_without_repo_path(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    assert plan["_meta"]["generated"].startswith("review_kit.py plan "), plan["_meta"]
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, [])) == 0
+    record = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    assert record["_meta"]["generated"].startswith(f"review_kit.py record --run {run} ")
+    assert kit.merge(directory)["_meta"]["generated"] == f"review_kit.py merge --run {run}"
+    assert kit.audit(directory, None)["_meta"]["generated"] == f"review_kit.py audit --run {run}"
+    metas = [json.loads(p.read_text(encoding="utf-8"))["_meta"] for p in directory.rglob("*.json")]
+    assert len(metas) == 4 and "skills/deep-review/scripts" not in json.dumps(metas)
+
+
+def test_cp10_f3_cache_folder_ignores_itself(tmp_path):
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a.py": ""}, {"a.py": _lines(5)})
+    assert not (root / ".gitignore").exists()
+    assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
+    cache = root / ".skills/cache/deep-review"
+    assert (cache / ".gitignore").read_text(encoding="utf-8") == "*\n"
+    status = git(root, "status", "--porcelain", "--untracked-files=all")
+    assert ".skills" not in status, status
+    git(root, "add", "-A")
+    assert ".skills" not in git(root, "diff", "--cached", "--name-only")
+    # Die .gitignore des Repos bleibt unberührt; eine vorhandene im Cache-Ordner auch.
+    assert not (root / ".gitignore").exists()
+    (cache / ".gitignore").write_text("# eigene\n*\n", encoding="utf-8")
+    assert _cli(kit, root, "plan", "--range", "base..HEAD") == 0
+    assert (cache / ".gitignore").read_text(encoding="utf-8") == "# eigene\n*\n"
+    assert len([p for p in cache.iterdir() if p.is_dir()]) == 2
+
+
+def _flat(text):
+    """Text mit einfachem Leerraum, für Sätze über einen Zeilenumbruch."""
+    return re.sub(r"\s+", " ", text)
+
+
+def _doc_section(text, head):
+    """Abschnitt `head` (eine Überschriftzeile) bis zur nächsten Überschrift derselben Ebene."""
+    level = head.split(" ", 1)[0]
+    start = text.index(head + "\n")
+    rest = text[start + len(head) + 1:]
+    match = re.search(rf"^{re.escape(level)} ", rest, re.M)
+    return text[start:start + len(head) + 1 + (match.start() if match else len(rest))]
+
+
+def test_cp10_f4_to_f8_docs_follow_the_kit():
+    skill = _doc("skills/deep-review/SKILL.md")
+    brief = _doc("skills/deep-review/references/review-brief.md")
+    spec26 = _doc("specs/Spec 26 – deep-review.md")
+    spec27 = _doc("specs/Spec 27 – subagent-dev-checkpoints.md")
+    checkpoints = _doc("skills/subagent-dev/references/checkpoints.md")
+    limits = _doc_section(_doc("docs/known-limits.md"), "## deep-review")
+    report = _doc("docs/superpowers/reports/deep-review-report.md")
+    flat_skill = _flat(skill)
+    assert len(skill.splitlines()) < 150 and "Eiserne Regel" in skill
+
+    # F1: Werkzeuge ohne Schrägstrich, mit Grund.
+    assert "--tool code-review" in skill and "--tool /code-review" not in skill
+    assert "Git Bash" in skill and "Git Bash" in brief and "`code-review`;" in brief
+    # F3: der Cache-Ordner bekommt seine eigene .gitignore.
+    assert "gitignored" not in skill and "`.gitignore` mit `*`" in flat_skill
+    # F4: Aussagen so, wie das Skript sie einhält.
+    assert "[--split-at N]" in skill
+    assert "`cleanup --stale` ohne `--run` löscht die Refs **jedes** Laufs" in flat_skill
+    assert "abgebrochener Läufe auf" not in skill
+    assert "Bis zu 800 geänderte Zeilen ohne Wurzel-Commit" not in flat_skill
+    assert "Für jeden Plan mit `split: false`, auch beim Wurzel-Commit" in flat_skill
+    assert "zählt beides" not in skill and "`coverage` zählt nur die angenommenen" in flat_skill
+    assert "results/*.json" not in skill and "Jeder Fund eines angenommenen Ergebnisses" in flat_skill
+    # F5: Eiserne Regel wie Spec 26, Übergabe mit fix-task, debug-ledger und test-first.
+    rule = re.search(r"\*\*Eiserne Regel:\*\* \*(.+?)\*", _flat(spec26))[1].replace("`", "")
+    assert rule in flat_skill, rule
+    handover = _flat(_doc_section(skill, "## Übergabe"))
+    assert "`fix-task`" in handover and "debug-ledger für Funde mit unklarer Ursache" in handover
+    assert "test-first für den Regressionstest" in handover
+    # F6: --since mit Übernahme schickt Fokus security in den Hauptkontext; Hilfscommits gibt es
+    # nur nach einem --since mit Übernahme.
+    security = _flat(_doc_section(brief, "## Fokus `security`"))
+    assert "alle vier Bedingungen" in security and "hat keine Datei `reused_from`" in security
+    assert "Folgelauf mit `--since`, der Dateien übernommen hat" in security
+    assert "`reused_from`" in _flat(spec26[spec26.index("Fokus `security`: `/security-review`"):])[:900]
+    for text in (brief, spec26):
+        assert not re.search(r"nach `--since`(?! mit Übernahme)", _flat(text))
+    # F7: übernommene, schon behobene Funde bleiben in findings.json und im Bericht.
+    for text in (limits, checkpoints, spec27):
+        flat = _flat(text)
+        assert "verwirft" not in flat and "lost_findings" in flat and "gekürzte Kopie" in flat
+        assert "nächsten `fix-task`" in flat
+    # F8: Stand nach Task 15, Abnahme in Task 16.
+    unmeasured = _doc_section(report, "## Was nicht gemessen wurde")
+    for text in (limits, unmeasured, report, spec26):
+        assert "Task 23" not in text and "noch nicht gebaut" not in text
+    assert "Offen: Task 15" not in spec26 and "Offen: Task 16" in _flat(spec26)
+    assert "Task 16" in unmeasured and "bis Task 15" in limits
+    assert "steht noch nicht in der Spec" not in limits and "Spec-Nachzug in Task 16" not in limits

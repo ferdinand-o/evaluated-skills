@@ -1,6 +1,6 @@
 # Spec 26: deep-review — `/code-review` in Paketen, mit den Verträgen der Gegenstellen
 
-Skill-Spezifikation · Zyklus 26 · Entscheidung: keine eigene Such-Pipeline — die Skill steuert die mitgelieferten Reviewer und ergänzt nur, was ihnen in der Messung fehlte: große Bereiche schneidet ein Tier-1-Skript in Pakete, und je Paket sammelt es die Gegenstellen der geänderten Aufrufe (Definition, `raise`-Stellen, Besitz, Weg eines Flags), die der Reviewer sonst nicht öffnet · Abgeglichen mit Spec 00 und Spec 27 · Neu gefasst nach der Messung vom 2026-11-01/02 (`docs/superpowers/reports/deep-review-report.md`); ersetzt die Fassung vom 2026-10-30 (Inventar, Nonce, Suchagenten, gestufte Verifikation, Sättigung) · Überarbeitet nach unabhängigem Review (2026-11-02, Opus: Schnittregel mit Paketgröße und IDs festgelegt, je Fixture eine weitere Datei, `--since` je Datei mit Gegenstellen im Schlüssel samt Nachbarn Spec 27, checkpoints.md und `fix-task`, 28 statt 34 Läufe, Sicherheitsfunde berichtigt, Tests standardmäßig nicht reviewt wie in der Messung, Sammelregel wie im Prototyp, Fokus `security` als ein Paket `s1` mit Audit, keine Fixes in der Skill, stochastische Fundprüfungen aus Eval 3 und 4 in die Abnahme, Hilfscommits mit Identität, Message und Aufräumen, `--max-findings all` als bekannte Grenze, test-first ohne Projekt-Kopie, `findings.json` mit Kopf) · Nachgezogen an den Bau (2026-11-03): kein `plan --run`, fortgesetzt wird mit `counterparts`, `record`, `merge` und `audit` über `--run`; die Paket-Bereiche baut `counterparts`, und `s1` bekommt beim Wurzel-Commit und nach `--since` Hilfscommits; `--since` nur beim Anlegen, mit Abdeckungskette (`base_blob`/`target_blob` als `<mode>:<sha>`), `reused_chain`, `outside`, `run` je Fund, Gleichstand über die mtime der Ergebnisse und Profilen nach `SINCE_PROFILES`; `checkpoint` nur mit `--soll-file`; Datei-Schlüssel mit Zeilennummern der Gegenstellen und Ziel eines Symlinks, bei `quality` nur Inhalt; `record` normalisiert Zeilen, `merge` nicht transitiv; `audit.json` mit `coverage`; Bericht mit fünf Kopffeldern, Pflichtzeilen, Längengrenze ohne Kopf- und Kommentarzeilen und der Regel für „vollständig"; Delphi-Sammler und `DELPHI_RELEASES` wie gebaut; `not_reviewed` mit den Gründen für Nicht-UTF-8-Pfade; `/security-review` nur bei passendem Umfang, sonst „Review ohne /security-review"; `fix-task` liest weiter `verdicts.jsonl`; Tests und Evals wie gebaut
+Skill-Spezifikation · Zyklus 26 · Entscheidung: keine eigene Such-Pipeline — die Skill steuert die mitgelieferten Reviewer und ergänzt nur, was ihnen in der Messung fehlte: große Bereiche schneidet ein Tier-1-Skript in Pakete, und je Paket sammelt es die Gegenstellen der geänderten Aufrufe (Definition, `raise`-Stellen, Besitz, Weg eines Flags), die der Reviewer sonst nicht öffnet · Abgeglichen mit Spec 00 und Spec 27 · Neu gefasst nach der Messung vom 2026-11-01/02 (`docs/superpowers/reports/deep-review-report.md`); ersetzt die Fassung vom 2026-10-30 (Inventar, Nonce, Suchagenten, gestufte Verifikation, Sättigung) · Überarbeitet nach unabhängigem Review (2026-11-02, Opus: Schnittregel mit Paketgröße und IDs festgelegt, je Fixture eine weitere Datei, `--since` je Datei mit Gegenstellen im Schlüssel samt Nachbarn Spec 27, checkpoints.md und `fix-task`, 28 statt 34 Läufe, Sicherheitsfunde berichtigt, Tests standardmäßig nicht reviewt wie in der Messung, Sammelregel wie im Prototyp, Fokus `security` als ein Paket `s1` mit Audit, keine Fixes in der Skill, stochastische Fundprüfungen aus Eval 3 und 4 in die Abnahme, Hilfscommits mit Identität, Message und Aufräumen, `--max-findings all` als bekannte Grenze, test-first ohne Projekt-Kopie, `findings.json` mit Kopf) · Nachgezogen an den Bau (2026-11-03): kein `plan --run`, fortgesetzt wird mit `counterparts`, `record`, `merge` und `audit` über `--run`; die Paket-Bereiche baut `counterparts`, und `s1` bekommt beim Wurzel-Commit und nach `--since` mit Übernahme Hilfscommits; `--since` nur beim Anlegen, mit Abdeckungskette (`base_blob`/`target_blob` als `<mode>:<sha>`), `reused_chain`, `outside`, `run` je Fund, Gleichstand über die mtime der Ergebnisse und Profilen nach `SINCE_PROFILES`; `checkpoint` nur mit `--soll-file`; Datei-Schlüssel mit Zeilennummern der Gegenstellen und Ziel eines Symlinks, bei `quality` nur Inhalt; `record` normalisiert Zeilen, `merge` nicht transitiv; `audit.json` mit `coverage`; Bericht mit fünf Kopffeldern, Pflichtzeilen, Längengrenze ohne Kopf- und Kommentarzeilen und der Regel für „vollständig"; Delphi-Sammler und `DELPHI_RELEASES` wie gebaut; `not_reviewed` mit den Gründen für Nicht-UTF-8-Pfade; `/security-review` nur bei passendem Umfang, sonst „Review ohne /security-review"; `fix-task` liest weiter `verdicts.jsonl`; Tests und Evals wie gebaut
 
 ## Problem
 
@@ -56,7 +56,10 @@ verlangt die SKILL.md (G1). Kein Hook. Plugin `evaluated-dev`; dazu Projekt-Kopi
 Projekt-Kopien laden (`scripts/sync_skills.py`).
 
 Ablage (Spec 00 §1), alles Ephemera unter `.skills/cache/deep-review/<lauf>/`. `<lauf>` ist
-die Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>` (UTC). Dazu schreibt
+die Lauf-ID `<JJJJ-MM-TT>-<HHMMSS>-<kurz-sha>-<4 Zufallszeichen>` (UTC). Fehlt
+`.skills/cache/deep-review/.gitignore`, schreibt `plan` sie mit `*`, damit die Läufe in einem
+Repo ohne passenden Eintrag nicht als ungetrackt erscheinen; die `.gitignore` des Repos bleibt
+unberührt. `_meta.generated` nennt das Skript ohne Pfad (`review_kit.py <befehl> …`). Dazu schreibt
 `counterparts` Hilfscommits unter `refs/deep-review/<lauf>/` in das Repo des Nutzers;
 `cleanup` löscht sie, und der Bootstrap nennt beide Orte.
 
@@ -177,7 +180,7 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
      `<mode>:<sha>`, `absent` oder `gitlink:<commit>`, für die Abdeckungskette von `--since`.
      `plan` sammelt dafür die Gegenstellen über den ganzen Bereich.
    - Fokus `security`: ein Paket `s1` über den ganzen Bereich, nie geteilt; Hilfscommits nur
-     beim Wurzel-Commit und nach `--since` (Paket-Bereich).
+     beim Wurzel-Commit und nach `--since` mit Übernahme (Paket-Bereich).
 3. **Gegenstellen:** `review_kit.py counterparts --run <lauf>` baut zuerst je Paket den
    Paket-Bereich, dann schreibt es `packets/<id>.md` und gibt je Paket
    `<id>: <bereich> · <pfad> · <k> Gegenstellen, <gezeigt> gezeigt, <u> nicht aufgelöst` aus;
@@ -236,8 +239,10 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
      und nimmt keinen Bereich. Es läuft deshalb einmal für `s1`, die Gegenstellen aller
      Dateien als Kontext, nur wenn sein Umfang dem Plan entspricht: ZIEL ist HEAD (unter
      `notes` kein `target_not_head`), `origin/HEAD` ist vorhanden, `base` ist gleich
-     `git merge-base HEAD origin/HEAD`, und unter `notes` steht kein `worktree_differs` und
-     kein `worktree_unknown`. Sonst prüft der Hauptagent `s1` selbst über den Bereich aus
+     `git merge-base HEAD origin/HEAD`, unter `notes` steht kein `worktree_differs` und
+     kein `worktree_unknown`, und keine Datei ist übernommen (in `file_keys` hat keine Datei
+     `reused_from`; nach `--since` mit Übernahme deckt `s1` nur die übrigen Dateien ab,
+     `/security-review` aber alles). Sonst prüft der Hauptagent `s1` selbst über den Bereich aus
      `counterparts` nach `references/review-brief.md` (Eingaben von außen, Rechte, Geheimnisse,
      Injektion); das Werkzeug heißt dann „Review ohne /security-review".
    - Fokus `quality`: `/code-review` je Paket mit dem Auftrag, nur Wartbarkeit, Doppelung und
@@ -248,7 +253,10 @@ tests/test_deep_review_kit.py        siehe Tests (Repo)
    Hauptagent an `review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->`
    (`-` liest stdin; Datei und stdin als UTF-8, ein BOM zählt nicht). `<werkzeug>` ist, was
    lief: `/code-review`, `/security-review`, „Review ohne /code-review" oder „Review ohne
-   /security-review". Das Skript nimmt das Ergebnis nur an, wenn das Paket im Plan steht und
+   /security-review". Die SKILL.md übergibt `code-review` und `security-review` ohne
+   Schrägstrich, weil Git Bash unter Windows ein Argument mit `/` am Anfang in einen
+   Windows-Pfad umschreibt; `record` speichert beide mit Schrägstrich, auch einen so
+   umgeschriebenen Pfad, der auf einen der beiden Namen endet. Das Skript nimmt das Ergebnis nur an, wenn das Paket im Plan steht und
    noch kein Ergebnis hat, und nur als ganze gültige Liste; sonst schreibt es nichts. Dabei
    wird `file` repo-relativ (`\` wird `/`, `./` fällt weg, `..` und Pfade außerhalb des Repos
    sind ungültig) und `line` eine Zahl, ein Bereich `"a-b"` oder `null` (`12`, `L12`, `12-14`,
@@ -588,5 +596,6 @@ Basislinie) und Tasks 2–13 mit den Prüfpunkten 1–9 (Report, Abschnitt „Ba
 mit `plan`, `counterparts` für Python und Delphi, `record`, `merge`, `audit`, `cleanup`, die
 References, die Berichtsvorlage, die Evals mit Fixtures und die Nachbarn (subagent-dev mit
 checkpoints.md, `fix-task` und Spec 27) sowie Task 14 (known-limits, mit den offenen Punkten
-der Prüfpunkte aus dem Report). Offen: Task 15 (SKILL.md, Plugin, Projekt-Kopie) und Task 16 (Abnahme
-mit review-bench, Evals mit und ohne Skill). Bau nach `skill-forge` (17) Schritt 3 bis 7.
+der Prüfpunkte aus dem Report) und Task 15 (SKILL.md, Plugin-Eintrag, Projekt-Kopie) mit dem
+Prüfpunkt 10. Offen: Task 16 (Abnahme mit review-bench, Evals mit und ohne Skill). Bau nach
+`skill-forge` (17) Schritt 3 bis 7.

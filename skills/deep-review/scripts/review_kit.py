@@ -76,8 +76,14 @@ REPORT_BASE_LINES = 20    # Anti-Zeremonie: Bericht höchstens so viele Zeilen p
 SKILL_NAME = "deep-review"
 SCHEMA_VERSION = 1
 RESERVED_META = ("skill", "schema")
-SCRIPT_CMD = "python skills/deep-review/scripts/review_kit.py"
+# `_meta.generated` nennt das Skript ohne Pfad, wie die References (`review_kit.py <befehl> …`):
+# Ein Repo-Pfad gälte nur in diesem Repo, nicht in einer Plugin-Installation oder Projekt-Kopie.
+SCRIPT_CMD = "review_kit.py"
 CACHE_DIR = PurePosixPath(".skills/cache/deep-review")
+# Legt `plan` in den Cache-Ordner, wenn sie fehlt: `*` blendet die Läufe und sich selbst aus
+# Git aus. Die .gitignore des Repos bleibt unberührt.
+CACHE_IGNORE = ".gitignore"
+CACHE_IGNORE_TEXT = "*\n"
 DEFAULT_RANGE = "HEAD"    # ohne Bereich: der letzte Commit
 # Dieselbe Pathspec wie subagent-dev (plan_to_tasks.py, changed_lines); `numstat` ruft git
 # immer aus der Repo-Wurzel auf, `.` ist also das ganze Repo. Der Unterschied bleibt die
@@ -566,7 +572,19 @@ def run_dir(repo, run_id) -> Path:
     return Path(repo) / CACHE_DIR / run_id
 
 
+def _ignore_cache(repo: Path) -> None:
+    """Den Cache-Ordner anlegen und `<cache>/.gitignore` mit `*` schreiben, wenn sie fehlt —
+    so stehen die Läufe nicht als ungetrackt im Status und kommen nicht über `git add -A` in
+    einen Commit. Eine vorhandene Datei bleibt, wie sie ist; die .gitignore des Repos auch."""
+    cache = Path(repo) / CACHE_DIR
+    cache.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(FileExistsError):
+        with open(cache / CACHE_IGNORE, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(CACHE_IGNORE_TEXT)
+
+
 def _new_run_dir(repo: Path, sha: str) -> tuple[str, Path]:
+    _ignore_cache(repo)
     for _ in range(100):
         run_id = new_run_id(sha)
         directory = run_dir(repo, run_id)
@@ -4487,6 +4505,24 @@ def _read_result(path: Path, pid: str, run_id: str, digest: str, repo: Path):
         return None, f"ungültiger Fund: {exc}"
 
 
+# Werkzeuge, die `record` mit Schrägstrich speichert (`_canonical_tool`).
+SLASH_TOOLS = ("code-review", "security-review")
+# Ein Pfad, wie ihn Git Bash (MSYS) aus `/code-review` macht: Laufwerk, Ordner, am Ende der
+# Name — `C:/Program Files/Git/code-review`.
+MSYS_TOOL_RE = re.compile(r"[A-Za-z]:/(?:.*/)?(" + "|".join(map(re.escape, SLASH_TOOLS)) + ")")
+
+
+def _canonical_tool(tool: str) -> str:
+    """`--tool` in fester Form: `code-review` und `security-review` ohne Schrägstrich werden
+    `/code-review` und `/security-review`, ebenso ein Windows-Pfad, der auf einen der beiden
+    Namen endet (die MSYS-Umschreibung von `/code-review` unter Git Bash; `\\` zählt wie
+    `/`). Alles andere bleibt, wie es ist, etwa „Review ohne /code-review"."""
+    if tool in SLASH_TOOLS:
+        return "/" + tool
+    match = MSYS_TOOL_RE.fullmatch(tool.replace("\\", "/"))
+    return "/" + match[1] if match else tool
+
+
 def record(run_path, packet, tool, payload_path):
     """`record --run <lauf> --packet <id> --tool <werkzeug> <datei>`: das Ergebnis eines
     Pakets annehmen (Spec 26, Ablauf Schritt 4).
@@ -4499,14 +4535,15 @@ def record(run_path, packet, tool, payload_path):
     steht und noch kein Ergebnis hat; sonst — und bei einer ungültigen Liste oder einem
     leeren Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des
     Plans `results/<id>.json` mit `_meta` (`generated`, `run`, `packet` = Paket-ID, `tool`,
-    `plan` = `_plan_digest`) und `findings`. Rückgabe: das geschriebene Objekt."""
+    `plan` = `_plan_digest`) und `findings`. `tool` steht dort gekürzt und nach
+    `_canonical_tool` (`code-review` → `/code-review`). Rückgabe: das geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
     if not isinstance(packet, str) or not PACKET_ID_RE.fullmatch(packet):
         raise KitError(f"keine Paket-ID: {packet!r}")
     if not isinstance(tool, str) or not tool.strip() or any(c in tool for c in "\r\n"):
         raise KitError(f"--tool braucht das Werkzeug des Reviews (eine Zeile), nicht {tool!r}")
-    tool = tool.strip()
+    tool = _canonical_tool(tool.strip())
     findings = [_clean_finding(item, i, repo) for i, item in enumerate(_read_payload(payload_path), 1)]
     with _plan_lock(directory, run_id):
         plan = _read_plan(directory / "plan.json", run_id)
@@ -5059,7 +5096,8 @@ def _parser() -> argparse.ArgumentParser:
     rec = sub.add_parser("record", parents=[common], help="Ergebnis eines Pakets annehmen")
     rec.add_argument("--run", required=True)
     rec.add_argument("--packet", required=True)
-    rec.add_argument("--tool", required=True, help="Werkzeug des Reviews, z. B. /code-review")
+    rec.add_argument("--tool", required=True, help="Werkzeug des Reviews, z. B. code-review "
+                          "(gespeichert als /code-review)")
     rec.add_argument("payload", help="JSON-Liste der Funde (- für stdin)")
     rec.set_defaults(func=_cmd_record)
 

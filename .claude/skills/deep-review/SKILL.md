@@ -12,25 +12,27 @@ nach, dass ein Ergebnis angenommen wurde. Das Review selbst ist `/code-review`.
 ## Eiserne Regel
 
 ```
-KEIN PAKET GILT ALS REVIEWT OHNE EIN VOM SKRIPT ANGENOMMENES ERGEBNIS —
-UND OHNE `audit` GIBT ES KEINE ÜBERGABE.
+Kein Bericht nennt sich vollständig, solange ein Paket des Plans kein vom Skript
+angenommenes Ergebnis hat — und kein Fund eines Pakets fehlt in findings.json.
 ```
 
-Dass je Paket ein Review lief, verlangt diese Datei (G1). Fehlende Pakete, verlorene Funde und
-einen Bericht, der nicht zu den Daten passt, meldet `audit` (G2).
+Ohne `audit` gibt es keine Übergabe. Dass je Paket ein Review lief, verlangt diese Datei (G1).
+Fehlende Pakete, verlorene Funde und einen Bericht, der nicht zu den Daten passt, meldet
+`audit` (G2).
 
 ## Ablauf
 
 Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner). Die Skill legt
-`.skills/cache/deep-review/` (Läufe, gitignored) und `refs/deep-review/` (Hilfscommits) an;
-Arbeitsbaum, Index und HEAD bleiben unberührt.
+`.skills/cache/deep-review/` (Läufe) und `refs/deep-review/` (Hilfscommits) an. In den
+Cache-Ordner schreibt `plan` eine `.gitignore` mit `*`, wenn sie fehlt, damit `git add -A`
+keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD bleiben unberührt.
 
 1. **Bereich, Profil, Fokus.** Bereich `BASIS..ZIEL`, Standard `HEAD`; Profil und Fokus aus
    der Tabelle unten. Ein Pfad statt eines Bereichs geht direkt an `/code-review <pfad>`,
    ohne Plan.
 2. **Plan:**
    ```bash
-   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" plan --range <bereich> [--profile …] [--focus …] [--soll-file <datei>] [--since <lauf>[,<lauf>…]] [--with-tests]
+   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" plan --range <bereich> [--profile …] [--focus …] [--split-at N] [--soll-file <datei>] [--since <lauf>[,<lauf>…]] [--with-tests]
    ```
    Die Lauf-ID steht in der ersten Ausgabezeile (`Lauf: <lauf>`). `plan` legt immer einen
    neuen Lauf an; fortgesetzt wird mit `--run <lauf>` bei den folgenden Befehlen.
@@ -51,8 +53,11 @@ Arbeitsbaum, Index und HEAD bleiben unberührt.
    [review-brief.md](references/review-brief.md). Danach das Ergebnis annehmen lassen, ein
    Paket ohne Funde mit `[]`:
    ```bash
-   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool /code-review <datei|->
+   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review <datei|->
    ```
+   Das Werkzeug steht ohne Schrägstrich: Git Bash unter Windows schreibt ein Argument mit `/`
+   am Anfang in einen Windows-Pfad um. `record` speichert `code-review` als `/code-review`,
+   und so heißt es in der Kopfzeile des Berichts.
    Eine abgewiesene Liste korrigierst du und rufst `record` erneut auf. Ohne `/code-review`
    (claude.ai, andere Agenten) läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne
    /code-review" in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht
@@ -71,8 +76,9 @@ Arbeitsbaum, Index und HEAD bleiben unberührt.
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" cleanup --run <lauf>
    ```
    `audit` endet mit Exit 1 bei einer Lücke; `audit.json` ist trotzdem geschrieben. Meldet es
-   `report_mismatch`, korrigierst du den Bericht und prüfst erneut. `cleanup --stale` räumt die
-   Refs abgebrochener Läufe auf.
+   `report_mismatch`, korrigierst du den Bericht und prüfst erneut. `cleanup --stale --run
+   <lauf>` löscht die Refs aller anderen Läufe; `cleanup --stale` ohne `--run` löscht die
+   Refs **jedes** Laufs, auch eines, der in einem anderen Worktree noch offen ist.
 
 ## Profile und Fokus
 
@@ -81,7 +87,7 @@ Arbeitsbaum, Index und HEAD bleiben unberührt.
 | Standard | `--profile standard --focus bugs` (beides Standard) | Normalfall |
 | Prüfpunkt aus subagent-dev | `--profile checkpoint --soll-file <datei>` | `--soll-file` ist Pflicht, nur Fokus `bugs`; das Soll hängst du als Abschnitt „Soll" an den Auftrag |
 | Wartbarkeit, Qualität | `--focus quality` | keine Gegenstellen; Auftrag „Fassung 2" in review-brief.md |
-| Sicherheit | `--focus security` | ein Paket `s1` über alles. `/security-review` läuft nur, wenn sein Umfang dem Plan entspricht (Bedingungen in review-brief.md, „Fokus security"); sonst Review im Hauptkontext mit `--tool "Review ohne /security-review"` |
+| Sicherheit | `--focus security` | ein Paket `s1` über alles. `/security-review` (`--tool security-review`) läuft nur, wenn sein Umfang dem Plan entspricht (Bedingungen in review-brief.md, „Fokus security"); sonst Review im Hauptkontext mit `--tool "Review ohne /security-review"` |
 | Folgelauf nach einem Fix | neuer `plan` mit `--since <lauf>` | Funde unveränderter Dateien werden übernommen |
 | Tests mitprüfen | `--with-tests` | Testdateien stehen sonst unter „Nicht geprüft" |
 
@@ -95,20 +101,27 @@ die Zahl der Funde und die Abdeckung `<covered>/<total>` aus `audit.json`. Lief 
 `--max-findings all` bleibt nach dem Lauf als Wahl des Nutzers gesetzt. Zurück geht es mit
 `/code-review --max-findings default`; auch das sagt die Übergabe.
 
+deep-review behebt nichts. Im Profil `checkpoint` behebt subagent-dev die Funde über
+`fix-task`. Sonst nennt die Übergabe debug-ledger für Funde mit unklarer Ursache und
+test-first für den Regressionstest.
+
 ## Contract
 
-- **Abdeckung gegen den Plan.** `audit` meldet jedes Paket ohne angenommenes Ergebnis und jedes
-  Ergebnis eines anderen Plans; `coverage` zählt beides.
-- **Kein Fund verschwindet.** Jeder Fund aus `results/*.json` und jeder übernommene Fund steht
-  in `findings.json`.
+- **Abdeckung gegen den Plan.** `audit` meldet jedes Paket ohne angenommenes Ergebnis
+  (`missing`) und jede nicht angenommene Ergebnisdatei, etwa eines anderen Plans (`stale`).
+  `coverage` zählt nur die angenommenen Ergebnisse gegen die Pakete des Plans.
+- **Kein Fund verschwindet.** Jeder Fund eines angenommenen Ergebnisses und jeder übernommene
+  Fund (`--since`) steht in `findings.json`; sonst meldet `audit` ihn unter `lost_findings`.
 - **Bericht und Daten stimmen überein.** „vollständig" steht nur bei lückenlosem Audit.
 - **Gegenstellen sind mechanisch.** `counterparts` wählt nicht nach Verdacht aus und nennt die
   Zahl der nicht aufgelösten Stellen.
 - **Nichts wird ausgeführt, nichts behoben.** Das Skript startet keinen Zielcode, die Skill
   schreibt weder Fixes noch Commits; Hilfscommits liegen nur unter `refs/deep-review/`.
-- **Anti-Zeremonie-Fall.** Bis zu 800 geänderte Zeilen ohne Wurzel-Commit: ein Paket, ein
-  `/code-review` über den Originalbereich, keine Hilfscommits, ein Bericht von höchstens 20
-  Zeilen plus einer je Fund.
+- **Anti-Zeremonie-Fall.** Bis `--split-at` (Standard 800) geänderte Zeilen ist der Plan ein
+  Paket (`split: false`). Für jeden Plan mit `split: false`, auch beim Wurzel-Commit und bei
+  Fokus `security` (immer ein Paket), prüft `audit` den Bericht auf höchstens 20 Zeilen plus
+  eine je Fund. Ohne
+  Wurzel-Commit läuft ein `/code-review` über den Originalbereich, ohne Hilfscommits.
 
 ## Anti-Rationalisierung
 
@@ -119,7 +132,7 @@ die Zahl der Funde und die Abdeckung `<covered>/<total>` aus `audit.json`. Lief 
 | „Ich fasse zwei Pakete in einem Review zusammen" | `record` nimmt je Paket genau ein Ergebnis an; der Zuschnitt war der Zweck. |
 | „Ich nehme den Originalbereich, das ist einfacher" | Bei Hilfscommits zeigt er das ganze Branch-Diff, nicht das Paket. Nimm `<von>..<bis>` aus `counterparts`. |
 | „Ein Paket ohne Funde braucht kein `record`" | Ohne Ergebnis ist das Paket nicht reviewt; es bekommt `[]`. |
-| „Ein kleiner Bereich braucht trotzdem sechs Schritte mit Hilfscommits" | Bis 800 Zeilen ist es ein Paket und ein kurzer Bericht. |
+| „Ein kleiner Bereich braucht trotzdem sechs Schritte mit Hilfscommits" | Bis `--split-at` (Standard 800 Zeilen) ist es ein Paket und ein kurzer Bericht. |
 
 ## Abgrenzung
 

@@ -29,8 +29,10 @@ Je Paket in Plan-Reihenfolge ein Aufruf:
 
 - `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
   (`<id>: <bereich> · …`). Den Originalbereich setzt du nicht selbst ein: Er ist es nur bei
-  `split: false` ohne Wurzel-Commit. Beim Wurzel-Commit (`root: true`) und nach `--since`
-  bekommt auch ein einzelnes Paket Hilfscommits, und dann ist es deren `<von>..<bis>`.
+  `split: false` ohne Wurzel-Commit. Beim Wurzel-Commit (`root: true`) und nach `--since` mit
+  Übernahme (eine Datei in `file_keys` hat `reused_from`) bekommt auch ein einzelnes Paket
+  Hilfscommits, und dann ist es deren `<von>..<bis>`. Ein `--since`, das nichts übernommen
+  hat, lässt den Plan, wie er war.
 - Den Inhalt von `packets/<id>.md` gibst du **jedem Unteragenten unverändert** mit: nicht
   gekürzt, nicht umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht
   aufgelösten Stellen und eine Kappung bleiben stehen.
@@ -99,7 +101,7 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 `/security-review` wählt seinen Bereich selbst: die Änderungen von HEAD gegen die
 Merge-Basis mit `origin/HEAD`, dem Default-Branch des Remotes. Einen Bereich nimmt es nicht
 an. Darum prüfst du zuerst, ob sich dieser Umfang mit dem Bereich des Plans deckt. Er deckt
-sich nur, wenn alle drei Bedingungen gelten:
+sich nur, wenn alle vier Bedingungen gelten:
 
 - ZIEL ist HEAD: `target` aus `plan.json` gleich `git rev-parse HEAD`, unter `notes` kein
   `target_not_head`.
@@ -109,6 +111,8 @@ sich nur, wenn alle drei Bedingungen gelten:
   `/security-review` nicht.
 - Unter `notes` steht kein `worktree_differs` und kein `worktree_unknown`. Sonst sieht
   `/security-review` andere Dateistände als der Plan.
+- Keine Datei ist übernommen: In `file_keys` hat keine Datei `reused_from`. Nach `--since`
+  mit Übernahme deckt `s1` nur die übrigen Dateien ab, `/security-review` prüft aber alles.
 
 Fehlt `origin/HEAD`, oder gilt eine der Bedingungen nicht, deckt sich der Umfang nicht. Dann
 prüfst du im Hauptkontext, und zwar über den Bereich `<von>..<bis>`, den `counterparts` für
@@ -118,8 +122,8 @@ Der Bereich von `counterparts` sind die Hilfscommits.
 
 | Fall | Beispiel | Review | `--tool` |
 | --- | --- | --- | --- |
-| Umfang deckt sich | Plan `main..HEAD`, `origin/HEAD` zeigt auf `main`, `base` gleich `git merge-base HEAD origin/HEAD`, keine Hinweise zum Arbeitsbaum | `/security-review` einmal für `s1`, die Gegenstellen aller Dateien als Kontext | `/security-review` |
-| Umfang deckt sich nicht | gepushter Feature-Branch mit Plan `origin/feature..HEAD` (die Basis ist nicht die Merge-Basis mit `origin/HEAD`); kein `origin/HEAD`; Wurzel-Commit; Bereich `v1.2..v1.3`; ZIEL nicht HEAD; `worktree_differs` oder `worktree_unknown` | im Hauptkontext über den Bereich von `s1`, den `counterparts` ausgegeben hat, Ablauf wie [Review ohne /code-review](#review-ohne-code-review), Prüfblick auf Eingaben von außen, Rechte, Geheimnisse und Injektion | `"Review ohne /security-review"` |
+| Umfang deckt sich | Plan `main..HEAD`, `origin/HEAD` zeigt auf `main`, `base` gleich `git merge-base HEAD origin/HEAD`, keine Hinweise zum Arbeitsbaum, keine übernommene Datei | `/security-review` einmal für `s1`, die Gegenstellen aller Dateien als Kontext | `security-review` |
+| Umfang deckt sich nicht | gepushter Feature-Branch mit Plan `origin/feature..HEAD` (die Basis ist nicht die Merge-Basis mit `origin/HEAD`); kein `origin/HEAD`; Wurzel-Commit; Bereich `v1.2..v1.3`; ZIEL nicht HEAD; `worktree_differs` oder `worktree_unknown`; Folgelauf mit `--since`, der Dateien übernommen hat | im Hauptkontext über den Bereich von `s1`, den `counterparts` ausgegeben hat, Ablauf wie [Review ohne /code-review](#review-ohne-code-review), Prüfblick auf Eingaben von außen, Rechte, Geheimnisse und Injektion | `"Review ohne /security-review"` |
 
 Im zweiten Fall nennt der Bericht das Werkzeug wörtlich „Review ohne /security-review“ in der
 Kopfzeile und in der Übergabe, wie beim Review ohne /code-review.
@@ -136,7 +140,8 @@ Je Paket, in Plan-Reihenfolge, eines nach dem anderen:
 1. Lies `packets/<id>.md` ganz.
 2. Lies die Änderung mit `git diff <von>..<bis>` (nur die Paketdateien). `<von>..<bis>` ist
    immer der Bereich, den `counterparts` für das Paket ausgegeben hat, auch bei `split: false`:
-   Beim Wurzel-Commit und nach `--since` sind es Hilfscommits, nicht der Originalbereich. Das
+   Beim Wurzel-Commit und nach `--since` mit Übernahme sind es Hilfscommits, nicht der
+   Originalbereich. Das
    Soll steht in `git log <von>..<bis>`, im Profil `checkpoint` in der Datei von `--soll-file`.
 3. Ein Review liest sonst den Arbeitsbaum, nicht ZIEL. Nennt der Plan unter `notes`
    `target_not_head`, `worktree_differs` oder `worktree_unknown` (Index fehlt, Arbeitsbaum
@@ -214,12 +219,20 @@ Ablauf in `failure_scenario` ist ein Satz als Text, kein Objekt mit Feldern.
 review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->
 ```
 
-- `<werkzeug>` ist das, was lief: `/code-review`; `/security-review` nur, wenn ZIEL HEAD
-  ist, `base` gleich `git merge-base HEAD origin/HEAD` und unter `notes` kein
-  `worktree_differs` und kein `worktree_unknown` steht; `"Review ohne /security-review"`
-  für ein Sicherheitsreview im Hauptkontext über den Bereich von `s1` aus `counterparts` in
-  jedem anderen Fall, auch ohne `origin/HEAD` ([Fokus `security`](#fokus-security)); sonst
-  `"Review ohne /code-review"`. Der Bericht übernimmt es.
+- `<werkzeug>` ist das, was lief: `code-review`; `security-review` nur, wenn ZIEL HEAD
+  ist, `base` gleich `git merge-base HEAD origin/HEAD`, unter `notes` kein
+  `worktree_differs` und kein `worktree_unknown` steht und keine Datei in `file_keys`
+  `reused_from` hat; `"Review ohne /security-review"` für ein Sicherheitsreview im
+  Hauptkontext über den Bereich von `s1` aus `counterparts` in jedem anderen Fall, auch ohne
+  `origin/HEAD` und nach `--since` mit Übernahme ([Fokus `security`](#fokus-security)); sonst
+  `"Review ohne /code-review"`.
+- Die Namen der beiden Werkzeuge stehen ohne Schrägstrich am Anfang: Git Bash unter Windows
+  schreibt ein Argument wie `/code-review` in einen Windows-Pfad um
+  (`C:/Program Files/Git/code-review`), und die Kopfzeile des Berichts passte dann nie.
+  `record` speichert `code-review` als `/code-review` und `security-review` als
+  `/security-review`; auch ein so umgeschriebener Pfad wird zurückgelegt. „Review ohne
+  /code-review" beginnt nicht mit `/` und bleibt, wie es ist. Der Bericht übernimmt das
+  gespeicherte Werkzeug aus `results/<id>.json` (`_meta.tool`), also `/code-review`.
 - `-` liest die Liste von stdin als UTF-8, eine Datei ebenso; ein BOM am Anfang zählt in
   beiden Fällen nicht.
 - Angenommen wird nur, wenn das Paket im Plan steht und noch kein Ergebnis hat. Ein zweites
