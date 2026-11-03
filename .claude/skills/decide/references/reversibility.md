@@ -58,16 +58,20 @@ Jede große Frage in `docs/big-decisions.md` trägt einen Schlüssel
 
 - `dependency:pyproject.toml` — jede Änderung an `pyproject.toml` an der Wurzel
 - `dependency:pyproject.toml#python-dateutil` — `pyproject.toml` nur, wenn eine hinzugefügte
-  oder entfernte Zeile `python-dateutil` enthält (Aufnehmen wie Entfernen); weitere Änderungen in
-  derselben Datei gibt der Eintrag dann mit frei
+  Zeile `python-dateutil` enthält (Aufnehmen); weitere Änderungen in derselben Datei gibt der
+  Eintrag dann mit frei
+- `dependency:pyproject.toml#-python-dateutil` — `pyproject.toml` nur, wenn eine entfernte Zeile
+  `python-dateutil` enthält (Entfernen); eine Freigabe zum Hinzufügen gibt nie das Entfernen frei,
+  auch nicht das Löschen einer Migration, die `migration:migrations/#add_index` angelegt hat
 - `migration:migrations/` — jede Datei unter `migrations/` (ebenso `migration:migrations/**/`)
 - `migration:evals/fixtures/` — die Fixtures unter `evals/fixtures/*/migrations/` in diesem Repo
 
 check gibt eine Stelle frei, wenn ein Block mit Status `freigegeben` einen Schlüssel derselben
 Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer
-hinzugefügten oder entfernten Zeile steht; eine unversionierte Datei ist ganz hinzugefügt). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
+hinzugefügten, dessen `#-<text>` in einer entfernten Zeile steht; eine unversionierte Datei ist ganz
+hinzugefügt). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
 Freigabe gilt für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt
-`#<text>`. Ein `#` ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
+`#<text>`. Ein `#` oder `#-` ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
 („hat leeren Text nach #“), und einer, der von Hand so in der Ablage steht, gibt nichts frei —
 `add` und check prüfen die Form mit derselben Funktion. Das Pfadmuster ist relativ zur
 Repo-Wurzel wie die Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil

@@ -72,8 +72,10 @@ Status ist `offen`, `freigegeben` oder `abgelehnt`; der Block bleibt nach der An
 `migration`, `data-delete`, `unsaved-work`, `push`, `external`, `permissions`, `dependency`,
 `cost`) oder `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft. Das Pfadmuster ist
 relativ zur Repo-Wurzel; endet es auf `/`, ist es ein Präfix. Mit `#<text>` gibt der Eintrag eine
-Datei nur frei, wenn ihre hinzugefügten oder entfernten Zeilen `<text>` enthalten — im Beispiel nur die Zeile mit
-`python-dateutil` in `pyproject.toml`, nicht jede andere Änderung dort. Eine Freigabe gilt für
+Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten — im Beispiel nur die Zeile mit
+`python-dateutil` in `pyproject.toml`, nicht jede andere Änderung dort. Mit `#-<text>` gilt dasselbe
+für entfernte Zeilen (`dependency:pyproject.toml#-python-dateutil` gibt das Entfernen frei); eine
+Freigabe zum Hinzufügen gibt nie das Entfernen frei. Eine Freigabe gilt für
 ihren Schlüssel, nicht für eine einzelne Änderung: Wer sie enger will, nimmt `#<text>`.
 
 ## Quelle der Antwort

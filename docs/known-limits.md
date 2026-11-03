@@ -2180,9 +2180,10 @@ Themen:
   `app/models.py` ohne Migration ändert, meldet `check` nicht.
 - **Eine Freigabe gilt je Schlüssel, `#<text>` je Datei.** Ein Block `migration:migrations/`
   gibt jede Datei darunter frei, auch eine, die der Auftrag nicht meinte. Mit `#<text>` muss der
-  Text in einer hinzugefügten oder entfernten Zeile der jeweiligen Datei stehen; ein Text, der in einer Datei
-  passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel vergleicht
-  `check` nie.
+  Text in einer hinzugefügten, mit `#-<text>` in einer entfernten Zeile der jeweiligen Datei stehen
+  (eine Freigabe zum Hinzufügen gibt das Löschen derselben Migration nicht frei); ein Text, der in
+  einer Datei passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel
+  vergleicht `check` nie.
 - **Fixtures unter `evals/fixtures/*/migrations/` meldet `check` in diesem Repo.** Das Muster
   `**/migrations/` trifft `evals/fixtures/dc-models/migrations/0001_initial.py`. Wer die Fixture
   ändert und `check` über den Diff laufen lässt, bekommt eine Stelle `migration` für Testdaten.

@@ -740,47 +740,55 @@ def _same_block(block, status, fields):
     return _same_question(block, status, fields) and _difference(block, status, fields) is None
 
 
-def _answered(block, status, fields):
-    """Steht die Frage mit gleichem Schlüssel schon beantwortet da? `freigegeben` oder `abgelehnt`, gleiche
-    Frage und gleicher Schlüssel (nach `line_value`); Optionen, Empfehlung und Quelle zählen nicht. Ein
-    Auftrag (`status` freigegeben) nach einer Ablehnung ist eine neue Antwort und zählt nur gegen eine
-    Freigabe."""
-    return (block["status"] in ("freigegeben", "abgelehnt")
-            and (status == "offen" or block["status"] == "freigegeben")
-            and line_value(block["question"]) == line_value(fields.get("question"))
+def _asked_before(block, fields):
+    """Gleiche Frage und gleicher Schlüssel (nach `line_value`), Status egal."""
+    return (line_value(block["question"]) == line_value(fields.get("question"))
             and line_value(block["key"]) == line_value(fields.get("key")))
+
+
+def _answered(block, status, fields):
+    """Steht die Frage mit gleichem Schlüssel schon freigegeben da (`_asked_before`)? Eine offene Frage nur
+    bei gleichen Optionen und gleicher Empfehlung (`_difference`), ein Auftrag (`status` freigegeben)
+    immer. Eine Ablehnung beantwortet nichts: danach ist ein add eine neue Frage oder ein neuer Auftrag."""
+    return (block["status"] == "freigegeben" and _asked_before(block, fields)
+            and (status != "offen" or _difference(block, "offen", fields) is None))
 
 
 def append_block(root, status, fields):
     """Hängt einen Block an; liest die Ablage unter ihrer Sperre unmittelbar davor neu.
-    (Nummer, angelegt, Problem, ohne Sperre: None oder Ursache, schon da: None oder der Block). Steht
+    (Nummer, angelegt, Problem, ohne Sperre: None oder Ursache, schon da: None oder der Block, früher:
+    None oder der letzte beantwortete Block derselben Frage, auf den eine neue offene Frage folgt). Steht
     derselbe Block schon (`_same_block`) oder die Frage schon beantwortet (`_answered`), wird nichts
     geschrieben und „schon da“ ist dieser Block; weichen bei einer offenen Frage nur Optionen oder
     Empfehlung ab (`_same_question`), wird nichts geschrieben und das Problem nennt das Feld. Wirft
     `LockBusy`, `Unreadable` oder OSError."""
     path = ledger_path(root)
+    earlier = None
     with log_lock(ledger_lock_path(root)) as unlocked:
         text = read_ledger_text(root)
         if text is not None:
             problem = ledger_problem(text, "nichts geschrieben")
             if problem:
-                return None, False, problem, unlocked, None
+                return None, False, problem, unlocked, None, None
             blocks = parse_blocks(text)
             same = next((b for b in blocks if _same_block(b, status, fields)), None) \
                 or next((b for b in blocks if _answered(b, status, fields)), None)
             if same:
-                return same["number"], False, None, unlocked, same
+                return same["number"], False, None, unlocked, same, None
             other = next((b for b in blocks if _same_question(b, status, fields)), None)
             if other:
                 how = " oder mit resolve beantworten" if status == "offen" else ""
                 return None, False, (f"{other['id']} steht {status} mit {_difference(other, status, fields)} — "
                                      f"von Hand ändern{how} "
-                                     f"({LEDGER_SHOWN}); nichts geschrieben."), unlocked, None
+                                     f"({LEDGER_SHOWN}); nichts geschrieben."), unlocked, None, None
+            if status == "offen":
+                earlier = next((b for b in reversed(blocks) if b["status"] in ("freigegeben", "abgelehnt")
+                                and _asked_before(b, fields)), None)
         number = max((int(n) for n in BLOCK_NUMBER_RE.findall(text or "")), default=0) + 1
         created = text is None
         base = ledger_template() if created else text
         write_atomic(path, base.rstrip("\n") + "\n\n" + render_block(number, date.today().isoformat(), status, fields) + "\n")
-    return number, created, None, unlocked, None
+    return number, created, None, unlocked, None, earlier
 
 
 def _locked_problem(busy, root, what):
@@ -806,7 +814,7 @@ def store_big(root, session, status, fields, row):
         return 1, [problem]
     existed = cache_exists(root)
     try:
-        number, created, problem, unlocked, existing = append_block(root, status, fields)
+        number, created, problem, unlocked, existing, earlier = append_block(root, status, fields)
     except LockBusy as busy:
         return 1, [_locked_problem(busy, root, "Ablage")]
     except Unreadable as error:
@@ -818,6 +826,8 @@ def store_big(root, session, status, fields, row):
 
     did = f"D-{number}"
     lines = ["angelegt: docs/big-decisions.md"] if created else []
+    if earlier:
+        lines.append(f"{earlier['id']} war {earlier['status']}; neue Frage {did}.")
     pending = (f"Bis zur Freigabe unterbleibt der Schritt; Antwort mit `resolve {did} --answer \"…\"` "
                "oder `--reject`.")
     if existing and not _same_block(existing, status, fields):          # schon beantwortet (`_answered`)
@@ -866,9 +876,10 @@ def store_big(root, session, status, fields, row):
 def parse_key(key):
     """((Kategorie, Muster, Text), None) eines Schlüssels `<kategorie>:<pfadmuster>[#<text>]`, oder
     (None, Grund), wenn er die Form nicht hat — die eine Prüfung der Form für `add` (`check_key`) und
-    check. Leerraum um Kategorie, Pfadmuster und Text fällt weg, Leerraum im Text wird zusammengezogen;
-    Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler, ebenso ein `#`
-    ohne Text (der gäbe sonst die ganze Datei frei). Das Pfadmuster ist relativ zur Repo-Wurzel wie die
+    check. `#<text>` meint hinzugefügte Zeilen, `#-<text>` entfernte; der Text behält dann sein
+    führendes `-`. Leerraum um Kategorie, Pfadmuster und Text fällt weg, Leerraum im Text wird
+    zusammengezogen; Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler,
+    ebenso ein `#` oder `#-` ohne Text (der gäbe sonst die ganze Datei frei). Das Pfadmuster ist relativ zur Repo-Wurzel wie die
     Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil `..` träfe nie eine
     Datei und ist ein Fehler („Pfadmuster muss relativ zur Repo-Wurzel sein“). Bei `rule:<thema>` ist
     alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`), der Text leer."""
@@ -886,9 +897,11 @@ def parse_key(key):
         return None, f"hat Tab oder Zeilenumbruch im Pfadmuster „{line_value(pattern)}“"
     if re.match(r"[/\\]|[A-Za-z]:[/\\]", pattern) or ".." in re.split(r"[/\\]", pattern):
         return None, "hat ein Pfadmuster außerhalb der Repo-Wurzel — Pfadmuster muss relativ zur Repo-Wurzel sein"
-    if hash_ and not text.strip():
-        return None, "hat leeren Text nach #"
-    return (category, pattern, " ".join(text.split())), None
+    sign = "-" if text.strip().startswith("-") else ""
+    words = " ".join(text.strip()[len(sign):].split())
+    if hash_ and not words:
+        return None, f"hat leeren Text nach #{sign}"
+    return (category, pattern, sign + words), None
 
 
 def check_key(key, topic, rules):
@@ -1277,62 +1290,68 @@ def _top_level(rev):
 
 
 def _revision_ends(top, rev):
-    """(einzeln, Ende, Revisionen für `git diff`, Hinweise, Problem) aus einem Aufruf
-    `git rev-parse --git-dir --symbolic <rev> --`: Basis und Ende stehen ausdrücklich in dessen Ausgabe,
-    `git diff` bekommt nie die rohe Angabe. Fehlt die erste Zeile (`--git-dir`), ist es kein Repo.
+    """(einzeln, Ende, Revisionen für `git diff`, Hinweise, Problem, Wurzel) aus einem Aufruf
+    `git rev-parse --git-dir --show-toplevel --symbolic <rev> --`: Basis und Ende stehen ausdrücklich in
+    dessen Ausgabe, `git diff` bekommt nie die rohe Angabe; die Wurzel (`--show-toplevel`, sonst `top`)
+    nimmt `changed_files` statt `top`. Fehlt die erste Zeile (`--git-dir`), ist es kein Repo.
     Eine positive und eine negative Revision (`<a>..<b>`, `<rev>^-<n>`, `<rev>^!` mit einem Elternteil):
     Basis die negative, Ende die positive. Eine positive und mehrere negative (`<merge>^!`): Basis der
     erste Elternteil, wie `<merge>^1..<merge>`, mit Hinweis `MERGE_NOTE`. Zwei positive mit negativen
-    (`<a>...<b>`; rev-parse nennt `<b>`, `<a>`, `^<merge-base>`): Basis die Merge-Base, Ende `<b>`.
+    (`<a>...<b>`; rev-parse nennt `<b>`, `<a>`, `^<merge-base>`): Basis die Merge-Base, Ende `<b>`;
+    ohne Merge-Base (keine gemeinsame Historie) fehlen die negativen: Problem „keine gemeinsame Basis“.
     Eine positive ohne negative: Einzelrevision (Diff gegen den Arbeitsbaum, Ende None) — außer die
     Angabe enthält `^!` oder `^-` außerhalb von `{…}`: der Root-Commit, Basis der leere Baum. Mehrere
     positive ohne negative (`HEAD^@` bei einem Merge) oder keine: Problem. Das Ende heißt, wie rev-parse
     `--symbolic` es nennt — wie angegeben (`v2`, nicht der Hash des Tag-Objekts)."""
-    result = _git(top, "rev-parse", "--git-dir", "--symbolic", rev, "--")
+    result = _git(top, "rev-parse", "--git-dir", "--show-toplevel", "--symbolic", rev, "--")
     lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if not lines:
-        return False, None, (), (), "kein Git"
+        return False, None, (), (), "kein Git", top
     if result.returncode != 0:
-        return False, None, (), (), f"git rev-parse {rev} fehlgeschlagen: {_git_error(result)}"
-    names = [name for name in lines[1:] if name != "--"]
+        return False, None, (), (), f"git rev-parse {rev} fehlgeschlagen: {_git_error(result)}", top
+    top = Path(lines[1]) if len(lines) > 1 else top
+    names = [name for name in lines[2:] if name != "--"]
     positive = [name for name in names if not name.startswith("^")]
     negative = [name[1:] for name in names if name.startswith("^")]
     if len(positive) == 1 and len(negative) == 1:
-        return False, positive[0], (negative[0], positive[0]), (), None
+        return False, positive[0], (negative[0], positive[0]), (), None, top
     if len(positive) == 1 and negative:
-        return False, positive[0], (negative[0], positive[0]), (f"{MERGE_NOTE} ({negative[0]}).",), None
+        return False, positive[0], (negative[0], positive[0]), (f"{MERGE_NOTE} ({negative[0]}).",), None, top
     if len(positive) == 2 and negative:
         notes = (f"Mehrere Merge-Basen: verglichen mit {negative[0]}.",) if len(negative) > 1 else ()
-        return False, positive[0], (negative[0], positive[0]), notes, None
+        return False, positive[0], (negative[0], positive[0]), notes, None, top
+    if len(positive) == 2 and "..." in _top_level(rev):
+        return False, None, (), (), f"keine gemeinsame Basis ({rev})", top
     if len(positive) > 1:
-        return False, None, (), (), f"Bereich mit mehreren Enden ({rev})"
+        return False, None, (), (), f"Bereich mit mehreren Enden ({rev})", top
     if not positive:
-        return False, None, (), (), f"Bereich „{rev}“ ohne End-Revision"
+        return False, None, (), (), f"Bereich „{rev}“ ohne End-Revision", top
     if re.search(r"\^[!-]", _top_level(rev)):                     # R^! auf dem ersten Commit
         empty = _git(top, "hash-object", "-t", "tree", "--stdin")
         if empty.returncode != 0:
-            return False, None, (), (), f"git hash-object fehlgeschlagen: {_git_error(empty)}"
-        return False, positive[0], (empty.stdout.strip(), positive[0]), (), None
-    return True, None, (positive[0],), (), None
+            return False, None, (), (), f"git hash-object fehlgeschlagen: {_git_error(empty)}", top
+        return False, positive[0], (empty.stdout.strip(), positive[0]), (), None, top
+    return True, None, (positive[0],), (), None, top
 
 
 def changed_files(root, rev):
     """(Dateien, Problem): die Stellen des Bereichs als `Changes` — eine Liste der Pfade relativ
     zur Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked`, `end`, `revs` und `notes`. Die eine
-    Quelle für check. `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; Git wird
-    nicht erneut danach gefragt.
+    Quelle für check. `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; `top`
+    ist die Wurzel, die Git im selben `rev-parse` wie Basis und Ende nennt (`_revision_ends`) — fiel
+    `repo_root` auf ein Unterverzeichnis zurück, liest check trotzdem an der Wurzel.
     Basis und Ende sagt `_revision_ends`. Eine einzelne Revision: `git diff <rev>` (Commits seit `<rev>`
     und Arbeitsbaum) plus `git ls-files --others --exclude-standard`, Ablage aus der Arbeitskopie (`end`
     None). Ein Bereich: nur `git diff <basis> <ende>`, `end` ist das Ende, wie angegeben.
     Problem: None, „kein Git“ (kein `git` oder kein Repo), „git antwortet nicht in <n> s“, ein
-    ungültiger Bereich (leer, mit Leerraum oder führendem `-`), einer mit mehreren Enden oder der
-    Grund, mit dem Git abbricht; dann sind die Dateien leer."""
+    ungültiger Bereich (leer, mit Leerraum oder führendem `-`), einer mit mehreren Enden, einer ohne
+    gemeinsame Basis oder der Grund, mit dem Git abbricht; dann sind die Dateien leer."""
     rev = (rev or "").strip()
     if not rev or rev.startswith("-") or re.search(r"\s", rev):
         return Changes(), f"Bereich „{rev}“ ungültig — erwartet <rev> oder <a>..<b>"
     top = Path(root)
     try:
-        single, end, revs, notes, problem = _revision_ends(top, rev)
+        single, end, revs, notes, problem, top = _revision_ends(top, rev)
         if problem:
             return Changes(top=top), problem
         diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", *revs, "--")
@@ -1352,65 +1371,60 @@ def changed_files(root, rev):
     return Changes(sorted(files | untracked), top, untracked, end, revs, notes), None
 
 
-_C_ESCAPES = {"a": b"\a", "b": b"\b", "t": b"\t", "n": b"\n", "v": b"\v", "f": b"\f", "r": b"\r",
-              '"': b'"', "\\": b"\\"}
+_C_QUOTE = {"\a": "a", "\b": "b", "\t": "t", "\n": "n", "\v": "v", "\f": "f", "\r": "r", '"': '"', "\\": "\\"}
 
 
-def _diff_path(rest):
-    """Der Pfad aus dem Kopf `diff --git a/<p> b/<p>` (`rest`: alles nach `diff --git `; ohne
-    Umbenennung sind beide Seiten gleich). Pfade mit Sonderzeichen wie Tab oder `"` setzt Git in
-    Anführungszeichen mit C-Escapes (Oktal für Bytes); sonst ist die erste Hälfte `a/<p>`."""
-    if rest.startswith('"'):
-        out, i = bytearray(), 1
-        while i < len(rest) and rest[i] != '"':
-            if rest[i] == "\\" and i + 1 < len(rest):
-                octal = re.match(r"[0-7]{3}", rest[i + 1:])
-                if octal:
-                    out.append(int(octal.group(), 8) & 0xFF)
-                    i += 4
-                    continue
-                out += _C_ESCAPES.get(rest[i + 1], rest[i + 1].encode("utf-8"))
-                i += 2
-                continue
-            out += rest[i].encode("utf-8")
-            i += 1
-        path = out.decode("utf-8", errors="replace")
-    else:
-        path = rest[:(len(rest) - 1) // 2]
-    return path[2:] if path.startswith("a/") else path
+def _git_quoted(name):
+    """`name`, wie Git ihn mit `core.quotePath=false` im Kopf `diff --git` schreibt: mit Steuerzeichen,
+    `"` oder `\\` in Anführungszeichen mit C-Escapes (sonst Oktal), sonst wörtlich."""
+    if not any(c in _C_QUOTE or c < " " or c == "\x7f" for c in name):
+        return name
+    return '"' + "".join("\\" + _C_QUOTE[c] if c in _C_QUOTE else f"\\{ord(c):03o}" if c < " " or c == "\x7f"
+                         else c for c in name) + '"'
+
+
+DIFF_CHUNK = 200
+
+
+class DiffFailed(Exception):
+    """`git diff` für die Zeilen der `#<text>`-Freigaben lieferte keinen Diff; die Ursache als Text."""
 
 
 def changed_lines(top, revs, paths, untracked):
-    """{Pfad: Zeilen}: die hinzugefügten und entfernten Zeilen jeder Datei aus `paths` im Bereich (`revs`
-    aus `changed_files`), Leerraum zusammengezogen — für `#<text>`. Eine unversionierte Datei ist ganz
-    hinzugefügt. Alle anderen kommen aus einem einzigen `git diff -U0` über alle Pfade, aufgeteilt an
-    den Köpfen `diff --git` (`_diff_path`). Kann Git den Diff nicht liefern, bleiben die Zeilen leer
-    (die Datei bleibt gemeldet); antwortet es nicht in `GIT_TIMEOUT` Sekunden, `GitTimeout` (check
-    endet dann mit 2)."""
-    found = {path: [] for path in paths}
+    """{Pfad: {"+": hinzugefügte Zeilen, "-": entfernte}} jeder Datei aus `paths` im Bereich (`revs` aus
+    `changed_files`), Leerraum zusammengezogen — für `#<text>` und `#-<text>`. Eine unversionierte Datei
+    ist ganz hinzugefügt. Die anderen kommen aus `git diff -U0`, je höchstens `DIFF_CHUNK` Pfade ein
+    Aufruf, aufgeteilt an den Köpfen `diff --git a/<p> b/<p>`, die das Skript je Pfad selbst so bildet,
+    wie Git sie schreibt (`_git_quoted`). Liefert Git einen Block nicht, `DiffFailed`; antwortet es
+    nicht in `GIT_TIMEOUT` Sekunden, `GitTimeout` (check endet dann mit 2)."""
+    found = {path: {"+": [], "-": []} for path in paths}
     for path in paths:
         if path in untracked:
             try:
-                found[path] = (read_file(Path(top) / path) or "").splitlines()
+                found[path]["+"] = (read_file(Path(top) / path) or "").splitlines()
             except Unreadable:
                 pass
     tracked = [path for path in paths if path not in untracked]
-    if tracked:
+    for start in range(0, len(tracked), DIFF_CHUNK):
+        chunk = tracked[start:start + DIFF_CHUNK]
+        heads = {f"diff --git {_git_quoted('a/' + p)} {_git_quoted('b/' + p)}": p for p in chunk}
         try:
             result = _git(top, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-                          "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U0", *revs, "--", *tracked)
-        except NoGit:
-            result = None
-        if result is not None and result.returncode == 0:
-            current, in_hunk = None, False
-            for line in result.stdout.split("\n"):
-                if line.startswith("diff --git "):
-                    current, in_hunk = _diff_path(line[len("diff --git "):]), False
-                elif line.startswith("@@"):
-                    in_hunk = True
-                elif in_hunk and current in found and line[:1] in ("+", "-"):
-                    found[current].append(line[1:])
-    return {path: [" ".join(line.split()) for line in lines] for path, lines in found.items()}
+                          "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U0", *revs, "--", *chunk)
+        except NoGit as error:
+            raise DiffFailed(str(error)) from error
+        if result.returncode != 0:
+            raise DiffFailed(_git_error(result))
+        current, in_hunk = None, False
+        for line in result.stdout.split("\n"):
+            if line.startswith("diff --git "):
+                current, in_hunk = heads.get(line), False
+            elif line.startswith("@@"):
+                in_hunk = True
+            elif in_hunk and current and line[:1] in ("+", "-"):
+                found[current][line[0]].append(line[1:])
+    return {path: {sign: [" ".join(line.split()) for line in lines] for sign, lines in signs.items()}
+            for path, signs in found.items()}
 
 
 def _ledger_at(top, rev):
@@ -1450,6 +1464,8 @@ def check(root, rev):
         return _check(changes, rev.strip(), categories, tail)
     except GitTimeout:
         return 2, f"ungeprüft — {timeout_problem()}\n{tail}"
+    except DiffFailed as error:
+        return 2, f"ungeprüft — git diff für #-Freigaben gescheitert ({error})\n{tail}"
     except NoGit:
         return 2, f"ungeprüft — kein Git\n{tail}"
 
@@ -1487,27 +1503,33 @@ def _check(changes, rev, categories, tail):
             continue
         entries.append((block, *parsed))
 
-    hits = {path: [c for c in categories.values() if any(pattern_matches(p, path) for p in c.patterns)]
-            for path in changes}
-    wanted = [path for path in changes if any(
-        block["status"] == "freigegeben" and text and name in {c.name for c in hits[path]}
-        and pattern_matches(pattern, path) for block, name, pattern, text in entries)]
+    # je Pfad die Kategorien, die er trifft, mit den Einträgen dieser Kategorie, deren Muster ihn trifft
+    candidates = {path: [(c, [e for e in entries if e[1] == c.name and pattern_matches(e[2], path)])
+                         for c in categories.values() if any(pattern_matches(p, path) for p in c.patterns)]
+                  for path in changes}
+    def needs_lines(matching):                          # ein Eintrag ohne Text gibt frei ohne Diff
+        free = [e for e in matching if e[0]["status"] == "freigegeben"]
+        return bool(free) and all(text for *_, text in free)
+
+    wanted = [path for path, hit in candidates.items() if any(needs_lines(matching) for _, matching in hit)]
     lines = changed_lines(top, changes.revs, wanted, changes.untracked) if wanted else {}
     found, with_category = [], 0
     for path in changes:
-        hit = hits[path]
+        hit = candidates[path]
         with_category += bool(hit)
-        for category in hit:
-            matching = [e for e in entries if e[1] == category.name and pattern_matches(e[2], path)]
+        for category, matching in hit:
             why = []
             for block, _, pattern, text in matching:
                 label = f"{block['id']} {block['key']}"
                 if block["status"] != "freigegeben":
                     why.append(f"{label} steht {block['status']}")
                     continue
-                if not text or any(text in line for line in lines.get(path, ())):
+                sign = text[:1] if text.startswith("-") else "+"
+                needle = text[1:] if sign == "-" else text
+                if not text or any(needle in line for line in lines.get(path, {}).get(sign, ())):
                     break
-                why.append(f"{label} freigegeben, aber „{text}“ in keiner hinzugefügten oder entfernten Zeile")
+                where_lines = "entfernten" if sign == "-" else "hinzugefügten"
+                why.append(f"{label} freigegeben, aber „{needle}“ in keiner {where_lines} Zeile")
             else:
                 reason = "; ".join(why) or (f"Freigaben nicht gelesen ({unread})" if unread else
                                             f"kein Eintrag mit passendem Schlüssel in {where}")
@@ -1858,7 +1880,8 @@ def write_brief(root, session, topic, home):
     gleich `topic` ist, und freigegebene oder abgelehnte Blöcke des Themas aus der Ablage, aus jeder
     Sitzung — `_entry_lines`; `—`, wenn keiner) und Rückgabe (`RETURN_FORM` und der Satz aus
     `load_subagent_sentence`); Frage, Anlass und Wo nachsehen bleiben leer. Die Kopfzeile nennt den
-    Befehl wörtlich; nur `-->` im Thema wird dort `-- >` (`_comment_safe`). Unlesbare Regeldateien meldet es wie add und schreibt trotzdem. Bleiben für die drei
+    Befehl wörtlich, bei einem Thema mit führendem `-` als `--topic=<thema>`, damit argparse es nimmt;
+    nur `-->` im Thema wird dort `-- >` (`_comment_safe`). Unlesbare Regeldateien meldet es wie add und schreibt trotzdem. Bleiben für die drei
     leeren Felder keine `BRIEF_EMPTY` Zeilen unter `BRIEF_LIMIT`, sagt ein Hinweis das mit den
     verbleibenden Zeilen und ihrer Herkunft (Regeln, Schon entschieden, offene Fragen; Exit bleibt 0) und
     rät, Regeln oder ältere Einträge unter Schon entschieden zu kürzen, nie die Zeilen zu offenen Fragen.
@@ -1889,7 +1912,7 @@ def write_brief(root, session, topic, home):
     decided, pending, ledger_notes, unread = _entry_lines(root, entries, topic)
 
     body = [f"<!-- skill: {SKILL} | schema: {SCHEMA} | generated: python decide_log.py brief "
-            f"--topic {_comment_safe(shlex.quote(topic))} -->",
+            f"--topic{'=' if topic.startswith('-') else ' '}{_comment_safe(shlex.quote(topic))} -->",
             "", "## Frage", "", "## Anlass", "",
             "## Feste Vorgaben", *pending, *[f"- Regel {rule_label(r)} ({r.source}:{r.line})" for r in rules], "",
             "## Schon entschieden", *(decided or [NONE]), "",

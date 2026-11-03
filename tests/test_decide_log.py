@@ -1410,11 +1410,13 @@ def test_check_untracked_and_hash_key(decide_repo, monkeypatch, tmp_path, capsys
                                          encoding="utf-8")
     code, out, _ = check_out(capsys, base)
     assert reported(out) == ["migrations/0003_x.py"], out
-    # der Text in einer entfernten Zeile zählt auch (Final-F4): das Entfernen ist freigegeben
+    # der Text in einer entfernten Zeile gibt nicht frei (Final-R2-F1): Entfernen braucht #-<text>
     after = commit(root)
     (root / "pyproject.toml").write_text('[project]\nname = "neu"\ndependencies = []\n', encoding="utf-8")
     code, out, _ = check_out(capsys, after)
-    assert code == 0 and reported(out) == [], out
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "„python-dateutil“ in keiner hinzugefügten Zeile" in out, out
+    git(root, "checkout", "-q", "--", "pyproject.toml")
 
     # <a>..<b> lässt Arbeitsbaum und unversionierte Dateien aus
     (root / "migrations" / "0004_y.py").write_text("def up(): pass\n", encoding="utf-8")
@@ -2653,9 +2655,10 @@ def test_key_pattern_must_be_relative_to_root(decide_repo, monkeypatch, capsys):
 
 
 def test_repeated_add_after_resolve_asks_no_second_time(decide_repo, capsys):
-    """Final-F3: Steht die Frage mit gleichem Schlüssel schon beantwortet in der Ablage (freigegeben oder
-    abgelehnt), legt ein wiederholtes add keinen neuen offenen Block an; Exit 0, die Ausgabe nennt Status
-    und Antwort, nur eine fehlende Protokollzeile wird nachgeholt."""
+    """Final-F3: Steht die Frage mit gleichem Schlüssel, gleichen Optionen und gleicher Empfehlung schon
+    freigegeben in der Ablage, legt ein wiederholtes add keinen neuen offenen Block an; Exit 0, die Ausgabe
+    nennt Status und Antwort, nur eine fehlende Protokollzeile wird nachgeholt. Nach abgelehnt ist es eine
+    neue Frage (Final-R2-F3)."""
     root, _ = decide_repo
     assert big(*TWO) == 0
     assert dl.main(["resolve", "D-1", "--answer", "B: strptime"]) == 0
@@ -2672,21 +2675,21 @@ def test_repeated_add_after_resolve_asks_no_second_time(decide_repo, capsys):
     assert big(*TWO, question="Zweite?") == 0
     assert dl.main(["resolve", "D-2", "--reject"]) == 0
     capsys.readouterr()
-    other = ("--option", "A: x", "--option", "B: y", "--recommendation", "A")   # andere Optionen: trotzdem beantwortet
+    other = ("--option", "A: x", "--option", "B: y", "--recommendation", "A")   # nach abgelehnt: neue Frage
     assert big(*other, question="Zweite?") == 0
-    assert "D-2 ist schon abgelehnt (Antwort: abgelehnt)" in capsys.readouterr().out
-    assert blocks_in(root) == ["D-1", "D-2"]
-    assert [(r[2], r[4]) for r in rows(root)] == [("gross", "D-1"), ("gross", "D-2")]
+    assert "D-2 war abgelehnt; neue Frage D-3" in capsys.readouterr().out
+    assert blocks_in(root) == ["D-1", "D-2", "D-3"]
+    assert [(r[2], r[4]) for r in rows(root)] == [("gross", "D-1"), ("gross", "D-2"), ("gross", "D-3")]
     # ein Auftrag nach der Ablehnung ist eine neue Antwort; nach einer Freigabe nicht
     assert big("--approved-by-request", "nimm doch python-dateutil", question="Zweite?") == 0
     assert big("--approved-by-request", "nimm python-dateutil", question="Datumsangaben parsen?") == 0
     assert "D-1 ist schon freigegeben" in capsys.readouterr().out
-    assert blocks_in(root) == ["D-1", "D-2", "D-3"]
+    assert blocks_in(root) == ["D-1", "D-2", "D-3", "D-4"]
 
 
-def test_hash_key_frees_removed_line(decide_repo, monkeypatch, capsys):
-    """Final-F4: `#<text>` trifft hinzugefügte und entfernte Zeilen — eine Freigabe kann auch das
-    Entfernen einer Abhängigkeit freigeben; das Entfernen einer anderen gibt sie nicht frei."""
+def test_hash_key_ignores_removed_line(decide_repo, monkeypatch, capsys):
+    """Final-R2-F1 (vorher Final-F4): `#<text>` trifft nur hinzugefügte Zeilen — das Entfernen der
+    Abhängigkeit gibt es nicht frei, das Aufnehmen schon."""
     root, _ = decide_repo
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "python-dateutil",\n  "requests",\n]\n',
@@ -2695,11 +2698,12 @@ def test_hash_key_frees_removed_line(decide_repo, monkeypatch, capsys):
     base = commit(root, "Basis")
     (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "requests",\n]\n', encoding="utf-8")
     code, out, _ = check_out(capsys, base)
-    assert code == 0 and reported(out) == [], out
-    (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "python-dateutil",\n]\n', encoding="utf-8")
-    code, out, _ = check_out(capsys, base)
     assert code == 1 and reported(out) == ["pyproject.toml"], out
-    assert "„python-dateutil“ in keiner hinzugefügten oder entfernten Zeile" in out, out
+    assert "„python-dateutil“ in keiner hinzugefügten Zeile" in out, out
+    (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "python-dateutil>=2",\n]\n',
+                                         encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
 
 
 def test_atomic_writes_keep_lf_where_the_platform_translates(decide_repo, monkeypatch):
@@ -2773,16 +2777,17 @@ def test_check_one_diff_for_all_hash_keys(decide_repo, monkeypatch, capsys):
 
 
 def test_check_asks_git_for_root_once(decide_repo, monkeypatch, capsys):
-    """Final-F9: Die Wurzel bestimmt main einmal (`repo_root`); changed_files fragt nicht erneut."""
+    """Final-F9: Die Wurzel bestimmt main einmal (`repo_root`); changed_files fragt nicht in einem eigenen
+    Aufruf erneut, sondern liest sie im selben `rev-parse` wie Basis und Ende (Final-R2-F6)."""
     root, _ = decide_repo
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     (root / "README.md").write_text("x\n", encoding="utf-8")
     base = commit(root, "Basis")
     (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
-    calls = git_calls(monkeypatch, lambda argv: "--show-toplevel" in argv)
+    calls = git_calls(monkeypatch, lambda argv: "rev-parse" in argv)
     code, out, _ = check_out(capsys, base)
     assert code == 1 and reported(out) == ["pyproject.toml"], out
-    assert len(calls) == 1, calls
+    assert len(calls) == 2 and "--git-dir" in calls[1] and "--show-toplevel" in calls[1], calls
 
 
 def test_brief_header_command_stays_copyable(decide_repo):
@@ -2795,4 +2800,147 @@ def test_brief_header_command_stays_copyable(decide_repo):
         head = brief_file(root, number).read_text(encoding="utf-8").splitlines()[0]
         assert head.startswith(prefix) and head.endswith(" -->") and dl.HEADER_RE.match(head), head
         command = head[len(prefix):-len(" -->")]
-        assert shlex.split(command) == ["python", "decide_log.py", "brief", "--topic", topic], head
+        flag = [f"--topic={topic}"] if topic.startswith("-") else ["--topic", topic]   # Final-R2-F4
+        assert shlex.split(command) == ["python", "decide_log.py", "brief", *flag], head
+
+
+# --- Funde des finalen Prüfpunkts, Runde 2 (F1–F9) ---------------------------------------
+
+def test_hash_key_added_does_not_free_deletion(decide_repo, monkeypatch, capsys):
+    """Final-R2-F1: `#<text>` trifft nur hinzugefügte Zeilen — `migration:migrations/#add_index` gibt das
+    Anlegen der Migration frei, das Löschen derselben Datei nicht."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    write_ledger(root, ledger_block(1, "freigegeben", "migration:migrations/#add_index"))
+    base = commit(root, "Basis")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0003_add_index.py").write_text("def up(): add_index('t', 'c')\n", encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
+    added = commit(root, "Migration")
+    (root / "migrations" / "0003_add_index.py").unlink()
+    code, out, _ = check_out(capsys, added)
+    assert code == 1 and reported(out) == ["migrations/0003_add_index.py"], out
+    assert "„add_index“ in keiner hinzugefügten Zeile" in out, out
+
+
+def test_hash_minus_key_frees_only_removed_line(decide_repo, monkeypatch, capsys):
+    """Final-R2-F1: `#-<text>` trifft nur entfernte Zeilen — `dependency:pyproject.toml#-python-dateutil` gibt
+    das Entfernen der Abhängigkeit frei, das Aufnehmen nicht; `#-` ohne Text ist kein Schlüssel."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "python-dateutil",\n  "requests",\n]\n',
+                                         encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml#-python-dateutil"))
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "requests",\n]\n', encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
+    (root / "pyproject.toml").write_text('[project]\ndependencies = [\n  "python-dateutil",\n  "requests",\n'
+                                         '  "python-dateutil-extra",\n]\n', encoding="utf-8")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "„python-dateutil“ in keiner entfernten Zeile" in out, out
+    assert dl.parse_key("dependency:pyproject.toml#- python-dateutil")[0] == (
+        "dependency", "pyproject.toml", "-python-dateutil")
+    assert dl.parse_key("dependency:pyproject.toml#-  ") == (None, "hat leeren Text nach #-")
+
+
+def test_repeated_add_after_reject_opens_new_question(decide_repo, capsys):
+    """Final-R2-F3: Nach `abgelehnt` legt ein erneutes add einen neuen offenen Block an, mit Hinweis auf den
+    alten; nach `freigegeben` nur bei anderen Optionen oder anderer Empfehlung."""
+    root, _ = decide_repo
+    assert big(*TWO) == 0
+    assert dl.main(["resolve", "D-1", "--reject"]) == 0
+    capsys.readouterr()
+    assert big(*TWO) == 0
+    out = capsys.readouterr().out
+    assert "D-1 war abgelehnt; neue Frage D-2" in out and "D-2 offen in" in out, out
+    assert blocks_in(root) == ["D-1", "D-2"]
+    assert big(*TWO) == 0                                                  # Wiederholung: derselbe offene Block
+    assert "D-2 steht schon offen" in capsys.readouterr().out
+    assert dl.main(["resolve", "D-2", "--answer", "B"]) == 0
+    capsys.readouterr()
+    assert big(*TWO) == 0                                                  # gleiche Optionen: beantwortet
+    assert "D-2 ist schon freigegeben (Antwort: B)" in capsys.readouterr().out
+    other = ("--option", "A: x", "--option", "B: y", "--recommendation", "A")
+    assert big(*other) == 0                                                # andere Optionen: neue Frage
+    out = capsys.readouterr().out
+    assert "D-2 war freigegeben; neue Frage D-3" in out and "D-3 offen in" in out, out
+    assert blocks_in(root) == ["D-1", "D-2", "D-3"]
+
+
+def test_brief_header_topic_with_leading_dash(decide_repo):
+    """Final-R2-F4: Die Kopfzeile schreibt `--topic=<thema>`; auch ein Thema mit führendem `-` läuft im
+    kopierten Befehl durch argparse."""
+    root, home = decide_repo
+    assert dl.write_brief(root, SESSION, "--dry-run", home)[0] == 0
+    head = brief_file(root).read_text(encoding="utf-8").splitlines()[0]
+    command = shlex.split(head[len("<!-- skill: decide | schema: 1 | generated: "):-len(" -->")])
+    assert command[2:] == ["brief", "--topic=--dry-run"], head
+    assert dl.main(command[2:]) == 0
+
+
+def test_check_hash_diff_in_chunks_and_failure_is_visible(decide_repo, monkeypatch, capsys):
+    """Final-R2-F5: Die Pfade für `#<text>` gehen in Blöcken von höchstens `DIFF_CHUNK` an `git diff`;
+    scheitert ein Block, endet check mit Exit 2 statt still leerer Zeilen."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    names = [f"m{n}/pyproject.toml" for n in range(5)]
+    for name in names:
+        (root / name).parent.mkdir()
+        (root / name).write_text("[project]\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:**/pyproject.toml#python-dateutil"))
+    base = commit(root, "Basis")
+    for name in names:
+        (root / name).write_text("[project]\npython-dateutil\n", encoding="utf-8")
+    monkeypatch.setattr(dl, "DIFF_CHUNK", 2)
+    calls = git_calls(monkeypatch, lambda argv: "-U0" in argv)
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [], out
+    assert [len(c[c.index("--", c.index("diff")) + 1:]) for c in calls] == [2, 2, 1], calls
+
+    real = subprocess.run
+
+    def broken(argv, *args, **kwargs):
+        if argv[:1] == ["git"] and "-U0" in argv:
+            raise OSError("Argumentliste zu lang")
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(dl.subprocess, "run", broken)
+    code, out, err = check_out(capsys, base)
+    assert code == 2, (out, err)
+    assert "ungeprüft — git diff für #-Freigaben gescheitert (Argumentliste zu lang)" in err, err
+    assert err.splitlines()[-1] == TAIL
+
+
+def test_check_takes_root_from_git(decide_repo, monkeypatch, capsys):
+    """Final-R2-F6: Fällt `repo_root` auf das Arbeitsverzeichnis zurück (hier ein Unterordner), nimmt check
+    die Wurzel aus demselben `git rev-parse`, das Basis und Ende liest — die Ablage liegt dort."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "src").mkdir()
+    (root / "src" / "a.py").write_text("x\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    monkeypatch.chdir(root / "src")
+    monkeypatch.setattr(dl, "repo_root", lambda cwd: Path(cwd))
+    code, out, _ = check_out(capsys, base)
+    assert code == 0 and reported(out) == [] and "fehlt" not in out, out
+    assert "1 Dateien im Diff, 1 mit Kategorie" in out, out
+
+
+def test_check_range_without_common_base(decide_repo, monkeypatch, capsys):
+    """Final-R2-F7: `<a>...<b>` ohne gemeinsame Historie: „keine gemeinsame Basis“, nicht „mehrere Enden“."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "a.txt").write_text("a\n", encoding="utf-8")
+    commit(root, "main")
+    main_branch = git(root, "branch", "--show-current").strip()
+    git(root, "checkout", "-q", "--orphan", "waise")
+    (root / "b.txt").write_text("b\n", encoding="utf-8")
+    commit(root, "waise")
+    code, out, err = check_out(capsys, f"waise...{main_branch}")
+    assert code == 2, (out, err)
+    assert f"ungeprüft — keine gemeinsame Basis (waise...{main_branch})" in err, err
