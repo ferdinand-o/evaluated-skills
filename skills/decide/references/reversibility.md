@@ -87,10 +87,6 @@ hat keine Pfadmuster und steht deshalb nicht in der Tabelle; check vergleicht si
 
 ## Bis zur Freigabe bleibt alles stehen
 
-Beispiel: Beim Aufräumen von `billing/schema.py` fällt auf, dass das Feld `fax` in `Customer`
-nirgends mehr gelesen wird. Es zu entfernen ist `migration` (oder `data-delete`, wenn Daten
-verloren gehen). Bis ein Block mit diesem Schlüssel `freigegeben` ist, unterbleibt der ganze
-Schritt: keine Migration **und auch das Feld in der Klasse bleibt** — eine Spalte, die nur im
-Modell entfällt, sieht check nicht (Grad `teilweise`), sie ist trotzdem dieselbe große
-Entscheidung. Die übrige Aufräumarbeit wird erledigt; die große Frage steht als `D-<n>` mit
-Status `offen` in der Ablage.
+Bis zur Freigabe unterbleibt die ganze Antwort auf eine große Frage, nicht nur ihr teuerster Teil —
+auch eine Änderung, die check nicht sieht (Grad `teilweise`), gehört dazu. Die übrige Arbeit läuft
+weiter.

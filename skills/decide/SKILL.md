@@ -32,11 +32,12 @@ führendem `-` als `--decision=-v`.
 2. **Einordnen.** Groß ist, was eine Handlung aus `references/reversibility.md` auslöst oder
    dessen Thema eine Regel `immer fragen` trifft; alles andere ist klein. Vorrang: konkreter
    Auftrag vor Regel vor eigener Einordnung. Hat der Nutzer genau diesen Schritt beauftragt
-   (Handlung und Gegenstand stehen im Auftrag, etwa „lösch den Branch release/1.0“), ist er
+   (Handlung und Gegenstand stehen im Auftrag, etwa „nimm httpx als Abhängigkeit auf“), ist er
    freigegeben — ablegen, dann ausführen:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross --topic "<thema>" \
-     --question "<frage>" --key "<kategorie>:<pfad>" --approved-by-request "<Zitat>"
+     --question "<frage>" --key "dependency:pyproject.toml#httpx" \
+     --approved-by-request "nimm httpx als Abhängigkeit auf"
    ```
    Ein Auftrag mit offenem Ergebnis („überarbeite die Hilfe zu --verbose“) gibt die Aufgabe
    frei, nicht die Wahl darin. Nur wegen einer Regel groß:
@@ -100,7 +101,7 @@ ersten Protokoll, dass ein unversionierter Ordner entstanden ist.
 
 ## Contract
 
-- **Klein nur mit Beleg.** `add --class klein` ohne passende Belegzeile schreibt nichts
+- **Klein nur mit Beleg.** Ein kleiner Eintrag ohne passende Belegzeile schreibt nichts
   (Exit 1); „nichts gefunden“ macht den Eintrag zur Annahme. Ob die Fundstelle stimmt: G1.
 - **Groß nie ohne Freigabe.** Ohne Block `freigegeben` unterbleibt der teure Schritt (G1);
   steht er im Diff dennoch, meldet `check` es (G2).
@@ -109,8 +110,8 @@ ersten Protokoll, dass ein unversionierter Ordner entstanden ist.
   große Frage nie herab.
 - **Sichtbar ungeprüft.** `check` sieht `data-delete`, `push`, `external` nicht; die
   Übergabe gibt die Zeile „ungeprüft: …“ weiter, nie „geprüft“.
-- **Kein wertender Auftrag.** `brief --check` meldet Länge, fremde Felder und Wertwörter;
-  andere Wertungen bleiben G1.
+- **Kein wertender Auftrag.** Die Prüfung mit `brief` (Schritt 6) meldet Länge, fremde Felder
+  und Wertwörter; andere Wertungen bleiben G1.
 - **Anti-Zeremonie:** Eine Wahl unter der Untergrenze erzeugt keinen Eintrag, keine Datei,
   keine Liste.
 - **Frontmatter:** nur `name`/`description`. Tier 1, `decide_log.py` nur Stdlib.

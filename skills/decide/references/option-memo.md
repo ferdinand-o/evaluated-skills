@@ -94,9 +94,19 @@ Jeder Block nennt, woher die Antwort kommt. Genau drei Werte:
 | `add --class gross --approved-by-request "<Zitat>"` | `--topic`, `--question`, `--key`, Zitat | keine; der Block nennt „Optionen: — (Auftrag)" | wie oben |
 | `add --class klein`, von `immer fragen` hochgestuft | `--topic`, `--question`, `--decision`, `--evidence` | zwei bis vier `--option`, sonst Exit 1; `--decision` wird die Empfehlung | `rule:<thema>`, von `check` nie verglichen |
 
-`--approved-by-request` gilt nur, wenn Handlung und Gegenstand im Auftrag stehen („lösch den
-Branch `release/1.0`"). Ein Auftrag, der das Ergebnis offen lässt, gibt die Aufgabe frei, nicht die
-Wahl darin.
+Eine Frage, die nur wegen einer Regel `immer fragen` groß ist, legt Claude mit `add --class gross`
+und `--key "rule:<thema>"` ab; das ist der vorgesehene Weg (Spec 28, Ablauf 2). Die dritte Zeile
+beschreibt, was das Skript tut, wenn Claude die Regel übersehen und `--class klein` aufgerufen hat:
+Es stuft den Eintrag hoch und verlangt dafür die Optionen.
+
+`--approved-by-request` gilt nur, wenn Handlung und Gegenstand im Auftrag stehen („nimm `httpx`
+als Abhängigkeit auf"). Ein Auftrag, der das Ergebnis offen lässt, gibt die Aufgabe frei, nicht die
+Wahl darin. Der Schlüssel nennt genau den beauftragten Gegenstand:
+
+```bash
+decide_log.py add --class gross --topic Abhängigkeiten --question "httpx als Abhängigkeit aufnehmen?" \
+  --key "dependency:pyproject.toml#httpx" --approved-by-request "nimm httpx als Abhängigkeit auf"
+```
 
 ## Antwort eintragen
 

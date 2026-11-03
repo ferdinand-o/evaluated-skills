@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import types
 
 from conftest import REPO_ROOT, decide_add_small, decide_log_file, decide_script, git
 from evalkit.assertions import ARTIFACT_HEADER_RE, GIT_HEAD_KEY, check
@@ -27,7 +28,8 @@ DC = ("dc-loaders", "dc-logging", "dc-models", "dc-rules")
 
 @functools.cache
 def _evals():
-    return {ev.id: ev for ev in load_evals(EVALS_PATH)}
+    """Einmal geparst und nur lesbar: Kein Test kann das geteilte dict für einen anderen verändern."""
+    return types.MappingProxyType({ev.id: ev for ev in load_evals(EVALS_PATH)})
 
 
 def _assertions(eval_id, kind, path=None):
@@ -161,14 +163,18 @@ def test_models_fixture_is_red_for_the_import_and_green_for_the_field(tmp_path):
 
 def _leaks(fixture, dest):
     """Was eine Fixture nicht mitbringen darf, im Workspace aus `prepare` unter `dest`: Pfade unter
-    `.skills/cache/` oder die Ablage, und deren Erwähnung in einer von git erfassten Datei (jede
-    einmal gelesen, als Bytes — ein Bytecode-Rest außerhalb von git zählt nicht)."""
+    `.skills/cache/` oder die Ablage, und deren Erwähnung in einer Datei des Workspace — auch einer
+    gitignorierten, die `prepare` mitkopiert. Jede Datei wird einmal gelesen; nur eine, die nicht als
+    UTF-8 dekodiert (ein Bytecode-Rest), wird übersprungen."""
     ws = prepare(dest, None, fixture)
     rels = [rel for rel in ws.baseline if rel != GIT_HEAD_KEY]
     problems = [rel for rel in rels if rel.startswith(".skills/cache/") or rel == LEDGER]
-    for rel in filter(None, git(ws.root, "ls-files", "-z").split("\0")):
-        data = (ws.root / rel).read_bytes()
-        problems.extend(f"{rel}: {needle}" for needle in (".skills/cache/", LEDGER) if needle.encode() in data)
+    for rel in rels:
+        try:
+            text = (ws.root / rel).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        problems.extend(f"{rel}: {needle}" for needle in (".skills/cache/", LEDGER) if needle in text)
     return problems
 
 
@@ -184,6 +190,17 @@ def test_leak_scan_skips_untracked_bytecode(tmp_path):
     (fixture / "app" / "__pycache__").mkdir()
     (fixture / "app" / "__pycache__" / "models.cpython-312.pyc").write_bytes(b"\x00\xff\xfe\x80 .skills/cache/")
     assert _leaks(fixture, tmp_path / "ws") == []
+
+
+def test_leak_scan_reads_ignored_text_files(tmp_path):
+    """Eine gitignorierte Textdatei, die `prepare` mitkopiert, liest der Scan ebenso."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURES / "dc-models", fixture)
+    with (fixture / ".gitignore").open("a", encoding="utf-8") as ignore:
+        ignore.write("notes/\n")
+    (fixture / "notes").mkdir()
+    (fixture / "notes" / "todo.md").write_text(f"Später {LEDGER} lesen.\n", encoding="utf-8")
+    assert _leaks(fixture, tmp_path / "ws") == [f"notes/todo.md: {LEDGER}"]
 
 
 def test_fixtures_hold_what_the_evals_assume(tmp_path):
