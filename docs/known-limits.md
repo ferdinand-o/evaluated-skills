@@ -2173,6 +2173,206 @@ prüft die Web-Plugins mit diesen Regeln.
 - **Wer evaluated-dev schon per CLI hat, bekommt die Setup-Skills erst mit
   `/plugin install evaluated-setup@evaluated-skills`**; ein Update von evaluated-dev nimmt sie heraus.
 
+## deep-review
+
+Gebaut nach Spec 26 (2026-11-02). Tier 1: `scripts/review_kit.py` schneidet einen Bereich in
+Pakete, sammelt die Gegenstellen der geänderten Zeilen, nimmt die Ergebnisse je Paket an und
+prüft die Abdeckung; reviewt wird mit `/code-review`. Stand: Bau bis Task 13. Die SKILL.md
+(Task 15) und die Abnahmemessung (Task 23) stehen aus, also ist keine Grenze unten an einem
+Lauf der Skill gemessen. Die Liste hat zwei Quellen: die offenen Fragen der Spec und die Funde
+der Prüfpunkte 1 bis 9, die nach der Linie von subagent-dev (zwei Fix-Runden) offen blieben.
+Was inzwischen behoben ist, steht nicht hier. Je Grenze: was nicht geht, und wo es einen
+gibt, der Umgang damit.
+
+**Ablauf und Abdeckung**
+
+- **Dass je Paket ein Review lief, ist Auskunft des Hauptagenten, kein Beleg.** `audit` zählt
+  angenommene Ergebnisse; ob `/code-review` über den Bereich lief, sieht es nicht, und ein
+  leeres Ergebnis gleicht einem übersprungenen Review. Der Bericht nennt deshalb die Abdeckung
+  `a/b` aus `audit` und sagt nie „fertig“ ohne sie. Einen Hook gibt es nicht (E2).
+- **Der Kontext über viele Pakete ist ungemessen.** Die Skill reviewt alle Pakete nacheinander
+  in einem Hauptkontext; im Prototyp lief jedes Paket in einem frischen `claude -p`. Ob spätere
+  Pakete schlechter werden, wenn sich der Kontext füllt, misst nichts. Dass der Gegenstellen-Block
+  die Unteragenten von `/code-review` erreicht, ist angenommen, weil der Hauptagent ihn im
+  Aufruf mitgibt.
+- **`--max-findings all` bleibt als Wahl des Nutzers gesetzt.** Ohne Stufe nimmt
+  `/code-review` danach die zuletzt getippte (Hilfetext der CLI 2.1.316); deep-review setzt
+  nichts zurück. Der Bericht sagt es, zurück geht es mit `/code-review --max-findings default`.
+  Die Option hebt nur die Kappung der Funde je Review auf und belegt nicht, dass kein Fehler
+  übrig blieb.
+- **`/security-review` nimmt vermutlich keinen Bereich.** Es wählt ihn selbst (HEAD gegen die
+  Merge-Basis mit `origin/HEAD`); ob es einen annimmt, ist nicht geprüft. Der Fokus `security`
+  ist deshalb ein Paket `s1` über den ganzen Bereich, nie geteilt. `references/review-brief.md`
+  lässt `/security-review` nur laufen, wenn sich sein Umfang mit dem Plan deckt; sonst prüft
+  der Hauptagent selbst und nennt das Werkzeug „Review ohne /security-review“.
+- **Sicherheit und Qualität sind ungemessen.** Gemessen sind nur Fehler (Fokus `bugs`) mit
+  `/code-review`. Von den eingebauten Sicherheitsfehlern der Diff-Szenarien fand es zwei in
+  beiden Läufen, einen in einem von zwei; für den Fokus `quality` gibt es keine Messung.
+- **Ob `/code-review` einen Bereich über Refs unter `refs/deep-review/` so annimmt wie über
+  Tags, ist nur mit Tags gemessen,** und ebenso, ob es aus einer Skill heraus läuft wie als
+  getippter Befehl. Wo `/code-review` fehlt, läuft dieselbe Paketfolge nach
+  `references/review-brief.md`, und der Bericht sagt „Review ohne /code-review“.
+
+**Schnitt und Pakete**
+
+- **Die Schwellen 800 und 600 Zeilen sind Annahmen.** Gemessen ist: 591 bis 651 Zeilen je
+  Paket wirkten, 1.988 Zeilen am Stück verloren null bis zwei Funde, 4.097 Zeilen ein bis vier
+  von sechs. Zwischen 800 und 2.000 Zeilen ist nichts gemessen. `--split-at N` ersetzt den
+  Wert je Lauf.
+- **Die Blockgrenze von 30.000 Zeichen und der Abstand von drei Zeilen beim Vereinigen sind in
+  ihrer Wirkung ungemessen.** Gemessen sind nur 28,7 KB Gegenstellen für 591 Zeilen und 49 KB
+  für 4.100. Was über die Grenze geht, kappt der Block mit Zahl, nie still.
+- **Hilfscommits bleiben bei einem Abbruch bestehen.** Die Refs unter `refs/deep-review/`
+  stehen, bis `cleanup --stale` sie löscht; `--stale` gilt für alle Worktrees des Repos und
+  löscht auch die Refs eines Laufs, der in einem anderen Worktree noch läuft. Die Objekte
+  räumt erst `git gc` ab.
+- **Die Sperre umfasst die ganze Git-Arbeit eines Pakets.** Mehrere Pakete eines Laufs werden
+  nacheinander vorbereitet und können `LOCK_WAIT` (600 s) erreichen; deep-review bereitet
+  Pakete ohnehin nacheinander im Hauptkontext vor.
+- **Dateien mit `assume-unchanged` oder `skip-worktree` (Sparse-Checkout) meldet der
+  Arbeitsbaum-Vergleich nicht als abweichend.** Der Reviewer liest den Arbeitsbaum, der Hinweis
+  `worktree_differs` fehlt dann.
+- **Der `range` im Plan ist `<Merge-Basis>..<Ziel>`, nicht die getippte BASIS.** Die BASIS hält
+  `log_base`. Wer den `range` erneut an `plan --range` gibt, bekommt über die Merge-Basis bei
+  Criss-Cross-Historie andere Commit-Messages als bei `BASIS..ZIEL`; dann den getippten Bereich
+  nehmen.
+- **Die escapte Form eines Pfads, der kein UTF-8 ist (`caf\xe9.png`), ist nicht eindeutig
+  gegen einen echten Pfad mit dieser Backslash-Folge.** Betroffen ist nur der Eintrag unter
+  `not_reviewed`; eine Quelldatei mit solchem Pfad steht dort mit eigenem Grund.
+- **`ARG_CHUNK_CHARS` rechnet feste Argumente, Quoting und die UTF-16-Länge unter Windows nicht
+  ein.** Bei sehr langen Pfadlisten kann ein git-Aufruf an die Grenze der Kommandozeile stoßen.
+
+**Gegenstellen (Python, Delphi)**
+
+- **Gegenstellen sammelt das Skript nur für Python und Delphi.** Eine Datei in einer anderen
+  Sprache steht im Paketblock mit „Gegenstellen nicht gesammelt (Sprache)“; der Review läuft
+  trotzdem, nur ohne Block für sie. Im Fokus `quality` sammelt kein Sammler.
+- **Der Delphi-Sammler ist ungemessen.** Gemessen ist nur der Python-Sammler (am Prototyp).
+  Dass der Text-Scanner auf DelphiMVCFramework brauchbare Gegenstellen liefert, ist
+  angenommen; die Tests belegen die Formen, nicht die Trefferquote. Dass ein Lauf mit
+  Prompt-Auftrag den Besitzfehler bei `Extract` fand, drei von fünf ohne ihn nicht, ist ein
+  Lauf, kein Beleg.
+- **Python: ohne Importbezug und mit mehr als drei gleichnamigen Definitionen steht nichts im
+  Block.** Der Sammler rät nicht und zählt die Stelle unter „nicht aufgelöst“.
+- **Der Delphi-Scanner ist kein Parser und liest keine Defines.** Von `{$IFDEF}`, `{$IF}` und
+  den Verwandten gilt immer der erste Zweig (Zeilen im nicht gelesenen Zweig stehen mit Zahl
+  in der Dateiliste), `{$I}` wird nicht gelesen, und eine Unit, deren Blöcke nicht aufgehen,
+  überspringt der Sammler mit Grund.
+- **Der Delphi-Scanner kennt keine Typinferenz für Ausdrücke.** Funktionsergebnisse, `with`
+  und Indexer ergeben keinen Empfängertyp, und Überladungen unterscheidet er nicht nach
+  Argumenttypen.
+- **`raise`-Stellen verfolgt der Delphi-Scanner nur innerhalb einer Unit** (`RAISE_DEPTH`),
+  nicht über Unit-Grenzen.
+- **Den Besitz der RTL kennt der Scanner nur aus einer festen Tabelle** (`OWNERSHIP_RTL`:
+  `TObjectList`, `TObjectDictionary`, `TObjectQueue`, `TObjectStack`). `ExtractAt` fehlt, weil
+  unbelegt ist, ab welcher RTL-Version es die Methode gibt.
+- **Der Python-Index hält die Quell-Bytes aller Python-Dateien des Repos im Prozess.** Bei
+  großen vendorten Bäumen kostet das Speicher.
+- **Der Index-Cache hat die Größe 1** (`INDEX_CACHE_SIZE`): Wechselt ein Aufruf zwischen zwei
+  Zielen, baut sich der Index jedes Mal neu.
+- **Eine mehrzeilige Anweisung zeigt im Weg eines Arguments nur die erste Quellzeile,** samt
+  Kommentar am Zeilenende.
+- **`enclosing()` sucht linear über alle Routinen einer Unit** und läuft je Kandidat; in
+  großen Units wächst die Zeit etwa quadratisch.
+- **Die Gegenstellen werden zweimal gesammelt:** `plan` über den ganzen Bereich für die
+  Schlüssel, `counterparts` je Paket noch einmal. Das kostet etwa das Doppelte, und ein
+  Sammelfehler bricht schon `plan` ab.
+
+**Folgeläufe (`--since`)**
+
+- **`--since` kann Funde zurückbringen, deren Fix in einer anderen Datei landete.** Der Schlüssel
+  einer Datei kennt den Fix nicht, wenn er woanders steht. Der Hauptagent gleicht übernommene
+  Funde gegen die Fix-Runden ab und verwirft die, die laut `fix-task.md` behoben sind.
+- **Gibt es mehrere Abdeckungsketten, nimmt `apply_since` die kürzeste,** bei gleicher Länge
+  die über die jüngeren Läufe. Funde aus Läufen außerhalb dieser Kette werden nicht übernommen.
+- **Ein kaputter oder alter Plan in `--since` bricht den ganzen Folgelauf ab,** auch wenn er
+  nach Fokus und Profil ohnehin übergangen würde, denn jeder frühere Plan wird vorher streng
+  geprüft. Das ist ein lauter Fehler, kein stilles Ergebnis; der Lauf kommt aus der Liste.
+- **Pläne aus dem Bau mit frei formulierter Zeilenangabe („12, 14“) bei einem übernommenen
+  Fund sind ein `KitError`** für `merge`, `audit` und `--since`. Solche Pläne gibt es nur aus
+  dem Bau.
+- **Funde zu Dateien außerhalb ihres Pakets aus Plänen von vor Fix-Runde 2 von Prüfpunkt 6
+  werden nicht weitergegeben,** weil ihr Datei-Stand fehlt. Auch das betrifft nur Läufe aus dem
+  Bau.
+- **`apply_since` nimmt `PACKET_SIZE`, wenn dem Plan `packet_size` fehlt.** Das trifft nur
+  handbearbeitete Pläne, denn `build_plan` schreibt das Feld immer.
+- **`plan --since` erkennt einen schon angewandten `--since` am Text in `_meta.generated`,**
+  nicht an einem eigenen Feld; wer den Text von Hand ändert, umgeht diesen Teil der Prüfung.
+
+**Bericht und Audit**
+
+- **`audit` liest den Bericht mit regulären Ausdrücken aus freiem Markdown.** Ein anderer
+  Gedankenstrich, Fettdruck oder eine Tabellenzeile statt der Fundzeile ergibt einen falschen
+  `report_mismatch`. Die Vorlage `assets/report-template.md` wörtlich zu füllen vermeidet das;
+  sauberer wäre, wenn das Skript die datentragenden Zeilen selbst schriebe.
+- **Die Zahlen in der Pakettabelle prüft `audit` nicht.** Geprüft werden Kopfzeile, Funde,
+  Abdeckung, Hinweise, Übernommen und die Fundzeilen.
+- **Die Vorlage nennt `SPLIT_AT` und `PACKET_SIZE` nicht,** obwohl `references/packets.md`
+  sagt, der Bericht nenne die Grenzwerte.
+- **`REPORT_BASE_LINES (20)` steht als Zahl in der Vorlage,** ohne dass ein Test sie gegen die
+  Konstante prüft.
+- **`_meta.generated` hält `--report` und `--soll-file` repo-relativ fest,** aufgelöst werden
+  sie aber gegen das Arbeitsverzeichnis. Das notierte Kommando wiederholt sich nur aus der
+  Repo-Wurzel gleich.
+- **Der Werkzeugname „Review ohne /security-review“ steht noch nicht in der Spec.** Die
+  References und die Vorlage kennen ihn.
+
+**Schnittstelle zu subagent-dev**
+
+- **`plan_to_tasks.py fix-task` liest weiter `verdicts.jsonl`.** Die Spec wollte es aus
+  Docstring und `--help` streichen; das ist ein Spec-Nachzug in Task 16.
+- **Hat ein eingerücktes `findings.json` einen Syntaxfehler, nennt die Meldung die Position aus
+  dem jsonl-Versuch (Zeile 1),** nicht die echte.
+- **`fix-task` kopiert Zeilen- und Pfadregeln aus `review_kit.py`** (`FIX_LINE_RE`,
+  `_clean_line`, `_repo_path`). Zwei Tier-1-Skripte aus verschiedenen Skills teilen keinen Code,
+  die Kopien können auseinanderlaufen.
+- **Ein Fund aus `findings.json` mit nur einer Quelle erscheint auch in der Quellenform,** die
+  Zeile steht dann doppelt in der Task-Datei.
+- **`fix-task` nimmt nur die Dateien der Funde in die Allowlist, nicht die Testdatei,** obwohl
+  die Akzeptanz „mit Test belegt“ verlangt. Von Hand in die Markdown-Allowlist und in den
+  JSON-Block am Ende eintragen; `verify` liest den Block.
+
+**Evals und Messung**
+
+- **Der Eval-Timeout ist 600 s (`evalkit/dispatch.py`), mehrere `/code-review`-Läufe liegen
+  nahe daran.** Eval 2 ruft `/code-review` mindestens dreimal auf. Laufzeit und Kosten der
+  Evals sind ungemessen (auf der Messfixture 0,29 bis 0,45 USD je Lauf); `--timeout N` am
+  Runner hebt die Grenze.
+- **Die Routing-Kollision mit `/code-review` ist stochastisch.** Eval 6
+  (`routing-large-branch-without-skill-name`) misst nur einen Prompt: Ein roter Lauf zeigt eine
+  Kollision, ein grüner beweist nichts.
+- **Eval 5 prüft nicht, dass `/security-review` lief.** Plan und Audit schreibt nur das
+  Skript.
+- **Die Streuung bleibt.** Mit Gegenstellen fand je Lauf einer von zwei schwer erkennbaren
+  Fehlern, nicht beide; zwei Läufe je Zelle sind kein Mittelwert. Die Skill selbst ist bis zur
+  Abnahme in Task 23 nicht gemessen.
+- **Drei Tests prüfen weniger, als ihr Name sagt.** Der Test der gemischten Kette prüft nur
+  `reused_chain`, nicht die vereinigten Funde. Der Test zu `ExtractPair` prüft nicht, dass
+  `ExtractKey` weiter als gewöhnlicher Aufruf gesammelt wird. Die Doku-Funde zu `review-brief.md`
+  und `delphi.md` haben bis auf die Gegenprobe zu `doOwnsKeys` keinen Test; die alten Fehler
+  (falscher Zeitpunkt der Freigabe bei `as`-Interface-Temporären, zwei falsche RTL-Namen)
+  könnten unbemerkt zurückkommen.
+- **`EVAL_RUNS` im Test doppelt den Fixture-Namen aus `evals.json`,** und die Fixtures werden
+  mehrfach gebaut. `test_f15` prüft nur UTC-Eingaben, und `new_run_id` lehnt eine Ortszeit mit
+  Offset ab, statt sie nach UTC umzurechnen; im Betrieb liefert `_now()` immer UTC.
+- **Die Runlog-Zeile zu Prüfpunkt 8 zählt „5 von 18“ für Runde 2.** Gemeint sind fünf Funde aus
+  dem Review des Fixes, das wieder 18 meldete.
+
+**Pflege des Skripts**
+
+- **Doppelte Aufrufe und Auflösungen:** `rev-parse --show-toplevel` läuft je Plan zweimal
+  (`build_plan`, `numstat`), `write_counterparts` löst Bereich und Index ein zweites Mal auf,
+  `ls-tree` am ZIEL läuft für Schlüssel und Blobs zweimal, und die Prüfung „kann nicht auf sich
+  selbst folgen“ steht in `apply_since` und `plan_since`. Beim `inherited Create` ruft der
+  Delphi-Sammler `_ownership` doppelt auf.
+- **Listen statt Mengen:** `_tree_entries` prüft die Mitgliedschaft in einer Liste (O(n·m)).
+- **Doppelter Code:** `_refs_hold` und `cleanup` lesen Refs mit demselben Code, `_is_python`
+  und `_is_delphi` wiederholen, was `COLLECTORS` schon weiß, `_line_span` parst die in `record`
+  normalisierte Zeile ein zweites Mal, und `_checked_plan` gibt `file_keys` doppelt zurück.
+- **Toter Code:** `COUNTERPART_SUFFIXES` und `_PasUnit.local_type` werden nirgends gebraucht.
+- **Zwei Codeausdrücke stehen über einen Zeilenumbruch** (`delphi.md`, `review-brief.md`),
+  und ein Test-Block wiederholt einen anderen.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
