@@ -291,18 +291,33 @@ def _is_shallow(repo: Path) -> bool:
     return _git(repo, "rev-parse", "--is-shallow-repository").strip() == "true"
 
 
-def _shallow_boundary(repo: Path, sha: str) -> bool:
-    """Ist `sha` ein Grenz-Commit eines flachen Klons (`git rev-parse
-    --is-shallow-repository`, Grenzen in `.git/shallow`)? Er hat in Git keine Eltern, ist
-    aber kein Wurzel-Commit. Ist die Grenzdatei nicht lesbar, gilt jeder elternlose Commit
-    des flachen Klons als Grenze — lieber ein KitError als der leere Baum als Basis."""
+def _shallow_cuts(repo: Path, shas) -> bool:
+    """Liegt hinter einem der Commits `shas` (eine Liste) eine Grenze eines flachen Klons
+    (`git rev-parse --is-shallow-repository`, Grenzen in `.git/shallow`)? Grenze heißt: der
+    Commit steht in der Grenzdatei, und sein Objekt nennt einen Elter (`git cat-file`) — git
+    führt bei `--depth 1` auch Wurzel-Commits dort, hinter ihnen fehlt aber nichts. Gesucht
+    wird über alles, was `git rev-list` von `shas` aus erreicht. Ist die Grenzdatei nicht
+    lesbar, gilt der flache Klon als abgeschnitten — lieber der Hinweis als eine falsche
+    Basis."""
     if not _is_shallow(repo):
         return False
     shallow = Path(_git(repo, "rev-parse", "--git-path", "shallow").strip())
     try:
-        return sha in (repo / shallow).read_text(encoding="ascii", errors="replace").split()
+        listed = set((repo / shallow).read_text(encoding="ascii", errors="replace").split())
     except OSError:
         return True
+    reached = listed & set(_git(repo, "rev-list", *shas, "--").split())
+    for sha in sorted(reached):
+        head = _git(repo, "cat-file", "commit", sha).split("\n\n", 1)[0]
+        if any(line.startswith("parent ") for line in head.splitlines()):
+            return True
+    return False
+
+
+def _shallow_boundary(repo: Path, sha: str) -> bool:
+    """Ist `sha` selbst die Grenze eines flachen Klons (`_shallow_cuts`)? Er hat in Git dann
+    keine Eltern, ist aber kein Wurzel-Commit."""
+    return _shallow_cuts(repo, [sha])
 
 
 def split_range(repo: Path, rng) -> Span:
@@ -312,7 +327,9 @@ def split_range(repo: Path, rng) -> Span:
     schon aufgelöster `Span` kommt unverändert zurück, ohne git: So lösen die Sammler und die
     Datei-Schlüssel in `build_plan` den Bereich nicht ein zweites Mal auf. Die Grenze eines
     flachen Klons ist kein Wurzel-Commit: Fehlt dort die Basis, ist das ein KitError
-    (`SHALLOW_HINT`), nie der leere Baum."""
+    (`SHALLOW_HINT`), nie der leere Baum. Finden BASIS und ZIEL keine Merge-Basis, kommt
+    `SHALLOW_HINT` nur, wenn von einem der beiden aus eine Grenze erreichbar ist
+    (`_shallow_cuts`), sonst „keine gemeinsame Basis"."""
     if isinstance(rng, Span):
         return rng
     rng = _requested_range(rng)
@@ -332,7 +349,7 @@ def split_range(repo: Path, rng) -> Span:
         merge_base = _git(repo, "merge-base", log_base, target).strip()
     except GitError as exc:
         if exc.returncode == 1:
-            why = (SHALLOW_HINT if _is_shallow(repo)
+            why = (SHALLOW_HINT if _shallow_cuts(repo, [log_base, target])
                    else "BASIS und ZIEL haben keine gemeinsame Basis")
             raise KitError(f"Bereich {rng!r}: {why}") from None
         raise
@@ -1358,7 +1375,33 @@ RAISE_LINES_MAX = 8        # raise-Zeilen je Gegenstelle
 FLOW_LINES_MAX = 12        # Zeilen des Wegs je geändertem Schlüsselwort-Argument
 DOC_CHARS = 240            # erste Docstring-Zeile höchstens so lang
 INDEX_CACHE_SIZE = 1       # Definitions-Indizes so vieler (Repo, ZIEL) je Prozess
-NO_COLLECTOR = "Gegenstellen nicht gesammelt (Sprache)"
+# Methodennamen der eingebauten Typen und der Stdlib-Typen, die ein Aufruf auf unbekanntem
+# Empfänger meist meint (`m.start()` auf einem Match-Objekt): für sie gilt eine im Repo
+# eindeutige Methode nicht als Gegenstelle. `find` steht nicht darin — `finder.find()` soll
+# seine eindeutige Methode erreichen; `s.find()` auf einem str wird dann markiert geraten.
+BUILTIN_METHOD_NAMES = frozenset({
+    # str, bytes
+    "capitalize", "casefold", "center", "count", "decode", "encode", "endswith",
+    "expandtabs", "format", "format_map", "hex", "index", "isalnum", "isalpha", "isascii",
+    "isdecimal", "isdigit", "isidentifier", "islower", "isnumeric", "isprintable", "isspace",
+    "istitle", "isupper", "join", "ljust", "lower", "lstrip", "partition", "removeprefix",
+    "removesuffix", "replace", "rfind", "rindex", "rjust", "rpartition", "rsplit", "rstrip",
+    "split", "splitlines", "startswith", "strip", "swapcase", "title", "translate", "upper",
+    "zfill",
+    # list, dict, set
+    "add", "append", "clear", "copy", "difference", "difference_update", "discard", "extend",
+    "fromkeys", "get", "insert", "intersection", "intersection_update", "isdisjoint",
+    "issubset", "issuperset", "items", "keys", "pop", "popitem", "remove", "reverse",
+    "setdefault", "sort", "symmetric_difference", "union", "update", "values",
+    # Dateiobjekte (io)
+    "close", "fileno", "flush", "read", "readable", "readline", "readlines", "seek",
+    "seekable", "tell", "truncate", "writable", "write", "writelines",
+    # re.Match, re.Pattern
+    "end", "expand", "findall", "finditer", "fullmatch", "group", "groupdict", "groups",
+    "match", "search", "span", "start", "sub", "subn",
+})
+RECEIVER_GUESS = "(Empfänger unbekannt, Name eindeutig)"   # Marke im Block
+NO_COLLECTOR ="Gegenstellen nicht gesammelt (Sprache)"
 NOT_IN_TARGET = "nicht als Datei im Baum des ZIELS"
 SKIP_SYNTAX = "Syntaxfehler"
 SKIP_SYMLINK = "Symlink"
@@ -1708,12 +1751,53 @@ class _PyIndex:
         return tree is not None and any(
             isinstance(n, ast.ClassDef) and n.name == name for n in tree.body)
 
+    def _reexport(self, found: str, name: str):
+        """Wohin das Modul `found` den Namen `name` weiterreicht, eine Ebene: bindet es ihn
+        per `from .x import name` (etwa im `__init__.py` eines Pakets), (datei, name) dort,
+        sonst None."""
+        entry = self.import_names(found).get(name)
+        if entry is None or entry[0] != "name":
+            return None
+        home = self.module_file(entry[1])
+        return (home, entry[2]) if home else None
+
+    def _class_home(self, found: str, name: str):
+        """(datei, klasse) für die Klasse `name` aus dem Modul `found` — dort definiert oder
+        von dort eine Ebene weitergereicht (`_reexport`) —, sonst None."""
+        if self._has_class(found, name):
+            return found, name
+        home = self._reexport(found, name)
+        return home if home and self._has_class(*home) else None
+
+    def _module_defs(self, found: str, name: str) -> list:
+        """Die Funktion oder Klasse `name` des Moduls `found` — dort definiert oder eine Ebene
+        weitergereicht (`_reexport`, auch unter anderem Namen)."""
+        exact = [c for c in self.defs.get(name, []) if c[0] == found and c[1] == name]
+        home = None if exact else self._reexport(found, name)
+        if home:
+            exact = [c for c in self.defs.get(home[1], []) if c[0] == home[0] and c[1] == home[1]]
+        return exact
+
+    def _guess(self, name: str):
+        """Empfänger unbekannt: die eine Klasse oder Methode namens `name` im Repo, mit
+        `RECEIVER_GUESS` markiert; keine, mehrere oder ein Name aus `BUILTIN_METHOD_NAMES`
+        ergeben nichts, gezählt."""
+        if name in BUILTIN_METHOD_NAMES:
+            return [], True
+        members = [c for c in self.defs.get(name, [])
+                   if "." in c[1] or isinstance(c[2], ast.ClassDef)]
+        if len(members) != 1:
+            return [], True
+        rel, qual, node = members[0]
+        return [(rel, f"{qual} {RECEIVER_GUESS}", node)], False
+
     def receiver(self, dotted: str, from_file: str):
         """Wohin der Empfänger `dotted` eines Attribut-Aufrufs zeigt, nur über einen
         Importbezug oder eine Klasse: (datei, None) für ein Modul im Repo, (datei, klasse)
         für eine Klasse auf Modulebene (in der eigenen Datei, importiert oder als
-        `modul.Klasse`), EXTERNAL für ein Modul außerhalb des Repos, None, wenn der Typ
-        unbekannt ist (eine Variable, ein Ausdruck, ein Attribut eines Moduls)."""
+        `modul.Klasse`, auch über einen Re-Export eines Pakets), EXTERNAL für ein Modul
+        außerhalb des Repos, None, wenn der Typ unbekannt ist (eine Variable, ein Ausdruck,
+        ein Attribut eines Moduls)."""
         parts = dotted.split(".")
         imports = self.import_names(from_file)
         for k in range(len(parts), 0, -1):
@@ -1725,15 +1809,15 @@ class _PyIndex:
                 found = self.module_file(entry[1])
                 if found is None:
                     return EXTERNAL
-                return (found, entry[2]) if not rest and self._has_class(found, entry[2]) else None
+                return None if rest else self._class_home(found, entry[2])
             files = [self.module_file(".".join([entry[1], *rest[:j]]))
                      for j in range(len(rest) + 1)]
             if not any(files):
                 return EXTERNAL
             if files[-1]:
                 return files[-1], None
-            if len(files) > 1 and files[-2] and self._has_class(files[-2], rest[-1]):
-                return files[-2], rest[-1]
+            if len(files) > 1 and files[-2]:
+                return self._class_home(files[-2], rest[-1])
             return None
         if len(parts) == 1 and self._has_class(from_file, parts[0]):
             return from_file, parts[0]
@@ -1763,21 +1847,24 @@ class _PyIndex:
         return [c for c in ranked if rank(c) == best][:COUNTERPART_MAX_DEFS], False
 
     def resolve_call(self, call: ast.Call, from_file: str):
-        """Wie `resolve` für `name(...)`. Ein Attribut-Aufruf `x.name(...)` wird nur über
-        einen Importbezug, `self`/`cls`/`super()` oder eine bekannte Klasse aufgelöst
-        (`receiver`): ein Modul im Repo (`import helpers; helpers.load()`, `a.b.f()`) nimmt
-        genau dessen Funktion, eine Klasse (`Klasse.name()`, `Klasse(...).name()`) ihre
-        Methode — sonst wie `self` über den Namen —, `self`, `cls` und `super()` gehen über
-        den Namen. Bei
-        unbekanntem Empfänger (`m.start()` auf einem Match-Objekt), einem Modul außerhalb
-        des Repos oder einem Modul ohne diese Funktion gibt es nichts; die Stelle zählt als
-        nicht aufgelöst, wenn es gleichnamige Definitionen gibt."""
+        """Wie `resolve` für `name(...)`. Ein Attribut-Aufruf `x.name(...)` geht zuerst über
+        einen Importbezug, `self`/`cls`/`super()` oder eine bekannte Klasse (`receiver`): ein
+        Modul im Repo (`import helpers; helpers.load()`, `a.b.f()`) nimmt genau dessen
+        Funktion, auch eine Ebene weitergereicht (`import pkg; pkg.load()` mit `from .impl
+        import load` in `pkg/__init__.py`); eine Klasse (`Klasse.name()`,
+        `Klasse(...).name()`, auch über einen Re-Export) ihre Methode — sonst wie `self` über
+        den Namen —; `self`, `cls` und `super()` gehen über den Namen.
+
+        Empfängerregel bei unbekanntem Typ (eine Variable `finder.find()`, ein Attribut
+        `self.x.m()`, ein Aufrufergebnis): Gegenstelle ist die eine Klasse oder Methode
+        dieses Namens im Repo, im Block markiert mit `RECEIVER_GUESS` — nur, wenn es genau
+        eine gibt und der Name nicht in `BUILTIN_METHOD_NAMES` steht (`m.start()` auf einem
+        Match-Objekt). Sonst, bei einem Modul außerhalb des Repos und bei einem Modul ohne
+        diese Funktion gibt es nichts; die Stelle zählt als nicht aufgelöst, wenn es
+        gleichnamige Definitionen gibt."""
         name = _callee_name(call) or ""
         if not isinstance(call.func, ast.Attribute):
             return self.resolve(name, from_file)
-        cands = self.defs.get(name, [])
-        if not cands:
-            return [], False
         recv = call.func.value
         if (isinstance(recv, ast.Name) and recv.id in ("self", "cls")) or (
                 isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name)
@@ -1788,14 +1875,23 @@ class _PyIndex:
         target = self.receiver(dotted, from_file) if dotted else None
         if made and not (isinstance(target, tuple) and target[1]):
             target = None   # nur `Klasse(...).name()` hat einen bekannten Typ
-        if target is None or target is EXTERNAL:
+        module = isinstance(target, tuple) and target[1] is None
+        if module:
+            exact = self._module_defs(target[0], name)
+            if exact:
+                return exact[:COUNTERPART_MAX_DEFS], False
+        cands = self.defs.get(name, [])
+        if not cands:
+            return [], False
+        if module or target is EXTERNAL:
             return [], True
+        if target is None:
+            return self._guess(name)
         found, cls = target
-        qual = f"{cls}.{name}" if cls else name
-        exact = [c for c in cands if c[0] == found and c[1] == qual]
+        exact = [c for c in cands if c[0] == found and c[1] == f"{cls}.{name}"]
         if exact:
             return exact[:COUNTERPART_MAX_DEFS], False
-        return self.resolve(name, from_file) if cls else ([], True)
+        return self.resolve(name, from_file)
 
 
 def _from_module(rel: str, node: ast.ImportFrom):
@@ -1983,8 +2079,9 @@ def _param_flow(index: _PyIndex, rel: str, fn, param: str, depth: int, seen: set
                         unresolved.add((rel, item.lineno, item.col_offset))
                     for drel, qual, dnode in defs:
                         if isinstance(dnode, _FUNCS):
-                            lines.append(f"{rel}:{item.lineno}: {param} -> {qual}({kw.arg}=...) "
-                                         f"[{drel}:{dnode.lineno}]")
+                            callee, _, mark = qual.partition(" ")   # Marke RECEIVER_GUESS
+                            lines.append(f"{rel}:{item.lineno}: {param} -> {callee}({kw.arg}=...) "
+                                         f"{mark + ' ' if mark else ''}[{drel}:{dnode.lineno}]")
                             lines += _param_flow(index, drel, dnode, kw.arg, depth - 1, seen,
                                                  unresolved)
     return lines
