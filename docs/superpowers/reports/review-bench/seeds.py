@@ -121,7 +121,8 @@ DL_PATH = [
     ("E3", "sources/MVCFramework.Middleware.RangeMedia.pas",
      "      LFileStream := nil; // SetContentStream takes ownership; prevent double-free in finally\n",
      ""),
-    # E4: UnixToDateTime(.., True) liefert UTC, Now ist Ortszeit -> abgelaufene Tokens oestlich von UTC stundenlang gueltig
+    # E4: UnixToDateTime(.., True) liefert UTC, Now ist Ortszeit -> oestlich von UTC werden gueltige Tokens um den
+    #     Versatz zu frueh abgewiesen (UTC+2: 2 h vor Ablauf), westlich bleiben abgelaufene stundenlang gueltig (UTC-5: 5 h)
     ("E4", "sources/MVCFramework.Middleware.OIDC.pas",
      "    if UnixToDateTime(lExp, False) + (FLeewaySeconds * OneSecond) <= Now then\n",
      "    if UnixToDateTime(lExp, True) + (FLeewaySeconds * OneSecond) <= Now then\n"),

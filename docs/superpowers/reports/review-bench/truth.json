@@ -172,7 +172,7 @@
    "kind": "seeded",
    "file": "MVCFramework.Middleware.OIDC.pas",
    "line": 661,
-   "what": "UnixToDateTime UTC gegen Now Ortszeit"
+   "what": "UnixToDateTime UTC gegen Now Ortszeit: oestlich von UTC gueltige Tokens zu frueh abgewiesen, westlich abgelaufene stundenlang gueltig"
   },
   {
    "id": "E5",
@@ -187,6 +187,68 @@
    "file": "MVCFramework.OIDC.JWKS.pas",
    "line": 558,
    "what": "IsCacheExpired umgedreht"
+  }
+ ],
+ "py-c1": [
+  {
+   "id": "P2",
+   "kind": "seeded",
+   "file": "req/req_dependency_group.py",
+   "line": 30,
+   "what": "TypeError des Resolvers nicht mehr gefangen"
+  },
+  {
+   "id": "P4",
+   "kind": "seeded",
+   "file": "commands/lock.py",
+   "line": 143,
+   "what": "ignore_installed=False: installierte Pakete fehlen im Lockfile"
+  },
+  {
+   "id": "P5",
+   "kind": "seeded",
+   "file": "cli/cmdoptions.py",
+   "line": 760,
+   "what": "partition statt rpartition, Windows-Laufwerk"
+  }
+ ],
+ "py-c2": [
+  {
+   "id": "P3",
+   "kind": "seeded",
+   "file": "models/wheel.py",
+   "line": 77,
+   "what": "Build-Tag () falsy -> Legacy-Regex, None -> TypeError"
+  },
+  {
+   "id": "P6",
+   "kind": "seeded",
+   "file": "index/package_finder.py",
+   "line": 903,
+   "what": "Cache-Schluessel ohne hashes"
+  },
+  {
+   "id": "R1",
+   "kind": "real",
+   "file": "wheel_builder.py",
+   "line": 53,
+   "what": "assert req.source_dir / not req.constraint, Legacy-Resolver liefert Reqs ohne source_dir (Fix 25.1.1, #13353)"
+  }
+ ],
+ "py-c3": [
+  {
+   "id": "P1",
+   "kind": "seeded",
+   "file": "network/download.py",
+   "line": 141,
+   "what": "HEADERS ohne copy() mutiert, Range/If-Range bleiben fuer Folgeanfragen"
+  },
+  {
+   "id": "R2",
+   "kind": "real",
+   "file": "operations/install/wheel.py",
+   "line": 610,
+   "what": "redirect_stdout(StringIO()) statt StreamWrapper, Absturz auf Python <=3.9.6 (Fix 25.1.1, #13364)"
   }
  ]
 }
