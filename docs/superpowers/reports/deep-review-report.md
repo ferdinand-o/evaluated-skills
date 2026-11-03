@@ -667,6 +667,13 @@ Offen für known-limits:
 - `ExtractAt` ist nicht aufgenommen, weil unbelegt ist, ab welcher RTL-Version es die Methode
   gibt.
 
+Fix-Runde 2 hat die fünf Funde behoben, danach liefen 1.786 Tests grün. Übernommene Funde tragen
+jetzt `run`, den Lauf, der sie gemeldet hat, und `findings.json` nennt diesen Lauf in
+`sources[].reused_from`. `plan --profile checkpoint` verlangt `--soll-file`. Ein Fix, der nur
+Tests ändert, scheitert mit dem wiederhergestellten Bereich nicht. Alle Dateien werden
+übernommen, und es entsteht ein normaler Lauf. `--run none` bleibt für den echten Fall „nichts zu
+reviewen“.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist noch nicht gebaut; ihre Läufe auf beiden Fixtures,
