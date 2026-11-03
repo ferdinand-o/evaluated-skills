@@ -82,10 +82,12 @@ führendem `-` als `--decision=-v`.
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" brief --topic "<thema>"
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" brief --check "<datei>"
    ```
-7. **Übergabe.** Hat die Aufgabe Dateien geändert, prüft `check` den Diff seit dem Commit vor
-   der Aufgabe (`<rev>`; ohne eigenen Commit `HEAD`; auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die
-   Antwort mit Grund, die Zeile „ungeprüft: data-delete, …“ wörtlich. Dann `summary` — nur wenn
-   es Einträge gibt — und `open`:
+7. **Übergabe.** Hat die Aufgabe Dateien geändert, läuft `check` als letzter Aufruf vor der
+   Antwort — auch nach einer Freigabe, auch wenn das Ergebnis klar scheint — über den Diff seit
+   dem Commit vor der Aufgabe (`<rev>`; ohne eigenen Commit `HEAD`; auch `<a>..<b>`,
+   `<a>...<b>`). Die Antwort nennt jede gemeldete Stelle mit Grund und zitiert die Schlusszeile
+   der Ausgabe, die mit „ungeprüft: data-delete, …“ beginnt, wörtlich. Ohne Aufruf kein Satz über
+   das Ergebnis von `check`. Dann `summary` — nur wenn es Einträge gibt — und `open`:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" check --range "<rev>"
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" summary
@@ -125,6 +127,7 @@ ersten Protokoll, dass ein unversionierter Ordner entstanden ist.
 | „Ich frage lieber nach, sicher ist sicher“ | Eine Frage, deren Antwort im Repo steht, kostet den Nutzer, was eine Suche gekostet hätte. Erst suchen. |
 | „Im -p-Lauf kann ich nicht fragen, also entscheide ich“ | Unbeaufsichtigt bleibt die große Frage offen; der teure Schritt unterbleibt, die Übergabe nennt `D-<n>`. |
 | „Der Nutzer hat es doch verlangt, trotzdem frage ich“ | Ein ausdrücklicher Auftrag ist die Freigabe. Zitat ablegen, ausführen. |
+| „check würde hier nichts melden, das spare ich mir“ | Ein Satz über ein Prüfergebnis ohne Aufruf ist erfunden. Aufrufen, Schlusszeile zitieren. |
 | „Der Subagent soll wissen, was ich denke“ | Dann bestätigt er es nur. Frage neutral, keine Empfehlung im Auftrag. |
 
 ## Abgrenzung
