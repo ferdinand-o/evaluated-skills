@@ -219,7 +219,10 @@ Skript das Thema in der Schreibweise der Regel in Protokoll und Ablage.
 
 `check --range <rev>` liest `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die
 unversionierten Dateien aus `git ls-files --others --exclude-standard`; `<a>..<b>` ist ebenfalls
-erlaubt und lässt den Arbeitsbaum aus. Je geänderte Datei sucht es die Kategorie über die
+erlaubt und lässt den Arbeitsbaum aus, ebenso `<a>...<b>` (wie `git diff <a>...<b>`: Basis ist
+die Merge-Base, Ende ist `<b>`) — die übliche Form für einen PR-Diff. Bei einem Bereich liest
+`check` die Ablage aus dem Ende, bei einer Einzelrevision aus der Arbeitskopie; Meldungen nennen
+die Revision so, wie sie angegeben wurde. Je geänderte Datei sucht es die Kategorie über die
 Pfadmuster in `reversibility.md`:
 
 | Kategorie | Grad | Pfadmuster |
