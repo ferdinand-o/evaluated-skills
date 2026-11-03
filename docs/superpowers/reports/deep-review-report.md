@@ -719,6 +719,47 @@ Das Review des Fixes meldete 10 Funde. In Runde 2 kamen sechs:
 Ergebnis: 1.797 Tests grün. Offen bleibt ein Aufräumpunkt: Ein Test listet den Cache-Ordner
 selbst, statt den Helfer `_runs` zu nutzen.
 
+### Finaler Prüfpunkt: deep-review auf sich selbst (2026-11-03)
+
+Auf Wunsch des Nutzers lief der finale Prüfpunkt über `78cfb45..HEAD` mit deep-review selbst.
+Das war der erste echte Einsatz der Skill. Als Bereich diente ein Scratch-Klon mit einem Commit
+„Branch ohne Projekt-Kopien“. Die Kopien unter `.claude/skills/` sind byte-gleich mit dem
+Original, sonst wären dieselben 5.000 Zeilen zweimal reviewt worden. Die Hilfscommits wurden
+nach `refs/deep-review/` ins Repo geholt, damit `/code-review` sie sieht. Danach hat `cleanup`
+sie im Klon und im Repo wieder gelöscht.
+
+- **Plan:** 6.537 Zeilen, 6 Pakete. 26 Dateien fielen unter „Nicht geprüft“ (24 Doku,
+  2 Tests); Doku reviewt der Fokus `bugs` nicht.
+- **Ein Paket mit einer ganzen Datei:** `review_kit.py` (5.161 Zeilen) bildet allein p5.
+  Die Schnittregel teilt Dateien nie. Ein neues großes Modul wird damit wieder ein Review über
+  tausende Zeilen. Genau das sollten Pakete eigentlich vermeiden.
+- **Ein falscher Gegenstellen-Eintrag:** `m.start()` auf einem Regex-Match in `match.py` wurde
+  `tdd_log.start` zugeordnet, einer Funktion in einer Datei, die `match.py` gar nicht
+  importiert. Der Reviewer von p2 erkannte das und meldete es als Fund des Sammlers.
+- **Blöcke als Datei:** Die Blöcke von p5 und p6 (29 KB und 14 KB) waren zu groß für den
+  Aufruf. Der Reviewer bekam den Pfad der Blockdatei und las sie vollständig.
+- **Ergebnis:** 6/6 Pakete angenommen, `audit` meldet `complete: true`. `merge` legte 33
+  Rohfunde zu 31 zusammen.
+  - p2 (Bench-Skripte): 11 Funde. Die Lesesperre lässt `git --git-dir` zu, `match.py`
+    stürzt bei py-c-Läufen ab, `crx` und `sp` messen andere Bereiche.
+  - p3: 4 Funde. Der E4-Kommentar nennt die Richtung falsch, `truth.json` fehlen die
+    py-c-Einträge. Eval 1 misst den Anti-Zeremonie-Fall nicht richtig, Eval 2 und 5 können
+    zwei Läufe mischen.
+  - p4: 3 Funde. Einer ist ein Artefakt des Zuschnitts ohne Projekt-Kopien. Zwei sind echte
+    Fehler in `dr-split`, das laut README fehlerfrei ist.
+  - p5 (`review_kit.py`): 6 Funde. Darunter `import x` ohne Importbezug, ein flacher Klon,
+    der als Wurzel-Commit gilt, `diff.interHunkContext` und ein Rennen beim Brechen des
+    Locks.
+  - p6 (`fix-task`): 9 Funde. Meist Regressionen aus den Prüf-Runden von Prüfpunkt 7:
+    `[id]`-Pfade, absolute Pfade und Freitext-Zeilen werden abgewiesen, ein fehlendes
+    `summary` endet mit KeyError.
+- **Fix-Runde 1:** drei Pakete parallel. A übernimmt Kit, Evals und dr-split, B `fix-task`,
+  C die Bench-Skripte mit dem neuen Werkzeug `dr`.
+- **Offen für known-limits:** Die Index-Kopie je Paket in `_worktree_differs`. Der Prototyp
+  `counterparts.py` (`crx`) wird für die Abnahme nicht gebraucht; seine fünf Funde bleiben
+  offen, denn er ist nicht Teil der Skill. Eval 2 und 5 können zwei Läufe mischen, wenn der
+  Agent neu plant.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
