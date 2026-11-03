@@ -1004,12 +1004,18 @@ def test_ignored_flags_warning_follows_upgrade(decide_repo, monkeypatch, capsys)
     err = capsys.readouterr().err
     assert "per Regel hochgestuften Frage" in err and "--option" not in err, err
 
-    rules = dl.load_rules(root, home)
-    answers = [rules, []]                    # zweiter Lesevorgang sähe die Regel nicht mehr
-    monkeypatch.setattr(dl, "load_rules", lambda *_: answers.pop(0) if answers else [])
+    answers = [dl.read_rules(root, home)]    # zweiter Lesevorgang sähe die Regel nicht mehr
+    calls = []
+
+    def read_rules(*args):
+        calls.append(args)
+        return answers.pop(0) if answers else ([], [], [])
+
+    monkeypatch.setattr(dl, "read_rules", read_rules)
     assert add_small("UI-Texte", "Text 3?", "A", "gesucht: a.py — Treffer: a.py:1", *flags) == 0
     err = capsys.readouterr().err
     assert "per Regel hochgestuften Frage" in err and "--option" not in err, err
+    assert len(calls) == 1, calls             # R2-F7: Regeln und Hinweise aus einem Lesevorgang
 
 
 def test_approved_request_with_rule_key(decide_repo, capsys):
@@ -2095,7 +2101,7 @@ def test_brief_numbers_count_up_and_need_session(decide_repo, monkeypatch, capsy
 
 
 def test_brief_reports_unreadable_rules_and_log(decide_repo, capsys):
-    """Eine unlesbare Regeldatei meldet brief wie add (rule_problems) und schreibt trotzdem; ein
+    """Eine unlesbare Regeldatei meldet brief wie add (read_rules) und schreibt trotzdem; ein
     unlesbares Protokoll lässt den Auftrag aus — Schon entschieden wäre sonst still leer."""
     root, home = decide_repo
     (root / ".skills" / "decide" / "rules.md").mkdir(parents=True)          # ein Ordner: nicht lesbar
@@ -2128,7 +2134,7 @@ def test_brief_big_questions_by_ledger_status(decide_repo, capsys):
     sections = brief_sections(brief_file(root).read_text(encoding="utf-8"))
     decided = sections["Schon entschieden"]
     assert len(decided) == 2, decided
-    assert "Parser wechseln?" in decided[0] and "D-2 freigegeben" in decided[0] and "wie im Auftrag" in decided[0]
+    assert "Parser wechseln?" in decided[0] and "D-2 freigegeben" in decided[0] and "„nimm argparse“" in decided[0]
     assert "Spalte legacy_id löschen?" in decided[1] and "D-3 abgelehnt" in decided[1], decided
     assert not any("D-1" in line or "Neue Abhängigkeit" in line for line in decided), decided
     assert sections["Feste Vorgaben"] == [
@@ -2177,9 +2183,10 @@ def test_brief_warns_when_rules_alone_exceed_limit(decide_repo):
     write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(18)))
     code, message = dl.write_brief(root, SESSION, "CLI", home)
     assert code == 0, message
-    assert "Hinweis: Auftrag hat schon 27 Zeilen ohne Kopf, höchstens 25 — Feste Vorgaben kürzen" in message
+    assert "Hinweis: Auftrag hat schon 27 Zeilen ohne Kopf, höchstens 25" in message, message
+    assert "bleiben 0 Zeilen" in message and "Regeln kürzen" in message, message
     assert len(brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]) == 18
-    write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(16)))   # 25 Zeilen: noch gut
+    write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(13)))   # 22 Zeilen: noch gut (R2-F4)
     code, message = dl.write_brief(root, SESSION, "CLI", home)
     assert code == 0 and "Hinweis: Auftrag hat schon" not in message, message
 
@@ -2239,16 +2246,19 @@ def test_brief_interrupted_write_leaves_no_file(decide_repo, monkeypatch):
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt
 
-    def fdopen(fd, *args, **kwargs):
+    written = []
+
+    def fdopen(fd, *args, **kwargs):                   # R2-F12: der Abbruch trifft das Schreiben über den Deskriptor
         handle = real_fdopen(fd, *args, **kwargs)
+        written.append(fd)
         handle.write = interrupted
         return handle
 
     with monkeypatch.context() as patch:
         patch.setattr(dl.os, "fdopen", fdopen)
-        patch.setattr(dl.os, "replace", interrupted)
         with pytest.raises(KeyboardInterrupt):
             dl.write_brief(root, SESSION, "CLI", home)
+    assert len(written) == 1, written
     folder = log_file(root).parent
     assert not [p.name for p in folder.iterdir() if p.name.startswith("brief-")]
     assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
@@ -2281,12 +2291,145 @@ def test_brief_sentence_from_reference(decide_repo, tmp_path, monkeypatch):
     assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
     assert brief_sections(brief_file(root).read_text(encoding="utf-8"))["Rückgabe"][-1] == "Neuer Satz, zwei Zeilen."
 
-    for broken in (None, "# Auftrag\n\n> Satz ohne Abschnitt\n", "## Der Satz für Subagenten\n\nnur Prosa\n",
-                   "## Der Satz für Subagenten\n\n> eins\n\n> zwei\n"):
+    fehlt = "ungeprüft — Satz für Subagenten fehlt in references/brief.md"           # R2-F10: nach Ursache
+    for broken, start in ((None, "ungeprüft — references/brief.md fehlt"),
+                          ("# Auftrag\n\n> Satz ohne Abschnitt\n", fehlt),
+                          ("## Der Satz für Subagenten\n\nnur Prosa\n", fehlt),
+                          ("## Der Satz für Subagenten\n\n> eins\n\n> zwei\n",
+                           "ungeprüft — Satz für Subagenten mehrfach in references/brief.md")):
         if broken is None:
             reference.unlink()
         else:
             reference.write_text(broken, encoding="utf-8")
         code, message = dl.write_brief(root, SESSION, "CLI", home)
-        assert code == 2 and message.startswith("ungeprüft — Satz für Subagenten in references/brief.md fehlt"), message
+        assert code == 2 and message.startswith(start), message
         assert not brief_file(root, 2).exists()
+
+
+# --- Prüfpunkt 4, Runde 2: Funde F1–F12 an brief -------------------------------------------
+
+def test_brief_open_questions_from_ledger_of_any_session(decide_repo, capsys):
+    """R2-F1: Die Ablage gehört dem Repo. Ein Auftrag zum Thema nennt jede offene große Frage dieses
+    Themas aus der Ablage unter Feste Vorgaben, auch ohne Zeile im eigenen Protokoll; freigegebene und
+    abgelehnte aus anderen Sitzungen stehen unter Schon entschieden — jede nur einmal."""
+    root, home = decide_repo
+    assert big("--session", "A", *TWO, topic="CLI", question="Neue Abhängigkeit für die CLI?") == 0
+    assert big("--session", "A", *TWO, topic="CLI", question="Spalte legacy_id löschen?",
+               key="migration:migrations/") == 0
+    assert big("--session", "A", *TWO, topic="Logging", question="Logformat wechseln?") == 0
+    assert big("--session", "A", *TWO, topic="cli", question="Konfig umbenennen?", key="api:app/") == 0
+    assert dl.main(["resolve", "D-2", "--reject"]) == 0
+    assert dl.main(["resolve", "D-4", "--answer", "ja, mit Alias"]) == 0
+    capsys.readouterr()
+
+    code, message = dl.write_brief(root, SESSION, " cli ", home)          # andere Sitzung, leeres Protokoll
+    assert code == 0, message
+    sections = brief_sections(brief_file(root).read_text(encoding="utf-8"))
+    assert sections["Feste Vorgaben"] == [
+        "- D-1 offen: Neue Abhängigkeit für die CLI? — nicht entscheiden, nicht darauf aufbauen"], sections
+    decided = sections["Schon entschieden"]
+    assert len(decided) == 2, decided
+    assert "Spalte legacy_id löschen?" in decided[0] and "D-2 abgelehnt" in decided[0], decided
+    assert "Konfig umbenennen?" in decided[1] and "D-4 freigegeben: ja, mit Alias" in decided[1], decided
+    assert "Logformat" not in brief_file(root).read_text(encoding="utf-8")
+
+    code, message = dl.write_brief(root, "A", "CLI", home)                # eigene Sitzung: Protokoll und Ablage
+    assert code == 0, message
+    text = (root / ".skills" / "cache" / "decide" / "A" / "brief-1.md").read_text(encoding="utf-8")
+    for did in ("D-1", "D-2", "D-4"):
+        assert text.count(f"{did} ") == 1, (did, text)
+
+
+def test_brief_names_quote_of_approving_request(decide_repo):
+    """R2-F2: Bei einem per Auftrag freigegebenen Block nennt der Auftrag das Zitat, nicht nur
+    „wie im Auftrag“."""
+    root, home = decide_repo
+    assert big("--approved-by-request", "nimm argparse", topic="CLI", question="Parser wechseln?",
+               key="dependency:pyproject.toml#argparse") == 0
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    [line] = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Schon entschieden"]
+    assert "D-1 freigegeben" in line and "„nimm argparse“" in line and "wie im Auftrag" not in line, line
+
+
+def test_subagent_sentence_continuation_without_marker(decide_repo, tmp_path, monkeypatch):
+    """R2-F3: Eine nicht-leere Zeile ohne `>` direkt im Zitat ist ein Problem mit Zeilennummer
+    (Exit 2), kein still gekürzter Satz."""
+    root, home = decide_repo
+    reference = tmp_path / "references" / "brief.md"
+    reference.parent.mkdir()
+    monkeypatch.setattr(dl, "BRIEF_REFERENCE", reference)
+    reference.write_text("## Der Satz für Subagenten\n\n> Du arbeitest als Subagent. … und\nschreib nicht.\n",
+                         encoding="utf-8")
+    sentence, problem = dl.load_subagent_sentence(reference)
+    assert sentence is None and problem and "references/brief.md:4" in problem, problem
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 2 and message.startswith("ungeprüft — ") and "references/brief.md:4" in message, message
+    assert not brief_file(root).exists()
+
+    reference.write_text("## Der Satz für Subagenten\n\n> Ein Satz,\n> zwei Zeilen.\n\nProsa danach.\n",
+                         encoding="utf-8")
+    assert dl.load_subagent_sentence(reference) == ("Ein Satz, zwei Zeilen.", None)
+
+
+def test_brief_hint_counts_the_three_empty_fields(decide_repo):
+    """R2-F4: Der Hinweis kommt, sobald für Frage, Anlass und Wo nachsehen keine drei Zeilen mehr
+    bleiben (mehr als 22), und nennt, wie viele bleiben."""
+    root, home = decide_repo
+    rules = root / ".skills" / "decide" / "rules.md"
+    write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(14)))     # 23 Zeilen
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0, message
+    assert "Hinweis: Auftrag hat schon 23 Zeilen ohne Kopf, höchstens 25" in message, message
+    assert "bleiben 2 Zeilen" in message, message
+    write_rules(rules, "".join(f"immer fragen: Thema {n}\n" for n in range(13)))     # 22 Zeilen: noch gut
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0 and "Hinweis: Auftrag hat schon" not in message, message
+
+
+def test_brief_open_questions_first_and_never_cut(decide_repo, capsys):
+    """R2-F5: Die Zeilen zu offenen Fragen stehen am Anfang von Feste Vorgaben, und der Hinweis zur
+    Länge sagt, nur Regeln zu kürzen."""
+    root, home = decide_repo
+    write_rules(root / ".skills" / "decide" / "rules.md", "".join(f"immer fragen: Thema {n}\n" for n in range(14)))
+    assert big(*TWO, topic="CLI", question="Neue Abhängigkeit für die CLI?") == 0
+    capsys.readouterr()
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0, message
+    rows_ = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]
+    assert rows_[0].startswith("- D-1 offen: ") and all(r.startswith("- Regel ") for r in rows_[1:]), rows_
+    assert "Regeln kürzen, die Zeilen zu offenen Fragen nie" in message, message
+
+
+def test_brief_duplicate_block_is_named(decide_repo, capsys):
+    """R2-F6: Stehen zwei Blöcke mit derselben D-<n> und Frage in der Ablage, sagt der Auftrag
+    „doppelt“, nicht „nicht in docs/big-decisions.md“."""
+    root, home = decide_repo
+    assert big(*TWO, topic="CLI", question="Neue Abhängigkeit?") == 0
+    capsys.readouterr()
+    ledger = root / "docs" / "big-decisions.md"
+    text = ledger.read_text(encoding="utf-8")
+    block = text[text.index("## D-1"):].rstrip("\n")
+    ledger.write_text(text.rstrip("\n") + "\n\n" + block + "\n", encoding="utf-8")
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    [line] = brief_sections(brief_file(root).read_text(encoding="utf-8"))["Feste Vorgaben"]
+    assert "D-1 doppelt in docs/big-decisions.md" in line and "nicht in docs" not in line, line
+    assert line.endswith("nicht darauf aufbauen"), line
+
+
+def test_subagent_sentence_problem_by_cause(decide_repo, tmp_path, monkeypatch):
+    """R2-F10: Die Meldung nennt die Ursache — nicht lesbar, mehrfach, fehlt."""
+    root, home = decide_repo
+    reference = tmp_path / "references" / "brief.md"
+    reference.mkdir(parents=True)                                         # ein Ordner: nicht lesbar
+    monkeypatch.setattr(dl, "BRIEF_REFERENCE", reference)
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 2 and message.startswith("ungeprüft — references/brief.md nicht lesbar ("), message
+    reference.rmdir()
+    for text, start in (("## Der Satz für Subagenten\n\n> eins\n\n> zwei\n",
+                         "ungeprüft — Satz für Subagenten mehrfach in references/brief.md"),
+                        ("## Der Satz für Subagenten\n\nnur Prosa\n",
+                         "ungeprüft — Satz für Subagenten fehlt in references/brief.md")):
+        reference.write_text(text, encoding="utf-8")
+        code, message = dl.write_brief(root, SESSION, "CLI", home)
+        assert code == 2 and message.startswith(start), message
+    assert not brief_file(root).exists()

@@ -14,14 +14,18 @@ Skript gibt es nicht.
 ## Form
 
 Zeile 1 ist die Kopfzeile `<!-- skill: decide | schema: 1 | generated: … -->`; sie zählt nicht
-zu den Feldern und nicht zu den Zeilen. Danach genau die sechs Felder unten, jedes als
+zu den Feldern und nicht zu den Zeilen. Sie nennt den Befehl lesbar, bei einem Thema mit `--` aber
+nicht wörtlich kopierbar: `--` steht dort als `‐‐` (U+2010), weil `--` in einem HTML-Kommentar nicht
+erlaubt ist. Danach genau die sechs Felder unten, jedes als
 Überschrift `## <Feld>`, der Inhalt in den Zeilen darunter. Jede Überschrift außerhalb eines
 Codezauns ist ein Feld, auch eine `###`; in einem Codezaun (```` ``` ```` oder `~~~`) ist eine
 Zeile mit `#` Text des Feldes. Ein Auftrag hat höchstens 25 Zeilen mit Text ohne die Kopfzeile;
 Leerzeilen zählen nicht. Die Grenze ist gesetzt, nicht gemessen: Ein längerer Auftrag nimmt dem
-Subagenten den Vorteil des frischen Kontexts. Liegt ein Auftrag schon so, wie `brief --topic` ihn
-schreibt, darüber (viele Regeln), sagt es „Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf,
-höchstens 25 — Feste Vorgaben kürzen“; geschrieben wird er trotzdem.
+Subagenten den Vorteil des frischen Kontexts. Bleiben in einem Auftrag, wie `brief --topic` ihn
+schreibt, für Frage, Anlass und Wo nachsehen keine drei Zeilen mehr (mehr als 22, etwa bei vielen
+Regeln), sagt es „Hinweis: Auftrag hat schon <n> Zeilen ohne Kopf, höchstens 25; für Frage, Anlass
+und Wo nachsehen bleiben <m> Zeilen, mindestens 3 nötig — Regeln kürzen, die Zeilen zu offenen Fragen
+nie“; geschrieben wird er trotzdem.
 
 ## Die sechs Felder
 
@@ -29,18 +33,22 @@ höchstens 25 — Feste Vorgaben kürzen“; geschrieben wird er trotzdem.
 | --- | --- | --- |
 | Frage | ein Satz, neutral, ohne Wörter der Wortliste | Hauptagent |
 | Anlass | die laufende Aufgabe und ihr Ziel | Hauptagent |
-| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln, offene große Fragen —, je mit Quelle | Skript: jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile, dann jede offene große Frage des Themas als `- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen` (ohne lesbare Ablage: `Status unbekannt`); Hauptagent: Nutzer, Spec, Plan |
-| Schon entschieden | die Einträge der Sitzung mit demselben Thema; eine große Frage nur, wenn ihr Block in `docs/big-decisions.md` freigegeben (mit Antwort) oder abgelehnt ist | Skript, aus Protokoll und Ablage; `—`, wenn keiner |
+| Feste Vorgaben | was nicht zur Wahl steht — Nutzer, Spec, Plan, Regeln, offene große Fragen —, je mit Quelle | Skript: zuerst jede offene große Frage des Themas aus `docs/big-decisions.md`, aus jeder Sitzung, als `- D-<n> offen: <frage> — nicht entscheiden, nicht darauf aufbauen` (ohne lesbare Ablage, bei doppeltem Block oder anderem Status: `Status unbekannt`), dann jede Regel aus `.skills/decide/rules.md` und `~/.skills/decide/rules.md` mit Datei und Zeile; Hauptagent: Nutzer, Spec, Plan |
+| Schon entschieden | die Einträge der Sitzung mit demselben Thema und die Blöcke des Themas in `docs/big-decisions.md`, die freigegeben (mit Antwort; per Auftrag freigegeben: mit dem Zitat) oder abgelehnt sind, aus jeder Sitzung, jede Frage einmal | Skript, aus Protokoll und Ablage; `—`, wenn keiner |
 | Wo nachsehen | Pfade und Suchmuster, keine Inhalte | Hauptagent |
 | Rückgabe | Optionen mit Belegen `datei:zeile`, Folgen, Umkehrbarkeit, Empfehlung; dazu der Satz für Subagenten | Skript |
 
 ## Der Satz für Subagenten
 
 Unter Rückgabe steht wörtlich der Satz aus Spec 28, Ablauf 5. Das Skript liest ihn aus diesem
-Abschnitt (`load_subagent_sentence`): das eine Zitat `> …` bis zur nächsten Überschrift, über
-mehrere Zeilen zu einer zusammengezogen. Fehlt die Datei, der Abschnitt oder das Zitat, oder stehen
-zwei Zitate darin, endet `brief --topic` mit Exit 2 „ungeprüft — Satz für Subagenten in
-references/brief.md fehlt (…)“ und schreibt nichts.
+Abschnitt (`load_subagent_sentence`): das eine Zitat `> …` bis zur nächsten Überschrift außerhalb
+eines Codezauns, über mehrere Zeilen zu einer zusammengezogen; jede Zeile des Zitats beginnt mit `> `.
+Sonst endet `brief --topic` mit Exit 2 und schreibt nichts; die Meldung nennt die Ursache:
+„ungeprüft — references/brief.md fehlt“ bzw. „… nicht lesbar (<Ursache>)“, „ungeprüft — Satz für
+Subagenten fehlt in references/brief.md (…)“ (kein Abschnitt, kein Zitat), „ungeprüft — Satz für
+Subagenten mehrfach in references/brief.md (…)“ (zwei Zitate) und „ungeprüft —
+references/brief.md:<n>: … ohne „>““ für eine Zeile ohne `>` mitten im Zitat, die den Satz sonst
+still kürzte.
 
 > Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.
 
