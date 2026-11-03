@@ -2256,6 +2256,11 @@ Themen:
 - **Eine Fehlermeldung zu `rule:` mit Zeilenumbruch im Thema geht über zwei Zeilen.** Das Thema
   steht in „keine Regel „immer fragen: …““ ohne `line_value`; ein Aufrufer, der Zeile für Zeile
   liest, sieht die zweite als eigene Meldung.
+- **Ein überholter offener Block bleibt in `open` stehen.** Ist der jüngste Block zu Frage und
+  Schlüssel offen und kommt danach ein Auftrag (`--approved-by-request`), entsteht ein neuer
+  freigegebener Block; `check` wertet nur den jüngsten, `open` listet den älteren offenen aber
+  weiter, bis jemand ihn mit `resolve` beantwortet. Gemeldet von der Mini-Runde am finalen
+  Prüfpunkt (6603098), nicht behoben.
 
 ### brief
 

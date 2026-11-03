@@ -135,12 +135,28 @@ enthalten.
 Spec 28 ist **abgenommen mit Vorbehalt.** Vier der fünf Evals sind mit Skill grün, alle fünf
 waren ohne Skill rot (Stand 605fdfe). Eval 2 ist rot und bleibt es, weil die Description nicht
 verändert wird; das Routing mitten in einer Aufgabe ist damit der gemessene Schwachpunkt. Die
-19 Akzeptanzkriterien laufen als Tests (160 decide-Tests grün). Der finale Prüfpunkt über den
-ganzen Bau steht aus.
+19 Akzeptanzkriterien laufen als Tests (181 decide-Tests grün, ganze Suite 1794 grün, nur der
+Altfehler in `test_rest_api_architect_gate.py` rot). Der finale Prüfpunkt ist durch (unten).
 
 ## Finaler Prüfpunkt
 
-Steht aus.
+Review mit `/code-review --max-findings all` über `03e05a1..678c767` (76 Dateien, knapp 10 000
+neue Zeilen), danach zwei Fix-Runden und eine vom Nutzer freigegebene Mini-Runde:
+
+| Runde | Funde im Review davor | Commit | Wichtigstes |
+| --- | --- | --- | --- |
+| 1 | 11 | d9c0e27, 648a07e | `check --range <merge>^!` meldete 0 Dateien und Exit 0 (nachgestellt); Basis und Ende jetzt aus `git rev-parse`; `./`-Schlüssel, Wiederholung nach `resolve` |
+| 2 | 11 | fe1ce0d (Spec), 4d57f2a | `#<text>` traf seit Runde 1 auch entfernte Zeilen und gab so das Löschen frei — Fehler des Hauptagenten; getrennt in `#<text>`/`#-<text>` |
+| Mini | 11 | 32e3a71 (Spec), 6603098 | Auftrag nicht neu fragen, jüngster Block gilt, Bare-Repo, `#+<text>` |
+
+Von den 11 Funden des letzten Reviews sind 4 behoben, 4 als Grenzen in `docs/known-limits.md`
+(Abschnitt decide, check) eingetragen, 3 durch die Mini-Runde gegenstandslos. Dazu eine Folge, die
+die Mini-Runde selbst meldete (überholter offener Block bleibt in `open`), ebenfalls als Grenze.
+Kein Review nach der Mini-Runde. `decide_log.py` hat danach 2245 Zeilen.
+
+Nach den Fix-Runden des finalen Prüfpunkts liefen die Evals nicht erneut; SKILL.md blieb dabei
+unverändert, geändert hat sich nur das Verhalten von `check` an Randfällen, das die Unit-Tests
+abdecken.
 
 ## Was nicht gemessen wurde
 

@@ -440,5 +440,12 @@ mechanische Prüfung, ob ein Subagent etwas eingetragen hat; die Prüfung, wie e
 
 ## Next steps
 
+**Stand 2026-11-03: gebaut, abgenommen mit Vorbehalt.** Plan
+`docs/superpowers/plans/2026-11-02-decide.md`, alle 10 Tasks. Evals mit Skill 4 von 5 grün, ohne
+Skill 0 von 5; Eval 2 (`small-decision-cites-repo-source`) bleibt rot, weil decide dort mitten in
+der Aufgabe nicht auslöst — vom Nutzer als Routing-Lücke dokumentiert statt die Description zu
+ändern. Fünf Prüfpunkte mit je zwei Fix-Runden und einer Mini-Runde; was offen blieb, steht in
+`docs/known-limits.md`, Abschnitt decide (`docs/superpowers/reports/decide-report.md`).
+
 Plan mit `impl-plan` (16) unter `docs/superpowers/plans/`; Bau nach `skill-forge` (17) Schritt 3
 bis 7.
