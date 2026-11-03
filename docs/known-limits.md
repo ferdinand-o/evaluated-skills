@@ -2180,7 +2180,7 @@ Themen:
   `app/models.py` ohne Migration ändert, meldet `check` nicht.
 - **Eine Freigabe gilt je Schlüssel, `#<text>` je Datei.** Ein Block `migration:migrations/`
   gibt jede Datei darunter frei, auch eine, die der Auftrag nicht meinte. Mit `#<text>` muss der
-  Text in einer hinzugefügten Zeile der jeweiligen Datei stehen; ein Text, der in einer Datei
+  Text in einer hinzugefügten oder entfernten Zeile der jeweiligen Datei stehen; ein Text, der in einer Datei
   passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel vergleicht
   `check` nie.
 - **Fixtures unter `evals/fixtures/*/migrations/` meldet `check` in diesem Repo.** Das Muster
