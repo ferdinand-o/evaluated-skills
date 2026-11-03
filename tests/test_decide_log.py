@@ -1897,3 +1897,212 @@ def test_tab_in_hand_written_key_is_refused_by_check_too(decide_repo, monkeypatc
     code, out, _ = check_out(capsys, base)
     assert code == 1 and reported(out) == ["migrations/a\tb.py"], out
     assert "Hinweis: D-1 Schlüssel „migration:migrations/a\tb.py“ hat Tab oder Zeilenumbruch" in out, out
+
+
+# --- brief (Task 4): Entscheidungsauftrag an einen Subagenten ------------------------------
+# SUBAGENT ist bewusst ein Literal: der Satz aus Spec 28, Ablauf 5, wörtlich — nicht aus dem
+# Skript gelesen, damit eine Änderung an SUBAGENT_SENTENCE hier auffällt.
+
+SUBAGENT = ("Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und "
+            "schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf "
+            "einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und "
+            "handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, "
+            "Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.")
+BRIEF_HEADER = "<!-- skill: decide | schema: 1 | generated: python decide_log.py brief --topic CLI -->"
+
+
+def brief_file(root, n=1):
+    return log_file(root).parent / f"brief-{n}.md"
+
+
+def brief_sections(text):
+    """Feld → Zeilen mit Text darunter, aus den Überschriften `## <Feld>`."""
+    sections, current = {}, None
+    for line in text.splitlines()[1:]:
+        if line.startswith("## "):
+            current = line[3:].strip()
+            sections[current] = []
+        elif line.strip() and current:
+            sections[current].append(line)
+    return sections
+
+
+def filled_brief(question="Welche Bibliothek parst die Argumente der CLI?", extra=(), anlass=1):
+    """Ein ausgefüllter Auftrag mit Kopfzeile; `anlass` Zeilen unter Anlass, `extra` danach."""
+    return "\n".join([BRIEF_HEADER, "## Frage", question, "## Anlass",
+                      *[f"Aufgabe Schritt {i}" for i in range(anlass)],
+                      "## Feste Vorgaben", "- nur Stdlib (Spec 28)", "## Schon entschieden", "—",
+                      "## Wo nachsehen", "- app/cli.py", "## Rückgabe", "Optionen mit Belegen.", SUBAGENT,
+                      *extra]) + "\n"
+
+
+def brief_check(capsys, path):
+    code = dl.main(["brief", "--check", str(path)])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_brief_takes_entries_from_add_small(decide_repo):
+    """Abnehmer von `add_small` (Task 1): zwei Einträge mit Themen CLI und Logging, der Auftrag zu
+    CLI führt unter Schon entschieden nur den ersten."""
+    root, home = decide_repo
+    for topic, question, decision in (("CLI", "Kurzoption für --verbose?", "Kurzform -v"),
+                                      ("Logging", "Format der Logzeilen?", "JSON")):
+        args = SimpleNamespace(topic=topic, question=question, decision=decision,
+                               evidence="gesucht: app/ — Treffer: app/cli.py:3", options=None, home=home)
+        assert dl.add_small(root, SESSION, args)[0] == 0
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0, message
+    assert ".skills/cache/decide/sitzung-1/brief-1.md" in message, message
+    text = brief_file(root).read_text(encoding="utf-8")
+    [line] = brief_sections(text)["Schon entschieden"]
+    assert "Kurzoption für --verbose?" in line and "Kurzform -v" in line and "app/cli.py:3" in line, line
+    assert "Format der Logzeilen" not in text and "JSON" not in text, text
+
+
+def test_brief_header_not_counted(decide_repo, capsys):
+    """Die Kopfzeile zählt nicht zu den 25 Zeilen; Leerzeilen auch nicht."""
+    root, _ = decide_repo
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    text = filled_brief(anlass=13)                     # 25 Zeilen mit Text ohne Kopf
+    assert len([line for line in text.splitlines()[1:] if line.strip()]) == 25
+    path.write_text(text.replace("## Anlass\n", "## Anlass\n\n\n"), encoding="utf-8")
+    code, out, _ = brief_check(capsys, path)
+    assert code == 0 and "25 Zeilen" in out, out
+
+    path.write_text(filled_brief(anlass=14), encoding="utf-8")
+    code, out, _ = brief_check(capsys, path)
+    assert code == 1 and "26 Zeilen ohne Kopf, höchstens 25" in out, out
+
+
+def test_brief_return_sentence(decide_repo, capsys):
+    """`brief --topic X` schreibt den Satz aus Spec 28, Ablauf 5, wörtlich unter Rückgabe;
+    `brief --check` meldet sein Fehlen nicht (unterrichten, nicht mechanisch prüfen)."""
+    root, _ = decide_repo
+    assert dl.SUBAGENT_SENTENCE == SUBAGENT
+    assert dl.main(["brief", "--topic", "X"]) == 0
+    text = brief_file(root).read_text(encoding="utf-8")
+    assert SUBAGENT in brief_sections(text)["Rückgabe"], text
+    assert text.count(SUBAGENT) == 1
+    assert SUBAGENT in dl.BRIEF_REFERENCE.read_text(encoding="utf-8")       # brief.md zitiert ihn
+    capsys.readouterr()
+
+    filled = text.replace("## Frage\n", "## Frage\nWelche Bibliothek parst die Argumente?\n")
+    brief_file(root).write_text(filled, encoding="utf-8")
+    code, out, _ = brief_check(capsys, brief_file(root))
+    assert code == 0, out
+    brief_file(root).write_text(filled.replace(SUBAGENT + "\n", ""), encoding="utf-8")
+    code, out, err = brief_check(capsys, brief_file(root))
+    assert code == 0 and "Subagent" not in out + err, out + err
+
+
+def test_wordlist_from_reference(decide_repo, tmp_path, monkeypatch, capsys):
+    """Die Wortliste kommt aus references/brief.md — dieselbe Liste für Mensch und Parser; fehlt
+    die Datei oder parst sie nicht, endet `brief --check` mit Exit 2, nie mit Erfolg."""
+    root, _ = decide_repo
+    words, problem = dl.load_wordlist(dl.BRIEF_REFERENCE)
+    assert problem is None
+    assert words == ("sollte", "besser", "lieber", "empfehle", "ich würde", "offensichtlich")
+
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    path.write_text(filled_brief("Sollte die CLI besser argparse nutzen?"), encoding="utf-8")
+    reference = tmp_path / "references" / "brief.md"
+    reference.parent.mkdir()
+    monkeypatch.setattr(dl, "BRIEF_REFERENCE", reference)
+    code, out, err = brief_check(capsys, path)
+    assert code == 2 and not out and "ungeprüft — references/brief.md fehlt" in err, (out, err)
+
+    reference.write_text("# Auftrag\n\n## Wortliste\n\n- `argparse`\n\n## Danach\n\n- `sollte`\n", encoding="utf-8")
+    assert dl.load_wordlist(reference) == (("argparse",), None)
+    code, out, _ = brief_check(capsys, path)                   # gelesen, nicht im Skript hinterlegt
+    assert code == 1 and "„argparse“" in out and "„sollte“" not in out, out
+
+    for broken, reason in (("# Auftrag\n\n- `sollte`\n", "kein Abschnitt „## Wortliste“"),
+                           ("## Wortliste\n\nnur Prosa\n", "ohne Listenpunkte"),
+                           ("## Wortliste\n\n- sollte\n", "references/brief.md:3: Listenpunkt „- sollte“")):
+        reference.write_text(broken, encoding="utf-8")
+        assert dl.load_wordlist(reference)[0] == ()
+        code, out, err = brief_check(capsys, path)
+        assert code == 2 and err.startswith("ungeprüft — ") and reason in err, (broken, err)
+
+
+def test_brief_words_whole_and_case_insensitive(decide_repo, capsys):
+    """Ein Wort der Liste trifft als ganzes Wort, groß oder klein, nur in der Frage; eine Wortfolge
+    auch über mehrere Leerzeichen."""
+    root, _ = decide_repo
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    path.write_text(filled_brief("Wie verbessern wir die Fehlermeldung, ohne dass Tests brechen?",
+                                 anlass=1).replace("Aufgabe Schritt 0", "Ich würde lieber argparse nehmen"),
+                    encoding="utf-8")
+    code, out, _ = brief_check(capsys, path)
+    assert code == 0, out
+    path.write_text(filled_brief("Ich  würde fragen: OFFENSICHTLICH argparse?"), encoding="utf-8")
+    code, out, _ = brief_check(capsys, path)
+    assert code == 1 and "„ich würde“" in out and "„offensichtlich“" in out and "„sollte“" not in out, out
+
+
+def test_brief_check_fields(decide_repo, capsys):
+    """Gemeldet werden Felder außer den sechs, Text vor dem ersten Feld, fehlende und doppelte Felder."""
+    root, _ = decide_repo
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    text = filled_brief(extra=["## Frage", "Noch eine?"])
+    text = text.replace(BRIEF_HEADER + "\n", BRIEF_HEADER + "\nMeine Einschätzung: argparse\n")
+    path.write_text(text.replace("## Wo nachsehen\n- app/cli.py\n", ""), encoding="utf-8")
+    code, out, _ = brief_check(capsys, path)
+    assert code == 1, out
+    assert "Text vor dem ersten Feld (Zeile 2)" in out, out
+    assert "Feld „Frage“ steht doppelt" in out and "es fehlt: Wo nachsehen" in out, out
+
+
+def test_brief_check_consumer_rule(decide_repo, capsys):
+    """Ohne Kopfzeile von decide, mit höherem schema oder ohne Datei: Exit 2 „ungeprüft — …“."""
+    root, _ = decide_repo
+    path = brief_file(root)
+    path.parent.mkdir(parents=True)
+    code, _, err = brief_check(capsys, path)
+    assert code == 2 and "ungeprüft — Auftrag" in err and "fehlt" in err, err
+    path.write_text(filled_brief().split("\n", 1)[1], encoding="utf-8")
+    code, _, err = brief_check(capsys, path)
+    assert code == 2 and "ohne Kopfzeile von decide" in err, err
+    path.write_text(filled_brief().replace("schema: 1", "schema: 2"), encoding="utf-8")
+    code, _, err = brief_check(capsys, path)
+    assert code == 2 and "schema 1 erwartet, 2 gefunden" in err, err
+
+
+def test_brief_numbers_count_up_and_need_session(decide_repo, monkeypatch, capsys):
+    """Jeder Auftrag bekommt die nächste Nummer; `brief --topic` braucht eine Sitzung, `--check` nicht."""
+    root, home = decide_repo
+    assert dl.write_brief(root, SESSION, "CLI", home)[0] == 0
+    first = brief_file(root).read_text(encoding="utf-8")
+    code, message = dl.write_brief(root, SESSION, "Logging", home)
+    assert code == 0 and "brief-2.md" in message, message
+    assert brief_file(root).read_text(encoding="utf-8") == first
+    assert "--topic Logging -->" in brief_file(root, 2).read_text(encoding="utf-8").splitlines()[0]
+    assert dl.write_brief(root, SESSION, "  ", home)[0] == 1
+
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    capsys.readouterr()
+    assert dl.main(["brief", "--topic", "CLI"]) == 1
+    assert "--session" in capsys.readouterr().err
+    assert not brief_file(root, 3).exists()
+    code, out, _ = brief_check(capsys, brief_file(root))
+    assert code == 0, out
+
+
+def test_brief_reports_unreadable_rules_and_log(decide_repo, capsys):
+    """Eine unlesbare Regeldatei meldet brief wie add (rule_problems) und schreibt trotzdem; ein
+    unlesbares Protokoll lässt den Auftrag aus — Schon entschieden wäre sonst still leer."""
+    root, home = decide_repo
+    (root / ".skills" / "decide" / "rules.md").mkdir(parents=True)          # ein Ordner: nicht lesbar
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 0 and "Hinweis: Regeln .skills/decide/rules.md nicht lesbar" in message, message
+    assert brief_file(root).exists()
+
+    log_file(root).mkdir(parents=True)
+    code, message = dl.write_brief(root, SESSION, "CLI", home)
+    assert code == 1 and "nicht lesbar" in message and "kein Auftrag geschrieben" in message, message
+    assert not brief_file(root, 2).exists()
