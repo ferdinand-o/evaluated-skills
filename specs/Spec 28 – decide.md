@@ -201,7 +201,10 @@ es auf `/`, ist es ein Präfix; sonst ein Glob, den das Skript selbst in eine Re
 `PurePath.full_match` (erst ab Python 3.13). Eine Stelle ist eine Datei im Diff. Mit `#<text>`
 gibt ein Eintrag eine Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten; mit
 `#-<text>` nur, wenn ihre entfernten Zeilen `<text>` enthalten (Entfernen einer Abhängigkeit,
-Löschen einer Migration) — eine Freigabe zum Hinzufügen gibt nie das Entfernen frei. Weitere
+Löschen einer Migration) — eine Freigabe zum Hinzufügen gibt nie das Entfernen frei. `#+<text>`
+ist die ausdrückliche Form für hinzugefügte Zeilen und nötig, wenn der Text selbst mit `-` oder
+`+` beginnt (`#+--extra-index-url`); `#<text>` ist ihre Kurzform. Eine geänderte Zeile erscheint
+im Diff als entfernte und hinzugefügte Zeile und trifft deshalb beide Formen. Weitere
 Änderungen in derselben Datei gibt ein passender Eintrag mit frei. Ein führendes `./` im
 Pfadmuster entfällt, ein absoluter Pfad oder `..` wird abgewiesen.
 
@@ -236,6 +239,10 @@ Pfadmuster in `reversibility.md`:
 | `api` | teilweise | `openapi.*`, `api/openapi.*` — eine öffentliche Python- oder JS-Schnittstelle erkennt es nicht |
 | `data-delete`, `unsaved-work`, `push`, `external`, `cost` | ungeprüft | stehen in keinem Diff |
 
+Für eine Frage mit demselben Schlüssel gilt nur der jüngste Block: Wird eine schon beantwortete
+Frage neu gestellt (andere Optionen oder Empfehlung), gibt der ältere freigegebene Block nichts
+mehr frei, bis der neue beantwortet ist. Ein wiederholter Aufruf auf eine per Auftrag
+freigegebene Frage legt keinen neuen Block an.
 Gemeldet wird jede Stelle ohne Eintrag mit passendem Schlüssel und Status `freigegeben`, mit
 Datei, Kategorie und Grund; Exit 1 bei mindestens einer Stelle, sonst 0. Jede Ausgabe endet mit
 „ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration,
