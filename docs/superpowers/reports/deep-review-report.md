@@ -703,6 +703,22 @@ gebündelt als F1–F8:
 
 Ergebnis: 1.792 Tests grün, SKILL.md mit 148 Zeilen.
 
+Das Review des Fixes meldete 10 Funde. In Runde 2 kamen sechs:
+
+- Der neue Doku-Test war auf HEAD schon rot, weil mein eigener Report-Eintrag den alten Stand
+  zitierte. Der Test prüft jetzt nur die Abschnitte mit dem aktuellen Stand.
+- `audit` vergleicht das Werkzeug in kanonischer Form auf beiden Seiten.
+- `cleanup --stale` löscht die Refs aller anderen Läufe, auch offener. Hilfe, Docstring und
+  SKILL.md sagen das jetzt.
+- `_meta.generated` heißt `python scripts/review_kit.py …`, ist also relativ zum Skill-Ordner
+  und lässt sich erneut eintippen.
+- `plan` kündigt die angelegte `.gitignore` an.
+- Die Längengrenze gilt nur bei `split: false`.
+- Die gekürzte `findings.json` für `fix-task` hat einen festen Pfad unter `.skills/cache/tasks/`.
+
+Ergebnis: 1.797 Tests grün. Offen bleibt ein Aufräumpunkt: Ein Test listet den Cache-Ordner
+selbst, statt den Helfer `_runs` zu nutzen.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
