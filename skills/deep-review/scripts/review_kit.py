@@ -69,8 +69,10 @@ PACKET_SIZE = 600         # obere Paketgröße beim Teilen (kleiner von diesem W
 BLOCK_MAX_CHARS = 30000   # Gegenstellen-Block je Paket
 MERGE_LINE_GAP = 3        # Funde derselben Datei mit höchstens diesem Abstand vereinigen
 RAISE_DEPTH = 2           # raise-Stellen transitiv im selben Modul
+FACTORY_DEPTH = 2         # raise fabrik(...): Fabriken in Fabriken so tief auf ihren Typ auflösen
 FLAG_DEPTH = 4            # Weg eines Schlüsselwort-Arguments durch die Gegenstellen
 AMBIGUOUS_MAX = 3         # mehr gleichnamige Definitionen ohne Importbezug: nicht raten
+EXTERNAL = "extern"       # Empfänger eines Attribut-Aufrufs ist ein Modul außerhalb des Repos
 REPORT_BASE_LINES = 20    # Anti-Zeremonie: Bericht höchstens so viele Zeilen plus eine je Fund
 
 SKILL_NAME = "deep-review"
@@ -117,6 +119,7 @@ PACKET_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 # Windows-Kommandozeile (32767), mit Platz für git und die übrigen Argumente.
 ARG_CHUNK_CHARS = 8000
 LOCK_NAME = "plan.lock"   # Sperrdatei im Laufordner, solange plan.json geändert wird
+BREAK_SUFFIX = ".break"   # Brechsperre plan.lock.break: nur ihr Halter entfernt eine tote Sperre
 LOCK_WAIT = 600           # Sekunden, die ein Aufruf auf die Sperre wartet
 LOCK_POLL = 0.05          # Sekunden zwischen zwei Versuchen
 MESSAGE_CACHE_SIZE = 64   # Commit-Messages so vieler Bereiche je Prozess zwischenspeichern
@@ -281,12 +284,35 @@ def range_text(span: Span) -> str:
     return span.target if span.log_base is None else f"{span.base}..{span.target}"
 
 
+SHALLOW_HINT = "flacher Klon: Basis fehlt, git fetch --unshallow oder Bereich angeben"
+
+
+def _is_shallow(repo: Path) -> bool:
+    return _git(repo, "rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def _shallow_boundary(repo: Path, sha: str) -> bool:
+    """Ist `sha` ein Grenz-Commit eines flachen Klons (`git rev-parse
+    --is-shallow-repository`, Grenzen in `.git/shallow`)? Er hat in Git keine Eltern, ist
+    aber kein Wurzel-Commit. Ist die Grenzdatei nicht lesbar, gilt jeder elternlose Commit
+    des flachen Klons als Grenze — lieber ein KitError als der leere Baum als Basis."""
+    if not _is_shallow(repo):
+        return False
+    shallow = Path(_git(repo, "rev-parse", "--git-path", "shallow").strip())
+    try:
+        return sha in (repo / shallow).read_text(encoding="ascii", errors="replace").split()
+    except OSError:
+        return True
+
+
 def split_range(repo: Path, rng) -> Span:
     """`BASIS..ZIEL` → Span. Eine einzelne Revision `X` heißt `X^..X`, beim Wurzel-Commit
     leerer Baum..X; ohne Bereich (None) der letzte Commit `HEAD`. Bei zwei Punkten wird ab
     der Merge-Basis gezählt. Drei Punkte sind abgelehnt — zwei Punkte zählen schon so. Ein
     schon aufgelöster `Span` kommt unverändert zurück, ohne git: So lösen die Sammler und die
-    Datei-Schlüssel in `build_plan` den Bereich nicht ein zweites Mal auf."""
+    Datei-Schlüssel in `build_plan` den Bereich nicht ein zweites Mal auf. Die Grenze eines
+    flachen Klons ist kein Wurzel-Commit: Fehlt dort die Basis, ist das ein KitError
+    (`SHALLOW_HINT`), nie der leere Baum."""
     if isinstance(rng, Span):
         return rng
     rng = _requested_range(rng)
@@ -296,6 +322,8 @@ def split_range(repo: Path, rng) -> Span:
         target = _commit(repo, rng)
         parents = _git(repo, "rev-list", "--parents", "-n", "1", target).split()[1:]
         if not parents:
+            if _shallow_boundary(repo, target):
+                raise KitError(f"Bereich {rng!r}: {SHALLOW_HINT}")
             return Span(_empty_tree(repo), target, None)
         return Span(parents[0], target, parents[0])
     base_rev, target_rev = rng.split("..", 1)
@@ -304,7 +332,9 @@ def split_range(repo: Path, rng) -> Span:
         merge_base = _git(repo, "merge-base", log_base, target).strip()
     except GitError as exc:
         if exc.returncode == 1:
-            raise KitError(f"Bereich {rng!r}: BASIS und ZIEL haben keine gemeinsame Basis") from None
+            why = (SHALLOW_HINT if _is_shallow(repo)
+                   else "BASIS und ZIEL haben keine gemeinsame Basis")
+            raise KitError(f"Bereich {rng!r}: {why}") from None
         raise
     return Span(merge_base, target, log_base)
 
@@ -788,29 +818,37 @@ def _lock_owner(lock: Path):
     return text, pid, _pid_alive(pid)
 
 
+def _breaker(lock: Path) -> Path:
+    """Die Brechsperre neben `lock`: wer eine tote Sperre entfernt, hält sie."""
+    return lock.with_name(lock.name + BREAK_SUFFIX)
+
+
 def _break_lock(lock: Path, text: str) -> bool:
-    """Die Sperre eines toten Besitzers entfernen, ohne eine frische zu treffen: umbenennen,
-    dann prüfen, dass der Inhalt noch der gelesene ist — sonst (ein anderer hat sie eben
-    übernommen) zurücklegen, wenn der Platz noch frei ist. False nur, wenn sie sich nicht
-    umbenennen lässt; dann wartet der Aufrufer wie bei einer belegten Sperre."""
-    grave = lock.with_name(f"{LOCK_NAME}.{os.getpid()}.{secrets.token_hex(4)}")
+    """Die Sperre eines toten Besitzers entfernen, ohne je eine lebende zu treffen. Erst die
+    Brechsperre (`_breaker`) mit O_EXCL anlegen — so bricht immer nur einer —, darunter die
+    Sperre neu lesen und nur löschen, wenn ihr Inhalt noch der gelesene `text` ist und ihr
+    Besitzer weiter nicht lebt. Solange die tote Sperre liegt, legt niemand eine neue an,
+    und löschen darf sie nur der Halter der Brechsperre; zwischen Lesen und Löschen ändert
+    sie sich also nicht. Hat ein anderer sie schon gebrochen und hält eine neue, bleibt diese
+    unberührt — nichts wird umbenannt. True: der Aufrufer versucht die Sperre neu. False:
+    die Brechsperre ist belegt; der Aufrufer wartet wie bei einer belegten Sperre und endet
+    nach der Frist mit KitError. Eine liegengebliebene Brechsperre wird nie gebrochen:
+    lieber ein KitError als zwei Halter."""
+    breaker = _breaker(lock)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     try:
-        os.rename(lock, grave)
-    except FileNotFoundError:
-        return True
+        fd = os.open(breaker, flags, 0o666)
     except OSError:
         return False
     try:
-        moved = grave.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        moved = None
-    if moved != text:
-        try:
-            os.link(grave, lock)
-        except OSError:
-            pass
-    grave.unlink(missing_ok=True)
-    return True
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()} {socket.gethostname()}\n")
+        owner = _lock_owner(lock)
+        if owner is not None and owner[0] == text and owner[2] is False:
+            lock.unlink(missing_ok=True)
+        return True
+    finally:
+        breaker.unlink(missing_ok=True)
 
 
 @contextlib.contextmanager
@@ -838,6 +876,9 @@ def _plan_lock(directory: Path, run_id: str, wait=None):
             if time.monotonic() >= deadline:
                 if alive is False:
                     who = f"Sperre des beendeten Prozesses {pid} lässt sich nicht entfernen"
+                    if _breaker(lock).exists():
+                        who += (f": Brechsperre {_breaker(lock)} belegt; läuft kein Aufruf "
+                                "mehr, sie entfernen")
                 elif alive:
                     who = f"Prozess {pid} hält sie noch; später erneut aufrufen"
                 elif pid is not None:
@@ -1398,13 +1439,14 @@ def _unquote_path(raw: str) -> str:
 def _changed_lines(repo: Path, span: Span, files) -> dict:
     """Geänderte Zeilen am ZIEL je Datei: `git diff -U0 BASIS ZIEL -- <dateien>` (Pathspecs in
     Stücken), ohne Umbenennungen, externe Diffs, Textconv und Farbe, mit festen Präfixen
-    `a/` `b/` gegen `diff.noprefix`. Eine reine Löschung ändert keine Zeile am ZIEL; eine
-    gelöschte Datei fehlt."""
+    `a/` `b/` gegen `diff.noprefix` und `--inter-hunk-context=0` gegen
+    `diff.interHunkContext` (sonst zählten Kontextzeilen zwischen zwei Hunks als geändert).
+    Eine reine Löschung ändert keine Zeile am ZIEL; eine gelöschte Datei fehlt."""
     changed: dict[str, set] = {}
     for chunk in _literal_chunks(files):
-        out = _git(repo, "diff", "-U0", "--no-renames", "--no-ext-diff", "--no-textconv",
-                   "--no-color", "--src-prefix=a/", "--dst-prefix=b/", span.base, span.target,
-                   "--", *chunk)
+        out = _git(repo, "diff", "-U0", "--inter-hunk-context=0", "--no-renames",
+                   "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/",
+                   "--dst-prefix=b/", span.base, span.target, "--", *chunk)
         current, header = None, False
         for line in out.split("\n"):
             if line.startswith("diff --git "):
@@ -1531,6 +1573,7 @@ class _PyIndex:
         self.source: dict[str, bytes] = {}
         self._lines: dict[str, list] = {}
         self._prefixes: dict[str, set] = {}
+        self._imports: dict[str, dict] = {}
         for rel in sorted(sources):
             try:
                 with warnings.catch_warnings():
@@ -1625,10 +1668,76 @@ class _PyIndex:
                         or self.module_file(module))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if "." in alias.name:
-                        add(self.module_file(alias.name))
+                    add(self.module_file(alias.name))
         self._prefixes[rel] = out
         return out
+
+    def import_names(self, rel: str) -> dict:
+        """Die Namen, die die Importe von `rel` binden: Name → ("module", modulpfad) für ein
+        Modul (`import a.b` bindet `a` und `a.b`, `import a.b as x` bindet `x`, `from a
+        import b` bindet `b`, wenn `a.b` ein Modul im Repo ist) oder ("name", modulpfad,
+        name) für einen Namen aus einem Modul (`from a import C`)."""
+        if rel in self._imports:
+            return self._imports[rel]
+        out: dict[str, tuple] = {}
+        tree = self.trees.get(rel)
+        for node in ast.walk(tree) if tree is not None else ():
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.asname:
+                        out[alias.asname] = ("module", alias.name)
+                        continue
+                    parts = alias.name.split(".")
+                    for k in range(1, len(parts) + 1):
+                        out.setdefault(".".join(parts[:k]), ("module", ".".join(parts[:k])))
+            elif isinstance(node, ast.ImportFrom):
+                module = _from_module(rel, node)
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    full = f"{module}.{alias.name}" if module else alias.name
+                    if module is None or self.module_file(full):
+                        out[alias.asname or alias.name] = ("module", full)
+                    else:
+                        out[alias.asname or alias.name] = ("name", module, alias.name)
+        self._imports[rel] = out
+        return out
+
+    def _has_class(self, rel: str, name: str) -> bool:
+        tree = self.trees.get(rel)
+        return tree is not None and any(
+            isinstance(n, ast.ClassDef) and n.name == name for n in tree.body)
+
+    def receiver(self, dotted: str, from_file: str):
+        """Wohin der Empfänger `dotted` eines Attribut-Aufrufs zeigt, nur über einen
+        Importbezug oder eine Klasse: (datei, None) für ein Modul im Repo, (datei, klasse)
+        für eine Klasse auf Modulebene (in der eigenen Datei, importiert oder als
+        `modul.Klasse`), EXTERNAL für ein Modul außerhalb des Repos, None, wenn der Typ
+        unbekannt ist (eine Variable, ein Ausdruck, ein Attribut eines Moduls)."""
+        parts = dotted.split(".")
+        imports = self.import_names(from_file)
+        for k in range(len(parts), 0, -1):
+            entry = imports.get(".".join(parts[:k]))
+            if entry is None:
+                continue
+            rest = parts[k:]
+            if entry[0] == "name":
+                found = self.module_file(entry[1])
+                if found is None:
+                    return EXTERNAL
+                return (found, entry[2]) if not rest and self._has_class(found, entry[2]) else None
+            files = [self.module_file(".".join([entry[1], *rest[:j]]))
+                     for j in range(len(rest) + 1)]
+            if not any(files):
+                return EXTERNAL
+            if files[-1]:
+                return files[-1], None
+            if len(files) > 1 and files[-2] and self._has_class(files[-2], rest[-1]):
+                return files[-2], rest[-1]
+            return None
+        if len(parts) == 1 and self._has_class(from_file, parts[0]):
+            return from_file, parts[0]
+        return None
 
     def resolve(self, name: str, from_file: str):
         """(Definitionen, mehrdeutig) zu einem Namen: bevorzugt die eigene Datei, dann die
@@ -1654,17 +1763,39 @@ class _PyIndex:
         return [c for c in ranked if rank(c) == best][:COUNTERPART_MAX_DEFS], False
 
     def resolve_call(self, call: ast.Call, from_file: str):
-        """Wie `resolve`, aber ein voll qualifizierter Modulpfad (`a.b.C(...)`) entscheidet
-        zuerst."""
-        name = _callee_name(call)
-        if isinstance(call.func, ast.Attribute):
-            module = _dotted(call.func.value)
-            found = self.module_file(module) if module and "." in module else None
-            if found:
-                exact = [c for c in self.defs.get(name, []) if c[0] == found]
-                if exact:
-                    return exact[:COUNTERPART_MAX_DEFS], False
-        return self.resolve(name or "", from_file)
+        """Wie `resolve` für `name(...)`. Ein Attribut-Aufruf `x.name(...)` wird nur über
+        einen Importbezug, `self`/`cls`/`super()` oder eine bekannte Klasse aufgelöst
+        (`receiver`): ein Modul im Repo (`import helpers; helpers.load()`, `a.b.f()`) nimmt
+        genau dessen Funktion, eine Klasse (`Klasse.name()`, `Klasse(...).name()`) ihre
+        Methode — sonst wie `self` über den Namen —, `self`, `cls` und `super()` gehen über
+        den Namen. Bei
+        unbekanntem Empfänger (`m.start()` auf einem Match-Objekt), einem Modul außerhalb
+        des Repos oder einem Modul ohne diese Funktion gibt es nichts; die Stelle zählt als
+        nicht aufgelöst, wenn es gleichnamige Definitionen gibt."""
+        name = _callee_name(call) or ""
+        if not isinstance(call.func, ast.Attribute):
+            return self.resolve(name, from_file)
+        cands = self.defs.get(name, [])
+        if not cands:
+            return [], False
+        recv = call.func.value
+        if (isinstance(recv, ast.Name) and recv.id in ("self", "cls")) or (
+                isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name)
+                and recv.func.id == "super" and not recv.args):
+            return self.resolve(name, from_file)
+        made = isinstance(recv, ast.Call)
+        dotted = _dotted(recv.func if made else recv)
+        target = self.receiver(dotted, from_file) if dotted else None
+        if made and not (isinstance(target, tuple) and target[1]):
+            target = None   # nur `Klasse(...).name()` hat einen bekannten Typ
+        if target is None or target is EXTERNAL:
+            return [], True
+        found, cls = target
+        qual = f"{cls}.{name}" if cls else name
+        exact = [c for c in cands if c[0] == found and c[1] == qual]
+        if exact:
+            return exact[:COUNTERPART_MAX_DEFS], False
+        return self.resolve(name, from_file) if cls else ([], True)
 
 
 def _from_module(rel: str, node: ast.ImportFrom):
@@ -1728,6 +1859,77 @@ def _signature(node) -> str:
     return f"{prefix} {node.name}({ast.unparse(node.args)})"
 
 
+def _own_nodes(fn):
+    """Knoten im Rumpf von `fn`, ohne in geschachtelte Funktionen, Klassen und Lambdas zu
+    steigen."""
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        item = stack.pop()
+        yield item
+        if not isinstance(item, (*_FUNCS, ast.ClassDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(item))
+
+
+def _factory(index: _PyIndex, rel: str, scope, name: str):
+    """Ist `name` in `raise name(...)` eine Funktion statt eines Typs? Gesucht wird in
+    `scope` (geschachtelte Funktionen), dann auf Modulebene von `rel`, dann in den Dateien
+    seiner Importe. None: keine Funktion dieses Namens bekannt (eine Klasse, ein Parameter,
+    ein Builtin) — der Name ist der Typ. Sonst (datei, knoten) der Funktion, knoten None bei
+    mehreren Kandidaten."""
+    local = [n for n in ast.walk(scope) if isinstance(n, _FUNCS) and n.name == name
+             and n is not scope]
+    found = [(rel, n) for n in local]
+    if not found:
+        cands = [(drel, d) for drel, qual, d in index.defs.get(name, []) if qual == name]
+        found = [c for c in cands if c[0] == rel]
+        if not found:
+            prefixes = index.import_prefixes(rel)
+            found = [c for c in cands if any(
+                c[0] == p or (p.endswith("/") and c[0].startswith(p)) for p in prefixes)]
+    funcs = [c for c in found if isinstance(c[1], _FUNCS)]
+    if not funcs:
+        return None
+    return funcs[0] if len(found) == 1 else (funcs[0][0], None)
+
+
+def _returned_type(index: _PyIndex, rel: str, fn, depth: int):
+    """Der Typ, den die Fabrik `fn` zurückgibt, wenn er eindeutig ist: die Annotation
+    (`-> KitError`), sonst der gemeinsame Typ aller `return X(...)` (Fabriken darin bis
+    `depth` tief aufgelöst). None, wenn das nicht eindeutig ist."""
+    returns = fn.returns
+    if isinstance(returns, ast.Constant) and isinstance(returns.value, str):
+        try:
+            returns = ast.parse(returns.value, mode="eval").body
+        except SyntaxError:
+            returns = None
+    if isinstance(returns, (ast.Name, ast.Attribute)):
+        return ast.unparse(returns)
+    values = [n.value for n in _own_nodes(fn) if isinstance(n, ast.Return)]
+    if depth <= 0 or not values or not all(isinstance(v, ast.Call) for v in values):
+        return None
+    kinds = {_exc_type(index, rel, fn, v, depth - 1) for v in values}
+    kind = kinds.pop() if len(kinds) == 1 else None
+    return None if kind is None or kind.endswith("(...)") else kind
+
+
+def _exc_type(index: _PyIndex, rel: str, scope, exc, depth: int) -> str:
+    """Typ einer raise-Stelle für `wirft:`. `raise X` und `raise X(...)` nennen `X`; ist `X`
+    eine Funktion (eine Fabrik wie `bad(...)`, die eine Ausnahme liefert), steht ihr
+    Rückgabetyp da, wenn er eindeutig ist (`_returned_type`), sonst `X(...)` — nie der Name
+    der Fabrik, als wäre er ein Typ."""
+    if not isinstance(exc, ast.Call):
+        return ast.unparse(exc)
+    if not isinstance(exc.func, ast.Name):
+        return ast.unparse(exc.func)
+    name = exc.func.id
+    factory = _factory(index, rel, scope, name)
+    if factory is None:
+        return name
+    frel, fn = factory
+    returned = _returned_type(index, frel, fn, depth) if fn is not None else None
+    return returned or f"{name}(...)"
+
+
 def _raises_in(index: _PyIndex, rel: str, node, depth: int, seen: set) -> list:
     """(Typ, Zeile) aller `raise` in `node`, transitiv über Aufrufe von Funktionen desselben
     Moduls bis `depth` Ebenen tief."""
@@ -1738,8 +1940,7 @@ def _raises_in(index: _PyIndex, rel: str, node, depth: int, seen: set) -> list:
     out = []
     for item in ast.walk(node):
         if isinstance(item, ast.Raise) and item.exc is not None:
-            exc = item.exc.func if isinstance(item.exc, ast.Call) else item.exc
-            out.append((ast.unparse(exc), item.lineno))
+            out.append((_exc_type(index, rel, node, item.exc, FACTORY_DEPTH), item.lineno))
         elif depth > 0 and isinstance(item, ast.Call):
             for drel, _qual, dnode in index.defs.get(_callee_name(item) or "", []):
                 if drel == rel and isinstance(dnode, _FUNCS):

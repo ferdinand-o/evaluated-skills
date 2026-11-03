@@ -4,6 +4,7 @@
 Beide bauen denselben Bereich `base..HEAD`; die Trefferquote misst der Report daran. Jeder
 Fehler hängt an einer Stelle in `base`, die der Diff nicht berührt."""
 
+import ast
 import datetime as dt
 import difflib
 import hashlib
@@ -5551,3 +5552,237 @@ def test_cp10b_f6_length_limit_and_reduced_copy():
         flat = _flat(_doc(rel))
         assert copy_path in flat, rel
         assert "das `findings.json` des Laufs ändert er nicht" in flat, rel
+
+
+# --- Finaler Prüfpunkt, Paket A: Funde F1–F9 zu Kit, Evals und dr-split ----------------------
+
+def _blocks_of(found):
+    return "\n".join(x for e in found.entries for x in e["lines"])
+
+
+def test_final_f1_plain_import_is_an_import_link(tmp_path):
+    kit = _kit()
+    helpers = "def load(name):\n    raise ValueError(name)\n"
+    other = "def load(name):\n    return name\n"
+    app = "import helpers\n\n\ndef run():\n    return 1\n"
+    after = app.replace("return 1", "return helpers.load('f')")
+    root = _commit_repo(tmp_path, {"helpers.py": helpers, "a/x.py": other, "b/x.py": other,
+                                   "app.py": app}, {"app.py": after})
+    found = kit.collect_python(root, "base..HEAD", ["app.py"])
+    text = _blocks_of(found)
+    assert "- Gegenstelle load [helpers.py:1]" in text and "wirft: ValueError" in text, text
+    assert "a/x.py" not in text and "b/x.py" not in text, text
+    assert found.unresolved == 0
+    # Auch ein Alias und das Paket eines einfachen Imports gelten als Importbezug.
+    index = kit._PyIndex({"helpers.py": helpers.encode(), "a/x.py": other.encode(),
+                          "pkg/__init__.py": b"", "pkg/mod.py": helpers.encode(),
+                          "app.py": b"import helpers as h\nimport pkg\n"})
+    assert {"helpers.py", "pkg/"} <= index.import_prefixes("app.py")
+    call = ast.parse("h.load('f')").body[0].value
+    assert [d[0] for d in index.resolve_call(call, "app.py")[0]] == ["helpers.py"]
+
+
+def _three_commits(src):
+    src.mkdir()
+    git(src, "init", "--quiet", "--initial-branch=main")
+    git(src, "config", "user.email", "t@example.invalid")
+    git(src, "config", "user.name", "Test")
+    for n in (1, 2, 3):
+        (src / f"m{n}.py").write_text(f"x = {n}\n", encoding="utf-8")
+        git(src, "add", "-A")
+        git(src, "commit", "--quiet", "-m", f"c{n}")
+    return src
+
+
+def test_final_f2_shallow_boundary_is_no_root_commit(tmp_path):
+    kit = _kit()
+    src = _three_commits(tmp_path / "src")
+    for depth, path in ((1, tmp_path / "flat"), (2, tmp_path / "two")):
+        subprocess.run(["git", "clone", "--quiet", "--depth", str(depth), src.as_uri(), str(path)],
+                       check=True, capture_output=True)
+    with pytest.raises(kit.KitError, match="flacher Klon: Basis fehlt") as caught:
+        kit.build_plan(tmp_path / "flat", None, "standard", "bugs", None, False)
+    assert "git fetch --unshallow" in str(caught.value)
+    with pytest.raises(kit.KitError, match="flacher Klon"):
+        kit.numstat(tmp_path / "flat", "HEAD")
+    # Mit Tiefe 2 hat HEAD seinen Elter: der Standard zählt nur m3.py, die Grenze HEAD~1 nicht.
+    assert list(kit.numstat(tmp_path / "two", None).counts) == ["m3.py"]
+    with pytest.raises(kit.KitError, match="flacher Klon"):
+        kit.split_range(tmp_path / "two", "HEAD~1")
+    # Der echte Wurzel-Commit eines vollen Klons bleibt die Wurzel.
+    span = kit.split_range(src, "HEAD~2")
+    assert span.log_base is None and list(kit.numstat(src, "HEAD~2").counts) == ["m1.py"]
+
+
+def test_final_f3_changed_lines_ignore_inter_hunk_context(tmp_path):
+    kit = _kit()
+    before = "".join(f"v{i} = {i}\n" for i in range(1, 13))
+    after = before.replace("v5 = 5", "v5 = 50").replace("v9 = 9", "v9 = 90")
+    root = _commit_repo(tmp_path, {"m.py": before}, {"m.py": after})
+    git(root, "config", "diff.interHunkContext", "10")
+    span = kit.split_range(root, "base..HEAD")
+    assert kit._changed_lines(root, span, ["m.py"]) == {"m.py": {5, 9}}
+
+
+FACTORY_SRC = (
+    "class KitError(Exception):\n    pass\n\n\n"
+    "def oops(msg):\n    return ValueError(msg)\n\n\n"
+    "def either(flag):\n    if flag:\n        return KeyError(flag)\n    return IndexError(flag)\n\n\n"
+    "def check(x, cls):\n"
+    "    def bad(why) -> KitError:\n        return KitError(why)\n\n"
+    "    if x == 1:\n        raise bad('eins')\n"
+    "    if x == 2:\n        raise oops('zwei')\n"
+    "    if x == 3:\n        raise either(x)\n"
+    "    if x == 4:\n        raise cls('vier')\n"
+    "    raise KitError('sonst')\n")
+
+
+def test_final_f4_factory_call_in_raise_is_no_type():
+    kit = _kit()
+    index = kit._PyIndex({"lib.py": FACTORY_SRC.encode()})
+    node = next(d for _r, _q, d in index.defs["check"])
+    types = [t for t, _ in kit._raises(index, "lib.py", node)]
+    # bad -> KitError (Annotation), oops -> ValueError (eindeutige Rückgabe), either ist nicht
+    # eindeutig und steht als Aufruf da; cls ist kein bekannter Name und bleibt, wie er ist.
+    assert types == ["KitError", "ValueError", "either(...)", "cls", "KitError"], types
+    # Am Kit selbst: _read_plan wirft nur KitError, nicht „bad".
+    own = kit._PyIndex({"review_kit.py": (REPO_ROOT / KIT_PATH).read_bytes()})
+    read_plan = next(d for _r, _q, d in own.defs["_read_plan"])
+    assert {t for t, _ in kit._raises(own, "review_kit.py", read_plan)} == {"KitError"}
+
+
+def test_final_f5_live_lock_is_never_moved_or_deleted(tmp_path, monkeypatch):
+    kit = _kit()
+    lock = tmp_path / kit.LOCK_NAME
+    dead = f"{_dead_pid()} {kit.socket.gethostname()}\n"
+    live = f"{os.getpid()} {kit.socket.gethostname()}\n"
+    # B hat die tote Sperre schon gebrochen und hält jetzt eine lebende; C hat noch den toten
+    # Inhalt gelesen und bricht. D legt die Sperre an, sobald der Platz frei wird.
+    lock.write_text(live, encoding="utf-8")
+    real_rename = os.rename
+
+    def rename_then_d_locks(src, dst):
+        real_rename(src, dst)
+        if not lock.exists():
+            lock.write_text("D\n", encoding="utf-8")
+
+    monkeypatch.setattr(kit.os, "rename", rename_then_d_locks)
+    kit._break_lock(lock, dead)
+    assert lock.read_text(encoding="utf-8") == live
+    assert sorted(p.name for p in tmp_path.iterdir()) == [kit.LOCK_NAME]
+    # Die tote Sperre selbst wird weiter gebrochen, ohne Reste.
+    lock.write_text(dead, encoding="utf-8")
+    assert kit._break_lock(lock, dead) is True
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+    # Bricht gerade ein anderer (Breaker-Datei belegt), bleibt die Sperre, wie sie ist.
+    lock.write_text(dead, encoding="utf-8")
+    (tmp_path / f"{kit.LOCK_NAME}.break").write_text(live, encoding="utf-8")
+    assert kit._break_lock(lock, dead) is False
+    assert lock.read_text(encoding="utf-8") == dead
+
+
+def test_final_f5_dead_breaker_ends_in_a_kit_error(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    _plan, run = _split_plan(kit, root)
+    directory = kit.run_dir(root, run)
+    dead = f"{_dead_pid()} {kit.socket.gethostname()}\n"
+    (directory / "plan.lock").write_text(dead, encoding="utf-8")
+    (directory / "plan.lock.break").write_text(dead, encoding="utf-8")
+    monkeypatch.setattr(kit, "LOCK_WAIT", 0.3)
+    with pytest.raises(kit.KitError, match="gesperrt") as caught:
+        kit.make_packet_range(root, run, "p1", None, None)
+    assert "plan.lock.break" in str(caught.value)
+    assert (directory / "plan.lock").read_text(encoding="utf-8") == dead
+
+
+def test_final_f6_attribute_call_on_an_unknown_receiver_is_unresolved(tmp_path):
+    kit = _kit()
+    tdd = "def start(note=None):\n    raise RuntimeError(note)\n"
+    match = ("import re\n\n\nclass Clock:\n    def start(self):\n        raise OSError('uhr')\n\n"
+             "    def go(self):\n        return 0\n\n\n"
+             "def span(text):\n    m = re.match('a', text)\n    return 0\n\n\n"
+             "def tick():\n    return 0\n")
+    after = (match.replace("    def go(self):\n        return 0",
+                           "    def go(self):\n        return self.start()")
+             .replace("    m = re.match('a', text)\n    return 0",
+                      "    m = re.match('a', text)\n    return m.start()")
+             .replace("def tick():\n    return 0", "def tick():\n    return Clock.start(None)"))
+    root = _commit_repo(tmp_path, {"skills/test-first/scripts/tdd_log.py": tdd, "match.py": match},
+                        {"match.py": after})
+    found = kit.collect_python(root, "base..HEAD", ["match.py"])
+    text = _blocks_of(found)
+    assert "tdd_log.py" not in text, text
+    # self.start() und Clock.start() gehen an die Methode der Klasse in der Datei.
+    assert [e["line"] for e in found.entries] == [9, 18], text
+    assert text.count("- Gegenstelle Clock.start [match.py:5]") == 2, text
+    # m.start() auf dem Ergebnis von re.match: Empfänger unbekannt, gezählt statt geraten.
+    assert found.unresolved == 1
+
+
+def _run_in(root, code):
+    done = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True,
+                          text=True, encoding="utf-8", timeout=60, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return done.stdout
+
+
+DR_SPLIT_SETUP = (
+    "import datetime as dt\n"
+    "from fahrten.model import Trip\n"
+    "from export.monatsbericht import Vehicle, render\n"
+    "from export.jahresuebersicht import render_year\n"
+    "car = Vehicle('M-XY 1', 'Kombi', ('Anna',), {'Anna': 25})\n")
+
+
+def test_final_f7_year_overview_holds_back_blocked_months(tmp_path):
+    ws = prepare(tmp_path / "dr-split", None, FIXTURES / "dr-split")
+    out = _run_in(ws.root, DR_SPLIT_SETUP + (
+        "trips = [Trip(dt.date(2026, 3, 2), 'Anna', 1000, 900, 'dienstlich', 'Kunde'),\n"
+        "         Trip(dt.date(2026, 4, 2), 'Anna', 900, 1000, 'dienstlich', 'Kunde')]\n"
+        "print(render(car, trips, '2026-03'))\n"
+        "print(render_year(car, trips, 2026))\n"))
+    assert "Abrechnung zurückgestellt" in out
+    year = out[out.index("Jahresübersicht"):]
+    march = next(line for line in year.splitlines() if line.startswith("Mär"))
+    april = next(line for line in year.splitlines() if line.startswith("Apr"))
+    assert "-30,00 €" not in year and "zurückgestellt" in march, year
+    assert "30,00 €" in april, year
+
+
+def test_final_f8_driver_check_matches_the_settlement_lookup(tmp_path):
+    ws = prepare(tmp_path / "dr-split", None, FIXTURES / "dr-split")
+    out = _run_in(ws.root, DR_SPLIT_SETUP + (
+        "trips = [Trip(dt.date(2026, 3, 2), 'Anna', 1000, 1010, 'arbeitsweg'),\n"
+        "         Trip(dt.date(2026, 3, 3), 'anna', 1010, 1020, 'arbeitsweg')]\n"
+        "print(render(car, trips, '2026-03'))\n"))
+    # Wer in der Abrechnung unter eigenem Namen und ohne Pauschale steht, hat einen Befund.
+    assert "anna ist nicht als Fahrer eingetragen (fahrer)" in out, out
+    assert "Anna ist nicht als Fahrer eingetragen" not in out, out
+
+
+def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, capsys):
+    from evalkit.assertions import check
+    from evalkit.schema import load_evals
+
+    kit = _kit()
+    first = load_evals(EVALS_PATH)[0]
+    assert first.id == "anti-ceremony-small-range-one-packet"
+    patterns = {a.pattern for a in first.must if a.type == "file_matches"
+                and a.path == ".skills/cache/deep-review/*/audit.json"}
+    assert patterns == {r'"complete":\s*true', r'"report_mismatch":\s*\[\]'}
+    assert any(a.type == "file_max_lines" for a in first.must)
+    ws = prepare(tmp_path / "ws", None, SEEDED)
+    directory, _plan = _eval_flow(kit, ws.root, ["--range", "base..HEAD"], "/code-review", capsys)
+    assert all(check(a, ws.root, ws.baseline).ok for a in first.must)
+    # Ein aufgeblähter Bericht unter 60 Zeilen: file_max_lines lässt ihn durch, audit nicht.
+    report = directory / "report.md"
+    text = report.read_text(encoding="utf-8")
+    padding = 55 - len(text.splitlines())
+    report.write_text(text + "".join(f"Weitere Anmerkung {i}.\n" for i in range(padding)),
+                      encoding="utf-8")
+    kit.audit(directory, None)
+    results = {(a.type, a.pattern): check(a, ws.root, ws.baseline).ok for a in first.must}
+    assert results[("file_max_lines", None)] is True
+    assert results[("file_matches", r'"report_mismatch":\s*\[\]')] is False
+    assert results[("file_matches", r'"complete":\s*true')] is False

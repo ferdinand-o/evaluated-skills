@@ -9,10 +9,12 @@
         {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"split\":\\s*false"},
         {"type": "artifact_header", "path": ".skills/cache/deep-review/*/report.md"},
         {"type": "file_max_lines", "path": ".skills/cache/deep-review/*/report.md", "max_lines": 60},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"complete\":\\s*true"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"report_mismatch\":\\s*\\[\\]"},
         {"type": "git_head_unchanged"}
       ],
       "must_not": [],
-      "notes": "Spec 26, Eval 1 — der Pflicht-Anti-Zeremonie-Eval (E5): base..HEAD auf dr-seeded liegt unter split_at (800), also ein Paket p1 über den Originalbereich, keine Hilfscommits, ein kurzer Bericht. Diskriminator: plan.json unter .skills/cache/deep-review/<lauf>/ schreibt nur review_kit.py plan (write_json rückt mit zwei Leerzeichen ein, daher \\s* nach dem Doppelpunkt), und die Kopfzeile <!-- skill: deep-review | … --> im report.md steht nur im Gerüst assets/report-template.md; ohne Skill gibt es weder Datei noch Kopfzeile. 60 = REPORT_BASE_LINES (20) plus bis zu 40 Funde — die Fixture trägt fünf eingebaute Fehler, die Grenze bricht also nur ein aufgeblähter Bericht. git_head_unchanged: die Skill committet nichts, Hilfscommits gäbe es nur unter refs/deep-review/. Ein Lauf je Workspace: der Glob nimmt den alphabetisch ersten, also den frühesten Lauf."
+      "notes": "Spec 26, Eval 1 — der Pflicht-Anti-Zeremonie-Eval (E5): base..HEAD auf dr-seeded liegt unter split_at (800), also ein Paket p1 über den Originalbereich, keine Hilfscommits, ein kurzer Bericht. Diskriminator: plan.json unter .skills/cache/deep-review/<lauf>/ schreibt nur review_kit.py plan (write_json rückt mit zwei Leerzeichen ein, daher \\s* nach dem Doppelpunkt), und die Kopfzeile <!-- skill: deep-review | … --> im report.md steht nur im Gerüst assets/report-template.md; ohne Skill gibt es weder Datei noch Kopfzeile. Die Anti-Zeremonie-Grenze selbst prüft audit: höchstens REPORT_BASE_LINES (20) Zeilen plus eine je Fund, ohne Kopfzeile und Kommentarzeilen; ein längerer Bericht steht unter report_mismatch, dann ist complete false. Darum sind complete: true und report_mismatch: [] in audit.json (schreibt nur review_kit.py audit) der Diskriminator der Länge; file_max_lines 60 bleibt nur eine grobe Obergrenze, weil sie alle Zeilen zählt und die Zahl der Funde nicht kennt. git_head_unchanged: die Skill committet nichts, Hilfscommits gäbe es nur unter refs/deep-review/. Ein Lauf je Workspace: der Glob nimmt den alphabetisch ersten, also den frühesten Lauf."
     },
     {
       "id": "large-range-is-split-and-covered",
