@@ -1501,7 +1501,7 @@ def test_check_key_matching(decide_repo, monkeypatch, capsys):
 
     # leeres `#`: add weist es ab; von Hand in der Ablage gibt es nichts frei (nicht die ganze Datei)
     assert big(*TWO, "--session", SESSION, key="dependency:pyproject.toml#  ") == 1
-    assert "leerer Text nach #" in capsys.readouterr().err
+    assert "hat leeren Text nach #" in capsys.readouterr().err         # Grund aus parse_key (CP3-R3-F5)
     assert big(*TWO, "--session", SESSION, key="dependency:pyproject.toml#python-dateutil") == 0
     capsys.readouterr()
     (root / "pyproject.toml").write_text('[project]\ndependencies = ["requests"]\n', encoding="utf-8")
@@ -1568,9 +1568,9 @@ def test_check_range_reads_ledger_from_end_revision(decide_repo, monkeypatch, ca
     for rev in (f"{base}..{feature}", f"{feature}^!"):
         code, out, _ = check_out(capsys, rev)
         assert code == 0 and reported(out) == [], (rev, out)
-    # <a>...<b>: git rev-parse nennt <b> und <a> als positive — mehrere Enden, Exit 2 (CP3-R2-F2)
+    # <a>...<b>: Basis die Merge-Base, Freigaben aus <b> (CP3-R3-F1)
     code, out, err = check_out(capsys, f"{base}...{feature}")
-    assert code == 2 and "ungeprüft — Bereich mit mehreren Enden" in err, (out, err)
+    assert code == 0 and reported(out) == [], (out, err)
     # in <b> offen, in der Arbeitskopie freigegeben: gemeldet mit dem Status aus <b>
     (root / "docs" / "big-decisions.md").unlink()
     git(root, "checkout", "-q", "feature")
@@ -1677,7 +1677,7 @@ def test_check_rule_key_with_hash_stays_silent(decide_repo, monkeypatch, capsys)
 
 
 def test_check_reason_comes_from_ledger_key(decide_repo, monkeypatch, capsys):
-    """CP3-R2-F6: Der Grund im Hinweis ist der, mit dem `_ledger_key` den Schlüssel abweist — bei
+    """CP3-R2-F6: Der Grund im Hinweis ist der, mit dem `parse_key` den Schlüssel abweist — bei
     `a#b:c#` der leere Text nach `#`, nicht „nicht die Form“."""
     root, _ = decide_repo
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
@@ -1701,7 +1701,7 @@ def test_check_range_notations_via_rev_parse(decide_repo, monkeypatch, capsys):
     base = commit(root, "Basis")
     (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
-    head = commit(root, "Abhängigkeit mit Freigabe")
+    commit(root, "Abhängigkeit mit Freigabe")
     (root / "migrations").mkdir()
     (root / "migrations" / "0001.py").write_text("x\n", encoding="utf-8")            # unversioniert
     since_base = ["docs/big-decisions.md", "migrations/0001.py", "pyproject.toml"]
@@ -1710,7 +1710,7 @@ def test_check_range_notations_via_rev_parse(decide_repo, monkeypatch, capsys):
         assert problem is None and files.end is None and list(files) == expected, (rev, problem, files.end)
     for rev in ("HEAD~1..HEAD", "HEAD^!"):
         files, problem = dl.changed_files(root, rev)
-        assert problem is None and files.end == head, (rev, problem, files.end)
+        assert problem is None and files.end == "HEAD", (rev, problem, files.end)       # wie angegeben (CP3-R3-F3)
         assert list(files) == ["docs/big-decisions.md", "pyproject.toml"], (rev, list(files))
 
     # HEAD^@ (ein Elternteil): Freigaben aus der Arbeitskopie, nicht „fehlt in HEAD^@“
@@ -1718,11 +1718,10 @@ def test_check_range_notations_via_rev_parse(decide_repo, monkeypatch, capsys):
     assert code == 1 and reported(out) == ["migrations/0001.py"], out
     assert "fehlt in" not in out and "kein Eintrag mit passendem Schlüssel in docs/big-decisions.md" in out, out
     code, out, _ = check_out(capsys, "HEAD~1..HEAD")
-    assert code == 0 and reported(out) == [] and f"Freigaben aus {head}" in out, out
-    # A...B: git rev-parse nennt B und A als positive — mehrere Enden, ungeprüft
+    assert code == 0 and reported(out) == [] and "Freigaben aus HEAD;" in out, out
+    # A...B: Bereich wie A..B, wenn A die Merge-Base ist (CP3-R3-F1)
     code, out, err = check_out(capsys, "HEAD~1...HEAD")
-    assert code == 2 and out == "" and "ungeprüft — Bereich mit mehreren Enden" in err, err
-    assert err.splitlines()[-1] == TAIL, err
+    assert code == 0 and reported(out) == [] and out.splitlines()[-1] == TAIL, (out, err)
 
     # Merge-Commit: HEAD^@ sind beide Eltern (mehrere Enden), HEAD^! ein Bereich mit Ende HEAD
     (root / "migrations" / "0001.py").unlink()
@@ -1731,11 +1730,10 @@ def test_check_range_notations_via_rev_parse(decide_repo, monkeypatch, capsys):
     commit(root, "Seite")
     git(root, "checkout", "-q", "-")
     git(root, "-c", "user.email=t@example.org", "-c", "user.name=t", "merge", "-q", "--no-ff", "-m", "Merge", "seite")
-    merge = git(root, "rev-parse", "HEAD").strip()
     code, out, err = check_out(capsys, "HEAD^@")
     assert code == 2 and "ungeprüft — Bereich mit mehreren Enden" in err, (out, err)
     files, problem = dl.changed_files(root, "HEAD^!")
-    assert problem is None and files.end == merge, (problem, files.end)
+    assert problem is None and files.end == "HEAD", (problem, files.end)
 
 
 def test_check_range_ledger_problems_name_revision(decide_repo, monkeypatch, capsys):
@@ -1766,3 +1764,136 @@ def test_check_range_ledger_problems_name_revision(decide_repo, monkeypatch, cap
     end = commit(root, "Ablage mit BOM")
     code, out, _ = check_out(capsys, f"{base}..{end}")
     assert code == 0 and reported(out) == [], out
+
+
+# --- Funde des Prüfpunkts 3, Runde 3 (Mini-Runde F1–F5) ---------------------------------
+
+def test_check_symmetric_range_uses_merge_base(decide_repo, monkeypatch, capsys):
+    """CP3-R3-F1: `<a>...<b>` wie `git diff <a>...<b>` — Basis die Merge-Base, Ende `<b>` (leer:
+    `HEAD`), ohne Arbeitsbaum; die Freigaben kommen aus `<b>`. `main` ist nach dem Abzweigen
+    weitergelaufen, die Merge-Base ist also nicht `main` selbst."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    commit(root, "Basis")
+    git(root, "branch", "-M", "main")
+    git(root, "checkout", "-q", "-b", "feature")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    commit(root, "Abhängigkeit mit Freigabe")
+    git(root, "checkout", "-q", "main")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0001.py").write_text("x\n", encoding="utf-8")
+    commit(root, "Migration nur auf main")
+    git(root, "checkout", "-q", "feature")
+    (root / "migrations").mkdir(exist_ok=True)
+    (root / "migrations" / "0002.py").write_text("x\n", encoding="utf-8")           # unversioniert
+    write_ledger(root, ledger_block(1, "offen", "dependency:pyproject.toml"))         # Arbeitskopie: offen
+    for rev in ("main...feature", "main...HEAD", "main..."):
+        files, problem = dl.changed_files(root, rev)
+        assert problem is None and list(files) == ["docs/big-decisions.md", "pyproject.toml"], (rev, problem)
+        code, out, err = check_out(capsys, rev)
+        assert code == 0 and reported(out) == [] and out.splitlines()[-1] == TAIL, (rev, out, err)
+    # main..feature sähe die Migration von main als gelöscht — der Unterschied zur Merge-Base
+    code, out, _ = check_out(capsys, "main..feature")
+    assert code == 1 and reported(out) == ["migrations/0001.py"], out
+
+
+def test_check_root_commit_bang_is_range(decide_repo, monkeypatch, capsys):
+    """CP3-R3-F2: `R^!` auf dem ersten Commit ist ein Bereich ohne Arbeitsbaum, obwohl git rev-parse
+    keine negative Revision nennt — Diff vom leeren Baum zu `R`, Ablage aus `R`."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    first = commit(root, "erster Commit")
+    (root / "app.py").write_text("x\n", encoding="utf-8")
+    commit(root, "zweiter")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0001.py").write_text("x\n", encoding="utf-8")            # unversioniert
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"),   # nur Arbeitskopie
+                 ledger_block(2, "freigegeben", "migration:migrations/"))
+    files, problem = dl.changed_files(root, f"{first}^!")
+    assert problem is None and files.end is not None, (problem, files.end)
+    assert list(files) == ["README.md", "pyproject.toml"], list(files)
+    code, out, _ = check_out(capsys, f"{first}^!")
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert f"Freigaben nicht gelesen (docs/big-decisions.md fehlt in {first})" in out, out
+
+
+def test_check_range_names_revision_as_given(decide_repo, monkeypatch, capsys):
+    """CP3-R3-F3: Meldungen nennen das Ende wie angegeben — bei annotierten Tags `v2`, nicht den
+    Hash des Tag-Objekts; gelesen wird die Ablage aus dem Commit, auf den das Tag zeigt."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    tag = ["-c", "user.email=t@example.org", "-c", "user.name=t", "tag", "-a", "-m", "Tag"]
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    commit(root, "Basis")
+    git(root, *tag, "v1")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    commit(root, "Abhängigkeit")
+    git(root, *tag, "v2")
+    write_ledger(root, ledger_block(1, "freigegeben", "dependency:pyproject.toml"))
+    commit(root, "Freigabe")
+    git(root, *tag, "v3")
+    hex40 = re.compile(r"\b[0-9a-f]{40}\b")
+
+    code, out, _ = check_out(capsys, "v1..v2")
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert "Freigaben nicht gelesen (docs/big-decisions.md fehlt in v2)" in out and "Freigaben aus v2;" in out, out
+    assert not hex40.search(out), out
+    for rev in ("v1..v3", "v1...v3", "v3^!"):
+        files, problem = dl.changed_files(root, rev)
+        assert problem is None and files.end == "v3", (rev, problem, files.end)
+        code, out, _ = check_out(capsys, rev)
+        assert code == 0 and reported(out) == [] and "Freigaben aus v3;" in out, (rev, out)
+        assert not hex40.search(out), (rev, out)
+
+
+def test_check_ledger_missing_by_exit_code_not_wording(decide_repo, monkeypatch, capsys):
+    """CP3-R3-F4: Ob die Ablage in der Revision fehlt, sagt der Exit-Code von `git cat-file -e`, nicht
+    der Wortlaut von stderr; ein Fehler beim Lesen danach heißt „nicht lesbar“."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    end = commit(root, "ohne Ablage")
+    real = subprocess.run
+
+    def german(argv, *args, **kwargs):
+        result = real(argv, *args, **kwargs)
+        if argv[:1] == ["git"] and "cat-file" in argv and result.returncode != 0:
+            message = "fatal: Pfad 'docs/big-decisions.md' existiert nicht in 'x'\n"
+            result.stderr = message.encode() if isinstance(result.stderr, bytes) else message
+        return result
+
+    monkeypatch.setattr(dl.subprocess, "run", german)
+    code, out, _ = check_out(capsys, f"{base}..{end}")
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert f"Freigaben nicht gelesen (docs/big-decisions.md fehlt in {end})" in out, out
+    assert "nicht lesbar" not in out, out
+
+    (root / "docs" / "big-decisions.md").mkdir(parents=True)                         # ein Ordner, kein Blob
+    (root / "docs" / "big-decisions.md" / "x").write_text("x\n", encoding="utf-8")
+    end = commit(root, "Ablage als Ordner")
+    code, out, _ = check_out(capsys, f"{base}..{end}")
+    assert code == 1 and f"docs/big-decisions.md in {end} nicht lesbar" in out and "fehlt in" not in out, out
+
+
+def test_tab_in_hand_written_key_is_refused_by_check_too(decide_repo, monkeypatch, capsys):
+    """CP3-R3-F5: add und check lesen Schlüssel mit derselben Funktion — ein Tab im Pfadmuster, den
+    add abweist, gibt auch von Hand in der Ablage nichts frei."""
+    root, _ = decide_repo
+    key = "migration:migrations/a\tb.py"
+    assert big(*TWO, key=key) == 1
+    assert "Tab oder Zeilenumbruch" in capsys.readouterr().err
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "migrations").mkdir()
+    (root / "migrations" / "a\tb.py").write_text("x\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "freigegeben", key))
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["migrations/a\tb.py"], out
+    assert "Hinweis: D-1 Schlüssel „migration:migrations/a\tb.py“ hat Tab oder Zeilenumbruch" in out, out

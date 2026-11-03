@@ -67,13 +67,16 @@ check gibt eine Stelle frei, wenn ein Block mit Status `freigegeben` einen Schl�
 Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer
 hinzugefügten Zeile steht). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Eine
 Freigabe gilt für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt
-`#<text>`. Ein `#` ohne Text ist kein Schlüssel: `add` weist ihn ab („leerer Text nach #“), und
-einer, der von Hand so in der Ablage steht, gibt nichts frei.
+`#<text>`. Ein `#` ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
+(„hat leeren Text nach #“), und einer, der von Hand so in der Ablage steht, gibt nichts frei —
+`add` und check prüfen die Form mit derselben Funktion.
 
 Woher die Freigaben kommen: bei einer einzelnen Revision (`--range <rev>`) aus der Arbeitskopie
-von `docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum (`<a>..<b>`, `<a>...<b>`,
-`<rev>^!`, `<rev>^-<n>`) aus der Ablage im End-Commit (`git show <b>:docs/big-decisions.md`).
-Fehlt sie dort, ist sie wie eine fehlende Ablage. Fehlt die Ablage, ist sie unlesbar oder wird
+von `docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum (`<a>..<b>`, `<rev>^!` — auch auf
+dem ersten Commit —, `<rev>^-<n>`, und `<a>...<b>` wie `git diff <a>...<b>`: Basis die Merge-Base,
+Ende `<b>`, die übliche Form für einen PR-Diff) aus der Ablage im Ende, aufgelöst auf seinen Commit
+(`<b>^{commit}:docs/big-decisions.md`). Fehlt sie dort, ist sie wie eine fehlende Ablage. Meldungen
+nennen das Ende so, wie es angegeben wurde (`v2`, nicht ein Hash). Fehlt die Ablage, ist sie unlesbar oder wird
 sie übersprungen, sagt jede Stelle „Freigaben nicht gelesen (<Grund>)“.
 
 ### rule
