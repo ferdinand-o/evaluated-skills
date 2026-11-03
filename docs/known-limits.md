@@ -2121,6 +2121,167 @@ schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es bei�
 - **Keine Projekt-Kopie.** test-first steht nicht in `PROJECT_SKILLS`; in diesem Repo
   lädt es nur über `evaluated-dev`, das hier ausgeschaltet ist.
 
+## decide
+
+Gebaut nach Spec 28 (2026-11-03). Tier 1: `decide_log.py` meldet, hält aber niemanden an;
+Einordnung, Themenwahl, Untergrenze und das Unterlassen des teuren Schritts verlangt die
+SKILL.md (G1). Stand der Eval-Läufe: `claude -p` 2.1.316 ohne Permission-Host, mit Skill 4 von
+5 grün (e171b54), ohne Skill 0 von 5 vor e171b54. Was ungemessen bleibt und wo es beißt, nach
+Themen:
+
+### Messung und Routing
+
+- **Der beaufsichtigte Weg ist ungemessen.** Alle fünf Evals laufen ohne Permission-Host;
+  `AskUserQuestion` kommt nie vor. Ob die gebündelte Frage und `resolve` im Betrieb
+  funktionieren, zeigt kein Lauf. Beißt bei der ersten großen Frage in einer interaktiven
+  Sitzung.
+- **Der Start eines Subagenten ist unbeobachtbar.** evalkit liest nur Text. Ob ein Subagent
+  startet, den Satz aus Schritt 5 bekommt und `CLAUDE_CODE_SESSION_ID` in derselben Form trägt,
+  misst nichts; die Skill hängt an der ID nicht, weil Subagenten nichts eintragen.
+- **Routing-Lücke, gemessen: Eval 2 (`small-decision-cites-repo-source`).** In drei Läufen mit
+  Skill fiel er jedes Mal, weil decide nicht ausgelöst wurde — kein `log.md`, obwohl
+  `CONTRIBUTING.md` die Antwort enthielt und die Änderung (`getLogger(__name__)`) stimmte. Der
+  Prompt nennt die Skill nicht („Füge … Logging hinzu“). Der Nutzer hat entschieden, das zu
+  dokumentieren und die Description unverändert zu lassen. Beißt bei jeder kleinen Frage, die
+  mitten in einer Aufgabe auftaucht, ohne dass das Wort „entscheiden“ fällt: Die Arbeit läuft
+  ohne Belegzeile.
+- **Routing mitten in einer Aufgabe ist eine Stichprobe.** Die Description muss auslösen, während
+  Claude an etwas anderem arbeitet; je Fall misst ein Prompt einen Lauf. Die vier grünen Evals
+  sagen nichts über andere Formulierungen.
+- **Eval 4 (`user-order-is-approval`) fiel zweimal, weil `check` nie aufgerufen wurde, die
+  Antwort aber ein Ergebnis behauptete** („Die Prüfung meldet keine Änderung ohne Freigabe“),
+  ohne die Zeile „ungeprüft: data-delete, …“. Der Transcript-Lauf von Hand zeigte: Skill
+  geladen, Block korrekt freigegeben, Modell und Migration geändert. Behoben in e171b54
+  (`check` als letzter Aufruf, kein Satz über ein Ergebnis ohne Aufruf), danach ein Lauf grün.
+  Ein einziger Lauf ist keine Wiederholung. Die Regel bleibt G1: Ob ein Agent `check` aufruft,
+  prüft nichts. Ein Lauf ohne Skill nach e171b54 fehlt (vorher 0 von 5), und der Runner speichert
+  kein Transcript.
+- **Die Untergrenze ist eine Regel, kein Messwert, und die Themenwahl ist G1.** „Merkt jemand
+  außerhalb der geänderten Stelle“ misst Eval 1 an einem Fall darunter (Reihenfolge von
+  Funktionen), Eval 2 an einem darüber. Eine Regel in `rules.md` trifft nur bei gleichem Thema
+  (nach Kleinschreibung und Leerraum); ein ähnliches Thema bleibt ein Hinweis. Wählt Claude
+  „Logging“ statt der Regel „Logging-Format“, greift sie nicht, und kein Skript merkt es.
+- **Die Evals lesen das echte `HOME`.** Der Harness isoliert `HOME` nicht (siehe „Isolation“);
+  `~/.skills/decide/rules.md` würde jeden Eval einordnen. Bei den Läufen existierte die Datei
+  nicht; wer eine hat, bekommt andere Ergebnisse.
+- **Die Rückgabe aus subagent-dev-Tasks bleibt G1.** Seit Task 8 schreibt
+  `plan_to_tasks.py generate` den festen Satz für Subagenten unter Nicht-Ziele jeder Task-Datei;
+  ein Feld für die Rückgabe gibt es nicht, und niemand prüft, ob sich der Subagent daran hält.
+  Task-Dateien, die vor 1066ad6 erzeugt wurden (auch die von Task 9), tragen den Satz nicht;
+  `generate` neu aufrufen.
+
+### check
+
+- **`check` sieht fünf Kategorien nie und vier nur teilweise.** `data-delete`, `unsaved-work`,
+  `push`, `external` und `cost` stehen in keinem Diff, die Schlusszeile sagt das. `api`
+  (nur `openapi.*`; eine öffentliche Python- oder JS-Schnittstelle nicht), `migration` (eine
+  Spalte, die nur im Modell entfällt, nicht), `dependency` (andere Ökosysteme, vendorte
+  Abhängigkeiten) und `permissions` (Rechte im Code) nur über ihre Pfadmuster. Ein Diff, der
+  `app/models.py` ohne Migration ändert, meldet `check` nicht.
+- **Eine Freigabe gilt je Schlüssel, `#<text>` je Datei.** Ein Block `migration:migrations/`
+  gibt jede Datei darunter frei, auch eine, die der Auftrag nicht meinte. Mit `#<text>` muss der
+  Text in einer hinzugefügten Zeile der jeweiligen Datei stehen; ein Text, der in einer Datei
+  passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel vergleicht
+  `check` nie.
+- **Fixtures unter `evals/fixtures/*/migrations/` meldet `check` in diesem Repo.** Das Muster
+  `**/migrations/` trifft `evals/fixtures/dc-models/migrations/0001_initial.py`. Wer die Fixture
+  ändert und `check` über den Diff laufen lässt, bekommt eine Stelle `migration` für Testdaten.
+- **Der Anzeigename „docs/big-decisions.md in <rev>“ entsteht an drei Stellen** (`LEDGER_SHOWN`
+  mit `rev`, mit `end` und im Fall „fehlt in“). Ändert jemand eine, weichen die Meldungen
+  auseinander; Tests prüfen den Wortlaut je Fall, nicht die Gleichheit.
+- **`glob_to_regex` verspricht im Docstring „je Muster einmal übersetzt (`lru_cache`)“, ein Test
+  dafür fehlt.** Entfällt der Dekorator, bleibt alles grün und `check` übersetzt je Datei neu.
+- **Der Testhelfer `unreadable()` ersetzt `Path.read_bytes` für jede Datei namens `log.md`**
+  (Vorgabe `name="log.md"`). Ein Test, der `unreadable()` setzt und dabei eine andere Datei dieses
+  Namens liest, scheitert an der falschen Stelle.
+
+### Protokoll und Sperre
+
+- **Wird `log.md.lock` gelöscht, während ein `add` sie hält, sperrt ein zweites `add` eine
+  neue Datei.** `flock` hängt am Inode, nicht am Namen; beide schreiben dann gleichzeitig, das
+  spätere `os.replace` verliert die Zeile des früheren. Das Skript löscht die Datei nie; ein
+  Aufräumskript oder `git clean -fdx` im falschen Moment tut es.
+- **`EACCES` unter NFS gilt als „belegt“ und verdeckt die Ursache.** `log_lock` fängt
+  `PermissionError` wie `BlockingIOError`; ein Dateisystem, das das Sperren mit `EACCES`
+  verweigert, endet nach `LOCK_WAIT` mit „Protokoll gesperrt“ statt mit dem Hinweis „ohne
+  Sperre geschrieben“.
+- **Eine ältere Skriptkopie mit eigener Sperre hält die liegende Sperrdatei für verwaist.** Vor
+  e6dc62e (Runde 3) übernahm `add` eine `log.md.lock` ohne lebende PID oder älter als 30 s. Liegt
+  noch eine solche Kopie im Plugin-Cache, ersetzt sie die Datei, die das neue Skript offen hält.
+- **Verwaiste `log.md.<pid>.tmp` nach doppeltem Fehlschlag bleiben ungemeldet.**
+  `write_atomic` räumt die Nachbardatei auf und schluckt einen Fehler dabei (`unlink` mit
+  `OSError` ignoriert). Scheitern `os.replace` und `unlink`, liegt die Datei da, und `add` meldet
+  nur den Fehler von `os.replace`.
+- **Belegpfade mit Windows-Trennern (`.\src\a.py:3`) werden nicht aufgelöst.** `_norm_path` kennt
+  nur `./` und `../`; der Pfad bleibt, wie er steht, und `check` auf einer Windows-Shell sieht
+  einen Beleg, den es sonst relativ zur Wurzel schreibt.
+- **Der Test zur Freigabe beim Prozessende ist unter Windows zeitkritisch.**
+  `test_process_end_releases_lock` beendet das Kind mit `kill` und schreibt sofort; ob
+  `msvcrt.locking` die Sperre so schnell freigibt wie `flock`, ist nirgends gemessen. Der
+  Windows-Pfad ist nur mit einem Ersatz für `msvcrt` getestet.
+- **Der Wortlaut „Protokoll <pfad>“ und die Namensregel der Sperrdatei stehen an mehreren
+  Stellen** (`unreadable_problem`, `store_big`, der Schreibfehler in `add_small`; `lock_file`
+  neben `ledger_lock_path` und seinem Kommentar). Eine Änderung an einer Stelle lässt die
+  anderen stehen.
+
+### Ablage und Schlüssel
+
+- **Doppelte Leerzeichen in einem Schlüssel werden beim Schreiben zusammengezogen und treffen
+  dann den echten Pfad nicht.** `parse_key` lässt `migration:db/a  b/x.sql` zu, der Block trägt
+  `db/a b/x.sql` (über `line_value`); `check` meldet die Datei `db/a  b/x.sql` trotz
+  Freigabe. Gemessen von Hand mit einem Wegwerf-Repo.
+- **Ein geschütztes Leerzeichen im Pfadmuster wird als „Tab oder Zeilenumbruch“ gemeldet.**
+  `[^\S ]` trifft U+00A0; die Meldung zeigt das Zeichen wie ein gewöhnliches Leerzeichen
+  (`db/a b`), der Fehler ist nicht zu finden.
+- **Eine Fehlermeldung zu `rule:` mit Zeilenumbruch im Thema geht über zwei Zeilen.** Das Thema
+  steht in „keine Regel „immer fragen: …““ ohne `line_value`; ein Aufrufer, der Zeile für Zeile
+  liest, sieht die zweite als eigene Meldung.
+
+### brief
+
+- **`load_subagent_sentence` erkennt „kein Abschnitt“ am Wortlaut der Meldung von
+  `_section_lines`** (`problem.startswith(f"{where}: kein Abschnitt")`). Ändert jemand den Text
+  dort, wird aus „Satz fehlt“ eine rohe Meldung, ohne dass ein Test es zeigt.
+- **`check_brief` und `_check_brief` sind zwei Einstiege für einen optionalen Parameter.** Ein
+  Aufrufer, der die Wurzel kennt, muss den privaten nehmen.
+- **Das Format „Auftrag: „…““ steht in `add_big` (`f"Auftrag: „{approved}“"`) und als Regex in
+  `_REQUEST_SOURCE_RE`.** Eine Änderung am Format macht freigegebene Aufträge in `brief` zu
+  „wie im Auftrag“ statt zum Zitat.
+- **Ein Satz im Modul-Docstring zu `_section_lines` macht den Bezug von „sie“ unklar**
+  („Fehlt sie oder parst sie nicht, ist die Datei nicht lesbar“ — die Überschrift oder die
+  Datei?). Gemeint ist: fehlt die Überschrift.
+
+### Tests der Skill
+
+- **Der Inline-Aufruf-Check erkennt einen Aufruf nur am Anfang einer Code-Spanne** (`.match` in
+  `tests/test_decide_evals_schema.py`). `scripts/decide_log.py add --x …` in Prosa der SKILL.md
+  rutscht durch; `decide_log.py add x` wird erkannt.
+- **Code-Spannen werden über den ganzen Text gepaart.** Ein einzelner Backtick weiter oben
+  verschiebt die Paarung; danach prüft der Check Text zwischen zwei Spannen und übersieht eine
+  echte.
+- **Der Leck-Scan in `test_decide_fixtures.py` überspringt alles, was nicht als UTF-8
+  dekodiert, und liest nur `ws.baseline`.** Das ist nicht die ganze Fixture: `snapshot`
+  lässt `.claude/skills/` und `.claude/worktrees/` aus, und Symlinks gehen nie hinein. Eine
+  Fixture mit `.skills/cache/` in einer Latin-1-Datei oder unter `.claude/skills/` besteht den
+  Scan.
+- **`_mandatory` liest die Pflichtfelder-Tabelle mit `_table_cells`, das an jedem `|` trennt.**
+  Trägt eine Zelle in option-memo.md ein `|` in Backticks, hat die Zeile fünf statt vier Zellen,
+  und das Entpacken endet mit `ValueError` statt mit Klartext.
+- **Ein Doktrin-Aufruf, den argparse nicht parst, bricht den Test mit `SystemExit` ab statt mit
+  einer Meldung.** `parser.parse_args` in `_call_problems` steht ohne Fang; pytest zeigt Exit 2
+  und die Usage-Zeile, nicht den Aufruf.
+- **Ob ein klein-Aufruf als hochgestuft gilt, hängt am Platzhalter `<regelthema>`.** Ein
+  anderer Name für dasselbe Thema („<thema der regel>“) wird als gewöhnlicher klein-Aufruf
+  geprüft, `--option` fehlt nicht auf.
+- **`add-on --x` o. ä. in Prosa wird als Aufruf gemeldet.** `INLINE_CALL_RE` verlangt nach
+  `add` nur eine Wortgrenze; der Bindestrich genügt, und ein Satz über ein „add-on“ in
+  Backticks macht den Test rot.
+- **`_flag_dests` nutzt argparse-Interna** (`parser._actions`, `_SubParsersAction`,
+  `.choices`). Ein Python-Update, das sie umbenennt, bricht den Test, nicht die Skill.
+- **Der Prosa-Scan rechnet Zeilenanfänge quadratisch** (`starts` summiert für jede Zeile die
+  Längen aller davor). Bei den gut hundert Zeilen der SKILL.md unmerklich; es beißt erst, wenn der
+  Scan auf eine lange Datei ausgedehnt wird.
+
 ## skill-dir
 
 Spec 25 (2026-10-14): Jeder Skript-Aufruf steht in der SKILL.md als
