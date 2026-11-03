@@ -60,7 +60,7 @@ führendem `-` als `--decision=-v`.
    Anlass und Wo nachsehen. Vor dem Dispatch `python "$D" brief --check <datei>`.
 7. **Übergabe.** Hat die Aufgabe Dateien geändert: `python "$D" check --range <commit vor der
    Aufgabe>` (auch `<a>..<b>` und `<a>...<b>`). Jede gemeldete Stelle nennt die Antwort mit
-   Grund, die Zeile „ungeprüft: …“ wörtlich. Dann `python "$D" summary` — nur wenn es
+   Grund, die Zeile „ungeprüft: data-delete, …“ wörtlich. Dann `python "$D" summary` — nur wenn es
    Einträge gibt — und `python "$D" open`. Ohne Git meldet `check` „ungeprüft — kein Git“.
    Fehlt das Skript, sagt die Übergabe „ungeprüft — decide_log.py nicht verfügbar“ und nennt
    die Entscheidungen aus dem Gedächtnis als solche.

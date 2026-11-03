@@ -12,7 +12,7 @@ references/reversibility.md fehlt“ bzw. mit dem Grund) und `add --class gross`
 | Kategorie | Bedeutung | Beispiel | Grad | Pfadmuster | Grenze |
 | --- | --- | --- | --- | --- | --- |
 | `api` | öffentliche Schnittstelle, auf die sich andere verlassen | ein Feld aus der Antwort von `GET /users` entfernen | teilweise | `openapi.*`, `api/openapi.*` | eine öffentliche Python- oder JS-Schnittstelle erkennt check nicht |
-| `migration` | Schema- oder Datenänderung, die auf jeder Datenbank läuft | Spalte `legacy_id` aus `users` entfernen | teilweise | `**/migrations/`, `**/alembic/versions/`, `db/**/*.sql` | eine Spalte, die nur im Modell entfällt, sieht check nicht |
+| `migration` | Schema- oder Datenänderung, die auf jeder Datenbank läuft | Spalte `fax` aus `customers` entfernen | teilweise | `**/migrations/`, `**/alembic/versions/`, `db/**/*.sql` | eine Spalte, die nur im Modell entfällt, sieht check nicht |
 | `data-delete` | Löschen von Daten oder Dateien, die kein Revert zurückbringt | `rm -rf data/`, `DELETE FROM orders`, `git clean -fdx` | ungeprüft | — | steht in keinem Diff |
 | `unsaved-work` | Verwerfen ungesicherter Arbeit im Arbeitsbaum | `git reset --hard`, `git checkout -- .`, `git stash drop` | ungeprüft | — | steht in keinem Diff |
 | `push` | Veröffentlichen oder Umschreiben geteilter Historie | `git push --force` auf `main`, ein Tag pushen | ungeprüft | — | steht in keinem Diff |
@@ -87,10 +87,10 @@ hat keine Pfadmuster und steht deshalb nicht in der Tabelle; check vergleicht si
 
 ## Bis zur Freigabe bleibt alles stehen
 
-Beispiel: In `app/models.py` steht `legacy_id = Column(Integer)`, ein Kommentar fragt, ob die
-Spalte weg kann. Die Spalte zu entfernen ist `migration` (oder `data-delete`, wenn Daten
+Beispiel: Beim Aufräumen von `billing/schema.py` fällt auf, dass das Feld `fax` in `Customer`
+nirgends mehr gelesen wird. Es zu entfernen ist `migration` (oder `data-delete`, wenn Daten
 verloren gehen). Bis ein Block mit diesem Schlüssel `freigegeben` ist, unterbleibt der ganze
-Schritt: keine Migration unter `migrations/` **und auch das Feld im Modell bleibt** — eine
-Spalte, die nur im Modell entfällt, sieht check nicht (Grad `teilweise`), sie ist trotzdem
-dieselbe große Entscheidung. Der kleine Teil daneben (ein ungenutzter `import json`) wird
-erledigt; die große Frage steht als `D-<n>` mit Status `offen` in der Ablage.
+Schritt: keine Migration **und auch das Feld in der Klasse bleibt** — eine Spalte, die nur im
+Modell entfällt, sieht check nicht (Grad `teilweise`), sie ist trotzdem dieselbe große
+Entscheidung. Die übrige Aufräumarbeit wird erledigt; die große Frage steht als `D-<n>` mit
+Status `offen` in der Ablage.
