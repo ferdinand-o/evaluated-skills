@@ -62,7 +62,7 @@ unabhängig von M0.
 | C5 | zur Laufzeit: ab `SIZE_TRIGGER_LINES = 400` geänderten Zeilen seit `last_reviewed`, oder `--tests-red` | beim nächsten `checkpoint status` | `checkpoint` |
 
 Fallen zwei Prüfpunkte auf dieselbe Stelle, bleibt einer mit allen Gründen, dem höheren
-Profil (`standard` über `checkpoint`, Reihenfolge in `PROFILES`) und der Art nach `CHECKPOINT_KINDS`:
+Profil (`standard` geht vor `checkpoint`) und der Art nach `CHECKPOINT_KINDS`:
 `final` > `group` > `after` > `before` (mit deren `task`). Liegt die Stelle eines
 Prüfpunkts hinter der von `final` (C3 mit einer Gruppe, die die Verifikation enthält), wird er
 mit `final` zusammengelegt. Die Spec nennt nur Gründe und
@@ -105,32 +105,34 @@ Prüfpunkt `base..HEAD`. Die Schalter für den Plan von deep-review kommen aus
 | --- | --- | --- |
 | `--range` | `range` | Bereich seit dem letzten `mark` |
 | `--profile checkpoint` oder `--profile standard` | `profile` | wie gemeldet; Fokus bleibt `bugs` |
-| `--soll-file <datei>` | subagent-dev | nur und immer im Profil `checkpoint`: die Task-Dateien des Bereichs (Tasks seit dem letzten `mark`) in einer Datei unter `.skills/cache/tasks/`; im Profil `standard` ist das Soll die Commit-Messages des Bereichs |
-| `--since <lauf>[,<lauf>…]` | `since_runs` | am finalen Prüfpunkt alle Läufe aus `runs`, sonst weglassen (auch bei der Nachprüfung eines Fixes) |
+| `--soll-file <datei>` | subagent-dev | nur und immer im Profil `checkpoint` (deep-review lehnt es sonst ab). Eine Regel: Das Soll sind die Task-Dateien des Bereichs (Tasks seit dem letzten `mark`), geschrieben nach `.skills/cache/tasks/soll-<prüfpunkt>.md` (`<prüfpunkt>` wie im runlog, etwa `before-5` oder `final`). Bei der Nachprüfung einer Fix-Runde kommt `fix-task.md` dieser Runde dazu, und zwar als ihre Kopie `.skills/cache/tasks/fix-task-<prüfpunkt>-<runde>.md` (Fix-Pfad, Schritt 1), denn `fix-task` überschreibt `fix-task.md` jede Runde, und `_meta.soll_file` hält nur den Pfad: Task-Dateien und Kopie gehen zusammen als `soll-<prüfpunkt>-<runde>.md` an deep-review. Im Profil `standard` ist das Soll die Commit-Messages des Bereichs |
+| `--since <lauf>[,<lauf>…]` | `since_runs` | am finalen Prüfpunkt alle Läufe aus `runs`; bei der Nachprüfung eines Fixes der Lauf des Prüfpunkts (Fix-Pfad, Schritt 4); sonst weglassen |
 
 - **`--since` wirkt je Datei.** Eine Datei übernimmt die Funde eines früheren Laufs, wenn ihr
   Datei-Schlüssel (Inhalt am ZIEL und Gegenstellen-Zeilen ihrer geänderten Stellen) gleich
   ist und sich die Abdeckungskette bis zur neuen Basis schließt. Neu reviewt werden die
   übrigen Dateien und die Aufrufer, deren Gegenstellen sich geändert haben.
 - **Das Profil ist das aus `checkpoint.json`**, nicht das einer Zeile der Tabelle oben:
-  Fallen Gründe zusammen (C1–C4, C5, rote Gesamttests), meldet `status` das höhere
-  (`standard` über `checkpoint`, `PROFILES` in `plan_to_tasks.py`). Meldet es `checkpoint`,
+  Fallen Gründe zusammen (C1–C4, C5, rote Gesamttests), meldet `status` das höhere:
+  `standard` geht vor `checkpoint`. Meldet es `checkpoint`,
   gehört `--soll-file` dazu. Der finale Prüfpunkt meldet so immer `standard`, auch wenn C5
   oder rote Gesamttests auf ihn fallen — dann `--profile standard`, ohne `--soll-file`.
-- **Übernommen wird nach Profil und Fokus** (deep-review, `SINCE_PROFILES`): `checkpoint` ist
-  `standard` mit Soll, also übernimmt ein `standard`-Lauf aus `standard`- und
-  `checkpoint`-Läufen, ein `checkpoint`-Lauf nur aus `checkpoint`-Läufen (ein
-  `standard`-Lauf hatte kein Soll); der Fokus muss gleich sein, andere Läufe übergeht
+- **Übernommen wird nach Profil und Fokus** (deep-review, `SINCE_PROFILES`): Beide Profile
+  reviewen denselben Bereich, `checkpoint` mit den Task-Dateien statt der Commit-Messages
+  als Soll, einem Soll mindestens so genau. Also übernimmt ein `standard`-Lauf aus
+  `standard`- und `checkpoint`-Läufen, ein `checkpoint`-Lauf nur aus `checkpoint`-Läufen (ein
+  `standard`-Lauf hatte nur die Commit-Messages); der Fokus muss gleich sein, andere Läufe übergeht
   deep-review still. Der finale Prüfpunkt übernimmt so aus allen Läufen in `runs`, auch aus
   den Zwischen-Prüfpunkten im Profil `checkpoint` und deren Nachprüfungen.
 - **Übernommene Funde können schon behoben sein.** Wurde ein Fund in `a.py` in der
   aufgerufenen `b.py` behoben, ohne die Gegenstellen-Zeilen von `a.py` zu ändern, bleibt der
   Schlüssel von `a.py` gleich, und `--since` bringt den alten Fund zurück. Vor einer
-  Fix-Runde am finalen Prüfpunkt gleicht der Hauptagent die übernommenen Funde
-  (`reused_chain` im Plan) mit den Fix-Runden der Läufe in `since_runs` ab: Einen Fund, den
-  eine Fix-Runde schon bearbeitet hat (er stand in der `findings.json` dieses Laufs, die an
-  `fix-task` ging, und der Fix ist gemergt), verwirft er; nur die übrigen gehen in den
-  Fix-Pfad.
+  Fix-Runde am finalen Prüfpunkt gleicht der Hauptagent die übernommenen Funde mit den
+  Fix-Runden der Läufe in `since_runs` ab: `sources[].reused_from` in `findings.json` nennt
+  je Fund den Lauf, der ihn gemeldet hat. Nennt die Kopie `fix-task-<prüfpunkt>-<runde>.md`
+  der Runde, die die Funde dieses Laufs bearbeitet hat, den Fund (gleiche Datei und
+  `summary`, die Zeile kann sich verschoben haben) und ist der Fix gemergt, verwirft er ihn;
+  nur die übrigen gehen in den Fix-Pfad.
 - **Keine Grenze von Verifikationen.** deep-review vereinigt die Funde aller Pakete in
   `.skills/cache/deep-review/<lauf>/findings.json`, ohne abzustimmen und ohne Status
   `offen`; jeder Fund geht in den Fix-Pfad.
@@ -153,11 +155,11 @@ sagt wörtlich:
 
 | Schritt | Inhalt |
 | --- | --- |
-| 1 | `python plan_to_tasks.py fix-task --verdicts <datei>` schreibt `.skills/cache/tasks/fix-task.md`. Eingabe: `findings.json` von deep-review (nach `merge`, Objekt mit `_meta` und `findings`; jeder Fund zählt, ein Paket-Ergebnis `results/<id>.json` wird abgewiesen), die JSON-Liste von `/code-review` (`file`, `line`, `summary`; jeder übernommene Fund zählt) oder `verdicts.jsonl` (nur Status `bestätigt`/`plausibel`, `FIX_STATUSES`). Ohne Fund fällt der Aufruf mit Exit 1. |
+| 1 | `python plan_to_tasks.py fix-task --verdicts <datei>` schreibt `.skills/cache/tasks/fix-task.md`. Eingabe: `findings.json` von deep-review (nach `merge`, Objekt mit `_meta` und `findings`; jeder Fund zählt, ein Paket-Ergebnis `results/<id>.json` wird abgewiesen), die JSON-Liste von `/code-review` (`file`, `line`, `summary`; jeder übernommene Fund zählt) oder `verdicts.jsonl` (nur Status `bestätigt`/`plausibel`, `FIX_STATUSES`). Ohne Fund fällt der Aufruf mit Exit 1. Danach `fix-task.md` nach `.skills/cache/tasks/fix-task-<prüfpunkt>-<runde>.md` kopieren: Die nächste Runde überschreibt sie, Schritt 4 und der finale Prüfpunkt gleichen mit der Kopie ab. |
 | 2 | Allowlist: `path` und `related` jedes Funds (aus `findings.json` und der `/code-review`-Liste nur `file`); Akzeptanz je Fund „behoben und mit Test belegt"; Modell: das höchste der Tasks in `gate.json`, deren `files` die Funde berühren, sonst `opus`. |
 | 3 | Ein Agent arbeitet sie in einem frischen Worktree vom integrierten Stand ab; dann `verify`, Merge, Gesamttests. |
-| 4 | Nachprüfung: deep-review über den Fix als eigenen Bereich `<vor-fix>..HEAD` — `<vor-fix>` ist der Commit vor dem Fix-Merge (das Ende des reviewten `range`; vor dem Merge mit `git rev-parse HEAD` notieren) —, im selben Profil (bei `checkpoint` mit `fix-task.md` als `--soll-file`), **ohne `--since`**. Mit `--since` kämen Dateien, die der Fix nicht berührt hat, mit ihren alten Funden zurück (ein Fund in `a.py`, behoben in der aufgerufenen `b.py`) und begännen eine unnötige zweite Fix-Runde; am finalen Prüfpunkt wäre `last_reviewed..HEAD` zudem schmaler als das reviewte `base..HEAD`. Bringt die Nachprüfung Funde, ist das die nächste Runde ab Schritt 1 mit ihrer `findings.json`. Ohne deep-review `/code-review` über denselben Bereich. |
-| 5 | `checkpoint mark` je Lauf, in dieser Reihenfolge, damit `runs` den ganzen Bereich deckt (der finale Prüfpunkt braucht beide für die Abdeckungskette): `--commit <vor-fix> --run <lauf des Prüfpunkts>`, dann je Nachprüfung `--commit <ihr Ende> --run <ihr lauf>`, jeweils mit `--tasks <ids>`. Ohne deep-review einmal `--commit HEAD --run none`. |
+| 4 | Nachprüfung: deep-review über `<prüfpunkt-basis>..HEAD` im selben Profil (Soll nach der Zeile `--soll-file` oben) mit `--since <lauf des Prüfpunkts>`, ab der zweiten Runde dazu die Läufe der Nachprüfungen davor. Vor dem Fix den `range` aus `checkpoint status` notieren, er lautet `<prüfpunkt-basis>..<vor-fix>`: `<vor-fix>` ist das ZIEL des reviewten Bereichs. Neu reviewt wird, was der Fix geändert hat, samt den Aufrufern, deren Gegenstellen sich dabei geändert haben (ein Fund in `a.py`, behoben in der aufgerufenen `b.py`: `a.py` steht wieder im Plan, wenn sich ihr Schlüssel geändert hat); der Rest kommt mit seinen Funden aus dem Lauf des Prüfpunkts. Darunter können schon behobene sein: Einen übernommenen Fund, den `fix-task-<prüfpunkt>-<runde>.md` einer Runde dieses Prüfpunkts nennt (gleiche Datei und `summary`, die Zeile kann sich verschoben haben), verwirft der Hauptagent. Bleiben Funde, ist das die nächste Runde ab Schritt 1 mit einer Kopie der `findings.json` ohne die verworfenen. Ein Fix nur an Tests oder Doku ändert keinen Schlüssel: `plan` übernimmt dann alle Dateien („Pakete: keine — alle Dateien übernommen“), und der Lauf zählt in Schritt 5 wie jeder. Lehnt `plan` mit „nichts zu reviewen“ ab (keine reviewbare Datei im Bereich), gibt es keinen Lauf der Nachprüfung: in Schritt 5 `--run none` für sie, und die Übergabe sagt es. Ohne deep-review `/code-review` nur über die Fix-Commits, `<vor-fix>..HEAD`. |
+| 5 | `checkpoint mark` je Lauf, in dieser Reihenfolge, damit `runs` den ganzen Bereich deckt (der finale Prüfpunkt braucht beide für die Abdeckungskette): `--commit <vor-fix> --run <lauf des Prüfpunkts>`, dann je Nachprüfung `--commit <ihr Ende> --run <ihr lauf>` (ohne Lauf `--run none`), jeweils mit `--tasks <ids>`. Ohne deep-review einmal `--commit HEAD --run none`. |
 
 Höchstens **zwei Fix-Runden je Prüfpunkt**, dann Eskalation an den Nutzer. Diese Grenze
 verlangt die SKILL.md; anders als in E8 der Spec (`MAX_FIX_ROUNDS = 2`) steht sie nicht

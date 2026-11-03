@@ -24,7 +24,7 @@ Unteragenten von `/code-review` unverändert mit (`review-brief.md`). Grenzwerte
 | Python | `.py` | Aufruf auf einer geänderten Zeile | eine erreichte Definition etwas wirft oder der Aufruf ein geändertes Schlüsselwort-Argument hat |
 | Python | | geänderte `except`-Klausel | ein Aufruf im `try`-Block eine Definition erreicht, die etwas wirft |
 | Delphi | `.pas`, `.dpr`, `.dpk` | Aufruf auf einer geänderten Zeile | die Implementierung etwas wirft oder ihr Kopf einen Default-Wert hat |
-| Delphi | | `Extract`, `ExtractPair`, `Remove`, `Free`, `FreeAndNil`, `SetContentStream` auf einer geänderten Zeile (an TDictionary/TObjectDictionary gibt es nur `ExtractPair`; eigene Methoden `ExtractKey`/`ExtractValue` bekommen keinen Besitz-Hinweis) | der Typ des Empfängers auflösbar ist (Klasse im Repo oder Besitz-Default der RTL) |
+| Delphi | | `Extract`, `ExtractPair`, `ExtractItem`, `Remove`, `Delete`, `Clear`, `Dequeue`, `Pop`, `Free`, `FreeAndNil`, `SetContentStream` auf einer geänderten Zeile (`Delete`, `Clear`, `Dequeue` und `Pop` geben bei OwnsObjects frei, `ExtractItem` gibt ab; an TDictionary/TObjectDictionary gibt es nur `ExtractPair`; eigene Methoden `ExtractKey`/`ExtractValue` bekommen keinen Besitz-Hinweis) | der Typ des Empfängers auflösbar ist (Klasse im Repo oder Besitz-Default der RTL) |
 | Delphi | | geändertes `inherited Create(…)` im Konstruktor einer Klasse mit Besitz-Default der RTL | immer |
 | andere | alle übrigen Endungen | keine | nie: „Gegenstellen nicht gesammelt (Sprache)“ |
 
