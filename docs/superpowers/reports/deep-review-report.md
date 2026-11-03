@@ -859,12 +859,40 @@ Lesesperre wie in README beschrieben, Nachkontrolle `probe=0` bei beiden Läufen
     ganzen Cache-Ordner ab, also liegt die Datei unter `.kit/<lauf>/`. Die Vorauswahl lief
     deshalb über das Textfenster. Die Treffer oben sind von Hand am `findings.json` geprüft.
 
+**Eval 3 und 4 mit Skill** (Wahl des Nutzers für das Restbudget):
+
+| Eval | Ergebnis | Fund des Reviewers | Kosten |
+| --- | --- | --- | --- |
+| `narrowed-except-gets-callee-raises` (`dr-contract`) | PASS | `app/groups.py:14`: Die verengte `except`-Klausel fängt den `TypeError` aus `vendor/grouplib.py` nicht mehr, ohne Mitgliederdatei stürzt der Aushang ab | 0,67 USD, 80 s |
+| `delphi-extract-shows-ownership` (`dr-delphi`) | PASS | `Query.pas:22`: `Extract` statt `Remove` auf `TQueryTree` (`TObjectList<TNode>` mit `inherited Create(True)`) leckt jeden leeren Knoten | 0,54 USD, 59 s |
+
+Die Assertions prüfen nur den Paketblock. Dass der Reviewer den Einbau auch meldet, ist an
+`findings.json` und der Übergabe geprüft. Beide Funde nennen die Gegenstelle aus dem Block.
+
+**Kosten der Abnahme:** 14,51 USD (Bench 13,30, Evals 1,21), Rahmen rund 15 USD.
+
+**Ergebnis der Abnahme:** Bei den Treffern ist deep-review klar besser als die Basislinie.
+Auf beiden großen Diffs fand es alle eingebauten Fehler, dazu zum ersten Mal P2, und P2 und
+P4 im selben Lauf. Die Kostenschwelle verfehlt es: Je Paket fällt ein `/code-review` an, also
+bei 4 Paketen das 3- bis 5,5-Fache eines einzelnen Reviews.
+
+Welche Stufe rausfliegt, lässt sich ohne die Abschaltungen nicht entscheiden. Der Plan sah
+`drnc` dafür vor, der Nutzer hat es aus Budgetgründen gestrichen. Die Messung aus dem
+Entscheidungsexperiment bleibt der einzige Beleg für den Block: Pakete ohne Gegenstellen
+fanden P2 und P4 dort nicht.
+
 ## Was nicht gemessen wurde
 
-**deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
-SKILL.md, Plugin-Eintrag, Projekt-Kopie), aber noch nicht gemessen; ihre Läufe auf beiden
-Fixtures, die Abschaltungen und der Vergleich mit dieser Basislinie folgen in der Abnahme,
-Task 16.
+**deep-review: nur reduziert abgenommen (Task 16)** — je ein Lauf auf `py-diff` und `dl-diff` und
+Eval 3 und 4 mit Skill (Abschnitt „Abnahme“). Nicht gelaufen:
+- ein zweiter Lauf je Szenario, ohne den es keine Streuung gibt;
+- die Abschaltungen `drnc` (ohne Gegenstellen) und ohne Delphi-Prüfliste. Ob der
+  Gegenstellen-Block die Treffer trägt oder das Schneiden in Pakete allein, ist auf den großen
+  Repos deshalb nicht getrennt;
+- Eval 1, 2, 5 und 6;
+- alle Evals ohne Skill;
+- die Evals der Nachbarn (`evals_due` war bei keinem gesetzt);
+- eine Fassung der Repos ohne Einbauten, also keine Präzision der 31 bzw. 54 Funde.
 
 **Eine Fixture jenseits des Kontextfensters** — beide Fassungen sind klein genug, dass ein
 Agent alles lesen kann. Den Effekt, auf den die Spec zielt (eine Stelle liegt außerhalb

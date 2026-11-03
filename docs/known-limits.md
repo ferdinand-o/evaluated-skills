@@ -2179,7 +2179,8 @@ Gebaut nach Spec 26 (2026-11-02). Tier 1: `scripts/review_kit.py` schneidet eine
 Pakete, sammelt die Gegenstellen der geänderten Zeilen, nimmt die Ergebnisse je Paket an und
 prüft die Abdeckung; reviewt wird mit `/code-review`. Stand: Bau bis Task 15, mit SKILL.md,
 Plugin-Eintrag und Projekt-Kopie. Der finale Prüfpunkt lief mit deep-review selbst über den
-Branch (6 Pakete, 31 Funde); die Abnahmemessung (Task 16) steht aus. Die Liste hat zwei
+Branch (6 Pakete, 31 Funde). Abgenommen ist die Skill reduziert (Task 16: je ein Lauf auf
+`py-diff` und `dl-diff`, Eval 3 und 4); die Kostenschwelle der Spec verfehlt sie. Die Liste hat zwei
 Quellen: die offenen Fragen der Spec und die Funde der Prüfpunkte 1 bis 10 und des finalen
 Prüfpunkts, die nach der Linie von subagent-dev (zwei Fix-Runden) offen blieben.
 Was inzwischen behoben ist, steht nicht hier. Je Grenze: was nicht geht, und wo es einen
@@ -2373,6 +2374,15 @@ gibt, der Umgang damit.
 - **Lesesperre mit Lücken:** `Bash(python3:*)` bei `dr` umgeht jede Sperre. Bash-Regeln
   vergleichen nur den Anfang des Befehls. Projektordner, die während des Laufs entstehen, sind
   nicht gesperrt. Gegenmittel ist die Nachkontrolle `probe=` in `status.txt`.
+- **`dr` darf `report.md` nicht anlegen:** `run.sh` erlaubt nur
+  `Edit(./.skills/cache/deep-review/**)`, für eine neue Datei braucht es `Write`. In
+  `py-diff-dr-1` fehlte deshalb der Bericht, und `audit` blieb unvollständig.
+- **`match.py` sucht `findings.json` direkt in `.kit`,** `run.sh` legt den Lauf aber unter
+  `.kit/<lauf>/` ab. Die Vorauswahl fällt dann auf das Textfenster zurück, und die Treffer
+  müssen von Hand am `findings.json` geprüft werden.
+- **Der Paketblock kann im Fork stecken bleiben:** In `dl-diff-dr-1` gab der Agent den Block
+  nicht ausdrücklich an `/code-review` weiter, der Fork kannte ihn nur aus dem Verlauf. Die
+  Anti-Rationalisierungs-Tabelle der SKILL.md nennt das, verhindert es aber nicht.
 - **Eval 2 und 5 können zwei Läufe mischen,** wenn der Agent neu plant: Die Globs nehmen den
   alphabetisch ersten Lauf, für Plan und Audit getrennt.
 
