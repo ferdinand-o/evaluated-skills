@@ -5786,3 +5786,126 @@ def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, c
     assert results[("file_max_lines", None)] is True
     assert results[("file_matches", r'"report_mismatch":\s*\[\]')] is False
     assert results[("file_matches", r'"complete":\s*true')] is False
+
+
+# --- Finaler Prüfpunkt, Runde 2, Paket A: Attribut-Auflösung, Shallow-Hinweis ---------------
+
+REEXPORT_IMPL = (
+    "class Finder:\n"
+    "    def find(self):\n"
+    "        raise KeyError('weg')\n\n\n"
+    "def load(n):\n"
+    "    raise ValueError(n)\n")
+REEXPORT_APP = (
+    "import re\n"
+    "import pkg\n"
+    "from pkg import Finder\n\n\n"
+    "def run(finder):\n"
+    "    m = re.match('a', 'a')\n"
+    "    a = 0\n"
+    "    b = 0\n"
+    "    c = 0\n"
+    "    d = 0\n"
+    "    return a, b, c, d, m\n")
+
+
+def test_final2_f1_variable_receiver_and_package_reexport_resolve(tmp_path):
+    kit = _kit()
+    after = (REEXPORT_APP.replace("a = 0", "a = pkg.load(1)")
+             .replace("b = 0", "b = Finder.find(None)")
+             .replace("c = 0", "c = finder.find()")
+             .replace("d = 0", "d = m.start()"))
+    timer = "class Timer:\n    def start(self):\n        raise OSError('uhr')\n"
+    root = _commit_repo(tmp_path, {"pkg/__init__.py": "from .impl import load, Finder\n",
+                                   "pkg/impl.py": REEXPORT_IMPL, "timer.py": timer,
+                                   "app.py": REEXPORT_APP}, {"app.py": after})
+    found = kit.collect_python(root, "base..HEAD", ["app.py"])
+    text = _blocks_of(found)
+    by_line = {e["line"]: "\n".join(e["lines"]) for e in found.entries}
+    assert sorted(by_line) == [8, 9, 10], text
+    # pkg.load(1): über den Re-Export in pkg/__init__.py an die Funktion in pkg/impl.py.
+    assert "- Gegenstelle load [pkg/impl.py:6]" in by_line[8] and "ValueError" in by_line[8]
+    # Finder.find(None): die Klasse kommt über den Re-Export, ihre Methode ist gemeint.
+    assert "- Gegenstelle Finder.find [pkg/impl.py:2]" in by_line[9], text
+    # finder.find(): Empfänger unbekannt, der Name ist unter den Methoden eindeutig — markiert.
+    assert ("- Gegenstelle Finder.find (Empfänger unbekannt, Name eindeutig) [pkg/impl.py:2]"
+            in by_line[10]), text
+    assert "KeyError" in by_line[10]
+    # m.start(): start ist eine Methode von Typen der Stdlib — nicht geraten, gezählt.
+    assert "timer.py" not in text and found.unresolved == 1, text
+    assert "start" in kit.BUILTIN_METHOD_NAMES and "find" not in kit.BUILTIN_METHOD_NAMES
+
+
+def test_final2_f1_unknown_receiver_needs_a_unique_method_name():
+    kit = _kit()
+    index = kit._PyIndex({"a.py": b"class A:\n    def run(self):\n        raise KeyError(1)\n",
+                          "b.py": b"class B:\n    def run(self):\n        raise KeyError(2)\n",
+                          "c.py": b"class C:\n    def poke(self):\n        raise KeyError(3)\n"
+                                  b"\n    def get(self):\n        raise KeyError(4)\n",
+                          "app.py": b"import os\n"})
+
+    def resolve(src):
+        defs, ambiguous = index.resolve_call(ast.parse(src).body[0].value, "app.py")
+        return [(d[0], d[1]) for d in defs], ambiguous
+
+    # Zwei Methoden run: nicht eindeutig, gezählt.
+    assert resolve("x.run()") == ([], True)
+    # Eine Methode poke, auch auf einem Attribut- oder Aufruf-Empfänger: markiert aufgelöst.
+    guess = ("c.py", "C.poke (Empfänger unbekannt, Name eindeutig)")
+    assert resolve("self.x.poke()") == ([guess], False)
+    assert resolve("make().poke()") == ([guess], False)
+    # get ist ein Name der Stdlib-Typen: trotz einer einzigen Definition nicht geraten.
+    assert resolve("cache.get()") == ([], True)
+    # Ein Modul außerhalb des Repos bleibt extern.
+    assert resolve("os.poke()") == ([], True)
+
+
+def _clone_flat(src, dest):
+    subprocess.run(["git", "clone", "--quiet", "--depth", "1", "--no-single-branch",
+                    src.as_uri(), str(dest)], check=True, capture_output=True)
+    return dest
+
+
+def _src_with_branch(src, main_commits, branch, branch_from):
+    """`main` mit `main_commits` Commits, dazu `branch` mit einem Commit — ab `branch_from`
+    (Revision) oder ohne Vorgänger (None, orphan)."""
+    src.mkdir()
+    git(src, "init", "--quiet", "--initial-branch=main")
+    git(src, "config", "user.email", "t@example.invalid")
+    git(src, "config", "user.name", "Test")
+    for n in range(1, main_commits + 1):
+        (src / f"m{n}.py").write_text(f"x = {n}\n", encoding="utf-8")
+        git(src, "add", "-A")
+        git(src, "commit", "--quiet", "-m", f"c{n}")
+    if branch_from is None:
+        git(src, "checkout", "--quiet", "--orphan", branch)
+        git(src, "rm", "-r", "--quiet", "-f", ".")
+    else:
+        git(src, "checkout", "--quiet", "-b", branch, branch_from)
+    (src / "b.py").write_text("y = 1\n", encoding="utf-8")
+    git(src, "add", "-A")
+    git(src, "commit", "--quiet", "-m", branch)
+    git(src, "checkout", "--quiet", "main")
+    return src
+
+
+def test_final2_f2_shallow_hint_only_behind_a_real_boundary(tmp_path):
+    kit = _kit()
+    # Orphan-Zweig im flachen Klon: git führt beide Spitzen in .git/shallow, obwohl sie
+    # Wurzel-Commits sind. Hinter ihnen fehlt nichts — die Geschichten sind fremd.
+    flat = _clone_flat(_src_with_branch(tmp_path / "src1", 1, "orphan", None), tmp_path / "f1")
+    assert kit._is_shallow(flat)
+    with pytest.raises(kit.KitError, match="keine gemeinsame Basis") as caught:
+        kit.build_plan(flat, "origin/orphan..HEAD", "standard", "bugs", None, False)
+    assert "unshallow" not in str(caught.value)
+    # Eine einzelne Revision auf einem solchen Wurzel-Commit ist die Wurzel, keine Grenze.
+    assert kit.split_range(flat, "HEAD").log_base is None
+    # Ist ZIEL abgeschnitten, kann die Basis hinter seiner Grenze liegen: Hinweis.
+    cut = _clone_flat(_src_with_branch(tmp_path / "src2", 3, "orphan", None), tmp_path / "f2")
+    with pytest.raises(kit.KitError, match="flacher Klon: Basis fehlt"):
+        kit.split_range(cut, "origin/orphan..HEAD")
+    # Die echte Merge-Basis c1 liegt hinter der Grenze beider Spitzen: Hinweis.
+    hidden = _clone_flat(_src_with_branch(tmp_path / "src3", 3, "feature", "main~2"),
+                         tmp_path / "f3")
+    with pytest.raises(kit.KitError, match="flacher Klon: Basis fehlt"):
+        kit.split_range(hidden, "origin/feature..origin/main")
