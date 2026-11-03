@@ -53,10 +53,10 @@ Antwort: —
 Quelle der Antwort: —
 ```
 
-Aufruf dazu:
+Aufruf dazu (`decide_log.py` mit dem Pfad aus der SKILL.md):
 
 ```
-python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" add --class gross \
+decide_log.py add --class gross \
   --topic Abhängigkeiten \
   --question "Datumsangaben mit einer neuen Abhängigkeit parsen oder mit der Stdlib?" \
   --key "dependency:pyproject.toml#python-dateutil" \
@@ -102,8 +102,8 @@ Wahl darin.
 Beaufsichtigt, nach `AskUserQuestion`:
 
 ```
-python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" resolve D-1 --answer "B, wie empfohlen"
-python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" resolve D-1 --reject
+decide_log.py resolve D-1 --answer "B, wie empfohlen"
+decide_log.py resolve D-1 --reject
 ```
 
 `resolve` setzt den Status auf `freigegeben` (mit `--reject` auf `abgelehnt`), schreibt die Antwort
