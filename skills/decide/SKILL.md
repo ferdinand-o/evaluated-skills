@@ -23,8 +23,8 @@ führendem `-` als `--decision=-v`.
    Test, ein Aufrufer, ein Leser des Logs, ein anderes Modul). Reihenfolge von Funktionen
    in einer Datei, lokale Namen, Formatierung, Importreihenfolge: ohne Eintrag entscheiden,
    auch wenn das Repo die Antwort zeigt. Eine Frage, deren Thema eine Regel trifft, liegt nie
-   darunter. Ruft `/decide <frage>` eine Frage darunter auf, lautet die Antwort „Keine
-   Entscheidung nötig“ mit dem Grund; es entsteht keine Datei.
+   darunter. Ruft `/decide <frage>` eine Frage darunter auf, lautet die Antwort
+   „Keine Entscheidung nötig“ mit dem Grund; es entsteht keine Datei.
 2. **Einordnen.** Groß ist, was eine Handlung aus `references/reversibility.md` auslöst oder
    dessen Thema eine Regel `immer fragen` trifft; alles andere ist klein. Vorrang: konkreter
    Auftrag vor Regel vor eigener Einordnung. Hat der Nutzer genau diesen Schritt beauftragt
