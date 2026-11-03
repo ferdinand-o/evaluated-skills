@@ -760,6 +760,37 @@ sie im Klon und im Repo wieder gelöscht.
   offen, denn er ist nicht Teil der Skill. Eval 2 und 5 können zwei Läufe mischen, wenn der
   Agent neu plant.
 
+**Fix-Runde 1 und Review der Fixes.** Die drei Pakete A, B und C sind gemergt, 1.816 Tests grün.
+Das Review über `fa2041b..c129974` meldete 17 Funde. Der Auftrag verlangte je Fund die Angabe
+„[nachgestellt]“ oder „[nicht nachgestellt]“. Ergebnis: 5 nachgestellt, 9 nicht nachgestellt,
+3 reine Effizienz- oder Aufräumpunkte.
+
+**Versuch: Verifikation der Funde durch Sonnet (Entscheidung des Nutzers).** Jeder der neun
+nicht nachgestellten Funde ging an einen eigenen Sonnet-Agenten. Der Agent bekam nur Datei,
+Zeile, Behauptung, Szenario und Commit, die Begründung des Reviewers nicht. Verlangt war ein
+Urteil BESTÄTIGT, WIDERLEGT oder UNKLAR mit Befehl und Ausgabe als Beleg.
+
+| Ergebnis | Zahl |
+| --- | --- |
+| bestätigt | 8 (V2 tool-results-Sperre, V7 Repo-Prüfung nach Seiteneffekten, V9 breite Muster, V10 Nachbarfund im Fenster bei `dr`, V11 Dateimuster ohne `re.I`, V12 `dr` auf Pfad-Szenarien, V13 `CLAUDE_CONFIG_DIR`, V14 flacher Klon und verwaiste Historie) |
+| widerlegt | 1 (V5: Der PermissionError verlässt den Lock, `main` fängt aber `OSError`; Exit 1 mit Meldung, kein Traceback) |
+| unklar | 0 |
+
+- **Kosten:** rund 550.000 Tokens, also etwa 61.000 je Fund. Der größte Teil davon ist der
+  feste Anlauf eines Agenten; die eigentliche Arbeit waren 3 bis 6 Werkzeugaufrufe in 17 bis 40
+  Sekunden. Zum Vergleich: Eine Opus-Fix-Runde kostete in diesem Bau 150.000 bis 290.000 Tokens.
+- **Was die Prüfung gebracht hat:** Sie hat einen Fund aussortiert, und dessen Rest, eine rohe
+  Meldung statt Warten, ist klein. Die Bestätigungen haben fast alle eine echte Nachstellung als
+  Beleg: Befehl, Ausgabe und Gegenprobe (V10: mit Nachbar 2/6, ohne 0/6). Damit ist für Runde 2
+  belegt, dass die Funde echt sind, und das musste ich nicht mehr von Hand einschätzen.
+- **Nebenwirkung:** Der Prüfer von V7 hat beim Nachstellen über einen leeren `readlink -f` (das
+  ist R6) die leeren Ordner `/out` und `/work` im Wurzelverzeichnis des Containers angelegt. Die
+  Sicherheitsprüfung hat das Entfernen abgewiesen, sie liegen noch dort. Prüfer, die
+  Shell-Skripte ausführen, brauchen also eine Sandbox, die tiefer greift als ein eigener Ordner.
+- **Einordnung:** Hier ist die Quote der Fehlalarme mit 1 von 9 niedrig. Das Review bei hoher
+  Stufe liefert also meist echte Funde; die Prüfung lohnt sich vor allem, wenn eine teure
+  Fix-Runde von einem Fund abhängt. Gemessen ist das an einem einzigen Review.
+
 ## Was nicht gemessen wurde
 
 **deep-review selbst** — die Skill ist bis Task 15 gebaut (Skript, References, Vorlage, Evals,
