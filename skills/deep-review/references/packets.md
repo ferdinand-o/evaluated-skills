@@ -105,7 +105,7 @@ den Bereich. Den gibst du an `/code-review`.
 | Fokus `security` (`s1`), kein Wurzel-Commit | Originalbereich | keine |
 | `split: true` | `<von>..<bis>` | ja |
 | Wurzel-Commit (`root: true`) | `<von>..<bis>`, auch bei einem Paket | ja, Basis ist der leere Baum |
-| nach `--since` | `<von>..<bis>`, auch bei einem Paket | ja |
+| nach `--since` mit Übernahme (ohne Übernahme bleibt der Plan unverändert) | `<von>..<bis>`, auch bei einem Paket | ja |
 
 Die Hilfscommits liegen unter `refs/deep-review/<lauf>/<id>/von` und `…/bis`. Gebaut werden
 sie über einen temporären Index mit der Identität `deep-review <deep-review@localhost>`.

@@ -587,6 +587,6 @@ Plan `docs/superpowers/plans/2026-10-30-deep-review.md`, neu gefasst mit 16 Task
 Basislinie) und Tasks 2–13 mit den Prüfpunkten 1–9 (Report, Abschnitt „Bau"): `review_kit.py`
 mit `plan`, `counterparts` für Python und Delphi, `record`, `merge`, `audit`, `cleanup`, die
 References, die Berichtsvorlage, die Evals mit Fixtures und die Nachbarn (subagent-dev mit
-checkpoints.md, `fix-task` und Spec 27). Offen: Task 14 (known-limits, mit den offenen Punkten
-der Prüfpunkte aus dem Report), Task 15 (SKILL.md, Plugin, Projekt-Kopie) und Task 16 (Abnahme
+checkpoints.md, `fix-task` und Spec 27) sowie Task 14 (known-limits, mit den offenen Punkten
+der Prüfpunkte aus dem Report). Offen: Task 15 (SKILL.md, Plugin, Projekt-Kopie) und Task 16 (Abnahme
 mit review-bench, Evals mit und ohne Skill). Bau nach `skill-forge` (17) Schritt 3 bis 7.
