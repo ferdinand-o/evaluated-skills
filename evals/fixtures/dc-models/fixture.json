@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Paket mit app/models.py (Klasse User mit den Spalten id, name und legacy_id über die Stubs aus app/db.py, dazu zwei Kommentare „# Aufgabe:“) und migrations/ mit 0001_initial.py (up/down ohne Framework) und README.md zur Namensform der Dateien. Kein .skills/, kein docs/."
+}

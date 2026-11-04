@@ -69,7 +69,7 @@ Drei Durchsetzungsgrade, die jede Skill pro Gate deklariert — und eine Sprachr
 - **G2 Maschinelles Urteil** — ein Skript fällt das Urteil, der Aufruf bleibt freiwillig. Formulierung: „meldet Verstoß". Das ist der Normalfall in allen vierzehn Specs.
 - **G3 Hook** — `PreToolUse`/`Stop` in `settings.json` erzwingt es unabhängig vom Modell. Formulierung: „blockiert".
 
-**Kein G2-Gate darf sich „blockiert" nennen.** Die Specs 06, 07, 08 und 09 tun das derzeit („Blocker", „blockieren", „Abnahme-Blocker") und überschätzen damit ihre eigene Härte. Lohnend ist G3 nur dort, wo der Schaden irreversibel ist: `migration_gate.py` (08) und `check_ledger.py` (01) bekommen ein Hook-Snippet unter `assets/hooks/`, das der Nutzer bewusst installiert. Alles andere bleibt G2 und sagt das auch.
+**Kein G2-Gate darf sich „blockiert" nennen.** Die Specs 06, 07, 08 und 09 tun das derzeit („Blocker", „blockieren", „Abnahme-Blocker") und überschätzen damit ihre eigene Härte. Lohnend ist G3 nur dort, wo der Schaden irreversibel ist: `migration_gate.py` (08), `check_ledger.py` (01) und `decide_log.py guard` (28) bekommen ein Hook-Snippet unter `assets/hooks/`, das der Nutzer bewusst installiert. Alles andere bleibt G2 und sagt das auch.
 
 ### 5 · Routing
 
@@ -91,6 +91,7 @@ Jede Description trägt eine explizite Abgrenzungsklausel gegen ihre zwei stärk
 | Konzept/Thema erklären (kein Code) | explain (15) | learning-coach (Session mit Abruf), visual-summary (verdichtet Vorliegendes), architecture-map (Codebase) |
 | Implementierungsplan zu einer Spec | impl-plan (16) | work-plan (fremde Repos), brainstorming — die eigene Profil-Skill, nicht superpowers (die Spec davor), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
 | Plan für Arbeit in einem beliebigen Repo (Spec, Befund, Auftrag) | work-plan (23) | impl-plan (16) (Specs dieser Sammlung), eingebauter Plan-Modus (Plan nur im Gespräch), subagent-dev (zerlegt und dispatcht den fertigen Plan) |
+| eigene Frage während der Arbeit, „entscheide selbst", „was hast du entschieden", `/decide` | decide (28) | feature-spec (03) (Annahmen eines Spec-Entwurfs), work-plan (23) (Annahmen eines Plans) |
 | Skill bauen oder ändern | skill-forge (17) | skill-creator (außerhalb dieser Sammlung, eigenes Eval-Schema), superpowers:writing-skills (Disziplin-Skills mit Druckszenarien), impl-plan (nur der Plan) |
 | eigenen Claude-Code-User-Scope einrichten oder prüfen (Statusline, Kontext-Hinweise, Regeln) | setup-user (21) | `/statusline` (Statusline nach Freitext-Wunsch), setup-repo (22, was in Cloud und CI gelten muss), handoff (sichert den Stand, setup-user rät nur dazu) |
 | ein Repo für Claude Code einrichten oder prüfen (Verifikationsbefehl, CLAUDE.md, Regeln mit Quelle, Freigaben) | setup-repo (22) | setup-user (21, persönlicher User-Scope), testing-strategy (welche Tests fehlen), `/init` (CLAUDE.md ohne Beleg und Budget) |

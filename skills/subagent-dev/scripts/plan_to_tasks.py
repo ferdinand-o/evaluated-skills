@@ -757,6 +757,15 @@ def _slug(title: str) -> str:
     return slug or "task"
 
 
+# Spec 28 (decide), Ablauf 5: fester Satz für Subagenten, wörtlich unter Nicht-Ziele jeder
+# Task-Datei. Er nennt decide nicht, weil subagent-dev auch ohne decide läuft.
+SUBAGENT_QUESTIONS_SENTENCE = (
+    "Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in dieser Task "
+    "stehen, entscheidest und trägst du nicht selbst ein; nenn sie in deinem Bericht mit Frage, "
+    "Optionen, Folgen und Empfehlung. Der Hauptagent ordnet sie ein."
+)
+
+
 def _header(command: str) -> str:
     return f"<!-- skill: subagent-dev | schema: {SCHEMA_VERSION} | generated: {command} -->"
 
@@ -810,6 +819,7 @@ def render_task_file(task: PlanTask, doc: PlanDoc, plan_path: str,
         f"## Nicht-Ziele\n\n"
         f"Alles außerhalb der Datei-Allowlist oben. Andere Tasks dieses Plans "
         f"gehören nicht hierher:\n\n{others_md}\n\n"
+        f"{SUBAGENT_QUESTIONS_SENTENCE}\n\n"
         f"```json\n{json.dumps(machine_block, indent=2, ensure_ascii=False)}\n```\n"
     )
 

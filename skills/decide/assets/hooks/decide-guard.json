@@ -1,0 +1,16 @@
+{
+  "_comment": "G3-Vorlage (Spec 00 §4, Spec 28 Abschnitt Hook) — wird NIE automatisch installiert. Ohne diesen Hook bleibt decide G1 (SKILL.md) und check G2: Es meldet, blockiert aber nicht. Übernehmen: scripts/decide_log.py nach .claude/hooks/ kopieren, dann diesen Block in .claude/settings.json oder .claude/settings.local.json mischen. Mit Hook fragt Claude Code bei einem erkannten Befehl (references/reversibility.md, „Befehle, die guard erkennt“) den Nutzer, bis er antwortet. Ein Python-Start je Bash-Aufruf: python3, sonst python. Fehlt die Kopie oder beide, meldet der Hook „ungeprüft“ und hält nichts an.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ ! -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" ]; then echo '{\"systemMessage\": \"[decide] Hook ungeprüft — .claude/hooks/decide_log.py fehlt\"}'; elif command -v python3 >/dev/null 2>&1; then exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" guard; elif command -v python >/dev/null 2>&1; then exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" guard; else echo '{\"systemMessage\": \"[decide] Hook ungeprüft — kein Python\"}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
