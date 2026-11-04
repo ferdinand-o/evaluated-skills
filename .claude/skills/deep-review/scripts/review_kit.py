@@ -78,7 +78,9 @@ FACTORY_DEPTH = 2         # raise fabrik(...): Fabriken in Fabriken so tief auf 
 FLAG_DEPTH = 4            # Weg eines Schlüsselwort-Arguments durch die Gegenstellen
 AMBIGUOUS_MAX = 3         # mehr gleichnamige Definitionen ohne Importbezug: nicht raten
 EXTERNAL = "extern"       # Empfänger eines Attribut-Aufrufs ist ein Modul außerhalb des Repos
-REPORT_BASE_LINES = 20    # Anti-Zeremonie: Bericht höchstens so viele Zeilen plus eine je Fund
+REPORT_BASE_LINES = 20    # Anti-Zeremonie: Skript-Teil des Berichts (ohne Kopfzeile) bei einem
+                          # Paket höchstens so viele Zeilen plus eine je Fund (`_report_text`)
+EINORDNUNG_MAX_LINES = 8  # Anti-Zeremonie (`split: false`): Textzeilen ab `## Einordnung`
 
 SKILL_NAME = "deep-review"
 SCHEMA_VERSION = 1
@@ -5160,13 +5162,28 @@ REPORT_NO_DATA = "—"             # Zelle ohne Wert: kein Ergebnis, kein Gegens
 NOT_COLLECTED_QUALITY = "Gegenstellen nicht gesammelt (Fokus quality)"
 # Gründe unter not_reviewed, die Quellcode betreffen: im Bericht mit ihren Dateien genannt.
 REPORT_SOURCE_REASONS = (REASON_SOURCE_NOT_UTF8,)
-REPORT_DISCLAIMER = (
+REPORT_TRUST_NOTE = (
     "Dass je Paket ein Review lief, ist Auskunft des Hauptagenten, kein Beleg; belegt ist nur, "
-    "was `audit` an angenommenen Ergebnissen zählt. `--max-findings all` hebt nur die Kappung "
-    "der Funde je Review auf und belegt nicht, dass kein Fehler übrig blieb. Es bleibt danach "
+    "was `audit` an angenommenen Ergebnissen zählt.")
+CODE_REVIEW = "/code-review"     # das Werkzeug in fester Form (`_canonical_tool`)
+# Nur, wenn die Kopfzeile `CODE_REVIEW` als Werkzeug nennt (`_report_text`): an REPORT_TRUST_NOTE
+# angehängt, in derselben Zeile.
+REPORT_DISCLAIMER = (
+    "`--max-findings all` hebt nur die Kappung der Funde je Review auf und belegt nicht, dass "
+    "kein Fehler übrig blieb. Es bleibt danach "
     "als Wahl des Nutzers gesetzt, und `/code-review` ohne Stufe nimmt die zuletzt getippte "
     "Stufe; deep-review setzt nichts zurück, zurück geht es mit "
     "`/code-review --max-findings default`.")
+# G2 auf die Einordnung: „vollständig" und seine Adjektiv-Endungen als ganzes Wort, nicht
+# „unvollständig" und nicht „Vollständigkeit" (`_claims_complete`)
+REPORT_CLAIM_RE = re.compile(r"\bvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
+# Verneinung vor der Behauptung: „nicht", „kein…" (auch „keineswegs") oder „un", mit höchstens
+# zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz"); Satzzeichen beenden sie
+REPORT_NEGATION_RE = re.compile(r"\b(?:nicht|kein\w*|un)(?:\s+\w+){0,2}\s*\Z", re.IGNORECASE)
+REPORT_EMPHASIS_RE = re.compile(r"[*_`]+")   # Markdown-Hervorhebung zählt beim Lesen nicht
+REPORT_NEGATION_CHARS = 80  # so weit vor „vollständig" wird nach der Verneinung gesucht
+# Die Zählzeile, die `_render` unter `## Gegenstellen` in `packets/<id>.md` schreibt
+BLOCK_COUNT_RE = re.compile(r"(\d+) Stelle\(n\) nach der Sammelregel\b")
 # Eine Zeile nur aus HTML-Kommentaren zählt nicht zur Längengrenze
 REPORT_COMMENT_LINE_RE = re.compile(r"[ \t]*(?:<!--.*?-->[ \t]*)+")
 
@@ -5773,18 +5790,36 @@ def _not_reviewed_text(plan: dict) -> str:
     return ", ".join(named + counted) + " — Dateien in plan.json not_reviewed"
 
 
-def _counterpart_cell(plan: dict, packet: dict, stored) -> str:
+def _block_count(directory: Path, run_id: str, pid: str) -> str | None:
+    """Die Zahl der Gegenstellen aus `packets/<id>.md` (die Zählzeile `<n> Stelle(n) nach der
+    Sammelregel`, `BLOCK_COUNT_RE`), wenn die Datei die Kopfzeile von `counterparts` für
+    diesen Lauf und dieses Paket trägt; sonst None (fehlt, nicht lesbar, anderer Lauf oder
+    anderes Paket, keine Zählzeile)."""
+    try:
+        text = (directory / "packets" / f"{pid}.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not text.startswith(_packet_header(run_id, pid)):
+        return None
+    match = BLOCK_COUNT_RE.search(text)
+    return None if match is None else match[1]
+
+
+def _counterpart_cell(plan: dict, packet: dict, stored, directory: Path, run_id: str) -> str:
     """Spalte Gegenstellen eines Pakets: bei Fokus quality `NOT_COLLECTED_QUALITY`, ein Paket
     nur aus Dateien ohne Sammler `NO_COLLECTOR`, sonst die Zahl der Gegenstellen seiner
-    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt); ohne
-    passenden Speicher (Lauf aus Spec 26) `REPORT_NO_DATA`."""
+    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt). Fehlt der
+    Speicher oder passt er nicht zum Plan (`stored` None: `plan` konnte ihn nicht schreiben —
+    `build_plan` unterdrückt den Fehler —, oder ein Lauf aus Spec 26), die Zahl aus dem Block
+    `packets/<id>.md`, den `counterparts` dann live gesammelt hat (`_block_count`); fehlt
+    auch der, `REPORT_NO_DATA`."""
     if plan.get("focus") == "quality":
         return NOT_COLLECTED_QUALITY
     files = [str(f) for f in packet["files"]]
     if not any(_has_collector(f) for f in files):
         return NO_COLLECTOR
     if stored is None:
-        return REPORT_NO_DATA
+        return _block_count(directory, run_id, packet["id"]) or REPORT_NO_DATA
     return str(len(_stored_found(stored, files).entries))
 
 
@@ -5804,12 +5839,16 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     Ergebnis das des Plans), Titel, `Funde: <N>` mit je Fund einer Zeile, Pakettabelle,
     `- Hinweise:`, `- Übernommen (--since):`, `- Nicht geprüft:`, `- Ohne Block:`,
     `- Abdeckung: <a>/<b> — vollständig|unvollständig` (nach `_RunState.gaps`), `- Reviews:`
-    (`_reviews_line`, mit den Paketen unter der Stufe) und der Hinweis `REPORT_DISCLAIMER`."""
+    (`_reviews_line`, mit den Paketen unter der Stufe) und der Hinweis `REPORT_TRUST_NOTE`,
+    in derselben Zeile ergänzt um `REPORT_DISCLAIMER` (`--max-findings`), wenn die Kopfzeile
+    `/code-review` als Werkzeug nennt: ein angenommenes Ergebnis mit `/code-review` oder,
+    ohne angenommenes Ergebnis, ein Plan, der `/code-review` vorsieht (Fokus nicht
+    security). Nach `/security-review` oder einem Review im Hauptkontext steht er nicht."""
     plan = state.plan
     level = _review_level(plan)
     tools = list(dict.fromkeys(_canonical_tool(r.tool) for r in state.accepted.values()))
     if not tools:
-        tools = ["/code-review" if level is not None else SECURITY_REVIEWS]
+        tools = [CODE_REVIEW if level is not None else SECURITY_REVIEWS]
     head = {"skill": SKILL_NAME, "schema": SCHEMA_VERSION,
             "generated": f"{REPORT_GENERATED} --run {run_id}", "run": run_id,
             "range": plan.get("range") or REPORT_NO_DATA, "profile": plan.get("profile"),
@@ -5823,7 +5862,7 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     for packet in plan["packets"]:
         result = state.accepted.get(packet["id"])
         cells = (packet["id"], len(packet["files"]), packet.get("changed_lines", REPORT_NO_DATA),
-                 _counterpart_cell(plan, packet, stored),
+                 _counterpart_cell(plan, packet, stored, directory, run_id),
                  REPORT_NO_DATA if result is None else len(result.findings))
         rows.append("| " + " | ".join(map(str, cells)) + " |")
     claim = "unvollständig" if state.gaps else "vollständig"
@@ -5837,34 +5876,72 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
              f"- Ohne Block: {', '.join(state.no_block()) or REPORT_NONE}",
              f"- Abdeckung: {len(state.accepted)}/{len(plan['packets'])} — {claim}",
              f"- {_reviews_line(plan, state.below_level())}", "",
-             REPORT_DISCLAIMER]
+             REPORT_TRUST_NOTE + (f" {REPORT_DISCLAIMER}" if CODE_REVIEW in tools else "")]
     return "\n".join(lines) + "\n"
 
 
-def render_report(run_path):
-    """Der Text von `report.md` für den Lauf `run_path` (`_report_text`), unter der Sperre
-    des Plans; schreibt nichts. Derselbe Text, gegen den `audit` den Bericht vergleicht."""
+def _locked_report(run_path, write: bool) -> tuple[Path, str]:
+    """Der eine Weg zum Bericht für `render_report` und `write_report`: unter der Sperre des
+    Plans `_report_text` aus `_run_state` (derselbe Text, gegen den `audit` vergleicht), mit
+    `write` atomar nach `report.md` im Laufordner geschrieben. Rückgabe: (Pfad von
+    `report.md`, Text)."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
+    path = directory / REPORT_NAME
     with _plan_lock(directory, run_id):
-        return _report_text(directory, run_id, _run_state(directory, run_id, repo))
+        text = _report_text(directory, run_id, _run_state(directory, run_id, repo))
+        if write:
+            _write_text(path, text)
+    return path, text
+
+
+def render_report(run_path):
+    """Der Text von `report.md` für den Lauf `run_path` (`_locked_report`); schreibt nichts."""
+    return _locked_report(run_path, write=False)[1]
 
 
 def write_report(run_path):
-    """`report --run <lauf>`: `report.md` im Laufordner schreiben (`render_report`; atomar,
+    """`report --run <lauf>`: `report.md` im Laufordner schreiben (`_locked_report`; atomar,
     ein früherer Bericht wird ersetzt, auch eine angefügte `## Einordnung`). Der Hauptagent
     fügt danach nur einen Abschnitt `## Einordnung` an. Rückgabe: der Pfad."""
-    directory = Path(run_path)
-    repo, run_id = _layout(directory)
-    with _plan_lock(directory, run_id):
-        text = _report_text(directory, run_id, _run_state(directory, run_id, repo))
-        path = directory / REPORT_NAME
-        _write_text(path, text)
-        return path
+    return _locked_report(run_path, write=True)[0]
 
 
-def _report_mismatch(report: Path, shown: str, run_id: str, expected: str, plan: dict,
-                     findings: list) -> list:
+def _claims_complete(text: str) -> bool:
+    """Ob `text` „vollständig" behauptet: das ganze Wort oder eine Adjektivform („vollständige",
+    „vollständiges", „vollständigen", „vollständiger", „vollständigem"; groß oder klein, nicht
+    „unvollständig", nicht „Vollständigkeit"), nicht verneint durch „nicht", „kein…" („keine",
+    „keineswegs") oder „un" davor, mit höchstens zwei Wörtern dazwischen („nicht mehr", „noch
+    nicht ganz") und beliebigem Leerraum, auch über einen Zeilenumbruch
+    (`REPORT_NEGATION_RE`). Markdown-Hervorhebung (`*`, `_`, `` ` ``) zählt nicht:
+    „**nicht** vollständig" ist verneint. Dieselbe Regel wie in Spec 26, jetzt nur auf den
+    freien Teil ab `## Einordnung` angewandt."""
+    text = REPORT_EMPHASIS_RE.sub("", text)
+    for match in REPORT_CLAIM_RE.finditer(text):
+        lo = max(0, match.start() - REPORT_NEGATION_CHARS)
+        before = text[lo:match.start()]
+        if lo and re.match(r"\w", text[lo - 1]):
+            before = re.sub(r"\A\w+", "", before)          # kein abgeschnittenes Wort am Anfang
+        if not REPORT_NEGATION_RE.search(before):
+            return True
+    return False
+
+
+def _gap_text(state: _RunState) -> str:
+    """Die Lücken des Audits als Text für eine Meldung: `missing: …; stale: …;
+    lost_findings: <n>`, nur die belegten Listen."""
+    parts = []
+    if state.missing:
+        parts.append(f"missing: {', '.join(state.missing)}")
+    if state.stale:
+        parts.append(f"stale: {', '.join(str(s.get('packet')) for s in state.stale)}")
+    if state.lost:
+        parts.append(f"lost_findings: {len(state.lost)}")
+    return "; ".join(parts)
+
+
+def _report_mismatch(report: Path, shown: str, run_id: str, expected: str,
+                     state: _RunState) -> list:
     """Was am Bericht nicht zum neu erzeugten Text `expected` (`_report_text`) passt (Spec 28,
     Contract; ein BOM am Anfang zählt nicht). Verglichen wird Zeile für Zeile alles vor der
     ersten Zeile `## Einordnung` (Leerzeilen am Ende dieses Teils nicht), Text gegen Text;
@@ -5873,10 +5950,16 @@ def _report_mismatch(report: Path, shown: str, run_id: str, expected: str, plan:
     scripts/review_kit.py report` trägt — etwa einer aus Spec 26, den der Hauptagent nach
     `assets/report-template.md` schrieb —, wird nicht mehr mit Mustern gelesen: Er ist ein
     Eintrag, der `report --run <lauf>` nennt; der Lauf selbst bleibt prüfbar, sobald das
-    Skript den Bericht neu schreibt. Dazu wie in Spec 26 im Anti-Zeremonie-Fall (`split:
-    false`) höchstens `REPORT_BASE_LINES` Zeilen plus eine je Fund im ganzen Bericht (die
-    Kopfzeile und Zeilen nur aus einem HTML-Kommentar nicht gezählt): Der Teil vor
-    `## Einordnung` ist durch den Vergleich festgelegt, wachsen kann nur die Einordnung."""
+    Skript den Bericht neu schreibt.
+
+    Im freien Teil gilt zweierlei (G2). Meldet das Audit eine Lücke (`missing`, `stale`,
+    `lost_findings`; `_RunState.gaps`), darf er nicht „vollständig" behaupten
+    (`_claims_complete`; „unvollständig" und Verneinungen zählen nicht). Und im
+    Anti-Zeremonie-Fall (`split: false`) hat er höchstens `EINORDNUNG_MAX_LINES` Textzeilen:
+    gezählt wird nach der Überschrift `## Einordnung`, ohne sie, ohne Leerzeilen und ohne
+    Zeilen nur aus einem HTML-Kommentar. Der Teil davor ist durch den Vergleich festgelegt
+    (seine Länge hält `_report_text` kurz, `REPORT_BASE_LINES`); wachsen kann nur die
+    Einordnung, und nur sie zählt."""
     try:
         text = report.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -5906,13 +5989,16 @@ def _report_mismatch(report: Path, shown: str, run_id: str, expected: str, plan:
             else:
                 out.append(f"{where}: erwartet {want[i]!r}, steht {have[i]!r}")
             break
-    counted = sum(not REPORT_COMMENT_LINE_RE.fullmatch(line) for line in lines[1:])
-    limit = REPORT_BASE_LINES + len(findings)
-    if plan.get("split") is False and counted > limit:
-        allowed = len(lines) - counted + limit
-        out.append(f"Bericht hat {len(lines)} Zeilen, erlaubt sind {allowed} (Kopfzeile und "
-                   f"Zeilen nur aus einem HTML-Kommentar nicht gezählt, {REPORT_BASE_LINES} "
-                   "Zeilen und eine je Fund; ein Paket, Anti-Zeremonie-Fall)")
+        free = lines[cut + 1:]
+        if state.gaps and _claims_complete("\n".join(free)):
+            out.append(f"`{REPORT_FREE_HEADING}` sagt „vollständig“, obwohl das Audit Lücken "
+                       f"meldet ({_gap_text(state)}) — dort „unvollständig“ mit den Lücken nennen")
+        counted = sum(bool(line.strip()) and not REPORT_COMMENT_LINE_RE.fullmatch(line)
+                      for line in free)
+        if state.plan.get("split") is False and counted > EINORDNUNG_MAX_LINES:
+            out.append(f"`{REPORT_FREE_HEADING}` hat {counted} Textzeilen, erlaubt sind "
+                       f"{EINORDNUNG_MAX_LINES} (Überschrift, Leerzeilen und Zeilen nur aus "
+                       "einem HTML-Kommentar nicht gezählt; ein Paket, Anti-Zeremonie-Fall)")
     return out
 
 
@@ -5932,7 +6018,8 @@ def audit(run_path, report_path):
     einem anderen Plan zählt als leer), je `{"file", "line", "summary", "packet",
     "reused_from"}`. Diese Rechnung (`_run_state`) teilt `audit` mit `render_report`.
     `report_mismatch`: wo der Bericht vor `## Einordnung` vom neu erzeugten Text abweicht,
-    dazu die Längengrenze (`_report_mismatch`; ein Bericht aus Spec 26 ohne die Kopfzeile
+    dazu ab `## Einordnung` „vollständig" bei einer Lücke und die Längengrenze der Einordnung
+    (`_report_mismatch`; ein Bericht aus Spec 26 ohne die Kopfzeile
     von `report` ist ein Eintrag, kein Absturz; `report_path` None: `report.md` im
     Laufordner; ein relativer `report_path` gilt einmal ab
     dem Arbeitsverzeichnis, gelesen wird dieser Pfad, und `_meta.report` nennt ihn repo-relativ
@@ -5950,7 +6037,7 @@ def audit(run_path, report_path):
     with _plan_lock(directory, run_id):
         state = _run_state(directory, run_id, repo)
         expected = _report_text(directory, run_id, state)
-        mismatch = _report_mismatch(report, shown, run_id, expected, state.plan, state.findings)
+        mismatch = _report_mismatch(report, shown, run_id, expected, state)
         command = f"{SCRIPT_CMD} audit --run {run_id}"
         if report_path is not None:
             command += f" --report {shlex.quote(shown)}"
