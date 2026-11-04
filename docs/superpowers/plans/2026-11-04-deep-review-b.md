@@ -2,31 +2,33 @@
 
 # deep-review B Implementation Plan
 
-**Goal:** deep-review findet auf jeder Eingabe, die es annimmt (großer und kleiner Diff, Pfad,
-Python, Delphi, TypeScript und weitere Sprachen), im Mittel mindestens so viel wie
-`/code-review`, mehr, wo der Vertrag außerhalb des Diffs liegt, kostet auf großen Diffs
-höchstens das Doppelte und belegt je Paket, dass der Reviewer den Gegenstellen-Block bekam.
+**Goal:** deep-review findet auf jeder Eingabe der Abnahme B (großer und kleiner Diff, Pfad,
+Python, Delphi, TypeScript) im Mittel mindestens so viel wie `/code-review` und auf großen
+Diffs mehr; Auftrag und Gegenstellen-Block erreichen den Reviewer als eine Datei; die
+Hauptschleife liest keine Blöcke und schreibt keinen Bericht mehr; und welche Eingaben
+deep-review übernimmt, entscheidet die Abnahme nach einer festen Regel.
 
 **Architecture:** Tier 1 wie in Spec 26. Der Code bleibt in
 `skills/deep-review/scripts/review_kit.py` (Stdlib): neue Unterbefehle `report`, `verify`,
 `verdict`; Paket-Auftrag mit Marke; Spannen innerhalb einer Datei; Pfad-Modus; Sammler für
 TypeScript/JavaScript und ein Namens-Rückfall; Gegenstellen einmal gesammelt. Dazu eine
 kleine Änderung an `fix-task` in subagent-dev und ein Werkzeug `crb` im Review-Bench. Vor dem
-Bau misst eine Sonde, welche Stufe von `/code-review` je Paket reicht, ob der Block die Treffer
-trägt und wie der Block den Reviewer erreicht; ihr Ergebnis legt Task 12 fest.
+Bau misst eine Sonde Kostenzerlegung, Stufe je Paket, Wirkung des Blocks und den Weg des
+Auftrags; ihr Ergebnis legt `PROFILE_LEVELS` (Task 3) und die Form von Schritt 4 (Task 12)
+fest.
 
 **Gemessen vor dem Plan** (2026-11-04, ohne bezahlte Läufe): `match.py` gleicht die
 gespeicherten Läufe `py-diff-dr-1` (7/8: P1–P6, R1) und `dl-diff-dr-1` (6/6) schon über
-`.kit/<lauf>/findings.json` ab; der Eintrag dazu in `docs/known-limits.md` ist veraltet und
-wird in Task 13 berichtigt, nicht repariert. `run.sh` gibt `dr` nur `Edit` im Laufordner;
-seit `review_kit.py report` den Bericht schreibt (Task 5), braucht `dr` kein `Write`.
+`.kit/<lauf>/findings.json` ab (`rglob` seit d5c9b36); der Eintrag dazu in
+`docs/known-limits.md` ist veraltet und wird in Task 13 berichtigt. Das Spec-Review schätzt
+die Hauptschleife der beiden Abnahme-Läufe auf rund 2,17 und 1,70 USD; Task 2 misst das nach.
 
 **Lesson aus Spec 23, 24 und 26:** Fixture-Werte nie als Beispiel in SKILL.md oder References;
 `verify` vor jedem Merge mit `rc=$?` auswerten, nie hinter `tail`.
 
 **Tech Stack:** Python 3.11+ Stdlib für Skript und Tests; Git-Plumbing (`read-tree`,
-`apply --cached`, `write-tree`, `commit-tree`, `update-ref`); Bash für den Bench; Markdown
-für Skill, References, Evals.
+`update-index`, `hash-object`, `write-tree`, `commit-tree`, `update-ref`); Bash für den Bench;
+Markdown für Skill, References, Evals.
 
 **Spec:** `specs/Spec 28 – deep-review-b.md`
 
@@ -35,23 +37,24 @@ für Skill, References, Evals.
 - **E1 — Tier 1, nur Stdlib.** Aufruf in der SKILL.md als
   `python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py"`, in References ohne Pfad. Ohne
   `/code-review` läuft dieselbe Paketfolge nach `references/review-brief.md`.
-- **E2 — Gate-Sprache:** Abdeckung, Marke, Bericht und Urteile meldet `audit` bzw. `record`
-  und `verdict` (G2); dass je Paket ein Review lief, verlangt die SKILL.md (G1). Kein Hook.
+- **E2 — Gate-Sprache:** Form der Ergebnisse (Marke), Bericht, Abdeckung und Urteile meldet
+  `record`, `verdict` bzw. `audit` (G2); dass der Reviewer den Auftrag las und je Paket ein
+  Review lief, verlangt die SKILL.md (G1). Die Marke heißt nirgends Beleg. Kein Hook.
 - **E3 — Kopfzeile je Artefakt:** neue Dateien (`packets/<id>.prompt.md`, `verify/<n>.md`,
   `verdicts/<n>.json`, der Gegenstellen-Speicher) tragen `_meta` bzw. die HTML-Kopfzeile;
   `report.md` schreibt nur `review_kit.py report`.
-- **E4 — SKILL.md ≤ 150 Zeilen**, portables Frontmatter.
-- **E5 — Anti-Zeremonie-Eval** `anti-ceremony-small-diff-script-report`.
-- **E6 — Nichts im Arbeitsbaum des Nutzers.** Auch Teil-Hilfscommits (Spannen) und der
-  Pfad-Modus laufen über einen temporären Index; HEAD, Index und Arbeitsbaum bleiben
-  unverändert.
-- **E7 — Grenzwerte als Konstanten** am Kopf von `review_kit.py`: neu `PATH_SPLIT_AT = 5000`,
-  `PATH_PACKET_SIZE = 2500`, `LEVELS = ("low", "medium", "high", "xhigh", "max")`,
-  `PROFILE_LEVELS` (Werte aus der Sonde, Task 2).
-- **E8 — Läufe aus Spec 26 bleiben lesbar.** Neue Felder in `plan.json`, Ergebnissen und
-  `findings.json` sind optional mit Standard; Schema bleibt 1. Ein Plan ohne `mode` ist
-  `range`, ein Paket ohne `spans` umfasst ganze Dateien, ein Ergebnis ohne `marke` gilt als
-  `no_block`.
+- **E4 — SKILL.md ≤ 150 Zeilen**, portables Frontmatter; Einzelheiten wandern nach
+  `references/packets.md`.
+- **E5 — Anti-Zeremonie-Eval** `anti-ceremony-small-range-one-packet`, nachgezogen auf den
+  Bericht aus dem Skript.
+- **E6 — Nichts im Arbeitsbaum des Nutzers.** Auch Spannen und Pfad-Modus bauen ihre
+  Hilfscommits über einen temporären Index; HEAD, Index und Arbeitsbaum bleiben unverändert.
+- **E7 — Grenzwerte als Konstanten** am Kopf von `review_kit.py`: neu `PATH_SPLIT_AT = 6000`,
+  `PATH_PACKET_SIZE = 3000`, `LEVELS = ("low", "medium", "high", "xhigh", "max")`,
+  `PROFILE_LEVELS` (Werte aus Task 2), `MARKER_HEX = 6`.
+- **E8 — Läufe aus Spec 26 bleiben lesbar.** Neue Felder sind optional mit Standard, Schema
+  bleibt 1: ohne `mode` gilt `range`, ohne `spans` ganze Dateien, ohne `marke` `no_block`,
+  ohne `level` der Standard des Profils.
 
 ## Skill-Struktur
 
@@ -99,8 +102,9 @@ schon hier, weil sie dieselbe Datei betrifft.
 
 ### Task 2: Sonde B
 
-Messung vor dem Bau, rund 9 USD. Ohne Freigabe des Nutzers läuft kein bezahlter Lauf; dann
-bleiben die Annahmen der Spec stehen, und der Report sagt das.
+Messung vor dem Bau. Ohne Freigabe des Nutzers läuft kein bezahlter Lauf; dann bleiben die
+Annahmen der Spec stehen, `PROFILE_LEVELS` setzt `high` für beide Profile, Schritt 4 bleibt im
+Hauptkontext, und der Report sagt das.
 
 **Files:**
 - Modify: `docs/superpowers/reports/deep-review-report.md`
@@ -110,21 +114,27 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Consumes: `token:crb`
 - Produces: `token:Sonde B`
 
-- [ ] **Step 1: Freigabe** — Budget der Sonde (rund 9 USD) vom Nutzer bestätigen lassen;
-      Bench nach README neu bauen, falls `$BENCH/repos` fehlt.
-- [ ] **Step 2: Läufe** — `run.sh py-diff drnc 1`; `run.sh dr-contract cr 1..2` und
-      `run.sh dr-delphi cr 1..2` (die Fixtures als Bench-Repos über `build.sh`, Treffer aus
-      dem README der Fixture); `LEVEL=low|medium|high run.sh py-c1 crb 1`.
-- [ ] **Step 3: Übergabe des Blocks** — ein headless-Lauf `/code-review medium` über `py-c1`
-      mit einer Marke `sonde-<zufall>` im Aufruf; in den Transkripten seiner Unteragenten
-      (`<projektordner>/<sitzung>/subagents/`) nach der Marke suchen. Ein zweiter Lauf, in dem
-      ein Unteragent (Agent-Werkzeug) `/code-review low` über `py-c1` startet: läuft es,
-      startet es eigene Unteragenten, kommt ein Ergebnis zurück?
-- [ ] **Step 4: Report** — Abschnitt „Sonde B" mit Tabelle (Lauf, Treffer am Text, Kosten)
-      und den drei Entscheidungen: Stufe je Profil (billigste mit P2 und P4 für `standard`,
-      eine höher für `checkpoint`), Block bleibt oder fliegt (Regel aus Spec 28, Open
-      questions), Schritt 4 im Hauptkontext oder je Paket ein Unteragent. Dieselben drei als
-      Ergebnis in die Open questions von Spec 28.
+- [ ] **Step 1: Kosten zerlegen (kostenlos)** — aus `$BENCH/out/py-diff-dr-1.json`,
+      `dl-diff-dr-1.json` und den `cr`-Läufen: Kosten der Hauptschleife gegen die der
+      Unteragenten (`usage`, `modelUsage`), und ob `total_cost_usd` eines `cr`-Laufs die
+      Unteragenten enthält.
+- [ ] **Step 2: Freigabe** — Budget rund 9 USD, dazu bedingt rund 6 USD für einen zweiten
+      `drnc`, vom Nutzer bestätigen lassen; Bench nach README neu bauen, falls
+      `$BENCH/repos` fehlt.
+- [ ] **Step 3: Läufe** — `run.sh py-diff drnc 1` (findet er P2 und P4, dazu `drnc 2`);
+      `run.sh dr-contract cr 1..2` und `run.sh dr-delphi cr 1..2` (die Fixtures als
+      Bench-Repos über `build.sh`, Treffer nach dem README der Fixture);
+      `LEVEL=low|medium|high run.sh py-c1 crb 1`. Danach: ein headless-Lauf
+      `/code-review medium` über `py-c1` mit einer Marke `sonde-<zufall>` im Aufruf, Suche nach
+      der Marke in den Transkripten seiner Unteragenten; ein Lauf, in dem ein Unteragent
+      (Agent-Werkzeug) `/code-review low` über `py-c1` startet: läuft es, startet es eigene
+      Unteragenten, kommt ein Ergebnis zurück?
+- [ ] **Step 4: Report** — Abschnitt „Sonde B" mit Tabelle (Lauf, Treffer am Text, Kosten),
+      der Kostenzerlegung und drei Entscheidungen: Stufe je Profil nach der Regel der Spec
+      (billigste mit P5 und einem von P2/P4 für `standard`, eine höher für `checkpoint`,
+      sonst `high`), Block bleibt oder fliegt (beide `drnc` mit P2 und P4 → fliegt), Schritt 4
+      im Hauptkontext oder je Paket ein Unteragent. Dieselben drei als Ergebnis in die Open
+      questions von Spec 28.
 - [ ] **Step 5: Commit.**
 
 ### Task 3: review_kit: Gegenstellen einmal sammeln, Stufe im Plan
@@ -141,13 +151,13 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
       der Speicher im Laufordner, `counterparts` ruft `collect_python` und `collect_delphi`
       nicht erneut (Monkeypatch zählt Aufrufe); `plan.json` trägt `level` nach
       `PROFILE_LEVELS[profile]`, `--level` überschreibt, `max` nur mit `--level max`; die
-      erste Ausgabe nennt `Reviews: <n> × /code-review <stufe>`; ein Plan ohne `level`
-      (Spec 26) liest sich mit dem Standard des Profils.
+      Ausgabe nennt `Reviews: <n> × /code-review <stufe>`; ein Plan ohne `level` (Spec 26)
+      liest sich mit dem Standard des Profils.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py -k test_b_counterparts_collected_once`.
 - [ ] **Step 3: Implementieren** — `build_plan` legt die gesammelten Einträge mit
       `store_collected` ab (JSON mit `_meta`, je Datei Einträge und nicht aufgelöste);
       `write_counterparts` nimmt `load_collected` und sammelt nur, wenn der Speicher fehlt
-      oder nicht zum Plan passt; `LEVELS`, `PROFILE_LEVELS` mit den Werten aus der Sonde.
+      oder nicht zum Plan passt; `LEVELS`, `PROFILE_LEVELS` mit den Werten aus Task 2.
 - [ ] **Step 4: Grün sehen**, volle Suite.
 - [ ] **Step 5: Commit.**
 
@@ -159,22 +169,23 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 
 **Interfaces:**
 - Consumes: `fn:load_collected(run_path)`, `PROFILE_LEVELS`
-- Produces: `fn:packet_marker(run_id, packet_id)`, `fn:write_prompt(run_path, packet, block, level)`, `fn:record(run_path, packet, tool, payload_path, no_block)`
+- Produces: `fn:packet_marker(packet_id)`, `fn:write_prompt(run_path, packet, block, level)`, `fn:record(run_path, packet, tool, payload_path, no_block)`
 
 - [ ] **Step 1: Test schreiben** — `test_b_record_needs_packet_marker`: `counterparts`
       schreibt `packets/<id>.prompt.md` mit Auftrag, Bereich, Stufe, Block und letzter Zeile
-      `Paket-Marke: dr-…`; `record` mit Objekt `{"marke", "findings"}` und passender Marke →
-      angenommen; ohne Marke, mit Marke eines anderen Pakets oder als bloße Liste → Exit 1,
-      nichts geschrieben; `--no-block` → angenommen mit `no_block: true`; `audit` listet
-      solche Pakete unter `no_block`; ein Ergebnis aus Spec 26 ohne Marke gilt als
-      `no_block`.
+      `Paket-Marke: dr-<paket>-<6 hex>`, die Marke steht auch beim Paket in `plan.json`;
+      `record` mit Objekt `{"marke", "findings"}` und passender Marke → angenommen, ein
+      `evidence` je Fund bleibt erhalten; ohne Marke, mit Marke eines anderen Pakets oder als
+      bloße Liste → Exit 1, nichts geschrieben; `--no-block` → angenommen mit
+      `no_block: true`; `audit` listet solche Pakete unter `no_block`, `complete` bleibt
+      `true`; ein Ergebnis aus Spec 26 ohne Marke gilt als `no_block`.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py -k test_b_record_needs_packet_marker`.
-- [ ] **Step 3: Implementieren** — Marke aus Lauf, Paket und `secrets.token_hex(3)`, im Plan
-      je Paket gespeichert; Auftragstext aus `references/review-brief.md` gelesen (Fassung nach
-      Profil und Fokus), nicht im Skript dupliziert; `record` und CLI um `--no-block`;
-      `audit.json` um `no_block`.
-- [ ] **Step 4: Grün sehen**, volle Suite; bestehende `record`-Tests auf das Objekt umstellen
-      oder `--no-block` setzen.
+- [ ] **Step 3: Implementieren** — Marke aus Paket-ID und `secrets.token_hex(MARKER_HEX // 2)`;
+      Auftragstext aus `references/review-brief.md` gelesen (Fassung nach Profil und Fokus),
+      nicht im Skript dupliziert; `record` und CLI um `--no-block`; `audit.json` um `no_block`.
+- [ ] **Step 4: Grün sehen**, volle Suite: die Test-Helfer, die `record` aufrufen (rund 90
+      Aufrufe), zentral auf das Objekt mit Marke umstellen, nicht Aufruf für Aufruf
+      `--no-block` setzen.
 - [ ] **Step 5: Commit.**
 
 ### Task 5: review_kit: Bericht vom Skript
@@ -191,15 +202,16 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - [ ] **Step 1: Test schreiben** — `test_b_report_is_written_by_the_script`: `report --run`
       schreibt Kopfzeile (mit `generated: python scripts/review_kit.py report …`, Stufe und
       Werkzeug), `Funde:`, `- Hinweise:`, `- Übernommen (--since):`, `- Nicht geprüft:`,
-      `- Abdeckung:`, Pakettabelle, Fundzeilen; `audit` danach `complete: true`; eine
-      geänderte Fundzeile → `report_mismatch`; angefügtes `## Einordnung` → keine Abweichung;
-      Längengrenze bei `split: false` hält. Tests, die die Vorlage lesen
-      (`test_report_template`, `test_cp8_f1_…`), auf `render_report` umstellen.
+      `- Ohne Block:`, `- Abdeckung:`, `Reviews:`, Pakettabelle, Fundzeilen; `audit` danach
+      `complete: true`; eine geänderte Fundzeile → `report_mismatch`; angefügtes
+      `## Einordnung` mit „laut fix-task-… behoben" → keine Abweichung; Längengrenze bei
+      `split: false` hält.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py -k test_b_report_is_written_by_the_script`.
 - [ ] **Step 3: Implementieren** — `render_report` erzeugt den Text aus `plan.json`,
-      `findings.json` und einer vorläufigen Abdeckung; `audit` vergleicht alle Zeilen bis
+      `findings.json` und einer vorläufigen Abdeckung; `audit` vergleicht alle Zeilen vor
       `## Einordnung` mit `render_report` statt der regulären Ausdrücke; Vorlage löschen.
-- [ ] **Step 4: Grün sehen**, volle Suite.
+- [ ] **Step 4: Grün sehen**, volle Suite: die Bericht-Helfer der Tests (rund 50 Aufrufe) und
+      `test_report_template`, `test_cp8_f1_…` zentral auf `render_report` umstellen.
 - [ ] **Step 5: Commit.**
 
 ### Task 6: review_kit: Spannen in großen Dateien
@@ -214,18 +226,21 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Consumes: `fn:write_report(run_path)`
 - Produces: `fn:split_file_spans(repo, rng, path, packet_size)`
 
-- [ ] **Step 1: Test schreiben** — `test_b_big_file_split_at_definitions`: eine Python-Datei
-      mit 1.300 geänderten Zeilen → mindestens zwei Pakete mit `spans`, jede Grenze auf einer
-      Zeile mit `def` oder `class` der obersten Ebene; Delphi an einer Routinengrenze; eine
-      Datei ohne Sammler an der größten Hunk-Lücke; `von..bis` je Paket zeigt nur die Hunks
-      seiner Spanne, `bis^{tree}` = Baum des Ziels; HEAD, Index, Arbeitsbaum unverändert;
-      `merge` ordnet Funde nach Spanne; `--since` behandelt die Datei weiter als ein
-      Schlüssel und übernimmt nur, wenn alle ihre Spannen ein Ergebnis haben.
+- [ ] **Step 1: Test schreiben** — `test_b_big_file_split_at_definitions`: eine neue
+      Python-Datei mit 1.300 Zeilen → drei Pakete mit `spans` (Zeilenbereiche am Ziel), jede
+      Grenze auf einer Zeile mit `def` oder `class` der obersten Ebene; eine geänderte Datei mit
+      Hunks in zwei Spannen; Delphi an einer Routinengrenze; eine Datei ohne Scanner an einer
+      Leerzeile, ohne Leerzeile nach genau `PACKET_SIZE` Zeilen; `von..bis` je Paket zeigt nur
+      die Zeilen seiner Spanne, `bis^{tree}` = Baum des Ziels; HEAD, Index, Arbeitsbaum
+      unverändert; `merge` ordnet Funde nach Spanne; `--since` übernimmt die Datei nur, wenn
+      jede ihrer Spannen ein Ergebnis hat, und `outside`/`packet_files` zählen sie bei jedem
+      ihrer Pakete.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py -k test_b_big_file_split_at_definitions`.
 - [ ] **Step 3: Implementieren** — `cut_packets` ruft `split_file_spans` für Dateien über
-      `packet_size`; `make_packet_range` baut `von` als Ziel-Baum, in dem die Hunks der
-      Spanne per `git apply -R --cached --unidiff-zero` auf einem temporären Index
-      zurückgenommen sind; `render_block` nimmt nur Einträge der Spanne.
+      `packet_size`; `make_packet_range` baut `von` als Ziel-Baum, in dem die Datei außerhalb
+      der Spanne den Ziel-Stand und innerhalb den Basis-Stand hat (neue Datei: Zeilen der
+      Spanne fehlen), über `hash-object -w` und einen temporären Index; `render_block` nimmt
+      nur Einträge der Spanne.
 - [ ] **Step 4: Grün sehen**, volle Suite.
 - [ ] **Step 5: Commit.**
 
@@ -241,16 +256,17 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Consumes: `fn:split_file_spans(repo, rng, path, packet_size)`
 - Produces: `fn:build_path_plan(repo, paths, profile, focus, with_tests)`
 
-- [ ] **Step 1: Test schreiben** — `test_b_path_mode`: `plan --path src` → `mode: path`,
-      `range` vom leeren Stand zum Ziel nur mit den Dateien des Pfads; bis
-      `PATH_SPLIT_AT` ein Paket, darüber Pakete bis `PATH_PACKET_SIZE`; Gegenstellen nur für
-      Aufrufe in Dateien außerhalb des Pfads; `--path` und `--range` zusammen → Exit 2;
-      `--since` im Pfad-Modus → Exit 1 mit Meldung; `report` nennt den Pfad statt des
+- [ ] **Step 1: Test schreiben** — `test_b_path_mode`: `plan --path src` und
+      `plan --path a.pas,b.pas` → `mode: path`, Hilfscommits vom Ziel-Baum ohne die
+      Pfad-Dateien zum Ziel-Baum; bis `PATH_SPLIT_AT` ein Paket, darüber Pakete bis
+      `PATH_PACKET_SIZE`; Gegenstellen nur für Aufrufe in Dateien außerhalb des Pfads;
+      abweichender Arbeitsbaum → Hinweis `worktree_differs`; `--path` und `--range` zusammen
+      → Exit 2; `--since` im Pfad-Modus → Exit 1 mit Meldung; `report` nennt den Pfad statt des
       Bereichs.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py -k test_b_path_mode`.
 - [ ] **Step 3: Implementieren** — `build_path_plan` zählt die Zeilen des Pfads am Ziel,
-      schneidet mit den Pfad-Grenzwerten und schreibt dieselben Dateien wie `build_plan`;
-      Hilfscommits: `von` = Ziel-Baum ohne die Pfad-Dateien, `bis` = Ziel-Baum.
+      schneidet mit den Pfad-Grenzwerten (große Dateien über `split_file_spans`) und schreibt
+      dieselben Dateien wie `build_plan`.
 - [ ] **Step 4: Grün sehen**, volle Suite.
 - [ ] **Step 5: Commit.**
 
@@ -291,15 +307,18 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Produces: `fn:write_verify(run_path)`, `fn:verdict(run_path, number, payload_path)`, `token:widerlegt`
 
 - [ ] **Step 1: Test schreiben** — `test_b_verdict_needs_evidence`: `verify --run` schreibt
-      je Fund ohne Beleg `verify/<n>.md` mit Datei, Zeile, Szenario, Commit und ohne
-      `summary`-Begründung; `verdict` mit `widerlegt` ohne `beleg` → Exit 1; mit Beleg →
-      `findings.json` trägt `verdict`, der Bericht zählt `Urteile:`; `plan --verify` und
-      Profil `checkpoint` setzen `verify: true`, `audit` meldet fehlende Urteile dann als
-      Lücke. `test_b_fix_task_skips_refuted`: `fix-task` lässt `widerlegt` weg und nennt
-      die Zahl in der Task-Datei.
+      je Fund ohne `evidence` `verify/<n>.md` mit Datei, Zeile, Szenario, Commit, der
+      Schreibgrenze `verify/<n>/work/` und ohne `summary`; `verdict` nimmt nur `bestätigt`,
+      `widerlegt`, `unklar`; `widerlegt` ohne Beleg → Exit 1; mit Beleg → `verdicts/<n>.json`,
+      `findings.json` trägt `verdict` auch nach erneutem `merge`, der Bericht zählt
+      `Urteile:`; `plan --verify` und Profil `checkpoint` setzen `verify: true`, `audit`
+      meldet fehlende Urteile dann als Lücke. `test_b_fix_task_skips_refuted`: `fix-task`
+      lässt `widerlegt` weg, nimmt `bestätigt`, `unklar` und Funde ohne Urteil, und nennt die
+      Zahl der weggelassenen in der Task-Datei.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_deep_review_kit.py tests/test_subagent_dev_plan_to_tasks.py -k "verdict or refuted"`.
-- [ ] **Step 3: Implementieren** — `write_verify`, `verdict`, Feld `verdict` in `merge`,
-      `render_report` und `audit`; in `plan_to_tasks.py` filtert `_deep_review_findings`.
+- [ ] **Step 3: Implementieren** — `write_verify`, `verdict`, `merge` liest `verdicts/`,
+      `render_report` und `audit` kennen `verdict`; in `plan_to_tasks.py` filtert
+      `_deep_review_findings`, ohne `FIX_STATUSES` zu ändern.
 - [ ] **Step 4: Grün sehen**, volle Suite.
 - [ ] **Step 5: Commit.**
 
@@ -315,14 +334,17 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Produces: `token:Paket-Marke:`, `token:Pfad-Modus`, `token:Name eindeutig, ohne Sammler`
 
 - [ ] **Step 1: packets.md** — Spannen, Pfad-Modus mit `PATH_SPLIT_AT`/`PATH_PACKET_SIZE`,
-      Stufe je Profil, Zeile `Reviews:`.
+      Stufe je Profil, Zeile `Reviews:`; dazu die Einzelheiten, die Task 12 aus der SKILL.md
+      nimmt: Git Bash und der Werkzeugname, Wirkung von `cleanup --stale`, Lage der
+      Cache-Dateien.
 - [ ] **Step 2: counterparts.md** — TypeScript/JavaScript und Namens-Rückfall nach der
       Sammler-Tabelle der Spec, mit einem Beispiel, das keiner Fixture gleicht.
 - [ ] **Step 3: review-brief.md** — Paket-Auftrag als Datei, Rückgabe als Objekt mit
-      `Paket-Marke:`, `--no-block`, Prüfer-Auftrag für `verify` (nur Datei, Zeile, Szenario,
-      Commit; Urteil mit Beleg).
-- [ ] **Step 4: Prüfen** — `python skills/skill-forge/scripts/lint_skill.py skills/deep-review` ohne Befund in den
-      References, `pytest tests/test_deep_review_kit.py`; Commit.
+      `Paket-Marke:` und `evidence`, `--no-block`, Prüfer-Auftrag für `verify` (nur Datei,
+      Zeile, Szenario, Commit; Schreiben nur unter `verify/<n>/work/`, Python mit `-I`;
+      Urteil mit Beleg).
+- [ ] **Step 4: Prüfen** — `python skills/skill-forge/scripts/lint_skill.py skills/deep-review`
+      ohne neuen Befund, `pytest tests/test_deep_review_kit.py`; Commit.
 
 ### Task 11: Evals
 
@@ -340,12 +362,18 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 
 - [ ] **Step 1: Fixtures** — `dr-bigfile`: neues Python-Modul mit rund 1.300 Zeilen über
       mehrere Klassen; `dr-ts`: `src/` fängt einen Fehler nicht mehr, den eine Funktion unter
-      `lib/` wirft. Je Tag `base` und README mit dem Einbau.
-- [ ] **Step 2: Evals** — `anti-ceremony-small-diff-script-report`,
+      `lib/` wirft (Klassenname endet auf `Error`). Je Tag `base` und README mit dem Einbau.
+- [ ] **Step 2: Evals** — `anti-ceremony-small-range-one-packet` bekommt die Assertion auf
+      `generated: python scripts/review_kit\.py report`, seine Notes verlieren
+      `report-template.md`; `large-range-is-split-and-covered`,
+      `narrowed-except-gets-callee-raises`, `delphi-extract-shows-ownership`,
+      `security-focus-is-one-packet` und `routing-large-branch-without-skill-name` bleiben und
+      laufen mechanisch gegen den neuen Ablauf (Marke, `report`); neu
       `packet-result-carries-marker`, `big-file-split-at-definitions`,
-      `path-review-has-plan-and-audit`, `typescript-throw-gets-counterpart` mit Prompts und
-      Assertions aus Spec 28; je Eval in `notes` die Diskriminator-Frage.
-- [ ] **Step 3: Prüfen** — `test_evals_and_fixtures` spielt die neuen Evals mechanisch durch
+      `path-review-has-plan-and-audit` (Prompt mit den Units von `dr-delphi`),
+      `typescript-throw-gets-counterpart` mit Prompts und Assertions aus Spec 28; je Eval in
+      `notes` die Diskriminator-Frage.
+- [ ] **Step 3: Prüfen** — `test_evals_and_fixtures` spielt alle zehn Evals mechanisch durch
       (plan, counterparts, record mit Marke, merge, report, audit, cleanup) und prüft die
       Assertions gegen die echte Ausgabe; `evalkit.schema.load_evals` lädt; Commit.
 
@@ -360,12 +388,15 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Produces: `token:Paket-Auftrag`
 
 - [ ] **Step 1: Ablauf** — Schritt 1 nimmt Pfade (`plan --path`); Schritt 4 ruft
-      `/code-review <stufe> --max-findings all <von>..<bis>` mit dem Inhalt von
-      `packets/<id>.prompt.md` als Paket-Auftrag, im Hauptkontext oder je Paket in einem
-      Unteragenten, wie die Sonde B entschieden hat; `record` mit Marke; Schritt 6 `report`
-      statt Vorlage; `verify` im Profil `checkpoint`; Anti-Rationalisierung „den Block lasse
-      ich weg" zeigt auf `record`, das ohne Marke abweist.
-- [ ] **Step 2: Prüfen** — `wc -l` ≤ 150, `python skills/skill-forge/scripts/lint_skill.py skills/deep-review`,
+      `/code-review <stufe> --max-findings all <von>..<bis>` mit `packets/<id>.prompt.md` als
+      Paket-Auftrag, im Hauptkontext oder je Paket in einem Unteragenten, wie die Sonde B
+      entschieden hat; die Hauptschleife liest keinen Paketblock und keine Ausgabe eines
+      Reviews; `record` mit Marke; Schritt 6 `report` statt Vorlage, eigener Text nur unter
+      `## Einordnung`; `verify` im Profil `checkpoint`; die Anti-Rationalisierung „den Block
+      lasse ich weg" zeigt auf den Auftrag als eine Datei. Git-Bash-Hinweis,
+      `cleanup --stale`-Einzelheiten und Cache-Lage verweisen auf `packets.md`.
+- [ ] **Step 2: Prüfen** — `wc -l` ≤ 150,
+      `python skills/skill-forge/scripts/lint_skill.py skills/deep-review`,
       `python scripts/sync_skills.py` und `--check`, volle Suite.
 - [ ] **Step 3: Commit.**
 
@@ -379,10 +410,12 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Produces: (nichts Neues)
 
 - [ ] **Step 1: Abschnitt deep-review** — behobene Grenzen streichen (zweimal gesammelt, Datei
-      nie geteilt, Bericht per Regex, `dr` ohne `Write`, Block im Fork); den veralteten Eintrag
-      zu `match.py` berichtigen; neue Grenzen: was die Marke belegt und was nicht, TS ohne
-      Typinferenz und Aliase, Namens-Rückfall rät nur bei eindeutigen Namen, Pfad-Grenzwerte
-      ungemessen, `verify`-Kosten. Commit.
+      nie geteilt, Bericht per Regex, Block im Fork); den veralteten Eintrag zu `match.py`
+      berichtigen; den zu `dr` ohne `Write` als erledigt durch `report` vermerken; neue
+      Grenzen: die Marke ist Auskunft, kein Beleg; TS ohne Typinferenz und Aliase;
+      Namens-Rückfall nur bei eindeutigen Namen; Pfad-Grenzwerte ungemessen und Pfad-Modus am
+      Ziel statt im Arbeitsbaum; `verify`-Kosten und Schreibgrenze nur verlangt; Präzision nur
+      auf Python gemessen. Commit.
 
 ### Task 14: Report
 
@@ -393,13 +426,15 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Consumes: `evals_json`, `token:Paket-Auftrag`
 - Produces: `token:Abnahme B`
 
-- [ ] **Step 1: Freigabe** — Budget der Abnahme (rund 31 USD) vom Nutzer bestätigen lassen.
+- [ ] **Step 1: Freigabe** — Budget der Abnahme (rund 30 USD bei erreichtem Kostenziel, bis
+      rund 45 USD) vom Nutzer bestätigen lassen.
 - [ ] **Step 2: Läufe** — nach der Tabelle „Abnahme B" der Spec: `dr` auf `py-diff` und
       `dl-diff` je zweimal, `dl-path` einmal, `dr-seeded`, `dr-contract`, `dr-delphi`,
-      `dr-ts` je einmal, `cr` auf `dr-ts` zweimal; Evals 7–11 mit Skill; Präzision mit je
-      zehn gezogenen Funden aus `cr` und `dr` auf `py-diff` und `dl-diff`, isoliert geprüft.
-- [ ] **Step 3: Report** — Abschnitt „Abnahme B" mit Treffern am Text, Kosten, Schwellen je
-      Eingabe, Präzision; „Was nicht gemessen wurde" nachziehen. Commit.
+      `dr-ts` je einmal, `cr` auf `dr-ts` zweimal; Evals 1 und 7–10 mit Skill; Präzision mit je
+      zehn gezogenen Funden aus `cr` und `dr` auf `py-diff`, isoliert geprüft.
+- [ ] **Step 3: Report** — Abschnitt „Abnahme B" mit Treffern am Text, Kosten, beiden
+      Schwellen je Eingabe, Präzision als Hinweis und dem Ergebnis der Routing-Regel; „Was
+      nicht gemessen wurde" nachziehen. Commit.
 
 ### Task 15: Nachbarn
 
@@ -414,11 +449,12 @@ bleiben die Annahmen der Spec stehen, und der Report sagt das.
 - Consumes: `token:Abnahme B`
 - Produces: (nichts Neues)
 
-- [ ] **Step 1: Routing nach der Abnahme** — nur die Eingaben, deren Schwelle in „Abnahme B"
-      erfüllt ist, wandern in Spec 00 §5, README und die Description von deep-review; die
-      übrigen bleiben bei `/code-review`, und die Description nennt sie unter „Not for".
-- [ ] **Step 2: Abgrenzungen** — `checkpoints.md`: `verify` am finalen Prüfpunkt und
-      widerlegte Funde in `fix-task`; review-context nennt den Pfad-Modus. Plugin-Zuordnung
-      unverändert (evaluated-dev).
+- [ ] **Step 1: Routing nach der Regel der Spec** — großer Diff bleibt bei deep-review, wenn
+      die Treffer-Schwelle erfüllt ist; kleiner Diff und Pfad wandern nur, wenn Treffer- und
+      Kosten-Schwelle erfüllt sind. Spec 00 §5, README und die Description von deep-review
+      zeigen dasselbe; nicht übernommene Eingaben nennt die Description unter „Not for".
+- [ ] **Step 2: Abgrenzungen** — `checkpoints.md`: `verify` am finalen Prüfpunkt, widerlegte
+      Funde in `fix-task`, Vermerk „laut fix-task-… behoben" unter `## Einordnung`;
+      review-context nennt den Pfad-Modus. Plugin-Zuordnung unverändert (evaluated-dev).
 - [ ] **Step 3: Prüfen** — `python scripts/sync_skills.py` und `--check`,
       `python skills/skill-forge/scripts/lint_skill.py skills/deep-review`, volle Suite; Commit.
