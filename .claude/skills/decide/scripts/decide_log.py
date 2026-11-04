@@ -8,27 +8,25 @@
     decide_log.py open                          offene große Fragen
     decide_log.py summary                       Einträge der laufenden Sitzung
     decide_log.py check --range <rev>           teure Änderungen seit <rev> ohne Freigabe, dann Übergabe
-    decide_log.py brief --topic T               Auftrag an einen Subagenten schreiben (brief-<n>.md)
-    decide_log.py brief --check <datei>         Auftrag vor dem Dispatch prüfen
 
 Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py"`. Repo-Wurzel ist einmal
 `git rev-parse --show-toplevel` (`repo_root`), sonst das Arbeitsverzeichnis. Die Sitzung ist
-`--session`, sonst `CLAUDE_CODE_SESSION_ID`; nur `add`, `summary` und `brief --topic` brauchen sie,
+`--session`, sonst `CLAUDE_CODE_SESSION_ID`; nur `add` und `summary` brauchen sie,
 `check` nennt mit ihr die Einträge der Sitzung.
 
 Ablageorte:
-- `.skills/cache/decide/<session>/log.md` — Protokoll der Sitzung, `brief-<n>.md` daneben
+- `.skills/cache/decide/<session>/log.md` — Protokoll der Sitzung
 - `docs/big-decisions.md` — Ablage großer Fragen (committet); Sperre unter `.skills/cache/decide/`
 - `.skills/decide/rules.md` und `~/.skills/decide/rules.md` — Regeln `immer fragen` / `nie fragen`
 
 Regeln und Formate stehen nicht hier, sondern an je einer Stelle: Kategorien, Pfadmuster,
 Schlüssel und was check sieht in `references/reversibility.md`; Ablage, Optionen und Empfehlung in
-`references/option-memo.md`; Form des Auftrags, Satz für Subagenten und Wortliste in
-`references/brief.md`; Ablauf, Belegzeile und Regeln in `SKILL.md`. Die Funktions-Docstrings
+`references/option-memo.md`; Vorlage des Auftrags an einen Subagenten in
+`references/brief.md` (kein Skript liest sie); Ablauf, Belegzeile und Regeln in `SKILL.md`. Die Funktions-Docstrings
 beschreiben das Verhalten im Einzelnen.
 
-Exit-Codes: 0 Erfolg; 1 abgewiesen oder nicht geschrieben (Grund auf stderr) bzw. bei check und
-`brief --check` mindestens ein Befund (Bericht auf stdout); 2 falscher Aufruf (argparse) und jedes
+Exit-Codes: 0 Erfolg; 1 abgewiesen oder nicht geschrieben (Grund auf stderr) bzw. bei check
+mindestens ein Befund (Bericht auf stdout); 2 falscher Aufruf (argparse) und jedes
 „ungeprüft — …“ (kein Git, Git antwortet nicht, Reference fehlt oder parst nicht), nie ein Erfolg.
 Das Skript meldet; es hält niemanden an.
 """
@@ -37,7 +35,6 @@ import errno
 import functools
 import os
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -101,27 +98,6 @@ BLOCK_NUMBER_RE = re.compile(r"(?m)^## D-(\d+)\b")
 SKIPPED = " — Freigaben übersprungen"
 FIELDS = (("question", "Frage"), ("topic", "Thema"), ("key", "Schlüssel"), ("options", "Optionen"),
           ("recommendation", "Empfehlung"), ("answer", "Antwort"), ("source", "Quelle der Antwort"))
-
-# Auftrag an einen Subagenten (brief). Die Wortliste steht in references/brief.md (load_wordlist).
-BRIEF_REFERENCE = SKILL_DIR / "references" / "brief.md"
-BRIEF_FIELDS = ("Frage", "Anlass", "Feste Vorgaben", "Schon entschieden", "Wo nachsehen", "Rückgabe")
-BRIEF_LIMIT = 25                # Zeilen mit Text ohne Kopfzeile
-BRIEF_EMPTY = 3                 # Frage, Anlass, Wo nachsehen: je mindestens eine Zeile vom Hauptagenten
-WORDLIST_HEADING = "## Wortliste"
-# Der Satz für Subagenten (Spec 28, Ablauf 5) steht nur in references/brief.md, als Zitat in diesem
-# Abschnitt (load_subagent_sentence); `brief --check` prüft ihn bewusst nicht.
-SENTENCE_HEADING = "## Der Satz für Subagenten"
-RETURN_FORM = ("Je Option: Belege `datei:zeile`, Folgen, Umkehrbarkeit; dann eine Empfehlung mit Grund. "
-               "Kleine Entscheidungen unterwegs mit Belegzeile `gesucht: … — Treffer: datei:zeile`.")
-NOT_DECIDED = "nicht entscheiden, nicht darauf aufbauen"
-LEDGER_UNREAD = ("offene große Fragen zum Thema möglich; nichts entscheiden, was teuer umkehrbar ist, "
-                 "sondern zurückgeben")
-NO_TOPIC_CHECK = "prüfen, ob sie das Thema betrifft"
-_HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<name>.*?)\s*#*\s*$")
-_FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
-_QUOTE_RE = re.compile(r"^ {0,3}>\s?(?P<text>.*)$")
-# Beginnt eine Zeile direkt nach einem Zitat so, endet das Zitat wie in Markdown (load_subagent_sentence).
-_QUOTE_END_RE = re.compile(r"^ {0,3}(?:```|~~~|[-*+] |\d+\. |#|<!--)")
 
 
 class Category(NamedTuple):
@@ -237,7 +213,7 @@ def read_rules(root, home):
 def load_rules(root, home):
     """Alle Regeln aus Repo- und Nutzerdatei als `Rule`, Repo-Datei zuerst; fehlende Dateien
     zählen nicht, Kommentare und ungültige Zeilen fallen weg; unlesbare auch — die Hinweise dazu
-    gibt `read_rules` aus demselben Lesevorgang (add, brief und rules lesen nur darüber)."""
+    gibt `read_rules` aus demselben Lesevorgang (add und rules lesen nur darüber)."""
     return read_rules(root, home)[0]
 
 
@@ -1665,426 +1641,9 @@ def _add_small(root, session, args):
     return 0, "\n".join(lines), False
 
 
-# --- brief: Auftrag an einen Subagenten -------------------------------------------------
-
-def brief_path(root, session, number):
-    return log_path(root, session).parent / f"brief-{number}.md"
-
-
-def _fence_step(fence, line):
-    """(Zaun nach `line`, ob `line` außerhalb eines Codezauns steht und selbst keiner ist). `fence` ist
-    der offene Zaun (```` ``` ```` oder `~~~`, mindestens drei) oder None; geschlossen wird er von einem
-    Zaun derselben Art, mindestens gleicher Länge und ohne Info-Text. Ein ```` ``` ```` mit `` ` `` im
-    Info-Text ist kein Zaun. Für `check_brief` und `_section_lines`."""
-    marker = _FENCE_RE.match(line)
-    if fence:
-        if marker and marker.group("fence")[0] == fence[0] and len(marker.group("fence")) >= len(fence) \
-                and not marker.group("info").strip():
-            return None, False
-        return fence, False
-    if marker and not (marker.group("fence")[0] == "`" and "`" in marker.group("info")):
-        return marker.group("fence"), False
-    return None, True
-
-
-def _section_lines(path, heading):
-    """(Zeilen, Problem) des Abschnitts `heading` (`## …`) in `path`, bei jedem Aufruf neu gelesen; der
-    Abschnitt beginnt an der ersten Überschrift `heading` außerhalb eines Codezauns (ein Beispiel im Zaun
-    zählt nicht). Zeilen als (Nummer, Zeile, außerhalb eines Codezauns) bis zur nächsten Überschrift
-    außerhalb eines Codezauns (`_fence_step`). Problem: None, oder „<datei> fehlt“, „<datei> nicht lesbar (<Ursache>)“,
-    „<datei>: kein Abschnitt „<heading>““; dann sind die Zeilen None. Für `load_wordlist` und
-    `load_subagent_sentence`."""
-    where = reference_shown(path)
-    try:
-        text = read_file(path)
-    except Unreadable as error:
-        return None, unreadable_problem(error, where, "")
-    if text is None:
-        return None, f"{where} fehlt"
-    lines = text.splitlines()
-    start, fence = None, None
-    for i, line in enumerate(lines):
-        fence, plain = _fence_step(fence, line)
-        if plain and line.strip() == heading:
-            start = i
-            break
-    if start is None:
-        return None, f"{where}: kein Abschnitt „{heading}“"
-    section, fence = [], None
-    for number, line in enumerate(lines[start + 1:], start + 2):
-        fence, plain = _fence_step(fence, line)
-        if plain and _HEADING_RE.match(line):
-            break
-        section.append((number, line, plain))
-    return section, None
-
-
-def load_wordlist(path):
-    """(Wörter, Problem) aus dem Abschnitt `## Wortliste` in `references/brief.md` (`path`), bei jedem
-    Aufruf neu gelesen (`_section_lines`). Wörter: Tupel in Dateireihenfolge, klein, Leerraum
-    zusammengezogen. Im Abschnitt steht bis zur nächsten Überschrift nur ein Listenpunkt je Zeile (`- `
-    oder `* `, dann ein Wort oder eine Wortfolge in Backticks) oder eine Leerzeile. Problem: None, oder
-    eine Zeile Grund (fehlt, nicht lesbar, kein Abschnitt, eine Zeile anderer Form — auch Prosa, `+ `
-    oder ein Codezaun — mit ihrer Nummer, doppelt, keine Listenpunkte); dann (). Nichts wird still
-    verworfen."""
-    where = reference_shown(path)
-    section, problem = _section_lines(path, WORDLIST_HEADING)
-    if problem:
-        return (), problem
-    words = []
-    for number, line, _ in section:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        match = re.fullmatch(r"[-*]\s+`([^`]+)`", stripped)
-        word = " ".join(match.group(1).split()).lower() if match else ""
-        if not word:
-            if re.match(r"(?:[-*+]|\d+[.)])(?:\s|$)", stripped):
-                return (), f"{where}:{number}: Listenpunkt „{stripped}“ — erwartet „- `<wort>`“ oder „* `<wort>`“"
-            return (), (f"{where}:{number}: „{stripped}“ ist kein Listenpunkt — im Abschnitt "
-                        f"„{WORDLIST_HEADING}“ stehen nur Listenpunkte „- `<wort>`“")
-        if word in words:
-            return (), f"{where}:{number}: `{word}` steht doppelt"
-        words.append(word)
-    if not words:
-        return (), f"{where}: Abschnitt „{WORDLIST_HEADING}“ ohne Listenpunkte"
-    return tuple(words), None
-
-
-def load_subagent_sentence(path):
-    """(Satz, Problem) aus dem Abschnitt `## Der Satz für Subagenten` in `references/brief.md` (`path`),
-    bei jedem Aufruf neu gelesen (`_section_lines`) — der einen Quelle des Satzes aus Spec 28, Ablauf 5.
-    Der Satz ist das eine Zitat bis zur nächsten Überschrift: Zeilen mit `> ` ohne Leerzeile dazwischen,
-    zu einer Zeile zusammengezogen; Prosa davor und danach (nach einer Leerzeile) zählt nicht, Zeilen in
-    einem Codezaun sind kein Zitat. Problem nach Ursache, dann ist der Satz None: „references/brief.md
-    fehlt“, „references/brief.md nicht lesbar (<Ursache>)“, „Satz für Subagenten fehlt in
-    references/brief.md (<grund>)“ (kein Abschnitt, kein oder leeres Zitat), „Satz für Subagenten
-    mehrfach in references/brief.md (Zeile <n> …)“, „references/brief.md:<n>: … ohne „>““ für eine
-    nicht-leere Zeile ohne `>` direkt im Zitat — sie würde den Satz sonst still kürzen. Beginnt diese
-    Zeile mit ```` ``` ````, `~~~`, `- `, `* `, `+ `, einer Ziffer mit `. `, `#` oder `<!--`
-    (`_QUOTE_END_RE`), endet das Zitat dort wie in Markdown; nur andere Textzeilen sind ein Problem."""
-    where = reference_shown(path)
-    missing = f"Satz für Subagenten fehlt in {where}"
-    section, problem = _section_lines(path, SENTENCE_HEADING)
-    if problem:
-        return None, (f"{missing} (kein Abschnitt „{SENTENCE_HEADING}“)"
-                      if problem.startswith(f"{where}: kein Abschnitt") else problem)
-    quotes, inside = [], False
-    for number, line, plain in section:
-        quote = _QUOTE_RE.match(line) if plain else None
-        if quote and not inside:
-            if quotes:
-                return None, f"Satz für Subagenten mehrfach in {where} (Zeile {number}: ein zweites Zitat)"
-            quotes.append([])
-        if quote:
-            quotes[-1].append(quote.group("text"))
-        elif inside and line.strip() and not _QUOTE_END_RE.match(line):
-            return None, (f"{where}:{number}: „{line.strip()}“ setzt das Zitat ohne „>“ fort — jede Zeile "
-                          "des Satzes beginnt mit „> “")
-        inside = bool(quote)
-    sentence = " ".join(" ".join(quotes[0]).split()) if quotes else ""
-    if not sentence:
-        return None, f"{missing} (kein Zitat „> …“ im Abschnitt „{SENTENCE_HEADING}“)"
-    return sentence, None
-
-
 def klasse_label(entry):
-    """Anzeige der Klasse eines Protokolleintrags: `klein`, `Annahme`, `groß` — für summary und brief."""
+    """Anzeige der Klasse eines Protokolleintrags: `klein`, `Annahme`, `groß` — für summary."""
     return {"annahme": "Annahme", "gross": "groß"}.get(entry["klasse"], "klein")
-
-
-def _decided_line(entry):
-    return f"- [{klasse_label(entry)}] {entry['frage']} → {entry['entscheidung']} ({entry['beleg']})"
-
-
-
-def _block_line(did, question, group, unknown):
-    """(entschieden, Zeile) für die große Frage `did`/`question` mit ihren Blöcken `group` aus der Ablage.
-    `freigegeben` (mit Antwort; bei Quelle „Auftrag: „…““ statt „wie im Auftrag“ das Zitat) und
-    `abgelehnt` sind entschieden; `offen` und jeder unbekannte Status — Ablage fehlt oder übersprungen
-    (`unknown`), Block fehlt, steht doppelt oder trägt einen anderen Status — stehen unter Feste Vorgaben
-    als „nicht entscheiden, nicht darauf aufbauen“ (Spec 28, Ablauf 4)."""
-    status = group[0]["status"] if len(group) == 1 and not unknown else None
-    answer = line_value(group[0]["answer"]) if status else NONE
-    if status == "freigegeben":
-        source = line_value(group[0]["source"])
-        if answer in (NONE, ANSWER_BY_REQUEST) and _REQUEST_SOURCE_RE.match(source):
-            answer = source
-        return True, f"- [groß] {question} → {did} freigegeben: {answer} ({LEDGER_SHOWN})"
-    if status == "abgelehnt":
-        told = f": {answer}" if answer not in (NONE, "abgelehnt") else ""
-        return True, f"- [groß] {question} → {did} abgelehnt{told} ({LEDGER_SHOWN})"
-    if status == "offen":
-        return False, f"- {did} offen: {question} — {NOT_DECIDED}"
-    if unknown:
-        why = unknown
-    elif len(group) > 1:
-        why = f"{did} doppelt in {LEDGER_SHOWN}"
-    elif group:
-        why = f"Status „{status}“ in {LEDGER_SHOWN}"
-    else:
-        why = f"nicht in {LEDGER_SHOWN}"
-    return False, f"- {did} Status unbekannt ({why}): {question} — {NOT_DECIDED}"
-
-
-def _entry_lines(root, entries, topic):
-    """(Schon entschieden, Feste Vorgaben zu großen Fragen, Hinweise, Zahl der Zeilen zur nicht gelesenen
-    Ablage am Anfang der Feste Vorgaben) für das Thema `topic`: zuerst die
-    Einträge `entries` der Sitzung in Protokollreihenfolge, dann jeder weitere Block der Ablage, dessen
-    Thema nach `_norm` gleich `topic` ist — die Ablage gehört dem Repo, eine offene Frage aus einer
-    anderen Sitzung bindet den Subagenten genauso. Kleine und Annahmen sind entschieden
-    (`_decided_line`); eine große Frage ist `D-<n>` mit gleicher Frage (nach einer verworfenen Ablage
-    kehren Nummern wieder) und steht nur einmal da, eingeordnet von `_block_line`. Fehlt die Ablage,
-    überspringt die Konsumenten-Regel sie (dann ein Hinweis), ist der Status großer Protokolleinträge
-    unbekannt. Ist die Ablage unlesbar oder übersprungen, beginnen die Feste Vorgaben mit „- Ablage
-    docs/big-decisions.md nicht gelesen (<Grund>) — offene große Fragen zum Thema möglich; nichts
-    entscheiden, was teuer umkehrbar ist, sondern zurückgeben“ (`LEDGER_UNREAD`); fehlt sie, nicht. Ein
-    offener Block ohne Thema (Zeile fehlt oder leer) steht als „- D-<n> offen, ohne Thema: <frage> —
-    prüfen, ob sie das Thema betrifft“ darunter; ein abweichendes Thema bleibt draußen — ob es passt,
-    ist G1."""
-    blocks, problem, exists = _read_ledger(root)
-    notes, unknown, unread = [], None, []
-    if problem:
-        notes.append(f"Hinweis: {problem}")
-        unknown = f"{LEDGER_SHOWN} übersprungen"
-        why = problem.removeprefix(f"{LEDGER_SHOWN} ").removesuffix(SKIPPED)
-        unread.append(f"- Ablage {LEDGER_SHOWN} nicht gelesen ({why}) — {LEDGER_UNREAD}")
-    elif not exists:
-        unknown = f"{LEDGER_SHOWN} fehlt"
-    current = {id(b) for b in _latest(blocks)[0]}
-    groups, superseded = {}, set()
-    for block in blocks:
-        groups.setdefault((block["id"], cell(block["question"])), []).append(block)
-        if id(block) not in current:
-            superseded.add((block["id"], cell(block["question"])))
-    decided, pending, done = [], [], set()
-    for entry in entries:
-        if entry["klasse"] != "gross":
-            decided.append(_decided_line(entry))
-            continue
-        key = (entry["entscheidung"], entry["frage"])
-        if key in done or key in superseded:            # ein jüngerer Block derselben Frage gilt
-            continue
-        done.add(key)
-        ok, line = _block_line(*key, groups.get(key, []), unknown)
-        (decided if ok else pending).append(line)
-    wanted = _norm(topic)
-    for key, group in groups.items():
-        if key in done or key in superseded:
-            continue
-        if any(_norm(b["topic"]) == wanted for b in group):
-            done.add(key)
-            ok, line = _block_line(*key, group, None)
-            (decided if ok else pending).append(line)
-        elif any(b["status"] == "offen" and line_value(b["topic"]) == NONE for b in group):
-            done.add(key)
-            pending.append(f"- {key[0]} offen, ohne Thema: {key[1]} — {NO_TOPIC_CHECK}")
-    return decided, unread + pending, notes, len(unread)
-
-
-def _comment_safe(text):
-    """Nutzertext für den generated-Teil einer Kopfzeile: nur `-->` und `--!>`, die den HTML-Kommentar
-    vorzeitig schlössen, werden unschädlich (`-- >`, `--! >`); alles andere bleibt, wie es ist — auch
-    `--`, damit der Befehl in der Kopfzeile wörtlich kopierbar bleibt. Nur bei einem Thema mit `-->`
-    sucht der kopierte Befehl ein anderes Thema."""
-    return text.replace("--!>", "--! >").replace("-->", "-- >")
-
-
-def _write_new(path, text):
-    """Legt `path` exklusiv an und schreibt `text` über denselben Deskriptor (`utf-8`, `\\n`); False,
-    wenn die Datei schon steht. Bricht das Schreiben ab — Fehler oder Unterbrechung —, wird die Datei
-    entfernt und der Fehler weitergereicht: keine leere oder halbe brief-<n>.md bleibt liegen."""
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o666)
-    except FileExistsError:
-        return False
-    try:
-        try:
-            handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
-        except BaseException:
-            os.close(fd)
-            raise
-        with handle:
-            handle.write(text)
-    except BaseException:
-        try:
-            Path(path).unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-    return True
-
-
-def write_brief(root, session, topic, home):
-    """(exit, meldung): schreibt `.skills/cache/decide/<session>/brief-<n>.md` mit Kopfzeile und den
-    sechs Feldern aus `references/brief.md` als `## <Feld>`. Das Skript füllt Feste Vorgaben (zuerst,
-    ist die Ablage unlesbar oder übersprungen, „- Ablage docs/big-decisions.md nicht gelesen (<Grund>) —
-    …“; dann jede offene große Frage des Themas als „- D-<n> offen: <frage> — nicht entscheiden, nicht
-    darauf aufbauen“, jede, deren Status die Ablage nicht sagt, als „Status unbekannt“ und jeden offenen
-    Block ohne Thema als „- D-<n> offen, ohne Thema: <frage> — prüfen, ob sie das Thema betrifft“; dann
-    jede Regel aus `read_rules` mit Datei und Zeile), Schon entschieden (Einträge der Sitzung, deren Thema nach `_norm`
-    gleich `topic` ist, und freigegebene oder abgelehnte Blöcke des Themas aus der Ablage, aus jeder
-    Sitzung — `_entry_lines`; `—`, wenn keiner) und Rückgabe (`RETURN_FORM` und der Satz aus
-    `load_subagent_sentence`); Frage, Anlass und Wo nachsehen bleiben leer. Die Kopfzeile nennt den
-    Befehl wörtlich, bei einem Thema mit führendem `-` als `--topic=<thema>`, damit argparse es nimmt;
-    nur `-->` im Thema wird dort `-- >` (`_comment_safe`). Unlesbare Regeldateien meldet es wie add und schreibt trotzdem. Bleiben für die drei
-    leeren Felder keine `BRIEF_EMPTY` Zeilen unter `BRIEF_LIMIT`, sagt ein Hinweis das mit den
-    verbleibenden Zeilen und ihrer Herkunft (Regeln, Schon entschieden, offene Fragen; Exit bleibt 0) und
-    rät, Regeln oder ältere Einträge unter Schon entschieden zu kürzen, nie die Zeilen zu offenen Fragen.
-    Fehlt der Satz für Subagenten in `references/brief.md` oder parst er nicht: Exit 2 „ungeprüft — …“
-    mit der Ursache aus `load_subagent_sentence`, nichts geschrieben. Ein unlesbares Protokoll oder eines ohne
-    passende Kopfzeile: Exit 1, kein Auftrag — Schon entschieden wäre sonst still leer. Die Nummer ist
-    die höchste vorhandene plus eins, exklusiv angelegt und über denselben Deskriptor geschrieben
-    (`_write_new`; zwei gleichzeitige Aufrufe bekommen zwei Nummern, ein Abbruch hinterlässt keine
-    Datei)."""
-    root, home = Path(root), Path(home)
-    topic = " ".join((topic or "").split())
-    if not topic:
-        return 1, "brief: es fehlt --topic; kein Auftrag geschrieben."
-    sentence, problem = load_subagent_sentence(BRIEF_REFERENCE)
-    if problem:
-        return 2, f"ungeprüft — {problem}; kein Auftrag geschrieben."
-    try:
-        text = read_log(root, session)
-    except Unreadable as error:
-        return 1, unreadable_problem(error, log_shown(root, session), "; kein Auftrag geschrieben.")
-    entries = []
-    if text is not None:
-        problem = header_problem(text, shown(log_path(root, session), root), "kein Auftrag geschrieben")
-        if problem:
-            return 1, problem
-        entries = [e for e in parse_rows(text) if _norm(e["thema"]) == _norm(topic)]
-    rules, _, notes = read_rules(root, home)
-    decided, pending, ledger_notes, unread = _entry_lines(root, entries, topic)
-
-    body = [f"<!-- skill: {SKILL} | schema: {SCHEMA} | generated: python decide_log.py brief "
-            f"--topic{'=' if topic.startswith('-') else ' '}{_comment_safe(shlex.quote(topic))} -->",
-            "", "## Frage", "", "## Anlass", "",
-            "## Feste Vorgaben", *pending, *[f"- Regel {rule_label(r)} ({r.source}:{r.line})" for r in rules], "",
-            "## Schon entschieden", *(decided or [NONE]), "",
-            "## Wo nachsehen", "",
-            "## Rückgabe", RETURN_FORM, sentence]
-    content = "\n".join(body) + "\n"
-    folder = log_path(root, session).parent
-    existed = cache_exists(root)
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        taken = [int(m.group(1)) for p in folder.iterdir() if (m := re.fullmatch(r"brief-(\d+)\.md", p.name))]
-        number = max(taken, default=0) + 1
-        while not _write_new(brief_path(root, session, number), content):
-            number += 1
-    except OSError as error:
-        return 1, (f"Auftrag unter {shown(folder, root)} nicht schreibbar ({error.strerror or error}); "
-                   "kein Auftrag geschrieben.")
-    path_shown = shown(brief_path(root, session, number), root)
-    count = sum(1 for line in content.splitlines()[1:] if line.strip())
-    open_count = len(pending) - unread
-    lines = notes + ledger_notes + [
-        f"Auftrag geschrieben: {path_shown} — Schon entschieden: {len(decided)}, Feste Vorgaben: "
-        f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}"
-        + (f", {open_count} große Frage{'' if open_count == 1 else 'n'} ohne Freigabe" if open_count else "")
-        + ".",
-        f"Frage, Anlass und Wo nachsehen ausfüllen (Feste Vorgaben ergänzen), dann brief --check {path_shown}."]
-    if count > BRIEF_LIMIT - BRIEF_EMPTY:
-        lines.append(f"Hinweis: Auftrag hat schon {count} Zeilen ohne Kopf, höchstens {BRIEF_LIMIT} (davon "
-                     f"{len(rules)} Regel{'' if len(rules) == 1 else 'n'}, {len(decided)} unter Schon entschieden, "
-                     f"{len(pending)} zu offenen Fragen); für Frage, Anlass und Wo nachsehen bleiben "
-                     f"{max(BRIEF_LIMIT - count, 0)} Zeilen, mindestens {BRIEF_EMPTY} nötig — Regeln oder ältere "
-                     "Einträge unter Schon entschieden kürzen, die Zeilen zu offenen Fragen nie")
-    notice = unversioned_notice(root, existed, True)
-    if notice:
-        lines.append(notice)
-    return 0, "\n".join(lines)
-
-
-def _word_re(word):
-    """Ein Wort der Wortliste als ganzes Wort: davor und danach kein Buchstabe und keine Ziffer — `_`
-    grenzt ab wie Leerraum (`_sollte_` trifft); Groß/klein egal, Leerraum in Wortfolgen beliebig."""
-    return re.compile(r"(?<![^\W_])" + r"\s+".join(re.escape(w) for w in word.split()) + r"(?![^\W_])",
-                      re.IGNORECASE)
-
-
-def _resolve_brief(path, root):
-    """Ein relativer Pfad, der im Arbeitsverzeichnis nicht steht, gilt relativ zur Repo-Wurzel `root` —
-    so nennt ihn `brief --topic`. Ist `root` None, wird sie erst dann bestimmt (`repo_root`)."""
-    if path.is_absolute() or path.exists():
-        return path
-    candidate = (repo_root(Path.cwd()) if root is None else Path(root)) / path
-    return candidate if candidate.exists() else path
-
-
-def check_brief(path):
-    """(exit, meldung) für einen Auftrag: Exit 1 mit je Befund einer Zeile — mehr als `BRIEF_LIMIT`
-    Zeilen mit Text ohne Kopfzeile (Leerzeilen zählen nicht), eine Überschrift außer den sechs
-    Feldern, Text vor dem ersten Feld, ein fehlendes oder doppeltes Feld, Wörter aus
-    `load_wordlist(BRIEF_REFERENCE)` in der Frage (`_word_re`) —, sonst 0. Zeilen in einem Codezaun
-    (```` ``` ```` oder `~~~`, bis zum schließenden Zaun derselben Art und mindestens gleicher Länge)
-    sind Text des Feldes, keine Überschriften; nur außerhalb eines Zauns beginnt eine Überschrift ein
-    Feld. Ein relativer Pfad, der im Arbeitsverzeichnis fehlt, wird gegen die Repo-Wurzel aufgelöst
-    (`_resolve_brief`). Den Satz für Subagenten prüft es bewusst nicht. Exit 2 „ungeprüft — …“, wenn
-    die Wortliste nicht gelesen werden kann, die Datei fehlt oder nicht lesbar ist, oder die
-    Konsumenten-Regel sie überspringt (Kopfzeile von decide fehlt, `schema` höher als 1)."""
-    return _check_brief(path, None)
-
-
-def _check_brief(path, root):
-    """`check_brief` mit der Repo-Wurzel `root`, die `main` schon kennt (None: erst bei Bedarf bestimmt)."""
-    given = Path(path)
-    words, problem = load_wordlist(BRIEF_REFERENCE)
-    if problem:
-        return 2, f"ungeprüft — {problem}"
-    path = _resolve_brief(given, root)
-    where = f"Auftrag {given}"
-    try:
-        text = read_file(path)
-    except Unreadable as error:
-        return 2, "ungeprüft — " + unreadable_problem(error, where, "")
-    if text is None:
-        return 2, f"ungeprüft — {where} fehlt"
-    problem = header_problem(text, str(given))
-    if problem:
-        return 2, f"ungeprüft — {problem}"
-
-    lines = text.splitlines()
-    head = next(i for i, line in enumerate(lines) if line.strip())
-    findings, seen, question = [], [], []
-    count, current, outside, fence = 0, None, False, None
-    for number, line in enumerate(lines[head + 1:], head + 2):
-        if not line.strip():
-            continue
-        count += 1
-        fence, plain = _fence_step(fence, line)
-        heading = _HEADING_RE.match(line) if plain else None
-        if heading:
-            name = " ".join(heading.group("name").split())
-            if name not in BRIEF_FIELDS:
-                findings.append(f"- Feld „{name}“ (Zeile {number}) gehört nicht in den Auftrag — erlaubt sind nur "
-                                f"{', '.join(BRIEF_FIELDS)}")
-            elif name in seen:
-                findings.append(f"- Feld „{name}“ steht doppelt (Zeile {number})")
-            else:
-                seen.append(name)
-            current = name
-        elif current is None and not outside:
-            outside = True
-            findings.append(f"- Text vor dem ersten Feld (Zeile {number}) — jede Zeile gehört unter eines der "
-                            "sechs Felder")
-        elif current == "Frage":
-            question.append(line)
-    if count > BRIEF_LIMIT:
-        findings.insert(0, f"- {count} Zeilen ohne Kopf, höchstens {BRIEF_LIMIT} (Leerzeilen zählen nicht)")
-    missing = [name for name in BRIEF_FIELDS if name not in seen]
-    if missing:
-        findings.append(f"- es fehlt: {', '.join(missing)}")
-    asked = " ".join(question)
-    hits = [word for word in words if _word_re(word).search(asked)]
-    if hits:
-        findings.append(f"- Frage wertet: {', '.join(f'„{w}“' for w in hits)} (Wortliste "
-                        f"{reference_shown(BRIEF_REFERENCE)}) — neutral fragen")
-    if findings:
-        return 1, "\n".join([f"{where}: {len(findings)} Befund{'' if len(findings) == 1 else 'e'}"] + findings)
-    return 0, (f"{where}: {count} Zeilen, sechs Felder, kein Wort der Wortliste in der Frage. "
-               "Andere Wertungen prüft brief --check nicht.")
 
 
 # --- summary und rules ------------------------------------------------------------------
@@ -2170,10 +1729,6 @@ def build_parser():
     chk = sub.add_parser("check", parents=[common],
                          help="teure Änderungen seit einer Revision ohne Freigabe, dann Übergabe")
     chk.add_argument("--range", dest="rev", required=True, metavar="<rev>")
-    brf = sub.add_parser("brief", parents=[common], help="Auftrag an einen Subagenten schreiben oder prüfen")
-    what = brf.add_mutually_exclusive_group(required=True)
-    what.add_argument("--topic", help="Auftrag zu diesem Thema schreiben (braucht eine Sitzung)")
-    what.add_argument("--check", metavar="<datei>", help="Auftrag vor dem Dispatch prüfen")
     return parser
 
 
@@ -2193,8 +1748,6 @@ def main(argv):
         code, message = open_questions(root)
     elif args.action == "check":
         code, message = check(root, args.rev, session_id(args.session), home)
-    elif args.action == "brief" and args.check is not None:
-        code, message = _check_brief(Path(args.check), root)
     else:
         session = session_id(args.session)
         if not session:
@@ -2204,8 +1757,6 @@ def main(argv):
             code, message = 1, f"Sitzung „{session}“ ungültig (kein / oder \\, nicht . oder ..) — --session <id> angeben."
         elif args.action == "summary":
             code, message = summary(root, session, home)
-        elif args.action == "brief":
-            code, message = write_brief(root, session, args.topic, home)
         elif args.cls == "gross":
             args.home = home
             code, message = add_big(root, session, args)
@@ -2224,9 +1775,8 @@ def main(argv):
                         "bei einer kleinen Entscheidung ignoriert; ist die Frage groß, mit --class gross eintragen.")
                 warning = (f"Hinweis: {', '.join(ignored)} gehör{'en' if len(ignored) > 1 else 't'} zu "
                            f"--class gross — {what}")
-    # check und brief --check: Stellen und Befunde sind ein Bericht
-    report = code == 0 or (code == 1 and (args.action == "check"
-                                          or (args.action == "brief" and args.check is not None)))
+    # check: Stellen und Befunde sind ein Bericht
+    report = code == 0 or (code == 1 and args.action == "check")
     print(message, file=sys.stdout if report else sys.stderr)
     if warning:
         print(warning, file=sys.stderr)
