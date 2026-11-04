@@ -17,7 +17,7 @@ Am Kopf von `review_kit.py` (E7). Der Bericht nennt sie.
 | `RAISE_DEPTH` | 2 | `raise`-Stellen transitiv im selben Modul bzw. in derselben Unit |
 | `FLAG_DEPTH` | 4 | Weg eines geänderten Schlüsselwort-Arguments durch so viele Funktionen |
 | `AMBIGUOUS_MAX` | 3 | mehr gleichnamige Definitionen ohne Importbezug: nichts statt Raten, gezählt |
-| `REPORT_BASE_LINES` | 20 | Anti-Zeremonie-Fall: Bericht höchstens 20 Zeilen plus eine je Fund (Kopfzeile nicht gezählt) |
+| `EINORDNUNG_MAX_LINES` | 8 | nur bei `split: false`: Textzeilen der Einordnung ab `## Einordnung` (siehe „Bericht prüfen“); den Teil davor schreibt das Skript |
 
 ## Bereich und Zählung
 
@@ -131,7 +131,14 @@ Der Reviewer liest den Arbeitsbaum, nicht ZIEL. Deshalb schreibt jeder Bau Hinwe
 
 Bei `split: false` mit HEAD als ZIEL und sauberem Arbeitsbaum gibt es keine Refs und keine
 `notes`. Das ist der Anti-Zeremonie-Fall: ein `/code-review` über den Originalbereich, ein
-Bericht von höchstens `REPORT_BASE_LINES` Zeilen plus einer je Fund.
+Bericht, dessen Einordnung höchstens `EINORDNUNG_MAX_LINES` Textzeilen hat. Den Teil vor
+`## Einordnung` schreibt `report`, `audit` vergleicht ihn Zeile für Zeile; eine eigene Grenze
+hat nur die Einordnung.
+
+Die Kopfzeile von `packets/<id>.md` endet auf `| counterparts: <n> -->`: die Zahl der
+Gegenstellen des Pakets, maschinenlesbar. Fehlt der Gegenstellen-Speicher von `plan`, liest
+der Bericht die Spalte Gegenstellen dort, nicht aus dem Text des Blocks. Ein Block ohne dieses
+Feld (Lauf vor dieser Regel, Fokus `quality`) ergibt „—“.
 
 ## Datei-Schlüssel
 
@@ -218,6 +225,28 @@ Bei einem übernommenen Fund nennt `sources[].reused_from` den Lauf, der ihn gem
 Fund mit der Fix-Runde genau dieses Laufs abgleichen. Das `reused_from` des vereinigten Funds
 ist das seiner ersten übernommenen Quelle. Pläne ohne `run` an den Funden (vor dieser Regel
 geschrieben) nennen weiter den Lauf aus `file_keys`.
+
+## Bericht prüfen: die Einordnung
+
+`audit` vergleicht alles vor der ersten Zeile `## Einordnung` mit dem Text von `report`. Für
+die Einordnung danach gelten zwei einfache Regeln. Vorher werden HTML-Kommentare `<!-- … -->`
+entfernt, auch über mehrere Zeilen; Text davor und danach bleibt je auf seiner Zeile.
+
+- **Keine Vollständigkeit bei Lücken.** Meldet das Audit `missing`, `stale` oder
+  `lost_findings`, ist jede Zeile ein Eintrag in `report_mismatch`, die eines der Wörter
+  `vollständig`, `fertig`, `komplett` (auch mit -e, -em, -en, -er, -es) oder `complete` als
+  ganzes Wort enthält, Groß/Klein egal, und nicht zugleich `unvollständig` oder `incomplete`.
+  Es gibt keine Suche nach Verneinungen: „nicht vollständig“ meldet, „unvollständig“ nicht.
+  „Vollständigkeit“, „fertigstellen“ und „completed“ sind andere Wörter. „un-vollständig“
+  ist nicht die Schreibweise `unvollständig` und meldet. „Die Abdeckung ist unvollständig;
+  vollständig wird sie erst nach p3.“ meldet nicht.
+- **Kurz bei einem Paket.** Bei `split: false` höchstens `EINORDNUNG_MAX_LINES` Textzeilen,
+  ohne die Überschrift, ohne Leerzeilen und ohne Zeilen, die nach dem Entfernen der
+  Kommentare leer sind.
+
+Das Werkzeug gilt als `/code-review`, wenn sein Name (nach `record`) `/code-review` ist oder mit
+`/code-review ` beginnt, etwa `/code-review high`. Dann steht im Bericht der Hinweis zu
+`--max-findings`. `record` verlangt dort wie bei jedem Werkzeug mit Stufe eine `stufe`.
 
 ## Fortsetzen eines Laufs
 
