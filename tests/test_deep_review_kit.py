@@ -5393,10 +5393,13 @@ def test_cp9b_f5_delete_clear_extractitem_dequeue_pop_get_owner_entries(tmp_path
 EVALS_PATH = REPO_ROOT / "evals" / "deep-review" / "evals.json"
 EVAL_IDS = ["anti-ceremony-small-range-one-packet", "large-range-is-split-and-covered",
             "narrowed-except-gets-callee-raises", "delphi-extract-shows-ownership",
-            "security-focus-is-one-packet", "routing-large-branch-without-skill-name"]
+            "security-focus-is-one-packet", "routing-large-branch-without-skill-name",
+            "packet-result-carries-marker", "big-file-split-at-definitions",
+            "path-review-has-plan-and-audit", "typescript-throw-gets-counterpart"]
 # Je Eval: Fixture, Argumente von `plan` und Werkzeug — so, wie der Prompt es dem Hauptagenten
 # sagt ("letzter Commit" ohne --range, "teile ab 200 Zeilen" als --split-at 200; Sicherheit im
-# Workspace ohne origin/HEAD, also im Hauptkontext). Der Review selbst liefert hier keine Funde.
+# Workspace ohne origin/HEAD, also im Hauptkontext; "die Units Query.pas und Tree.pas" als
+# --path). Der Review selbst liefert hier keine Funde.
 EVAL_RUNS = {
     "anti-ceremony-small-range-one-packet": ("dr-seeded", ["--range", "base..HEAD"], "/code-review"),
     "large-range-is-split-and-covered": ("dr-split", ["--range", "base..HEAD", "--split-at", "200"],
@@ -5406,8 +5409,14 @@ EVAL_RUNS = {
     "security-focus-is-one-packet": ("dr-contract", ["--range", "base..HEAD", "--focus", "security"],
                                      "Review ohne /security-review"),
     "routing-large-branch-without-skill-name": ("dr-split", ["--range", "base..HEAD"], "/code-review"),
+    "packet-result-carries-marker": ("dr-contract", [], "/code-review"),
+    "big-file-split-at-definitions": ("dr-bigfile", ["--range", "base..HEAD"], "/code-review"),
+    "path-review-has-plan-and-audit": ("dr-delphi", ["--path", "Query.pas,Tree.pas"], "/code-review"),
+    "typescript-throw-gets-counterpart": ("dr-ts", [], "/code-review"),
 }
-NEW_FIXTURES = {"dr-split": (400, 500), "dr-contract": (1, 99), "dr-delphi": (1, 99)}
+# Fixtures aus Spec 26 und Spec 28: geänderte Zeilen von base..HEAD (untere, obere Grenze).
+NEW_FIXTURES = {"dr-split": (400, 500), "dr-contract": (1, 99), "dr-delphi": (1, 99),
+                "dr-bigfile": (1200, 1400), "dr-ts": (1, 99)}
 COUNT_RE = re.compile(r"^(\w+): .* · (\d+) Gegenstellen, ", re.MULTILINE)
 
 
@@ -5429,11 +5438,13 @@ def _eval_flow(kit, root, plan_args, tool, capsys):
         payload = root.parent / f"{root.name}-{packet['id']}.json"
         payload.write_text("[]", encoding="utf-8")
         assert _cli_record(kit, root, run, packet["id"], payload, tool=tool) == 0
-        rows.append((packet["id"], len(packet["files"]), packet["changed_lines"],
-                     counted[packet["id"]], 0))
+        spans = kit._spans_text(packet)
+        files = f"{len(packet['files'])} ({spans})" if spans else len(packet["files"])
+        rows.append((packet["id"], files, packet["changed_lines"], counted[packet["id"]], 0))
     assert _cli(kit, root, "merge", "--run", run) == 0
     assert _cli(kit, root, "report", "--run", run) == 0
-    # Die Spalte Gegenstellen nennt dieselbe Zahl wie counterparts.
+    # Die Spalte Gegenstellen nennt dieselbe Zahl wie counterparts; ein Spannen-Paket nennt
+    # in der Spalte Dateien seine Spannen.
     _rendered(directory, [], rows)
     assert _cli(kit, root, "audit", "--run", run) == 0, capsys.readouterr().out
     assert _cli(kit, root, "cleanup", "--run", run) == 0
@@ -5451,10 +5462,25 @@ def test_evals_and_fixtures(tmp_path, capsys):
     for ev in evals:
         assert ev.eval_class == "contract" and ev.fixture == EVAL_RUNS[ev.id][0], ev.id
         assert "Diskriminator" in ev.notes, ev.id
-    assert "stochastisch" in evals[-1].notes
-    assert "deep-review" not in evals[-1].prompt
+    by_id = {ev.id: ev for ev in evals}
+    routing = by_id["routing-large-branch-without-skill-name"]
+    assert "stochastisch" in routing.notes and "deep-review" not in routing.prompt
+    # Eval 1 (Spec 28): der Bericht kommt vom Skript; die Notes nennen weder das Gerüst noch die
+    # alte Längengrenze, sondern EINORDNUNG_MAX_LINES für den Teil unter `## Einordnung`.
+    first = by_id["anti-ceremony-small-range-one-packet"]
+    assert {(a.path, a.pattern) for a in first.must if a.type == "file_matches"} >= {
+        (".skills/cache/deep-review/*/report.md", r"generated: python scripts/review_kit\.py report")}
+    assert "report-template.md" not in first.notes and "REPORT_BASE_LINES" not in first.notes
+    assert "EINORDNUNG_MAX_LINES" in first.notes
+    # Evals 7–10: Prompts aus der Tabelle von Spec 28.
+    assert by_id["packet-result-carries-marker"].prompt == "Review den letzten Commit mit deep-review."
+    assert by_id["big-file-split-at-definitions"].prompt == "Prüf base..HEAD mit deep-review."
+    assert by_id["path-review-has-plan-and-audit"].prompt == (
+        "Prüf die Units Query.pas und Tree.pas mit deep-review.")
+    assert by_id["typescript-throw-gets-counterpart"].prompt == (
+        "Review den letzten Commit mit deep-review.")
 
-    # Die drei neuen Fixtures: Git mit Tag base, README.md, Größe und Verzeichnisse wie in Spec 26.
+    # Die Fixtures aus Spec 26 und 28: Git mit Tag base, README.md, Größe und Verzeichnisse.
     for name, (low, high) in NEW_FIXTURES.items():
         fixture = FIXTURES / name
         meta = _manifest(fixture)
@@ -5498,6 +5524,44 @@ def test_evals_and_fixtures(tmp_path, capsys):
             assert re.search(r"^### Query\.pas:\d+ Extract auf ATree: TQueryTree$", block, re.M)
         if ev.id == "routing-large-branch-without-skill-name":
             assert plan["split"] is False and len(plan["packets"]) == 1
+        if ev.id == "packet-result-carries-marker":
+            # Die Marke im Ergebnis ist die aus plan.json, und sie steht als letzte Zeile des
+            # Auftrags packets/p1.prompt.md, den counterparts schreibt.
+            stored = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+            [marker] = [p["marker"] for p in stored["packets"]]
+            result = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+            prompt = (directory / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
+            assert result["marke"] == marker and marker in prompt.splitlines()[-1], (marker, result)
+            assert json.loads((directory / "audit.json").read_text(encoding="utf-8"))["no_block"] == []
+        if ev.id == "big-file-split-at-definitions":
+            # Eine neue Datei, mindestens drei Spannen-Pakete, lückenlos und je vor einer Klasse
+            # oder Funktion der obersten Ebene geschnitten (ast am ZIEL, nie importiert).
+            [path] = {f for p in plan["packets"] for f in p["files"]}
+            assert len(plan["packets"]) >= 3 and plan["split"] is True
+            spans = [s for p in plan["packets"] for s in p["spans"]]
+            assert all(s["file"] == path for s in spans)
+            source = git(ws.root, "show", f"HEAD:{path}")
+            tops = {min([n.lineno] + [d.lineno for d in n.decorator_list])
+                    for n in ast.parse(source).body
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+            assert len([n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)]) >= 3
+            assert spans[0]["lines"][0] == 1 and spans[-1]["lines"][1] == len(source.splitlines())
+            for left, right in zip(spans, spans[1:]):
+                assert right["lines"][0] == left["lines"][1] + 1 and right["lines"][0] in tops
+            assert "--range base..HEAD" in plan["_meta"]["generated"]
+        if ev.id == "path-review-has-plan-and-audit":
+            assert plan["mode"] == "path"
+            assert sorted({f for p in plan["packets"] for f in p["files"]}) == ["Query.pas", "Tree.pas"]
+        if ev.id == "typescript-throw-gets-counterpart":
+            assert plan["split"] is False and [p["id"] for p in plan["packets"]] == ["p1"]
+            block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
+            assert kit.SKIP_UNBALANCED not in block and kit.SKIP_SYNTAX not in block, block
+            [thrown] = re.findall(r"^\s*wirft: ([A-Za-z]+Error)$", block, re.M)
+            [callee] = re.findall(r"^- Gegenstelle \w+ \[(lib/[\w./-]+\.ts):\d+\]", block, re.M)
+            # Den Fehlernamen und die Datei unter lib/ kennt nur der Sammler, nicht der Diff.
+            diff = git(ws.root, "diff", "HEAD^..HEAD")
+            assert {f.split("/")[0] for p in plan["packets"] for f in p["files"]} == {"src"}
+            assert thrown not in diff and callee not in diff and "throw new" not in diff, diff
 
 
 # --- Prüfpunkt 10: Funde F1–F3 zu record, _meta.generated und dem Cache-Ordner ---------------
