@@ -23,7 +23,7 @@ im Plan); dazu die Datei-Schlüssel (`file_keys`) und die Folgeläufe
     plan --range R [--profile P] [--focus F] [--level S] [--split-at N] [--since L[,L…]]
          [--soll-file D] [--with-tests]
     counterparts --run L
-    record --run L --packet ID --tool T DATEI|-
+    record --run L --packet ID --tool T [--no-block] DATEI|-
     merge --run L
     audit --run L [--report D]
     cleanup (--run L | --stale [--run L])
@@ -133,6 +133,9 @@ FOCI = ("bugs", "security", "quality")
 # liest sich mit dem Standard seines Profils (`plan_level`, E8).
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 PROFILE_LEVELS = {"standard": "medium", "checkpoint": "high"}
+# Marke je Paket (Spec 28, Ablauf Schritt 3): `dr-<paket>-<MARKER_HEX Hexzeichen>`. Sie steht in
+# `plan.json` beim Paket und als letzte Zeile von `packets/<id>.prompt.md`.
+MARKER_HEX = 6
 # Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: Beide Profile reviewen denselben
 # Bereich; checkpoint hat als Soll die Datei aus `--soll-file` (Pflicht) statt der
 # Commit-Messages, ein Soll mindestens so genau. Also übernimmt standard aus beiden,
@@ -1019,6 +1022,8 @@ def _read_plan(path: Path, run_id: str) -> dict:
             raise bad(f"files von {pid} ist keine Liste von Pfaden")
         if packet.get("range") is not None and not isinstance(packet["range"], str):
             raise bad(f"range von {pid} ist weder Text noch null")
+        if packet.get("marker") is not None and not isinstance(packet["marker"], str):
+            raise bad(f"marker von {pid} ist weder Text noch null")
     notes = plan.get("notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
         raise bad("notes ist keine Liste von Objekten")
@@ -4200,6 +4205,114 @@ def _stored_found(stored: dict, files) -> Collected:
     return Collected(entries, len(unresolved), unparsed)
 
 
+BRIEF_HEADINGS = {"bugs": "## Fassung 1", "quality": "## Fassung 2",
+                  "security": "## Fokus `security`"}
+BRIEF_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")     # Verweis auf einen Anker der Referenz
+
+
+def packet_marker(packet_id) -> str:
+    """Neue Marke eines Pakets: `dr-<paket>-<MARKER_HEX Hexzeichen>` (`secrets.token_hex`).
+    Eine Auskunft, kein Beleg: Sie zeigt nur, dass der Schreiber des Ergebnisses
+    `packets/<id>.prompt.md` kennt."""
+    if not isinstance(packet_id, str) or not PACKET_ID_RE.fullmatch(packet_id):
+        raise KitError(f"keine Paket-ID: {packet_id!r}")
+    return f"dr-{packet_id}-{secrets.token_hex(MARKER_HEX // 2)}"
+
+
+def _ensure_markers(repo: Path, run_id: str) -> dict:
+    """Jedem Paket des Plans eine Marke geben, das noch keine hat (vorhandene bleiben), unter
+    der Sperre des Plans. Rückgabe: der Plan, wie er danach auf der Platte steht."""
+    with _plan_lock(run_dir(repo, run_id), run_id):
+        path, plan = _load_plan(repo, run_id)
+        fresh = [p for p in plan["packets"] if not p.get("marker")]
+        for packet in fresh:
+            packet["marker"] = packet_marker(packet["id"])
+        return _write_plan(path, plan) if fresh else plan
+
+
+def _brief_text(focus: str) -> str:
+    """Der Auftragstext für `focus` aus `references/review-brief.md` (neben dem Skript, nicht
+    hier dupliziert): bei `bugs` Fassung 1, bei `quality` Fassung 2 (jeweils der zitierte
+    Auftrag ohne den Platzhalter für den Block), bei `security` der Abschnitt „Fokus security".
+    Verweise auf Anker der Referenz fallen auf ihren Text. Fehlt die Datei oder der Abschnitt,
+    ein KitError."""
+    path = Path(__file__).parent.parent / "references" / "review-brief.md"
+    heading = BRIEF_HEADINGS.get(focus, BRIEF_HEADINGS["bugs"])
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise KitError(f"Auftragstext fehlt: {path} nicht lesbar ({exc})") from None
+    start = next((i for i, line in enumerate(lines) if line.startswith(heading)), None)
+    if start is None:
+        raise KitError(f"Auftragstext fehlt: Abschnitt {heading!r} nicht in {path}")
+    body = []
+    for line in lines[start + 1:]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    if focus != "security":
+        quoted = [line[2:] if line.startswith("> ") else line[1:]
+                  for line in body if line.startswith(">")]
+        if "Paketblock:" in quoted:
+            quoted = quoted[:quoted.index("Paketblock:")]
+        body = quoted
+    text = BRIEF_LINK_RE.sub(r"\1", "\n".join(body)).strip()
+    if not text:
+        raise KitError(f"Auftragstext fehlt: Abschnitt {heading!r} in {path} ist leer")
+    return text
+
+
+def write_prompt(run_path, packet, block, level):
+    """`packets/<id>.prompt.md` im Laufordner `run_path` schreiben (Spec 28, Ablauf Schritt 3):
+    die Kopfzeile wie bei `packets/<id>.md`, der Auftragstext aus `references/review-brief.md`
+    (`_brief_text`, nach dem Fokus des Plans), der Bereich `<von>..<bis>` (`packet["range"]`),
+    die Stufe `level`, im Profil `checkpoint` das Soll (Inhalt der Datei aus `--soll-file`)
+    unter „## Soll“, der Paketblock `block` (Text von `packets/<id>.md` ohne Kopfzeile, ohne
+    Änderung), das Rückgabeformat mit der Marke und als letzte Zeile `Paket-Marke: <marke>`.
+    `packet` trägt `id`, `range` und `marker`. Atomar, überschreibt eine frühere Datei.
+    Rückgabe: der Pfad."""
+    directory = Path(run_path)
+    repo, run_id = _layout(directory)
+    pid, marker, rng = packet.get("id"), packet.get("marker"), packet.get("range")
+    if not isinstance(pid, str) or not PACKET_ID_RE.fullmatch(pid):
+        raise KitError(f"keine Paket-ID: {pid!r}")
+    if not isinstance(marker, str) or not marker or "\n" in marker:
+        raise KitError(f"Paket {pid} hat keine Marke")
+    if level not in LEVELS:
+        raise KitError(f"Stufe {level!r} ist keine Stufe aus {', '.join(LEVELS)}")
+    plan = _read_plan(directory / "plan.json", run_id)
+    task = _brief_text(plan.get("focus"))
+    task = task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
+    parts = [task, f"## Bereich\n\n`{rng}`\n\nStufe: {level}"]
+    soll_file = plan["_meta"].get("soll_file") if plan.get("profile") == "checkpoint" else None
+    if soll_file:
+        soll_path = Path(soll_file)
+        soll_path = soll_path if soll_path.is_absolute() else repo / soll_path
+        try:
+            soll = soll_path.read_text(encoding="utf-8-sig").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise KitError(f"Soll {soll_file} nicht lesbar ({exc})") from None
+        parts.append(f"## Soll\n\n{soll}")
+    parts.append(f"Paketblock:\n\n{block.strip()}")
+    parts.append(
+        "## Rückgabeformat\n\n"
+        "Antworte nur mit einem JSON-Objekt (statt einer bloßen Liste); `marke` und `stufe` "
+        "setzt du genau so ein:\n\n"
+        f'```json\n{{"marke": "{marker}", "stufe": "{level}", "findings": [\n'
+        '  {"file": "...", "line": 12, "summary": "...", "failure_scenario": "...", '
+        '"evidence": "..."}\n]}\n```\n\n'
+        "- `findings` sind die Funde im Format oben (`file`, `line`, `summary`, "
+        "`failure_scenario`), bei keinem Fund `[]`.\n"
+        "- `evidence` ist je Fund optional: der Befehl und seine Ausgabe oder zitierte Zeilen "
+        "mit `Datei:Zeile`.\n"
+        "- `stufe` ist die Stufe, mit der `/code-review` lief.")
+    header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
+              f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+    path = directory / "packets" / f"{pid}.prompt.md"
+    _write_text(path, header + "\n\n".join(parts) + f"\n\nPaket-Marke: {marker}\n")
+    return path
+
+
 def write_counterparts(repo, run_id):
     """`counterparts --run <lauf>`: je Paket des Plans `packets/<id>.md` im Laufordner.
 
@@ -4256,9 +4369,12 @@ def write_counterparts(repo, run_id):
     # welche nicht aufgehen, darf nicht von der Reihenfolge der Pakete abhängen.
     target = None
     written = []
+    plan = _ensure_markers(repo, run_id)
+    markers = {p["id"]: p["marker"] for p in plan["packets"]}
+    level = plan_level(plan)
     for packet, rng, found in collected:
         pid = packet["id"]
-        shown_packet = {**packet, "range": rng}
+        shown_packet = {**packet, "range": rng, "marker": markers[pid]}
         header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
                   f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
         cap = BLOCK_MAX_CHARS - len(header)
@@ -4289,6 +4405,7 @@ def write_counterparts(repo, run_id):
             total, unresolved = len(found.entries), found.unresolved
         rel = CACHE_DIR / run_id / "packets" / f"{pid}.md"
         _write_text(repo / rel, header + body)
+        write_prompt(run_dir(repo, run_id), shown_packet, body, level)
         written.append({"packet": pid, "range": rng, "path": rel.as_posix(),
                         "counterparts": total, "shown": shown, "unresolved": unresolved})
     return written
@@ -4541,7 +4658,7 @@ class _Earlier(NamedTuple):
     outside: list
 
 
-def _earlier_files(directory: Path, plan: dict) -> _Earlier:
+def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     """`_Earlier` eines früheren Laufs. Eine Datei gilt als reviewt, wenn ihr Paket ein
     angenommenes Ergebnis hat — dieselbe Regel wie in `audit` (`_read_result` mit dem
     Fingerabdruck des Plans, einmal je Plan berechnet) — und hat dann die Funde zu ihr daraus;
@@ -4552,7 +4669,8 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
     git-Aufruf je Lauf); dazu die `outside`-Elemente seiner übernommenen Einträge, wie sie
     sind. Jeder Fund trägt `run`: bei einem Ergebnis dieser Lauf, bei einem übernommenen sein
     `run`, wie es ist (fehlt es, der `reused_from` des Eintrags). `plan` ist geprüft
-    (`_earlier_plan`)."""
+    (`_earlier_plan`). Mit `min_level` zählt ein Ergebnis nur, wenn seine gespeicherte Stufe
+    (ohne Feld: `plan_level(plan)`) in `LEVELS` mindestens so hoch ist."""
     directory = Path(directory)
     keyed = plan.get("file_keys") or {}
     run_id = directory.name
@@ -4567,6 +4685,9 @@ def _earlier_files(directory: Path, plan: dict) -> _Earlier:
         result, _why = _read_result(directory / RESULTS_DIR / f"{packet['id']}.json",
                                     packet["id"], run_id, digest, repo)
         if result is None:
+            continue
+        if min_level is not None and LEVELS.index(result.level or plan_level(plan)) \
+                < LEVELS.index(min_level):
             continue
         own = set(packet["files"])
         found = [{**f, "run": run_id} for f in result.findings]
@@ -4750,7 +4871,7 @@ def apply_since(plan, run_dirs):
             raise KitError(f"Lauf {run_id} kann nicht auf sich selbst folgen (--since)")
         if _since_skip(plan, eplan) is not None:
             continue
-        earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan))
+        earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan, plan_level(plan)))
         repo = repo or _layout(Path(directory))[0]
     youngest_first = sorted(earlier, key=lambda r: earlier[r][0], reverse=True)
 
@@ -4993,7 +5114,8 @@ def _clean_line(line, where: str):
 def _clean_finding(item, index: int, repo: Path) -> dict:
     """Ein Fund der JSON-Liste von `/code-review` (oder aus dem Brief) mit den festen Feldern
     `file` (Pfad im Repo, `_finding_path`), `line` (`_clean_line`: Zahl ≥ 0, `"a-b"` oder
-    null), `summary` (Text, Pflicht) und `failure_scenario` (Text oder null; fehlt: null).
+    null), `summary` (Text, Pflicht), `failure_scenario` (Text oder null; fehlt: null) und
+    `evidence` (Text, optional; leer oder fehlend: das Feld fehlt).
     Andere Felder fallen weg. Alles andere ist ein KitError mit der Nummer des Funds."""
     where = f"Fund {index}"
     if not isinstance(item, dict):
@@ -5009,13 +5131,20 @@ def _clean_finding(item, index: int, repo: Path) -> dict:
     scenario = item.get("failure_scenario")
     if scenario is not None and not isinstance(scenario, str):
         raise KitError(f"{where} ({path}): failure_scenario muss Text oder null sein")
-    return {"file": path, "line": line, "summary": summary.strip(),
-            "failure_scenario": scenario.strip() or None if isinstance(scenario, str) else None}
+    out = {"file": path, "line": line, "summary": summary.strip(),
+           "failure_scenario": scenario.strip() or None if isinstance(scenario, str) else None}
+    evidence = item.get("evidence")
+    if evidence is not None and not isinstance(evidence, str):
+        raise KitError(f"{where} ({path}): evidence muss Text sein")
+    if isinstance(evidence, str) and evidence.strip():
+        out["evidence"] = evidence.strip()
+    return out
 
 
-def _read_payload(payload_path) -> list:
-    """Die Liste der Funde aus `payload_path` (`-`: stdin): eine JSON-Liste oder ein Objekt
-    mit der Liste unter `findings`. stdin und eine Datei werden als UTF-8 gelesen, nicht in
+def _read_payload(payload_path) -> tuple:
+    """Das Ergebnis aus `payload_path` (`-`: stdin) als `(marke, stufe, funde, bloß)`: eine
+    JSON-Liste (`bloß` wahr, Marke und Stufe None) oder ein Objekt mit der Liste unter
+    `findings` und den Feldern `marke` und `stufe`. stdin und eine Datei werden als UTF-8 gelesen, nicht in
     der Kodierung des Systems, ein BOM am Anfang zählt in beiden Fällen nicht; kein UTF-8,
     kein stdin (`sys.stdin` None, etwa unter pythonw) oder ein geschlossenes stdin ist ein
     KitError."""
@@ -5042,17 +5171,22 @@ def _read_payload(payload_path) -> list:
     except ValueError as exc:
         raise KitError(f"Ergebnis {payload_path} ist kein JSON: {exc}") from None
     if isinstance(data, dict) and isinstance(data.get("findings"), list):
-        data = data["findings"]
+        return data.get("marke"), data.get("stufe"), data["findings"], False
     if not isinstance(data, list):
-        raise KitError(f"Ergebnis {payload_path}: erwartet eine JSON-Liste von Funden "
-                       "(file, line, summary, failure_scenario), leer bei keinem Fund")
-    return data
+        raise KitError(f"Ergebnis {payload_path}: erwartet ein Objekt {{\"marke\", \"stufe\", "
+                       "\"findings\"} mit den Funden (file, line, summary, failure_scenario, "
+                       "evidence), leer bei keinem Fund")
+    return None, None, data, True
 
 
 class _Result(NamedTuple):
-    """Ein angenommenes Ergebnis: die geprüften Funde und das Werkzeug aus `_meta.tool`."""
+    """Ein angenommenes Ergebnis: die geprüften Funde, das Werkzeug aus `_meta.tool`, die
+    gespeicherte Stufe `level` (None: nicht gespeichert, es gilt die des Plans) und `no_block`
+    (ohne Marke des Pakets angenommen; ein Ergebnis aus Spec 26 ohne `marke` zählt dazu)."""
     findings: list
     tool: str
+    level: str | None = None
+    no_block: bool = False
 
 
 def _read_result(path: Path, pid: str, run_id: str, digest: str, repo: Path):
@@ -5077,9 +5211,13 @@ def _read_result(path: Path, pid: str, run_id: str, digest: str, repo: Path):
     tool = meta.get("tool")
     if not isinstance(tool, str) or not tool.strip():
         return None, "Ergebnis ohne Werkzeug (_meta.tool)"
+    level = data.get("level")
+    if level is not None and level not in LEVELS:
+        return None, f"Ergebnis mit unbekannter Stufe {level!r}"
+    no_block = data.get("no_block") is True or not isinstance(data.get("marke"), str)
     try:
         return _Result([_clean_finding(f, i, repo) for i, f in enumerate(data["findings"], 1)],
-                       tool), None
+                       tool, level, no_block), None
     except KitError as exc:
         return None, f"ungültiger Fund: {exc}"
 
@@ -5102,20 +5240,28 @@ def _canonical_tool(tool: str) -> str:
     return "/" + match[1] if match else tool
 
 
-def record(run_path, packet, tool, payload_path):
-    """`record --run <lauf> --packet <id> --tool <werkzeug> <datei>`: das Ergebnis eines
-    Pakets annehmen (Spec 26, Ablauf Schritt 4).
+def record(run_path, packet, tool, payload_path, no_block=False):
+    """`record --run <lauf> --packet <id> --tool <werkzeug> [--no-block] <datei>`: das
+    Ergebnis eines Pakets annehmen (Spec 26, Ablauf Schritt 4; Spec 28, Ablauf Schritt 4).
 
-    `run_path` ist der Laufordner, `payload_path` die JSON-Liste von `/code-review` oder die
-    Liste aus dem Brief (`-`: stdin, als UTF-8; ein Objekt mit `findings` geht auch), je Fund
-    `file`, `line` (Zahl, Text wie `12-14` oder `L12 bis L14`, oder null; gespeichert als Zahl
-    oder `"a-b"`), `summary`, `failure_scenario` (`_clean_finding`). Eine
-    leere Liste ist ein Ergebnis ohne Funde. Angenommen wird nur, wenn das Paket im Plan
-    steht und noch kein Ergebnis hat; sonst — und bei einer ungültigen Liste oder einem
-    leeren Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des
-    Plans `results/<id>.json` mit `_meta` (`generated`, `run`, `packet` = Paket-ID, `tool`,
-    `plan` = `_plan_digest`) und `findings`. `tool` steht dort gekürzt und nach
-    `_canonical_tool` (`code-review` → `/code-review`). Rückgabe: das geschriebene Objekt."""
+    `run_path` ist der Laufordner, `payload_path` das Objekt `{"marke", "stufe", "findings"}`
+    (`-`: stdin, als UTF-8), je Fund `file`, `line` (Zahl, Text wie `12-14` oder `L12 bis
+    L14`, oder null; gespeichert als Zahl oder `"a-b"`), `summary`, `failure_scenario` und
+    optional `evidence` (Text; `_clean_finding`). Eine leere `findings`-Liste ist ein Ergebnis
+    ohne Funde. `marke` muss die Marke des Pakets aus `plan.json` sein (`counterparts` hat sie
+    vergeben), `stufe` eine aus `LEVELS` — die Stufe, mit der `/code-review` lief; liegt sie
+    unter der Stufe des Plans, wird das Ergebnis angenommen und `audit` nennt es unter
+    `below_level`. Eine bloße Liste, ein Objekt ohne Marke oder mit der Marke eines anderen
+    Pakets, ohne oder mit unbekannter Stufe ist ein KitError, nichts wird geschrieben.
+    `no_block=True` (`--no-block`) nimmt eine bloße Liste oder ein Objekt ohne passende Marke
+    an (die Stufe ist dann optional, aber wenn genannt, gültig) und setzt `no_block: true`;
+    passt die Marke, ist das Ergebnis kein `no_block`. Angenommen wird nur, wenn das Paket im
+    Plan steht und noch kein Ergebnis hat; sonst — und bei ungültigen Funden oder einem leeren
+    Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des Plans
+    `results/<id>.json` mit `_meta` (`generated`, `run`, `packet` = Paket-ID, `tool`, `plan` =
+    `_plan_digest`), `findings` und, soweit vorhanden, `marke`, `level` (die genannte Stufe)
+    und `no_block`. `tool` steht dort gekürzt und nach `_canonical_tool` (`code-review` →
+    `/code-review`). Rückgabe: das geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
     if not isinstance(packet, str) or not PACKET_ID_RE.fullmatch(packet):
@@ -5123,7 +5269,8 @@ def record(run_path, packet, tool, payload_path):
     if not isinstance(tool, str) or not tool.strip() or any(c in tool for c in "\r\n"):
         raise KitError(f"--tool braucht das Werkzeug des Reviews (eine Zeile), nicht {tool!r}")
     tool = _canonical_tool(tool.strip())
-    findings = [_clean_finding(item, i, repo) for i, item in enumerate(_read_payload(payload_path), 1)]
+    marke, stufe, items, bare = _read_payload(payload_path)
+    findings = [_clean_finding(item, i, repo) for i, item in enumerate(items, 1)]
     with _plan_lock(directory, run_id):
         plan = _read_plan(directory / "plan.json", run_id)
         ids = [p["id"] for p in plan["packets"]]
@@ -5134,11 +5281,43 @@ def record(run_path, packet, tool, payload_path):
         if os.path.lexists(target):
             raise KitError(f"Paket {packet} von Lauf {run_id} hat schon ein Ergebnis "
                            f"({_shown_path(repo, target)}) — ein zweites wird nicht angenommen")
+        expected = plan["packets"][ids.index(packet)].get("marker")
+        valid = isinstance(marke, str) and marke == expected
+        if not no_block:
+            if bare:
+                raise KitError(f"Ergebnis für Paket {packet} als bloße Liste — erwartet ein "
+                               "Objekt {\"marke\", \"stufe\", \"findings\"} mit der Marke aus "
+                               f"packets/{packet}.prompt.md; ohne Gegenstellen-Block --no-block "
+                               "nennen. Nicht angenommen")
+            if not expected:
+                raise KitError(f"Paket {packet} hat keine Marke im Plan von Lauf {run_id} — "
+                               "erst `counterparts` laufen lassen (oder --no-block). "
+                               "Nicht angenommen")
+            if not isinstance(marke, str) or not marke:
+                raise KitError(f"Ergebnis für Paket {packet} ohne Marke (Zeile `Paket-Marke:` "
+                               f"in packets/{packet}.prompt.md) — nicht angenommen")
+            if not valid:
+                raise KitError(f"Marke {marke!r} gehört nicht zu Paket {packet} — nicht "
+                               "angenommen")
+            if stufe is None:
+                raise KitError(f"Ergebnis für Paket {packet} ohne stufe (die Stufe, mit der "
+                               f"/code-review lief: {', '.join(LEVELS)}) — nicht angenommen")
+        if stufe is not None and (not isinstance(stufe, str) or stufe not in LEVELS):
+            raise KitError(f"stufe {stufe!r} ist keine Stufe aus {', '.join(LEVELS)} — nicht "
+                           "angenommen")
         shown = "-" if str(payload_path) == "-" else _shown_path(repo, payload_path)
-        meta = {"generated": f"{SCRIPT_CMD} record --run {run_id} --packet {packet} --tool "
-                             f"{shlex.quote(tool)} {shlex.quote(shown)}",
-                "run": run_id, "packet": packet, "tool": tool, "plan": _plan_digest(plan, run_id)}
-        return write_json(target, meta, {"findings": findings})
+        generated = (f"{SCRIPT_CMD} record --run {run_id} --packet {packet} --tool "
+                     f"{shlex.quote(tool)}{' --no-block' if no_block else ''} {shlex.quote(shown)}")
+        meta = {"generated": generated, "run": run_id, "packet": packet, "tool": tool,
+                "plan": _plan_digest(plan, run_id)}
+        payload = {"findings": findings}
+        if valid:
+            payload["marke"] = marke
+        if stufe is not None:
+            payload["level"] = stufe
+        if no_block and not valid:
+            payload["no_block"] = True
+        return write_json(target, meta, payload)
 
 
 class _Source(NamedTuple):
@@ -5520,7 +5699,10 @@ def audit(run_path, report_path):
     `report_path` None: `report.md` im Laufordner; ein relativer `report_path` gilt einmal ab
     dem Arbeitsverzeichnis, gelesen wird dieser Pfad, und `_meta.report` nennt ihn repo-relativ
     oder, außerhalb des Repos, absolut). `complete` ist wahr nur, wenn die vier Listen leer
-    sind. Ein Plan, den `_checked_plan` nicht annimmt, ist ein KitError. Rückgabe: das
+    sind. Dazu zwei Auskünfte, die `complete` nicht ändern (Spec 28, Contract): `no_block`,
+    die Pakete mit angenommenem Ergebnis ohne Marke des Pakets (`record --no-block`, auch ein
+    Ergebnis aus Spec 26), und `below_level`, die Pakete, deren gespeicherte Stufe unter der
+    des Plans (`plan_level`) liegt; beide in Plan-Reihenfolge. Ein Plan, den `_checked_plan` nicht annimmt, ist ein KitError. Rückgabe: das
     geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
@@ -5535,6 +5717,10 @@ def audit(run_path, report_path):
         lost = _lost(_sources(accepted, keyed), merged)
         mismatch = _report_mismatch(report, shown, run_id, plan, merged, accepted,
                                     bool(missing or stale or lost))
+        wanted = LEVELS.index(plan_level(plan))
+        no_block = [pid for pid, r in accepted.items() if r.no_block]
+        below = [pid for pid, r in accepted.items()
+                 if r.level is not None and LEVELS.index(r.level) < wanted]
         command = f"{SCRIPT_CMD} audit --run {run_id}"
         if report_path is not None:
             command += f" --report {shlex.quote(shown)}"
@@ -5542,7 +5728,7 @@ def audit(run_path, report_path):
         payload = {"complete": not (missing or stale or lost or mismatch),
                    "coverage": {"covered": len(accepted), "total": len(plan["packets"])},
                    "missing": missing, "stale": stale, "lost_findings": lost,
-                   "report_mismatch": mismatch}
+                   "report_mismatch": mismatch, "no_block": no_block, "below_level": below}
         return write_json(directory / "audit.json", meta, payload)
 
 
@@ -5628,8 +5814,10 @@ def _cmd_counterparts(args) -> int:
 
 def _cmd_record(args) -> int:
     repo = _toplevel(args.repo)
-    data = record(run_dir(repo, _check_run_id(args.run)), args.packet, args.tool, args.payload)
-    print(f"{args.packet}: {len(data['findings'])} Fund(e) angenommen → "
+    data = record(run_dir(repo, _check_run_id(args.run)), args.packet, args.tool, args.payload,
+                  args.no_block)
+    print(f"{args.packet}: {len(data['findings'])} Fund(e) angenommen"
+          f"{' (ohne Gegenstellen-Block)' if data.get('no_block') else ''} → "
           f"{(CACHE_DIR / args.run / RESULTS_DIR / f'{args.packet}.json').as_posix()}")
     return 0
 
@@ -5699,7 +5887,10 @@ def _parser() -> argparse.ArgumentParser:
     rec.add_argument("--packet", required=True)
     rec.add_argument("--tool", required=True, help="Werkzeug des Reviews, z. B. code-review "
                           "(gespeichert als /code-review)")
-    rec.add_argument("payload", help="JSON-Liste der Funde (- für stdin)")
+    rec.add_argument("--no-block", action="store_true",
+                     help="auch eine bloße Liste oder ein Objekt ohne Marke annehmen "
+                          "(vermerkt no_block)")
+    rec.add_argument("payload", help='JSON-Objekt {"marke", "stufe", "findings"} (- für stdin)')
     rec.set_defaults(func=_cmd_record)
 
     mrg = sub.add_parser("merge", parents=[common], help="findings.json schreiben")

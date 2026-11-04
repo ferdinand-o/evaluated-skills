@@ -17,7 +17,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -2908,7 +2908,7 @@ def _record(kit, root, plan, packet, findings, tool="test"):
     (directory / "results" / f"{packet}.json").unlink(missing_ok=True)
     payload = root.parent / f"payload-{plan['_meta']['run']}-{packet}.json"
     payload.write_text(json.dumps(findings, ensure_ascii=False), encoding="utf-8")
-    kit.record(directory, packet, tool, payload)
+    _rec(kit, directory, packet, tool, payload)
 
 
 def _finding(path, line, summary):
@@ -3249,8 +3249,8 @@ def test_f3_plan_since_only_on_a_fresh_run(tmp_path, monkeypatch):
     # Artefakte des Laufs: der Fehler nennt sie, auf der Platte ändert sich nichts.
     plan_d = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     run_d = plan_d["_meta"]["run"]
-    before = disk(plan_d)
     _record(kit, root, plan_d, "p1", [])
+    before = disk(plan_d)
     with pytest.raises(kit.KitError, match=r"results/p1\.json"):
         kit.plan_since(root, run_d, [ids[0]])
     assert disk(plan_d) == before
@@ -3513,7 +3513,7 @@ def test_f9_plan_since_returns_what_it_wrote(tmp_path, monkeypatch):
 
 FINDING_KEYS = ["file", "line", "summary", "failure_scenario", "packets", "reused_from", "sources"]
 AUDIT_KEYS = ["_meta", "complete", "coverage", "missing", "stale", "lost_findings",
-              "report_mismatch"]
+              "report_mismatch", "no_block", "below_level"]
 
 
 def _payload(tmp_path, data, name="funde.json"):
@@ -3527,8 +3527,50 @@ def _cli(kit, root, command, *args):
     return kit.main([command, "--repo", str(root), *[str(a) for a in args]])
 
 
-def _cli_record(kit, root, run, packet, payload, tool="/code-review"):
-    return _cli(kit, root, "record", "--run", run, "--packet", packet, "--tool", tool, payload)
+def _as_result(kit, directory, packet, payload):
+    """Die Ablage in das Format, das `record` annimmt (Spec 28): ein Objekt mit der Marke des
+    Pakets (gibt es noch keine, vergibt sie `_ensure_markers` wie `counterparts`), der Stufe des
+    Plans und den Funden. Aus einer Liste oder einem Objekt mit `findings` ohne `marke` wird
+    eine Nachbardatei `<name>.obj.json`; alles andere — stdin, fehlende oder kaputte Datei,
+    unbekanntes Paket, ein Objekt, das schon eine Marke trägt — bleibt, wie es ist."""
+    path = Path(payload) if str(payload) != "-" else None
+    if path is None or not (Path(directory) / "plan.json").is_file():
+        return payload
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return payload
+    if isinstance(data, dict) and isinstance(data.get("findings"), list) and "marke" not in data:
+        data = data["findings"]
+    if not isinstance(data, list):
+        return payload
+    repo, run_id = kit._layout(Path(directory))
+    plan = kit._ensure_markers(repo, run_id)
+    marker = next((p["marker"] for p in plan["packets"] if p["id"] == packet), None)
+    if marker is None:
+        return payload
+    out = path.with_name(path.name + ".obj.json")
+    out.write_text(json.dumps({"marke": marker, "stufe": kit.plan_level(plan), "findings": data},
+                              ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+def _rec(kit, directory, packet, tool, payload, no_block=False):
+    """`kit.record` mit dem Ergebnis im Format von Spec 28 (`_as_result`). Mit `no_block`
+    bleibt die Ablage, wie sie ist — für die Tests, die das Listenformat ausdrücklich prüfen."""
+    if not no_block:
+        payload = _as_result(kit, directory, packet, payload)
+    return kit.record(directory, packet, tool, payload, no_block)
+
+
+def _cli_record(kit, root, run, packet, payload, tool="/code-review", no_block=False):
+    """`record` über die Kommandozeile mit dem Ergebnis im Format von Spec 28; mit `no_block`
+    (`--no-block`) bleibt die Ablage, wie sie ist (stdin, Listenformat)."""
+    flags = ["--no-block"] if no_block else []
+    if not no_block:
+        payload = _as_result(kit, kit.run_dir(root, run), packet, payload)
+    return _cli(kit, root, "record", "--run", run, "--packet", packet, "--tool", tool,
+                *flags, payload)
 
 
 def _report(directory, run, findings, coverage, claim="vollständig", count=None, header=None,
@@ -3577,7 +3619,7 @@ def test_record_rejects_unknown_or_duplicate(tmp_path, capsys):
     assert "p9" in capsys.readouterr().err
     assert not results.exists()
     with pytest.raises(kit.KitError, match="p9"):
-        kit.record(directory, "p9", "/code-review", payload)
+        _rec(kit, directory, "p9", "/code-review", payload)
     # Kein gültiges Ergebnis: Exit 1, nichts geschrieben.
     broken = ([{"file": "a/x.py", "line": 1}],                           # summary fehlt
               [{"file": "a/x.py", "line": True, "summary": "s"}],         # line ist bool
@@ -3597,7 +3639,7 @@ def test_record_rejects_unknown_or_duplicate(tmp_path, capsys):
     # Eine leere Liste wird angenommen: ein Paket ohne Funde bekommt ein Ergebnis.
     assert _cli_record(kit, root, run, "p2", _payload(tmp_path, [], "leer.json")) == 0
     data = json.loads((results / "p2.json").read_text(encoding="utf-8"))
-    assert list(data) == ["_meta", "findings"] and data["findings"] == []
+    assert list(data) == ["_meta", "findings", "marke", "level"] and data["findings"] == []
     meta = data["_meta"]
     assert list(meta)[:3] == ["skill", "schema", "generated"]
     assert meta["skill"] == "deep-review" and meta["schema"] == 1
@@ -3611,10 +3653,10 @@ def test_record_rejects_unknown_or_duplicate(tmp_path, capsys):
     assert "p2" in capsys.readouterr().err
     assert (results / "p2.json").read_bytes() == before
     with pytest.raises(kit.KitError, match="schon ein Ergebnis"):
-        kit.record(directory, "p2", "/code-review", payload)
+        _rec(kit, directory, "p2", "/code-review", payload)
 
     # Felder fest und in fester Reihenfolge, Pfade repo-relativ; fremde Felder fallen weg.
-    written = kit.record(directory, "p1", "/code-review", payload)
+    written = _rec(kit, directory, "p1", "/code-review", payload)
     expected = [
         {"file": "a/x.py", "line": 3, "summary": "Grenze falsch",
          "failure_scenario": "x = 8 → IndexError"},
@@ -3637,13 +3679,138 @@ def test_record_rejects_unknown_or_duplicate(tmp_path, capsys):
     assert why is None and accepted.findings == expected[:1] and accepted.tool == "review-brief"
 
 
+def _marked_run(kit, root, split_at=10):
+    """Lauf mit zwei Paketen, `counterparts` gelaufen: (Plan von der Platte, Lauf, Ordner)."""
+    plan, run = _split_plan(kit, root, split_at=split_at)
+    kit.write_counterparts(root, run)
+    directory = _run_path(root, plan)
+    return json.loads((directory / "plan.json").read_text(encoding="utf-8")), run, directory
+
+
+def _object(plan, packet, findings, stufe="medium", marke=None):
+    marker = next(p["marker"] for p in plan["packets"] if p["id"] == packet)
+    return {"marke": marker if marke is None else marke, "stufe": stufe, "findings": findings}
+
+
+def test_b_record_needs_packet_marker(tmp_path, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    results = directory / "results"
+    markers = {p["id"]: p["marker"] for p in plan["packets"]}
+    assert all(re.fullmatch(rf"dr-{pid}-[0-9a-f]{{6}}", m) for pid, m in markers.items())
+    assert markers["p1"] != markers["p2"]
+    # Ein zweiter counterparts-Lauf behält die Marken.
+    kit.write_counterparts(root, run)
+    again = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    assert {p["id"]: p["marker"] for p in again["packets"]} == markers
+
+    # packets/<id>.prompt.md: Kopfzeile, Auftrag, Bereich, Stufe, Block, Marke als letzte Zeile.
+    prompt = (directory / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
+    block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert prompt.startswith("<!-- skill: deep-review | schema: 1 | generated: ")
+    assert "packet: p1 -->" in prompt.splitlines()[0]
+    assert prompt.rstrip("\n").splitlines()[-1] == f"Paket-Marke: {markers['p1']}"
+    assert "Prüfe den Vertrag der Gegenstelle" in prompt           # Auftrag aus review-brief.md
+    assert again["packets"][0]["range"] in prompt and "Stufe: medium" in prompt
+    assert block.split("\n", 1)[1].strip() in prompt              # der Block, unverändert
+    assert "<von>" not in prompt and "<id>" not in prompt
+    # packets/<id>.md bleibt bestehen.
+    assert block.startswith("<!-- skill: deep-review")
+
+    finding = {"file": "a/x.py", "line": 3, "summary": "s", "failure_scenario": "f",
+               "evidence": "x.py:3 `return x`"}
+    ok = _payload(tmp_path, _object(plan, "p1", [finding]), "ok.json")
+    # Bloße Liste, ohne Marke, fremde Marke: Exit 1, nichts geschrieben.
+    for i, bad in enumerate([[finding], {"stufe": "medium", "findings": [finding]},
+                             _object(plan, "p1", [finding], marke=markers["p2"]),
+                             _object(plan, "p1", [finding], marke="dr-p1-000000")]):
+        assert _cli(kit, root, "record", "--run", run, "--packet", "p1", "--tool", "/code-review",
+                    _payload(tmp_path, bad, f"bad{i}.json")) == 1, bad
+        assert not results.exists(), bad
+    assert "Marke" in capsys.readouterr().err
+    # Passende Marke: angenommen, evidence bleibt.
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p1", "--tool", "/code-review", ok) == 0
+    data = json.loads((results / "p1.json").read_text(encoding="utf-8"))
+    assert data["marke"] == markers["p1"] and "no_block" not in data
+    assert data["findings"][0]["evidence"] == "x.py:3 `return x`"
+    # --no-block: bloße Liste und Objekt ohne Marke werden angenommen.
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p2", "--tool", "/code-review",
+                "--no-block", _payload(tmp_path, [finding], "liste.json")) == 0
+    assert json.loads((results / "p2.json").read_text(encoding="utf-8"))["no_block"] is True
+    kit.merge(directory)
+    audit = kit.audit(directory, None)
+    assert audit["no_block"] == ["p2"] and audit["below_level"] == []
+    assert audit["coverage"] == {"covered": 2, "total": 2}
+    assert not (audit["missing"] or audit["stale"] or audit["lost_findings"])
+    # no_block ändert complete nicht: mit passendem Bericht bleibt es wahr.
+    merged = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    _report(directory, run, merged, "2/2")
+    assert kit.audit(directory, None)["complete"] is True
+    # Ein Ergebnis aus Spec 26 (ohne Marke, ohne no_block) gilt als no_block.
+    legacy = json.loads((results / "p1.json").read_text(encoding="utf-8"))
+    del legacy["marke"]
+    (results / "p1.json").write_text(json.dumps(legacy), encoding="utf-8")
+    assert kit.audit(directory, None)["no_block"] == ["p1", "p2"]
+
+
+def test_b_record_needs_level_and_flags_lower_level(tmp_path, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    results = directory / "results"
+    # Ohne stufe oder mit unbekannter stufe: Exit 1, nichts geschrieben.
+    for i, stufe in enumerate([None, "mittel", 3]):
+        obj = _object(plan, "p1", [])
+        if stufe is None:
+            del obj["stufe"]
+        else:
+            obj["stufe"] = stufe
+        assert _cli(kit, root, "record", "--run", run, "--packet", "p1", "--tool", "/code-review",
+                    _payload(tmp_path, obj, f"s{i}.json")) == 1
+        assert not results.exists()
+    assert "stufe" in capsys.readouterr().err
+    # Unter der Stufe des Plans (medium): angenommen, level gespeichert, audit nennt es.
+    low = _payload(tmp_path, _object(plan, "p1", [], stufe="low"), "low.json")
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p1", "--tool", "/code-review", low) == 0
+    assert json.loads((results / "p1.json").read_text(encoding="utf-8"))["level"] == "low"
+    high = _payload(tmp_path, _object(plan, "p2", [], stufe="high"), "high.json")
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p2", "--tool", "/code-review", high) == 0
+    audit = kit.audit(directory, None)
+    assert audit["below_level"] == ["p1"] and audit["no_block"] == []
+
+
+def test_b_since_takes_only_results_at_or_above_new_level(tmp_path):
+    kit = _kit()
+    root = _since_repo(tmp_path / "r")
+    plan_a = kit.build_plan(root, "base..t1", "standard", "bugs", 800, False, "low")
+    kit.write_counterparts(root, plan_a["_meta"]["run"])
+    directory = _run_path(root, plan_a)
+    marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    obj = _object(marked, "p1", [_finding("a.py", 5, "A")], stufe="low")
+    assert _rec(kit, directory, "p1", "t", _payload(tmp_path, obj))["level"] == "low"
+    # Neuer Plan auf medium: ein Ergebnis auf low trägt ihn nicht.
+    plan_b = kit.build_plan(root, "base..t1", "standard", "bugs", 800, False, "medium")
+    assert "reused_from" not in plan_b["file_keys"]["a.py"] or \
+        plan_b["file_keys"]["a.py"]["reused_from"] is None
+    new = kit.apply_since(plan_b, [directory])
+    assert all(i.get("reused_from") is None for i in new["file_keys"].values())
+    # Ein Ergebnis ohne gespeicherte Stufe zählt mit der Stufe seines Plans (low): auch nicht.
+    stored = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    del stored["level"]
+    (directory / "results" / "p1.json").write_text(json.dumps(stored), encoding="utf-8")
+    plan_low = kit.build_plan(root, "base..t1", "standard", "bugs", 800, False, "low")
+    taken = kit.apply_since(plan_low, [directory])
+    assert taken["file_keys"]["a.py"]["reused_from"] == plan_a["_meta"]["run"]
+
+
 def test_record_result_of_another_plan_is_not_reused(tmp_path, monkeypatch):
     kit = _kit()
     _tick(kit, monkeypatch)
     root = _since_repo(tmp_path / "repo")
     run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
     other = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
-    kit.record(_run_path(root, other), "p1", "/code-review",
+    _rec(kit, _run_path(root, other), "p1", "/code-review",
                _payload(tmp_path, [_finding("a.py", 5, "A")]))
     # Das Ergebnis des anderen Laufs, in Lauf A kopiert: nicht angenommen, nichts übernommen.
     (_run_path(root, run_a) / "results").mkdir()
@@ -3717,7 +3884,7 @@ def test_merge_without_results_and_with_reused_findings(tmp_path, monkeypatch):
     _tick(kit, monkeypatch)
     root = _since_repo(tmp_path / "repo")
     run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)["_meta"]["run"]
-    kit.record(kit.run_dir(root, run_a), "p1", "/code-review",
+    _rec(kit, kit.run_dir(root, run_a), "p1", "/code-review",
                _payload(tmp_path, [_finding("a.py", 5, "A"), _finding("b.py", 1, "alt")]))
     # Ohne Ergebnis: merge schreibt eine leere Liste (audit meldet das fehlende Paket).
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
@@ -3732,7 +3899,7 @@ def test_merge_without_results_and_with_reused_findings(tmp_path, monkeypatch):
     assert plan_c["file_keys"]["a.py"]["reused_from"] == run_a
     assert plan_c["split"] is True and plan_c["range"] is not None
     assert [p["files"] for p in plan_c["packets"]] == [["b.py"]]
-    kit.record(directory, "p1", "/code-review",
+    _rec(kit, directory, "p1", "/code-review",
                _payload(tmp_path, [_finding("b.py", 7, "neu"), _finding("a.py", 6, "über a")], "c.json"))
     merged = kit.merge(directory)["findings"]
     assert [(f["file"], f["line"], f["summary"], f["packets"], f["reused_from"]) for f in merged] == [
@@ -3848,13 +4015,13 @@ def test_audit_counts_reused_findings(tmp_path, monkeypatch):
     _tick(kit, monkeypatch)
     root = _since_repo(tmp_path / "repo")
     run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)["_meta"]["run"]
-    kit.record(kit.run_dir(root, run_a), "p1", "/code-review",
+    _rec(kit, kit.run_dir(root, run_a), "p1", "/code-review",
                _payload(tmp_path, [_finding("a.py", 5, "A")]))
     # B: a.py übernommen, b.py in p1.
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     done_b = kit.plan_since(root, plan_b["_meta"]["run"], [run_a])
     run_b, dir_b = done_b["_meta"]["run"], _run_path(root, done_b)
-    kit.record(dir_b, "p1", "/code-review", _payload(tmp_path, [_finding("b.py", 3, "B")], "b.json"))
+    _rec(kit, dir_b, "p1", "/code-review", _payload(tmp_path, [_finding("b.py", 3, "B")], "b.json"))
     on_disk = kit.merge(dir_b)
     merged = on_disk["findings"]
     assert [(f["file"], f["reused_from"], f["packets"]) for f in merged] == [
@@ -3933,7 +4100,8 @@ def test_main_subcommands_exit_codes(tmp_path, capsys):
 
     # counterparts baut Paketblöcke und Hilfscommits; cleanup räumt sie weg.
     assert _cli(kit, root, "counterparts", "--run", run) == 0
-    assert sorted(p.name for p in (cache / run / "packets").iterdir()) == ["p1.md", "p2.md"]
+    assert sorted(p.name for p in (cache / run / "packets").iterdir()) == [
+        "p1.md", "p1.prompt.md", "p2.md", "p2.prompt.md"]
     assert git(root, "for-each-ref", "refs/deep-review/") != ""
     capsys.readouterr()
     assert _cli(kit, root, "cleanup", "--run", run) == 0
@@ -4023,14 +4191,14 @@ def test_cp6_f02_cli_output_and_stdin_are_utf8_safe(tmp_path, monkeypatch):
     # stdin wird als UTF-8 gelesen, nicht in der Kodierung des Systems.
     text = json.dumps([{"file": "b/y.py", "line": 2, "summary": "Lösung"}], ensure_ascii=False)
     monkeypatch.setattr(sys, "stdin", stream(text.encode("utf-8")))
-    assert _cli_record(kit, root, run, "p2", "-") == 0
+    assert _cli_record(kit, root, run, "p2", "-", no_block=True) == 0
     stored = json.loads((directory / "results" / "p2.json").read_text(encoding="utf-8"))
     assert stored["findings"][0]["summary"] == "Lösung"
 
     # Kein UTF-8 auf stdin: Exit 1 mit Meldung, kein Traceback, nichts geschrieben.
     plan2, run2 = _split_plan(kit, root)
     monkeypatch.setattr(sys, "stdin", stream(b'[{"file": "a/x.py", "line": 1, "summary": "\xff"}]'))
-    assert _cli_record(kit, root, run2, "p1", "-") == 1
+    assert _cli_record(kit, root, run2, "p1", "-", no_block=True) == 1
     err.flush()
     message = err.buffer.getvalue().decode("utf-8", errors="replace")
     assert "UTF-8" in message and "Traceback" not in message
@@ -4040,7 +4208,7 @@ def test_cp6_f02_cli_output_and_stdin_are_utf8_safe(tmp_path, monkeypatch):
 def test_cp6_f03_report_with_a_bom_passes_the_header_check(tmp_path):
     kit = _kit()
     root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
-    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
     kit.merge(directory)
     report = _report(directory, run, [], "1/1")
     report.write_text("﻿" + report.read_text(encoding="utf-8"), encoding="utf-8")
@@ -4124,7 +4292,7 @@ def test_cp6_f05_since_accepts_results_like_audit(tmp_path, monkeypatch):
     root2 = _two_packet_repo(tmp_path / "zwei")
     first, _run = _split_plan(kit, root2)
     for pid in ("p1", "p2"):
-        kit.record(_run_path(root2, first), pid, "/code-review",
+        _rec(kit, _run_path(root2, first), pid, "/code-review",
                    _payload(tmp_path, [], f"{pid}.json"))
     second, _run = _split_plan(kit, root2)
     calls = []
@@ -4152,7 +4320,7 @@ def test_cp6_f06_cli_paths_are_resolved_against_the_cwd(tmp_path, monkeypatch):
     assert meta["generated"].endswith(f"--soll-file {work / 'specs' / 's.md'}")
 
     # audit --report report.md aus /work: gelesen wird /work/report.md, _meta.report absolut.
-    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
     kit.merge(directory)
     _report(directory, run, [], "1/1").replace(work / "report.md")
     monkeypatch.chdir(work)
@@ -4183,7 +4351,7 @@ def test_cp6_f08_claim_is_the_whole_word_and_not_negated(tmp_path):
     root = _two_packet_repo(tmp_path)
     plan, run = _split_plan(kit, root)
     directory = _run_path(root, plan)
-    kit.record(directory, "p1", "/code-review",
+    _rec(kit, directory, "p1", "/code-review",
                _payload(tmp_path, [_finding("a/x.py", 3, "vollständige Validierung fehlt")]))
     merged = kit.merge(directory)["findings"]
     extra = ["Die Vollständigkeit ist nicht gegeben.", "Der Lauf ist nicht mehr vollständig.",
@@ -4201,7 +4369,7 @@ def test_cp6_f08_claim_is_the_whole_word_and_not_negated(tmp_path):
 def test_cp6_f09_header_names_range_profile_focus_and_tool(tmp_path):
     kit = _kit()
     root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
-    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
     kit.merge(directory)
     _report(directory, run, [], "1/1")
     assert kit.audit(directory, None)["report_mismatch"] == []
@@ -4243,9 +4411,9 @@ def test_cp6_f11_backslash_paths_are_posix(tmp_path):
     assert kit._clean_finding({"file": ".\\a\\x.py", "summary": "s"}, 1, root)["file"] == "a/x.py"
     with pytest.raises(kit.KitError, match="kein Pfad im Repo"):
         kit._clean_finding({"file": "..\\x.py", "summary": "s"}, 1, root)
-    kit.record(directory, "p1", "/code-review",
+    _rec(kit, directory, "p1", "/code-review",
                _payload(tmp_path, [_finding("a\\x.py", 3, "A")], "1.json"))
-    kit.record(directory, "p2", "/code-review",
+    _rec(kit, directory, "p2", "/code-review",
                _payload(tmp_path, [_finding("a/x.py", 4, "B")], "2.json"))
     merged = kit.merge(directory)["findings"]
     assert [(f["file"], f["line"], f["packets"]) for f in merged] == [("a/x.py", 3, ["p1", "p2"])]
@@ -4300,7 +4468,7 @@ def test_cp6_f14_cli_prints_what_audit_and_counterparts_return(tmp_path, monkeyp
         assert f"{packet['id']}: {packet['range']} · " in out
     assert [w["range"] for w in kit.write_counterparts(root, run)] == ranges
 
-    kit.record(directory, "p1", "/code-review", _payload(tmp_path, []))
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
     kit.merge(directory)
     assert _cli(kit, root, "audit", "--run", run) == 1
     out = capsys.readouterr().out
@@ -4312,11 +4480,11 @@ def test_cp6_f14_cli_prints_what_audit_and_counterparts_return(tmp_path, monkeyp
 
 def test_cp6_f15_run_path_parameter_and_report_length(tmp_path):
     kit = _kit()
-    for fn, arity in ((kit.record, 4), (kit.merge, 1), (kit.audit, 2)):
+    for fn, arity in ((kit.record, 5), (kit.merge, 1), (kit.audit, 2)):
         params = list(inspect.signature(fn).parameters)
         assert params[0] == "run_path" and len(params) == arity, (fn.__name__, params)
     root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(40)})
-    kit.record(directory, "p1", "/code-review",
+    _rec(kit, directory, "p1", "/code-review",
                _payload(tmp_path, [_finding("a.py", n, f"F{n}") for n in (3, 13, 23)]))
     merged = kit.merge(directory)["findings"]
     assert len(merged) == 3
@@ -4336,7 +4504,7 @@ def test_cp6_f15_run_path_parameter_and_report_length(tmp_path):
     plan2, run2 = _split_plan(kit, root2)
     dir2 = _run_path(root2, plan2)
     for pid in ("p1", "p2"):
-        kit.record(dir2, pid, "/code-review", _payload(tmp_path, [], f"{pid}.json"))
+        _rec(kit, dir2, pid, "/code-review", _payload(tmp_path, [], f"{pid}.json"))
     kit.merge(dir2)
     _report(dir2, run2, [], "2/2", extra=[f"Zeile {i}" for i in range(40)])
     assert kit.audit(dir2, None)["report_mismatch"] == []
@@ -4349,7 +4517,7 @@ def _gap_run(kit, tmp_path, findings):
     root = _two_packet_repo(tmp_path)
     plan, run = _split_plan(kit, root)
     directory = _run_path(root, plan)
-    kit.record(directory, "p1", "/code-review", _payload(tmp_path, findings))
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, findings))
     return run, directory, kit.merge(directory)["findings"]
 
 
@@ -4485,18 +4653,18 @@ def test_cp6b_f5_stdin_with_bom_or_without_stdin(tmp_path, monkeypatch, capsys):
     directory = _run_path(root, plan)
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf[]"),
                                                        encoding="cp1252"))
-    assert _cli_record(kit, root, run, "p1", "-") == 0
+    assert _cli_record(kit, root, run, "p1", "-", no_block=True) == 0
     stored = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
     assert stored["findings"] == []
     capsys.readouterr()
     monkeypatch.setattr(sys, "stdin", None)
-    assert _cli_record(kit, root, run, "p2", "-") == 1
+    assert _cli_record(kit, root, run, "p2", "-", no_block=True) == 1
     err = capsys.readouterr().err
     assert "stdin" in err and "Traceback" not in err, err
     assert not (directory / "results" / "p2.json").exists()
     # Ein Textstrom ohne `buffer` mit BOM geht auch.
     monkeypatch.setattr(sys, "stdin", io.StringIO("﻿[]"))
-    assert _cli_record(kit, root, run, "p2", "-") == 0
+    assert _cli_record(kit, root, run, "p2", "-", no_block=True) == 0
 
 
 def test_cp6b_f6_merge_joins_findings_inside_a_members_span():
@@ -4824,13 +4992,15 @@ def test_cp8b_f5_payload_file_with_bom_is_accepted(tmp_path, monkeypatch):
     root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(8)})
     path = tmp_path / "bom.json"
     path.write_bytes(b"\xef\xbb\xbf[]")
-    assert _cli_record(kit, root, run, "p1", path) == 0
+    # Listenformat mit BOM: Das prüft den Transport, darum --no-block (das Objekt ginge sonst
+    # über _as_result ohne BOM).
+    assert _cli_record(kit, root, run, "p1", path, no_block=True) == 0
     data = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
     assert data["findings"] == []
     # Dieselben Bytes über stdin gehen ebenso.
     *_, other = _single_run(kit, tmp_path, {"a.py": _lines(8)}, name="zwei")
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf[]")))
-    assert kit.record(other, "p1", "/code-review", "-")["findings"] == []
+    assert _rec(kit, other, "p1", "/code-review", "-", no_block=True)["findings"] == []
 
 
 def test_cp8b_f2_extract_pair_on_owning_dictionary_gets_owner_entry(tmp_path):
@@ -5940,7 +6110,8 @@ def _packet_blocks(kit, root, run):
     kit._delphi_index.cache_clear()
     kit.write_counterparts(root, run)
     folder = kit.run_dir(root, run) / "packets"
-    return {p.name: p.read_bytes() for p in sorted(folder.iterdir())}
+    return {p.name: p.read_bytes() for p in sorted(folder.iterdir())
+            if not p.name.endswith(".prompt.md")}
 
 
 def test_b_counterparts_collected_once(tmp_path, monkeypatch, capsys):
