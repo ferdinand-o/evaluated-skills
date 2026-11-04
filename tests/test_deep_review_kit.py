@@ -8769,3 +8769,66 @@ def test_cp7r2_name_sites_skip_balanced_end_without_definition(monkeypatch):
     assert [e["line"] for e in found] == [5]
     nodef = [i + len("nodef") for i in range(len(main)) if main.startswith("nodef(", i)]
     assert not set(nodef) & set(seen), seen
+
+
+def _cp7r3_parse_lines(tmp_path, main):
+    kit = _kit()
+    lib = "export function parse(s) {\n  throw new ParseError();\n}\n"
+    root = _cp7_repo(tmp_path, {"p.ts": lib, "main.ts": "import { parse } from './p';\n"},
+                     {"main.ts": main})
+    return [e["line"] for e in kit.collect_typescript(root, "base..HEAD", ["main.ts"]).entries]
+
+
+def test_cp7r3_short_def_private_decorator_after_semicolon(tmp_path):
+    main = ("import { parse } from './p';\n"
+            "class X {\n"
+            "  #parse(s) {\n"
+            "    return parse(s);\n"
+            "  }\n"
+            "}\n"
+            "class Y {\n"
+            "  @Dec() @Log parse(s) {\n"
+            "    return 1;\n"
+            "  }\n"
+            "}\n"
+            "class Z {\n"
+            "  n = 1; parse(s) {\n"
+            "    return 2;\n"
+            "  }\n"
+            "}\n")
+    assert _cp7r3_parse_lines(tmp_path, main) == [4]
+
+
+def test_cp7r3_ternary_call_on_new_line_stays_a_call(tmp_path):
+    main = ("import { parse } from './p';\n"
+            "const o = flag ?\n"
+            "  parse(x) : { a: 1 };\n")
+    assert _cp7r3_parse_lines(tmp_path, main) == [3]
+
+
+def test_cp7r3_short_def_with_function_or_wrapped_return_type(tmp_path):
+    main = ("import { parse } from './p';\n"
+            "class X {\n"
+            "  parse(s): () => void {\n"
+            "    return () => {};\n"
+            "  }\n"
+            "}\n"
+            "class Y {\n"
+            "  parse(s):\n"
+            "    number {\n"
+            "    return 1;\n"
+            "  }\n"
+            "}\n")
+    assert _cp7r3_parse_lines(tmp_path, main) == []
+
+
+def test_cp7r3_cpp_initializer_list_template_args_and_pack():
+    kit = _kit()
+    cpp = ("Foo::Foo(int x) : Base<int, long>(x) { throw E(); }\n"
+           "template <class... Bases>\n"
+           "Mix<Bases...>::Mix(Bases... args) : Bases(args)... {\n"
+           "  throw MixError();\n"
+           "}\n")
+    defs = kit._name_defs(kit._SrcFile(cpp.encode(), False), "typed")
+    assert [(d.name, d.line, d.body is not None) for d in defs] == [
+        ("Foo", 1, True), ("Mix", 3, True)]

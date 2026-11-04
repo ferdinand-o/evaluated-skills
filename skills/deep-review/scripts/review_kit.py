@@ -4922,26 +4922,69 @@ def _js_bound_calls(sf: _SrcFile, bindings: dict, a: int, b: int):
         yield m.start(), (second or first), bound[0], member, _balanced_end(sf.masked, m.end() - 1)
 
 
-_JS_SHORT_DEF_TAIL_RE = re.compile(r"\s*(?::[^{;=\n]*)?\{")
-_JS_SHORT_DEF_HEAD_RE = re.compile(
-    r"(?:^|[{,])[ \t]*(?:(?:async|static|get|set|public|private|protected|override)[ \t]+"
-    r"|\*[ \t]*)*$")
+# Rückgabetyp einer Kurzdefinition: ohne `{`, `}`, `;` und `=` außer in `=>`, Klammern
+# balanciert, über höchstens drei Zeilenumbrüche (`parse(s): () => void {`, `parse(s):\n T {`).
+_JS_RET_TYPE = r"(?:[^{};=()\n]|=>|\((?:[^(){};]|\([^(){};]*\))*\))*"
+_JS_SHORT_DEF_TAIL_RE = re.compile(rf"\s*(?::{_JS_RET_TYPE}(?:\n{_JS_RET_TYPE}){{0,3}})?\{{")
+_JS_SHORT_DEF_MODS = frozenset({"async", "static", "get", "set", "public", "private",
+                                "protected", "override"})
+_JS_EXPR_WORDS = frozenset({"return", "yield", "await", "typeof", "void", "delete", "throw",
+                            "case", "in", "of", "instanceof", "new", "else", "do"})
+
+
+def _js_short_def_head(masked: str, start: int) -> bool:
+    """Steht der Name bei `start` (`#` davor erlaubt) dort, wo eine Kurzdefinition stehen
+    kann? Rückwärts über Leerraum (auch Zeilen), Modifizierer, `*` und Dekoratoren `@X`/
+    `@X(…)`: ja am Dateianfang und hinter `{`, `}`, `;`, `,`; über ein Zeilenende hinweg auch
+    hinter einem Wort, `)`, `]` oder Anführungszeichen (Feld ohne `;`); nein hinter `?`, `:`,
+    `(`, `=`, Operatoren und Wörtern wie `return` — dort ist es ein Ausdruck."""
+    k = start - 1
+    if k >= 0 and masked[k] == "#":
+        k -= 1
+    newline = False
+    while True:
+        while k >= 0 and masked[k] in " \t\r\n":
+            newline |= masked[k] == "\n"
+            k -= 1
+        if k < 0 or masked[k] in "{};,":
+            return True
+        ch, end = masked[k], k
+        if ch == "*":
+            k -= 1
+            continue
+        if ch == ")":
+            depth = 0
+            while k >= 0:
+                depth += {")": 1, "(": -1}.get(masked[k], 0)
+                if depth == 0:
+                    break
+                k -= 1
+            k -= 1
+        while k >= 0 and (masked[k].isalnum() or masked[k] in "_$."):
+            k -= 1
+        if k >= 0 and masked[k] == "@" and k + 1 <= end and masked[k + 1] not in ".()":
+            k -= 1                          # Dekorator `@X`, `@a.b(…)`
+            continue
+        word = masked[k + 1:end + 1]
+        if ch != ")" and word in _JS_SHORT_DEF_MODS:
+            continue
+        return newline and (ch in ")]\"'`" or (
+            (ch.isalnum() or ch in "_$") and word not in _JS_EXPR_WORDS))
 
 
 def _js_is_call(sf: _SrcFile, start: int, end: int) -> bool:
     """Ist der Treffer ein Aufruf? Nicht hinter `function`/`new`/`class` (geprüft auf
     `_JS_DEF_WINDOW` Zeichen davor, damit der Aufwand nicht mit der Datei wächst) und keine
     Kurzdefinition einer Methode oder eines Objekt-Mitglieds (`check(x) {`, auch mit
-    Rückgabetyp `parse(s: string): number {`): der Name steht am Zeilenanfang oder hinter
-    `{`/`,`, davor höchstens Modifizierer (`async`, `static`, `get`, `*` …) — `class Y
-    extends mixin(Base) {` bleibt ein Aufruf."""
+    Rückgabetyp `parse(s: string): number {` oder `#parse(s) {`): dahinter passt
+    `_JS_SHORT_DEF_TAIL_RE`, davor `_js_short_def_head` — `class Y extends mixin(Base) {` und
+    `flag ?\n parse(x) : {…}` bleiben Aufrufe."""
     masked = sf.masked
     if _JS_DEF_BEFORE_RE.search(masked, max(0, start - _JS_DEF_WINDOW), start):
         return False
     if not _JS_SHORT_DEF_TAIL_RE.match(masked, end + 1):
         return True
-    head = masked[masked.rfind("\n", 0, start) + 1:start]
-    return not _JS_SHORT_DEF_HEAD_RE.search(head)
+    return not _js_short_def_head(masked, start)
 
 
 def _js_call_sites(sf: _SrcFile, bindings: dict, changed: list):
@@ -5092,8 +5135,8 @@ _NAME_TYPED_TAIL = re.compile(
     r"\s*(?:(?:const|noexcept(?:\s*\([^()]*\))?|override|final|volatile|mutable|&&?"
     r"|throws\s+[\w.,\s<>]+|where\s+[^{;]+|->\s*[\w:<>,\s*&]+?)\s*)*"
     r"(?:(?<!:)(:)(?!:)|\{)")
-_NAME_INIT_RE = re.compile(r"\s*[\w:<>]+\s*[({]")
-_NAME_INIT_NEXT_RE = re.compile(r"\s*(,|\{)")
+_NAME_INIT_RE = re.compile(r"\s*(?:[\w:]|<(?:[^<>(){};]|<[^<>(){};]*>)*>)+\s*[({]")
+_NAME_INIT_NEXT_RE = re.compile(r"\s*(?:\.\.\.\s*)?(,|\{)")
 _NAME_NEW_RE = re.compile(r"(?<![\w$])new\s+$")
 _NAME_DECL_GOES_ON = ("{", "->", ":", "where", "throws", "rethrows", "async", "=")
 _NAME_CALL_RE = re.compile(
