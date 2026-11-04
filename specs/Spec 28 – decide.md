@@ -1,6 +1,6 @@
 # Spec 28: decide — eigene Fragen nach Umkehrbarkeit einordnen, belegt statt still
 
-Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Zyklus 2 (2026-11-04, nach Bewertung durch den Nutzer): verschlankt nach der Regel „das Häufige genau abdecken, das Seltene an den Nutzer“ — `check` nur noch mit einer Revision, Schlüsseltext nur für hinzugefügte Zeilen, `brief` als Skript-Befehl entfällt, `check` schließt Zusammenfassung und offene Fragen ein; dazu ein optionaler Hook `guard` (G3) für Push, Löschen, Verwerfen und externe Wirkungen · Überarbeitet nach unabhängigem Review und nach dem Bau (2026-11-03: `#-<text>` für entfernte Zeilen, finaler Prüfpunkt) (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
+Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Zyklus 2 (2026-11-04, nach Bewertung durch den Nutzer): verschlankt nach der Regel „das Häufige genau abdecken, das Seltene an den Nutzer“ — `check` nur noch mit einer Revision, Schlüsseltext nur für hinzugefügte Zeilen, `brief` als Skript-Befehl entfällt, `check` schließt Zusammenfassung und offene Fragen ein; dazu ein optionaler Hook `guard` (G3) für Push, Löschen, Verwerfen und externe Wirkungen; überarbeitet nach unabhängigem Review (2026-11-04: Zerlegung mit Rücksicht auf Anführungszeichen, Push-Ziel mit `HEAD`, `:dst`, `git -C` und Optionen festgelegt, kein Ausweichen nach Ablehnung, Übergabe ohne geänderte Datei, Annahmen zu Rückfragen, 110 Zeilen und Schema) · Überarbeitet nach unabhängigem Review und nach dem Bau (2026-11-03: `#-<text>` für entfernte Zeilen, finaler Prüfpunkt) (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
 
 ## Problem
 
@@ -79,7 +79,7 @@ kleine fällt es nie ohne Belegzeile — gesucht wo, gefunden was.*
 
 ```
 skills/decide/
-├── SKILL.md                         Untergrenze, Einordnung, Ablauf klein und groß, Übergabe, Contract, Anti-Rationalisierung, Abgrenzung
+├── SKILL.md                         Untergrenze, Einordnung, Ablauf klein und groß, Übergabe, Optionaler Hook (G3), Contract, Anti-Rationalisierung, Abgrenzung
 ├── references/reversibility.md      Kategorien „teuer umkehrbar" mit Beispielen, Schlüssel-Form, je Kategorie geprüft/teilweise/ungeprüft, die Pfadmuster für check und die Befehle, die guard erkennt
 ├── references/option-memo.md        Form der Vorlage an den Nutzer und des Blocks in docs/big-decisions.md
 ├── references/brief.md              Vorlage des Auftrags an einen Subagenten: sechs Felder, der feste Satz, was nicht hinein gehört
@@ -164,7 +164,9 @@ tests/test_decide_*.py               17 Akzeptanztests aus dem Entwurf, dazu tes
    Fragen (wie `open`). Jede gemeldete Stelle nennt die Antwort mit ihrem Grund, die Zeile
    „ungeprüft: …" wörtlich. Ohne Aufruf kein Satz über das Ergebnis von `check`. Fehlt das
    Skript, sagt die Übergabe „ungeprüft — decide_log.py nicht verfügbar" und nennt die
-   Entscheidungen aus dem Gedächtnis als solche.
+   Entscheidungen aus dem Gedächtnis als solche. Hat die Aufgabe keine Datei geändert, ist der
+   eine Aufruf `open`, damit offene `D-<n>` trotzdem in der Übergabe stehen; ein Befehl, den
+   `guard` abgewiesen hat, steht dort wie eine offene große Frage.
 
 ### Formate
 
@@ -264,7 +266,9 @@ Datei, Kategorie und Grund; Exit 1 bei mindestens einer Stelle, sonst 0. Danach,
 Schlusszeile, die kleinen Entscheidungen der Sitzung wie `summary` (nur mit Sitzung und
 Einträgen; ohne Sitzung entfällt der Teil still, `check` schreibt nichts) und die offenen großen
 Fragen wie `open` (nur wenn es welche gibt). Ist nichts zu melden, bleibt die Ausgabe bei der
-Zeile „Keine Stelle ohne Freigabe (…)“ und der Schlusszeile. `summary` und `open` bleiben als
+Zeile „Keine Stelle ohne Freigabe (…)“ und der Schlusszeile. Endet `check` mit Exit 2 (kein Git,
+keine einzelne Revision, kein Arbeitsbaum), erscheinen Zusammenfassung und offene Fragen
+trotzdem vor der Schlusszeile — die Übergabe verliert sie nicht, weil die Diff-Prüfung entfällt. `summary` und `open` bleiben als
 eigene Befehle für „was hast du entschieden“ und „offene Entscheidungen“. Jede Ausgabe endet mit
 „ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration,
 dependency, permissions" — die Zeile entsteht aus der Spalte Grad von `reversibility.md`.
@@ -285,18 +289,49 @@ Hook `{"systemMessage": "[decide] Hook ungeprüft — .claude/hooks/decide_log.p
 nichts an. Die Skill installiert ihn nie selbst.
 
 `guard` liest das Hook-JSON von stdin (`tool_input.command`, `cwd`; Repo-Wurzel wie oben aus
-`cwd`), zerlegt den Befehl an `&&`, `||`, `;`, `|` und Zeilenumbrüchen und jeden Teil mit
-`shlex.split`; führende Zuweisungen (`VAR=x`) und ein führendes `sudo` überspringt es. Es erkennt:
+`cwd`). Es zerlegt den Befehl **mit Rücksicht auf Anführungszeichen**:
+`shlex.shlex(befehl, posix=True, punctuation_chars=";&|\n")` mit `whitespace = " \t\r"` und `whitespace_split = True`; die
+Trenner `&&`, `||`, `;`, `|`, `&` und Zeilenumbruch beenden einen Teil nur außerhalb von
+Anführungszeichen, `sqlite3 app.db "DROP TABLE users;"` bleibt also ein Teil. Löst `shlex` einen
+Fehler aus (unbalancierte Anführungszeichen) und enthält der rohe Text einen Programmnamen der
+Tabelle (`git`, `gh`, `rm`, `curl`, `wget`, `psql`, `sqlite3`, `mysql`, `npm`, `twine`, `docker`,
+`terraform`, `kubectl`), ist die Antwort `ask` mit Grund „Befehl nicht zerlegbar“ — nie still
+durchgelassen; ohne solchen Namen keine Ausgabe. Je Teil überspringt es führende Zuweisungen
+(`VAR=x`) und ein führendes `sudo`, bei `git` die globalen Optionen `-C <pfad>`, `-c <k=v>`,
+`--git-dir=…`, `--work-tree=…`, `--no-pager`; `-C <pfad>` (relativ zu `cwd`) ist dann das
+Verzeichnis für Upstream, Zweig und Ablage. Kurzoptionen dürfen gebündelt sein (`-rf`, `-fr`,
+`-Rf`, `-sSd`, `-XPOST`). Es erkennt:
 
 | Kategorie | Befehl | Freigabe über die Ablage |
 | --- | --- | --- |
-| `push` | `git push` | ja, Ziel `<remote>/<branch>`: ohne Argumente der Upstream des aktuellen Zweigs (`git rev-parse --abbrev-ref --symbolic-full-name @{u}`), `git push [-u] <remote> <ref>` → `<remote>/<ref>`, `<src>:<dst>` → `<remote>/<dst>`. Mit `-f`, `--force`, `--force-with-lease`, `--delete`, `-d`, `--tags`, `--all`, `--mirror`, einem Refspec mit `+`, mehr als einem Refspec oder ohne bestimmbares Ziel immer Rückfrage |
+| `push` | `git push` | ja, Ziel `<remote>/<branch>`, siehe unten |
 | `push` | `gh pr merge`, `gh release create` | nein, immer Rückfrage |
-| `external` | `gh pr create`, `gh issue create`, `gh issue close`, `gh issue comment`, `npm publish`, `twine upload`, `docker push`, `terraform apply`, `terraform destroy`, `kubectl apply`, `kubectl delete`; `curl` mit `-X`/`--request` `POST`/`PUT`/`PATCH`/`DELETE` oder mit `-d`, `--data*`, `-F`, `--form`, `--json`; `wget` mit `--post-data` oder `--method` | nein, immer Rückfrage |
-| `data-delete` | `rm` mit `-r`, `-R` oder `--recursive` (außer alle Ziele liegen unter `.skills/cache/`, `__pycache__/`, `.pytest_cache/`, `node_modules/` oder `/tmp/`), `git clean` mit `-f`, `git branch -D`; `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` in einem Argument von `psql`, `sqlite3`, `mysql` | nein, immer Rückfrage |
-| `unsaved-work` | `git reset --hard`, `git checkout -- <pfad>`, `git checkout .`, `git restore` ohne `--staged`, `git stash drop`, `git stash clear` | nein, immer Rückfrage |
+| `external` | `gh pr create`, `gh issue create`, `gh issue close`, `gh issue comment`, `npm publish`, `twine upload`, `docker push`, `terraform apply`, `terraform destroy`, `kubectl apply`, `kubectl delete`; `curl` mit Methode außer `GET`/`HEAD` (`-X`, `-X<methode>`, `--request`, `--request=<methode>`), mit `--data*`, `--form*`, `--json`, `-T`/`--upload-file` oder einem Kurzoptions-Bündel mit `d` oder `F`; `wget` mit `--post-data`, `--post-file` oder `--method` | nein, immer Rückfrage |
+| `data-delete` | `rm` mit `-r`, `-R`, `--recursive` oder einem Bündel mit `r`/`R`, außer jedes Ziel liegt unter `/tmp/` oder enthält eine Pfadkomponente aus der Ausnahmeliste; `git clean` mit `-f`/`--force` (auch gebündelt, `-fdx`); `git branch -D` oder `--delete --force`; `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` (ohne Groß-/Kleinschreibung) in einem Argument von `psql`, `sqlite3`, `mysql` | nein, immer Rückfrage |
+| `unsaved-work` | `git reset --hard`; `git checkout` mit `--`, mit `.`, mit `-f`/`--force` oder mit einem Argument, das als Pfad unter dem Arbeitsverzeichnis existiert; `git restore` außer nur mit `--staged`/`-S` ohne `--worktree`/`-W`; `git stash drop`, `git stash clear` | nein, immer Rückfrage |
 
-Entscheidung je erkanntem Teil:
+Ausnahmeliste für `rm` (*Annahme:* Inhalt dort ist regenerierbar): `.skills/cache` als Präfix,
+sonst die Komponenten `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`,
+`node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe.
+
+**Push-Ziel.** Optionen ohne Wirkung auf das Ziel (`-u`, `--set-upstream`, `-v`, `--verbose`,
+`-q`, `--quiet`, `--no-verify`, `--progress`, `--porcelain`) werden übersprungen; `-n` und
+`--dry-run` machen den Teil unerkannt (nichts wird geschrieben). Jede andere Option — darunter
+`-f`, `--force`, `--force-with-lease`, `--force-if-includes`, `-d`, `--delete`, `--tags`,
+`--follow-tags`, `--all`, `--mirror`, `--prune`, `--repo`, `-o`, `--push-option` — macht die
+Antwort `ask` mit „immer Rückfrage“. Danach:
+
+- keine Argumente: der Upstream des aktuellen Zweigs
+  (`git rev-parse --abbrev-ref --symbolic-full-name @{u}`); ohne Upstream `ask`.
+- nur `<remote>`: `<remote>/<aktueller zweig>`.
+- `<remote> <refspec>` mit genau einem Refspec: `<src>` allein steht für `<src>:<src>`; eine
+  Quelle `HEAD` wird zum aktuellen Zweig (`git rev-parse --abbrev-ref HEAD`; abgelöster `HEAD`
+  → `ask`); ein Ziel `refs/heads/<x>` wird `<x>`, jedes andere Ziel unter `refs/` → `ask`; ein
+  Refspec mit führendem `+` oder mit leerer Quelle (`:<dst>`, löscht den entfernten Zweig) →
+  `ask`. Ziel ist `<remote>/<dst>`.
+- mehr als ein Refspec: `ask`.
+
+Entscheidung je erkanntem Teil (mehrere Teile: die erste Rückfrage zählt):
 
 - **Nichts erkannt:** keine Ausgabe, Exit 0 — kein Token im Kontext.
 - **`git push` mit Ziel** und einem Block mit Status `freigegeben`, dessen Schlüssel `push:<muster>`
@@ -305,17 +340,28 @@ Entscheidung je erkanntem Teil:
   `--key push:origin/claude/x` abgelegt und gilt für jeden weiteren Push dorthin.
 - **Sonst:** `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
   "permissionDecisionReason": "decide: <kategorie> — <befehl, höchstens 80 Zeichen>: <grund>"}}`,
-  Exit 0. Grund ist „keine Freigabe mit Schlüssel push:<ziel> in docs/big-decisions.md“ oder
-  „immer Rückfrage“. Claude Code legt die Frage dem Nutzer vor; das Modell sieht nur die eine Zeile.
+  Exit 0. Grund ist „keine Freigabe mit Schlüssel push:<ziel> in docs/big-decisions.md“, „immer
+  Rückfrage“ oder „Befehl nicht zerlegbar“. Claude Code legt die Frage samt Grund dem Nutzer vor;
+  das Modell liest den Grund nur, wenn der Aufruf abgelehnt wird. Die Kürzung auf 80 Zeichen ist
+  gesetzt, nicht gemessen (*Annahme*).
 - **Eigener Fehler** (kein JSON, unerwartete Ausnahme): `{"systemMessage": "[decide] Hook
   ungeprüft — <grund>"}`, Exit 0. `guard` hält nie wegen eines eigenen Fehlers an.
 
+**Nach einer Ablehnung** (der Nutzer verneint, oder Claude Code lehnt unbeaufsichtigt ab):
+Claude wiederholt den Befehl nicht, weicht nicht auf eine andere Form aus (`bash -c`, ein
+Skript, ein MCP-Werkzeug) und nennt den unterlassenen Schritt in der Übergabe — wie eine offene
+große Frage (G1, SKILL.md).
+
 Die Befehlsliste steht als Konstante im Skript, weil die Hook-Kopie ohne `references/` läuft;
-`reversibility.md` trägt dieselbe Liste in einer Tabelle, ein Test hält beide gleich. Was `guard`
-nicht zerlegt — `$(…)`, Backticks, `bash -c`, `eval`, `xargs`, Aliase, Skripte, Werkzeuge außer
-Bash (MCP) —, sieht es nicht; die Schlusszeile von `check` bleibt deshalb unverändert. Gegenüber
+`reversibility.md` trägt dieselbe Liste in einer Tabelle, ein Test hält beide gleich. Der Satz
+„eine zweite Liste im Skript gibt es nicht“ in `reversibility.md` und im Kopf von
+`decide_log.py` gilt danach nur noch für Kategorien und Pfadmuster und wird so umformuliert.
+Was `guard` nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungszeichen, `bash -c`,
+`eval`, `xargs`, Aliase, Skripte, ein Heredoc ohne Anführungszeichen, Werkzeuge außer Bash
+(MCP) —, sieht es nicht; die Schlusszeile von `check` bleibt deshalb unverändert. Gegenüber
 Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis zur Antwort des
-Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1).
+Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1). Spec 00 §4 nennt bisher nur
+08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort.
 
 ### Contract
 
@@ -337,8 +383,12 @@ Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1).
 - **Kein wertender Auftrag.** Die Frage im Auftrag ist neutral, ohne Empfehlung; die Wortliste in
   `references/brief.md` nennt typische Wertwörter. G1, kein Skript prüft es (Zyklus 2).
 - **Seltenes an den Nutzer.** Was `check` oder `guard` nicht sicher einordnen kann (Bereich statt
-  Revision, Bare-Repo, unlesbare Datei, Push ohne bestimmbares Ziel), wird nicht nachgebaut,
-  sondern als „ungeprüft — …“ oder als Rückfrage an den Nutzer weitergegeben, nie als sauber.
+  Revision, Bare-Repo, unlesbare Datei, Push ohne bestimmbares Ziel, nicht zerlegbarer Befehl),
+  wird nicht nachgebaut, sondern als „ungeprüft — …“ oder als Rückfrage an den Nutzer
+  weitergegeben, nie als sauber. Ausgenommen ist, was `guard` gar nicht sieht (`bash -c`,
+  `$(…)`, Skripte, MCP — Abschnitt Hook); das steht in known-limits, nicht in einer Ausgabe.
+- **Kein Ausweichen.** Nach einer abgelehnten Rückfrage wiederholt Claude den Befehl nicht und
+  sucht keinen anderen Weg zum selben Schritt; die Übergabe nennt ihn (G1).
 - **Hook optional.** Mit `assets/hooks/decide-guard.json` blockiert ein erkannter Befehl bis zur
   Antwort des Nutzers (G3); ohne Hook bleibt es G1. Die Skill installiert ihn nie selbst.
 - **Sichtbar ungeprüft.** `check` nennt in jeder Ausgabe die Kategorien, die es nicht oder nur
@@ -360,6 +410,7 @@ Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1).
 | „Der Subagent soll wissen, was ich denke" | Dann bestätigt er es nur. Frage neutral, keine Empfehlung im Auftrag. |
 | „check würde hier nichts melden, das spare ich mir" | Ein Satz über ein Prüfergebnis ohne Aufruf ist erfunden. Aufrufen, Schlusszeile zitieren. |
 | „Der Hook fragt ja sowieso, den Push lege ich nicht ab" | Ohne Hook fragt niemand. Ein beauftragter Push wird einmal abgelegt; dann lässt auch der Hook ihn durch. |
+| „Der Hook hat abgelehnt, dann eben über `bash -c`" | Die Ablehnung ist die Antwort. Nicht wiederholen, nicht ausweichen, in der Übergabe nennen. |
 
 ### Abgrenzung
 
@@ -402,10 +453,11 @@ the assumptions of a plan (use work-plan)."
 | `test_check_untracked_and_hash_key` | dito | eine unversionierte Datei unter `migrations/` wird gemeldet; `dependency:pyproject.toml#python-dateutil` gibt die Datei nur frei, wenn eine hinzugefügte Zeile diesen Text enthält, nie bei nur entfernten Zeilen; `add --key …#-x` → Exit 1; ohne Git Exit 2 |
 | `test_check_one_revision` | dito | `HEAD~1..HEAD`, `HEAD~1...HEAD`, `HEAD^!` und eine unbekannte Revision → Exit 2 mit „ungeprüft — check nimmt eine Revision“; Bare-Repo → Exit 2 mit „ungeprüft — kein Arbeitsbaum“; ein Merge-Commit als `<rev>` wird wie jede Revision gegen den Arbeitsbaum verglichen |
 | `test_check_includes_summary_and_open` | dito | mit Sitzung und kleinem Eintrag nennt `check` ihn vor der Schlusszeile, ebenso einen offenen Block; ohne Einträge und offene Blöcke nur Ergebniszeile und Schlusszeile; die Schlusszeile ist immer die letzte |
-| `test_guard_push` | `tests/test_decide_guard.py` | `git push` ohne Block → `ask` mit „keine Freigabe mit Schlüssel push:origin/x“; mit freigegebenem Block `push:origin/**` → keine Ausgabe; `git push --force` und `git push origin +x` trotz Block → `ask`; ohne Upstream und ohne Argumente → `ask`; ein jüngerer offener Block mit gleicher Frage und gleichem Schlüssel → `ask` |
-| `test_guard_commands` | dito | je Zeile der Hook-Tabelle ein erkannter und ein ähnlicher nicht erkannter Befehl (`rm -rf data` → `ask`, `rm -rf .skills/cache/x` und `rm a.txt` → nichts; `curl https://x` → nichts, `curl -d a https://x` → `ask`; `git restore --staged a` → nichts); `cd x && git reset --hard` → `ask`; Zuweisung und `sudo` davor werden übersprungen |
-| `test_guard_errors` | dito | kein JSON, leere Eingabe, fehlendes `tool_input` → `systemMessage` mit „Hook ungeprüft“, Exit 0; unbalancierte Anführungszeichen → Teil gilt als nicht erkannt |
+| `test_guard_push` | `tests/test_decide_guard.py` | `git push` ohne Block → `ask` mit „keine Freigabe mit Schlüssel push:origin/x“; mit freigegebenem Block `push:origin/**` → keine Ausgabe für `git push`, `git push origin`, `git push -u origin HEAD`, `git push origin HEAD:refs/heads/x`, `git -C <repo> push origin x`; trotz Block `ask` für `--force`, `--force-with-lease`, `+x`, `origin :x`, `--delete x`, `--tags`, `-o ci.skip`, zwei Refspecs, `HEAD:refs/tags/v1`, abgelösten `HEAD`; ohne Upstream und ohne Argumente → `ask`; `--dry-run` → nichts; ein jüngerer offener Block mit gleicher Frage und gleichem Schlüssel → `ask` |
+| `test_guard_commands` | dito | je Zeile der Hook-Tabelle ein erkannter und ein ähnlicher nicht erkannter Befehl: `rm -rf data`, `rm -fr data`, `rm -R data` → `ask`; `rm -rf .skills/cache/x`, `rm -rf build dist .venv`, `rm -rf a/node_modules`, `rm a.txt` → nichts; `curl https://x` → nichts, `curl -d a https://x`, `curl -sSd a https://x`, `curl -XPOST https://x` → `ask`; `sqlite3 app.db "DROP TABLE users;"` → `ask`, `sqlite3 app.db "DELETE FROM t WHERE id=1;"` → nichts; `git restore --staged a`, `git restore -S a` → nichts, `git restore --staged --worktree a` → `ask`; `git checkout <vorhandene datei>` → `ask`, `git checkout main` → nichts; `git clean -fdx` → `ask`; `cd x && git reset --hard` → `ask`; `git commit -m "$(cat <<'EOF'` mit einer Zeile `git reset --hard` in der Nachricht → nichts; Zuweisung und `sudo` davor werden übersprungen |
+| `test_guard_errors` | dito | kein JSON, leere Eingabe, fehlendes `tool_input` → `systemMessage` mit „Hook ungeprüft“, Exit 0; unbalancierte Anführungszeichen mit `rm` im Text → `ask` mit „Befehl nicht zerlegbar“, ohne Programmnamen der Tabelle → nichts |
 | `test_guard_table_matches_reference` | dito | jeder Befehl der Konstante steht in der Tabelle in `reversibility.md` und umgekehrt |
+| gelöscht | `tests/test_decide_log.py` | die Tests zu `brief` (31 laut Review) und zu Bereichen, Merge-Basen, Ablage aus einer Revision, `#-` und `#+` (rund 15); der Bau zählt sie im Report |
 | `test_hook_snippet` | dito | `assets/hooks/decide-guard.json` ist gültiges JSON, `PreToolUse` mit `matcher` `Bash`, der Befehl ruft `.claude/hooks/decide_log.py guard` über `$CLAUDE_PROJECT_DIR` auf und gibt ohne Kopie die Meldung „Hook ungeprüft“ aus |
 | `test_eval_patterns` | `tests/test_decide_fixtures.py` | die Muster aus `evals.json` treffen einen vom Skript geschriebenen Block und eine Protokollzeile, nicht dieselben Wörter in Prosa |
 
@@ -456,8 +508,9 @@ Skill laufen sie nicht erneut — Evals und Basismodell sind unverändert, das E
 gilt weiter. `guard` bekommt keinen Eval: Ein Hook wirkt mit und ohne Skill gleich, ein Lauf
 ohne Skill wäre also ebenso grün und unterschiede nichts (Spec 00 §2). Ihn messen die
 Unit-Tests über stdin; ob Claude Code ein `ask` in `claude -p` ohne Permission-Host ablehnt,
-prüft eine einmalige Stichprobe beim Bau mit einem lokalen Bare-Repo als Remote, der Report
-nennt das Ergebnis.
+prüft eine einmalige Stichprobe beim Bau mit einem lokalen Bare-Repo als Remote, je einmal mit
+`--permission-mode default` und mit `--permission-mode bypassPermissions` (evalkit fährt Evals
+im zweiten oder mit `acceptEdits`, `evalkit/dispatch.py`); der Report nennt beide Ergebnisse.
 
 ## Alternatives considered
 
@@ -542,8 +595,19 @@ pushen oder Issues schreiben), eine Installation des Hooks durch die Skill.
 - *Annahme (Zyklus 2):* `guard` antwortet bei fehlender Freigabe mit `ask`, nicht mit `deny`.
   Vorgeschlagen am 2026-11-04, wie oben übernommen. — widersprich, falls nein.
 - *Annahme (Zyklus 2):* In `claude -p` ohne Permission-Host lehnt Claude Code ein `ask` eines
-  Hooks ab, statt den Befehl auszuführen. Ungeprüft bis zur Stichprobe beim Bau (Evals); trifft
-  es nicht zu, ist `guard` unbeaufsichtigt wirkungslos und das steht in known-limits.
+  Hooks ab, statt den Befehl auszuführen. Die Hook-Doku stützt das für den Standardmodus
+  (Review 2026-11-04); für `bypassPermissions` sagt sie nichts. Geprüft wird beides in der
+  Stichprobe beim Bau; trifft es nicht zu, steht das in known-limits.
+- *Annahme (Zyklus 2):* Die Befehle mit „immer Rückfrage“ sind selten genug, dass eine Rückfrage
+  auch bei einem ausdrücklichen Auftrag (etwa „leg den PR an“) weniger kostet als eine Freigabe
+  über die Ablage — gesetzt, nicht gemessen. Für sie gilt „Auftrag ist Freigabe“ nur im Sinn
+  der SKILL.md (kein Rückfragen im Chat), nicht für den Hook. — widersprich, falls nein.
+- *Annahme (Zyklus 2):* SKILL.md ≤ 110 Zeilen ist ein gesetztes Ziel (143 heute minus Ablauf 6
+  und zwei Aufrufe der Übergabe, plus Hook-Abschnitt), nicht gemessen; reicht es nicht, gilt
+  weiter die Grenze 150 aus Spec 00, und der Report nennt die Zahl.
+- *Annahme (Zyklus 2):* `docs/big-decisions.md` bleibt `schema: 1`. Das Format der Blöcke ändert
+  sich nicht; ein Schlüssel mit `#-`/`#+` parst weiter und gibt nur nichts frei (Hinweis in
+  `check`), `push:<remote>/<branch>` ist ein neuer Wert, keine neue Form.
 - Ob `docs/big-decisions.md` nach einiger Zeit ein Archiv für alte Blöcke braucht, entscheidet
   der Nutzer nach dem ersten Monat Nutzung.
 - **Ungemessen bleibt:** der beaufsichtigte Weg mit `AskUserQuestion` (alle Evals laufen ohne

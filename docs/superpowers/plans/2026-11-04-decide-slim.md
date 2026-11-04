@@ -85,7 +85,9 @@ den Report.
       gegen den Arbeitsbaum verglichen), `test_check_includes_summary_and_open` (Sitzung mit
       kleinem Eintrag und ein offener Block erscheinen vor der Schlusszeile; ohne beides nur
       Ergebniszeile und Schlusszeile; ohne Sitzung kein Teil Zusammenfassung, kein Fehler; die
-      Schlusszeile ist immer die letzte Zeile), `test_check_untracked_and_hash_key` erweitert
+      Schlusszeile ist immer die letzte Zeile; auch bei Exit 2 — Bereich statt Revision —
+      stehen Zusammenfassung und offener Block vor der Schlusszeile),
+      `test_check_untracked_and_hash_key` erweitert
       (nur entfernte Zeilen mit `#python-dateutil` → gemeldet; `add --key dependency:pyproject.toml#-x`
       und `#+x` → Exit 1; ein Block mit `#-x` in der Ablage gibt nichts frei, Hinweis in der
       Ausgabe), `test_check_unreadable_file` (Datei mit ungültigem UTF-8 unter `migrations/`
@@ -101,7 +103,7 @@ den Report.
       Zeilen), ein Text mit führendem `-` oder `+` ist ein Formfehler; je Datei, deren Diff
       nicht lesbar ist, eine Stelle „unlesbar — selbst prüfen“; nach den Stellen die Abschnitte
       wie `summary` (nur mit Sitzung und Einträgen) und wie `open` (nur mit offenen Blöcken),
-      dann die Schlusszeile; `main` gibt `check` ein optionales `--session`.
+      dann die Schlusszeile — auch auf jedem Weg mit Exit 2; `main` gibt `check` ein optionales `--session`.
       `references/reversibility.md` (Abschnitt Schlüssel) und `references/option-memo.md` ohne
       `#-` und `#+`, mit dem Satz aus Spec 28: nur entfernte Zeilen gibt nur ein Schlüssel ohne
       Text frei.
@@ -116,6 +118,7 @@ den Report.
 **Files:**
 - Modify: `skills/decide/scripts/decide_log.py`
 - Modify: `skills/decide/references/brief.md`
+- Modify: `skills/decide/references/option-memo.md`
 - Modify: `tests/test_decide_log.py`
 - Modify: `tests/test_decide_evals_schema.py`
 - Delete: `tests/test_decide_auftrag_uebernimmt_passende_eintraege_und_regeln.py`
@@ -137,7 +140,9 @@ den Report.
       Konstanten), jede Funktion vorher mit `grep -n "<name>(" skills/decide/scripts/decide_log.py`
       auf andere Aufrufer prüfen; die zwei Akzeptanztests und alle `brief`-Tests in
       `tests/test_decide_log.py` löschen; in `tests/test_decide_evals_schema.py` `brief` aus
-      `INLINE_CALL_RE` nehmen. `references/brief.md` neu: sechs Felder (Frage, Anlass, Wo
+      `INLINE_CALL_RE` nehmen; den Verweis auf `brief` in `references/option-memo.md` auf die
+      Vorlage `references/brief.md` umstellen. Die Zahl der gelöschten Tests notieren (Report).
+      `references/brief.md` neu: sechs Felder (Frage, Anlass, Wo
       nachsehen, Schon entschieden, Feste Vorgaben, Rückgabe) mit je einer Zeile, was hinein
       gehört; der feste Satz als Zitat unter Rückgabe; die Wortliste als Hinweis für den
       Hauptagenten (G1, kein Skript liest sie); keine Erwähnung von `brief --topic`,
@@ -173,16 +178,23 @@ den Report.
       `test_guard_table_matches_reference`, `test_hook_snippet`. Jede `ask`-Ausgabe ist gültiges
       JSON mit `hookSpecificOutput.hookEventName` `PreToolUse` und `permissionDecision` `ask`.
 - [ ] **Step 2: Rot sehen** — `pytest tests/test_decide_guard.py -q`.
-- [ ] **Step 3: Implementieren** — `guard(text)` liest das Hook-JSON, ruft je Teil
-      `guard_decision(command, root)` (`None` oder `(kategorie, grund)`) und gibt `""`, die
-      `ask`-Zeile oder die `systemMessage` zurück; `main(["guard"])` liest stdin, schreibt das
-      Ergebnis, endet immer mit 0. Zerlegen an `&&`, `||`, `;`, `|`, Zeilenumbruch, dann
-      `shlex.split`, Zuweisungen und `sudo` am Anfang überspringen; Befehlsliste als Konstante
-      `GUARD_COMMANDS`; Push-Ziel nach der Tabelle in Spec 28 „Hook“, Upstream über
-      `git rev-parse --abbrev-ref --symbolic-full-name @{u}`, `HEAD` über
-      `git rev-parse --abbrev-ref HEAD`; Freigabe über den jüngsten Block je Frage und Schlüssel
-      mit `push:<muster>` und Status `freigegeben`. Befehl in der Begründung auf 80 Zeichen
-      gekürzt. `assets/hooks/decide-guard.json` nach dem Vorbild
+- [ ] **Step 3: Implementieren** — `guard(text)` liest das Hook-JSON, ruft
+      `guard_decision(command, root)` (`None` oder `(kategorie, grund)`, erste Rückfrage zählt)
+      und gibt `""`, die `ask`-Zeile oder die `systemMessage` zurück; `main(["guard"])` liest
+      stdin, schreibt das Ergebnis, endet immer mit 0. Zerlegen mit
+      `shlex.shlex(befehl, posix=True, punctuation_chars=";&|\n")` und `whitespace = " \t\r"`, `whitespace_split = True`,
+      Trenner nur außerhalb von Anführungszeichen; bei `ValueError` `ask` mit „Befehl nicht
+      zerlegbar“, wenn ein Programmname der Tabelle im Text steht, sonst nichts. Zuweisungen
+      und `sudo` am Anfang, bei `git` die globalen Optionen (`-C` setzt das Verzeichnis)
+      überspringen; Kurzoptions-Bündel auflösen; Befehlsliste als Konstante `GUARD_COMMANDS`,
+      Ausnahmeliste für `rm` als Konstante; Push-Ziel genau nach Spec 28 „Push-Ziel“ (bekannte
+      Optionen überspringen, jede andere → `ask`; `HEAD` und `refs/heads/` auflösen; `:dst`,
+      `+`, andere `refs/`, mehrere Refspecs, abgelöster `HEAD` → `ask`), Upstream über
+      `git rev-parse --abbrev-ref --symbolic-full-name @{u}`; Freigabe über den jüngsten Block
+      je Frage und Schlüssel mit `push:<muster>` und Status `freigegeben`. Befehl in der
+      Begründung auf 80 Zeichen gekürzt. Den Satz „eine zweite Liste im Skript gibt es nicht“
+      im Kopf von `decide_log.py` und in `reversibility.md` auf Kategorien und Pfadmuster
+      einschränken. `assets/hooks/decide-guard.json` nach dem Vorbild
       `skills/sql-schema-architect/assets/hooks/migration-gate.json` (`_comment` mit
       Installationsweg, Fallback mit „[decide] Hook ungeprüft — .claude/hooks/decide_log.py
       fehlt“). `reversibility.md` bekommt den Abschnitt „Befehle, die guard erkennt“ mit derselben
@@ -210,7 +222,9 @@ Anti-Rationalisierung wiederholen keine Zeile des Ablaufs.
       `.claude/hooks/`, Snippet mischen, nie selbst installieren) und dem Satz, dass ein
       beauftragter Push einmal mit `--key push:<remote>/<branch>` abgelegt wird; Contract-Punkt
       „Seltenes an den Nutzer“; Anti-Rationalisierung um die Zeile zum Hook aus Spec 28
-      ergänzt; Description unverändert.
+      ergänzt, dazu die Zeile „Der Hook hat abgelehnt, dann eben über `bash -c`“ und der
+      Contract-Punkt „Kein Ausweichen“; ohne geänderte Datei ist der eine Aufruf `open`; der
+      Satz „einen Hook gibt es nicht“ in der Eisernen Regel entfällt; Description unverändert.
 - [ ] **Step 2: Prüfen** — `wc -l skills/decide/SKILL.md` ≤ 110;
       `pytest tests/test_decide_evals_schema.py tests/test_decide_log.py -q` grün (Tokens der
       Evals stehen wörtlich in der SKILL.md, Satz für Subagenten wörtlich);
@@ -239,13 +253,16 @@ ob die verschlankte Skill dieselben Evals hält.
       Eval 2 rot gilt als bekannte Routing-Lücke. Ohne Skill kein neuer Lauf (Spec 28).
 - [ ] **Step 3: Stichprobe Hook** — in einem Ordner im Scratchpad: Git-Repo mit lokalem Bare-Repo
       als `origin`, `decide_log.py` nach `.claude/hooks/`, Snippet nach `.claude/settings.json`;
-      `claude -p "Führe git push -u origin HEAD aus."`; danach `git ls-remote origin` zeigt, ob
-      gepusht wurde. Ergebnis (abgelehnt oder ausgeführt) in den Report; trifft die Annahme aus
+      `claude -p "Führe git push -u origin HEAD aus."` je einmal mit
+      `--permission-mode default` und `--permission-mode bypassPermissions`, vor dem zweiten Lauf
+      den Remote zurücksetzen; nach jedem Lauf zeigt `git ls-remote origin`, ob gepusht wurde.
+      Beide Ergebnisse (abgelehnt oder ausgeführt) in den Report; trifft die Annahme aus
       Spec 28 nicht zu, steht das in Task 7 in known-limits. Commit.
 
 ### Task 6: Nachbarn
 
 **Files:**
+- Modify: `specs/Spec 00 – skill-foundation.md`
 - Modify: `.claude/skills/decide/**`
 
 **Interfaces:**
@@ -255,7 +272,9 @@ ob die verschlankte Skill dieselben Evals hält.
 - [ ] **Step 1: Routing-Matrix** — Spec 00 §5 und README unverändert (Trigger und Abgrenzung
       gleich); `grep -n "decide" README.md "specs/Spec 00 – skill-foundation.md"` zeigt keine
       Erwähnung von `brief` oder Bereichen.
-- [ ] **Step 2: Abgrenzungssätze** — feature-spec, work-plan, subagent-dev unverändert; der Satz
+- [ ] **Step 2: Abgrenzungssätze und Spec 00 §4** — in Spec 00 §4 den Satz, der
+      `migration_gate.py` (08) und `check_ledger.py` (01) als Skills mit Hook-Snippet nennt, um
+      `decide_log.py guard` (28) ergänzen; feature-spec, work-plan, subagent-dev unverändert; der Satz
       für Tasks in `plan_to_tasks.py` bleibt. Plugin-Zuordnung unverändert (`evaluated-dev`,
       `PROJECT_SKILLS`).
 - [ ] **Step 3: Projekt-Kopie** — `python scripts/sync_skills.py`, dann
@@ -274,7 +293,9 @@ ob die verschlankte Skill dieselben Evals hält.
 - [ ] **Step 1: Abschnitt** `## decide` — Punkte streichen, die Zyklus 2 gegenstandslos macht
       (Bereiche, Merge-Basen, Ablage aus einer Revision, `#-`/`#+`, alles zu `brief`), neu:
       `check` nimmt nur eine Revision, ein PR-Diff ist Sache des Nutzers; `guard` sieht nur Bash
-      und nur die gelisteten Befehle, nicht `$(…)`, `bash -c`, `eval`, Aliase, Skripte, MCP;
+      und nur die gelisteten Befehle, nicht `$(…)` außerhalb von Anführungszeichen, `bash -c`,
+      `eval`, Aliase, Skripte, Heredocs ohne Anführungszeichen, MCP; Ausnahmeliste für `rm` ist
+      eine Annahme;
       `guard` fragt auch bei beauftragtem Löschen (nur Push hat eine Freigabe über die Ablage);
       Ergebnis der Stichprobe aus Task 5; der Auftrag an Subagenten ist ganz G1. Anzahl der
       Punkte vorher und nachher zählen (`awk` über den Abschnitt, Zeilen mit `- `). Commit.
