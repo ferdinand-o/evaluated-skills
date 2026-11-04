@@ -8000,10 +8000,10 @@ def test_b_path_mode(tmp_path, monkeypatch, capsys):
     block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
     assert "ruft fail(...)" in block and "lib/errors.py" in block
     assert "ruft helper(...)" not in block and "KeyError" not in block
-    assert "außerhalb der Dateien des Pfads" in block
+    assert "Gegenstellen in Dateien dieses Pakets stehen nicht im Block" in block
     assert item["counterparts"] == 1
     stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
-    assert [e["line"] for e in stored["files"]["src/a.py"]["entries"]] == [6]
+    assert [e["line"] for e in stored["files"]["src/a.py"]["entries"]] == [6, 7]   # ungefiltert
     # Der Auftrag nennt Bereich und Pfad.
     prompt = (directory / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
     area = prompt.split("## Bereich", 1)[1].split("\n## ", 1)[0]
@@ -8090,3 +8090,108 @@ def test_b_path_mode_target_options_and_digest(tmp_path, capsys):
     assert "--split-at" in err and "--target" in err
     assert _runs(root) == runs
     assert kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)["mode"] == "range"
+
+
+def _bare_repo(root, files):
+    root.mkdir(parents=True)
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    _commit_files(root, "basis", files)
+    return root
+
+
+RTL_LISTS_PAS = (
+    "unit Lists;\n\ninterface\n\nuses\n  System.Generics.Collections;\n\ntype\n"
+    "  TFoo = class\n  end;\n\n  TFooList = class(TObjectList<TFoo>)\n  end;\n\n"
+    "implementation\n\nend.\n")
+RTL_MAIN_PAS = (
+    "unit Main;\n\ninterface\n\nuses\n  Lists;\n\nprocedure Run(L: TFooList; F: TFoo);\n\n"
+    "implementation\n\nprocedure Run(L: TFooList; F: TFoo);\nbegin\n  L.Remove(F);\n"
+    "  F.Free;\nend;\n\nend.\n")
+
+
+def test_b_path_mode_keeps_rtl_ownership(tmp_path):
+    """Fund 1257: Ein Besitz-Eintrag mit der Zeile `Besitz (RTL)` bleibt im Pfad-Modus, auch
+    wenn seine Klassenkette ganz im Pfad deklariert ist — der RTL-Standard liegt außerhalb."""
+    kit = _kit()
+    root = _bare_repo(tmp_path / "repo", {"src/Lists.pas": RTL_LISTS_PAS,
+                                          "src/Main.pas": RTL_MAIN_PAS})
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    [item] = kit.write_counterparts(root, plan["_meta"]["run"])
+    block = (root / item["path"]).read_text(encoding="utf-8")
+    line = _line_no(RTL_MAIN_PAS, "L.Remove")
+    assert f"### src/Main.pas:{line} Remove auf L: TFooList" in block
+    assert "Besitz (RTL): TObjectList<…>" in block and "OwnsObjects standardmäßig wahr" in block
+    assert item["counterparts"] >= 1
+
+
+PACKET_A = ("from src.b import f\n\n\ndef run():\n    try:\n        return f(1)\n"
+            "    except ValueError:\n        return None\n")
+PACKET_B = 'def f(x):\n    if x:\n        raise KeyError("b")\n    return x\n'
+
+
+def test_b_path_mode_inside_per_packet(tmp_path, monkeypatch):
+    """Fund 1310: Mit zwei Paketen bleibt ein Aufruf in eine Datei des anderen Pakets im Block;
+    der Hinweis sagt, dass nur Gegenstellen in Dateien dieses Pakets fehlen."""
+    kit = _kit()
+    root = _bare_repo(tmp_path / "repo", {"src/__init__.py": "", "src/a.py": PACKET_A,
+                                          "src/b.py": PACKET_B})
+    monkeypatch.setattr(kit, "PATH_SPLIT_AT", 5)
+    monkeypatch.setattr(kit, "PATH_PACKET_SIZE", 8)
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    assert plan["split"] is True
+    owner = next(p for p in plan["packets"] if "src/a.py" in p["files"])
+    assert "src/b.py" not in owner["files"]
+    items = {i["packet"]: i for i in kit.write_counterparts(root, plan["_meta"]["run"])}
+    block = (root / items[owner["id"]]["path"]).read_text(encoding="utf-8")
+    assert "ruft f(...)" in block and "KeyError" in block and "src/b.py" in block
+    assert "except ValueError" in block and items[owner["id"]]["counterparts"] == 2
+    assert "Gegenstellen in Dateien dieses Pakets stehen nicht im Block" in block
+    assert "reviewt dieses Review selbst" not in block
+
+
+def test_b_path_mode_filters_once(tmp_path):
+    """Fund 5072: Der Speicher von plan bleibt ungefiltert, `file_keys` hängen nicht vom
+    Pfad-Filter ab; gefiltert wird nur in counterparts — mit und ohne Speicher gleich."""
+    kit = _kit()
+    root = _path_repo(tmp_path / "repo")
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    run = plan["_meta"]["run"]
+    directory = kit.run_dir(root, run)
+    stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
+    assert [e["line"] for e in stored["files"]["src/a.py"]["entries"]] == [6, 7]
+    files = plan["packets"][0]["files"]
+    span = kit.Span(plan["base"], plan["target"], None)
+    keys = kit.file_keys(root, plan["target"], files, kit._collect_all(root, span, files).entries)
+    assert {f: info["key"] for f, info in plan["file_keys"].items()} == keys
+    [item] = kit.write_counterparts(root, run)
+    block = (root / item["path"]).read_text(encoding="utf-8")
+    assert item["counterparts"] == 1 and "ruft helper(...)" not in block
+    (directory / kit.COLLECTED_NAME).unlink()
+    [again] = kit.write_counterparts(root, run)
+    assert (root / again["path"]).read_text(encoding="utf-8") == block
+
+
+def test_b_path_files_one_ls_tree(tmp_path, monkeypatch):
+    """Fund 1228: `_path_files` fragt alle Pfade in einem gebündelten `ls-tree`; ein Pfad ohne
+    Datei bleibt ein KitError mit derselben Meldung."""
+    kit = _kit()
+    root = _path_repo(tmp_path / "repo")
+    head = _rev(root, "HEAD")
+    calls = []
+    real = kit._git
+
+    def counting(repo, *args, **kw):
+        if args and args[0] == "ls-tree":
+            calls.append(args)
+        return real(repo, *args, **kw)
+
+    monkeypatch.setattr(kit, "_git", counting)
+    paths = ["src", "a.pas", "b.pas", "lib/errors.py", "srcx"]
+    assert kit._path_files(root, head, paths) == sorted(
+        ["src/README.md", "src/__init__.py", "src/a.py", "src/b.py", "src/test_a.py",
+         "a.pas", "b.pas", "lib/errors.py", "srcx/c.py"])
+    assert len(calls) == 1
+    with pytest.raises(kit.KitError, match=r"Pfad 'fehlt' fehlt am Ziel"):
+        kit._path_files(root, head, ["src", "fehlt"])

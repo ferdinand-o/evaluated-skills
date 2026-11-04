@@ -1126,15 +1126,14 @@ def _sorted_files(counts: dict, with_tests: bool, where: str) -> tuple[dict, lis
 
 def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile: str,
                     focus: str, level, split_at: int, packet_size: int, packets: list,
-                    reviewed: dict, not_reviewed: list, inside=None) -> dict:
+                    reviewed: dict, not_reviewed: list) -> dict:
     """Der gemeinsame Schluss von `build_plan` und `build_path_plan`: Gegenstellen sammeln
     (außer Fokus `quality`), `file_keys`, Laufordner, `plan.json` und den Gegenstellen-Speicher
     schreiben. `head` sind die ersten Felder des Plans (`mode`, beim Pfad-Modus `paths`,
     `range`, `base`, `target`, `log_base`, `root`; `mode` ist `range` oder `path`, ein Plan
-    ohne `mode` gilt als `range`, E8). `inside` (Pfad-Modus): die reviewten
-    Dateien des Pfads — Einträge, deren Gegenstellen alle darin liegen, fallen weg
-    (`_leaving_path`), in Speicher und Schlüsseln. Scheitert das Schreiben, bleibt kein
-    Laufordner."""
+    ohne `mode` gilt als `range`, E8). Speicher und Schlüssel sind auch im Pfad-Modus
+    ungefiltert; den Pfad-Filter (`_leaving_path`) wendet allein `write_counterparts` je Paket
+    an. Scheitert das Schreiben, bleibt kein Laufordner."""
     # Der schon aufgelöste Span geht an die Sammler: kein zweites Auflösen der SHAs. Je Datei
     # abgelegt (`store_collected`), damit `counterparts` nicht noch einmal sammelt.
     collected = None
@@ -1142,10 +1141,6 @@ def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile:
     if focus != "quality":
         per_file: dict = {}
         entries = _collect_all(repo, span, list(reviewed), per_file).entries
-        if inside is not None:
-            entries = _leaving_path(entries, inside)
-            for record in per_file.values():
-                record["entries"] = _leaving_path(record["entries"], inside)
         collected = _collected_payload(repo, span, focus, list(reviewed), per_file)
     keys = file_keys(repo, span.target, list(reviewed), entries)
     base_blobs = _file_blobs(repo, span.base, list(reviewed))
@@ -1189,9 +1184,11 @@ def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile:
 # `make_packet_range` (temporärer Index, E6).
 
 COUNTERPART_REF_RE = re.compile(r"- Gegenstelle .*? \[(.+?):\d+\]: ")   # Ort einer Gegenstelle
-PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Gegenstellen stehen hier nur für Aufrufe, deren "
-                   "Gegenstelle außerhalb der Dateien des Pfads liegt — die Dateien des Pfads "
-                   "reviewt dieses Review selbst.")
+RTL_LINE_RE = re.compile(r"\s*Besitz \(RTL\): ")   # Angabe ohne Datei im Repo
+PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Gegenstellen in Dateien dieses Pakets stehen nicht im "
+                   "Block — diese Dateien reviewt dieses Paket selbst; Gegenstellen in anderen "
+                   "Dateien (auch anderer Pakete des Pfads) und Besitz-Defaults der RTL stehen "
+                   "hier.")
 
 
 def _path_list(paths) -> list:
@@ -1222,16 +1219,18 @@ def _path_list(paths) -> list:
 
 def _path_files(repo: Path, target: str, paths: list) -> list:
     """Die Dateien der `paths` im Baum von `target` (Ordner rekursiv, auch Symlinks und
-    Submodule), ohne `.skills/`, sortiert. Ein Pfad ohne Datei dort: KitError."""
+    Submodule), ohne `.skills/`, sortiert — ein `ls-tree` über alle Pfade (in Stücken,
+    `_literal_chunks`). Ein Pfad ohne Datei dort: KitError."""
     files: set[str] = set()
-    for path in paths:
+    for chunk in _literal_chunks(paths):
         out = _git(repo, "ls-tree", "-r", "-z", "--name-only", "--full-tree", target, "--",
-                   f":(literal){path}")
-        found = [p for p in out.split("\0") if p and not _under_skills(p)]
-        if not found:
+                   *chunk)
+        files.update(p for p in out.split("\0") if p and not _under_skills(p))
+    for path in paths:
+        prefix = "" if path == "." else path + "/"
+        if not any(f == path or f.startswith(prefix) for f in files):
             raise KitError(f"Pfad {path!r} fehlt am Ziel {target[:SHORT_SHA_LEN]} "
                            "(oder enthält nur .skills/)")
-        files.update(found)
     return sorted(files)
 
 
@@ -1248,13 +1247,15 @@ def _tree_without(repo: Path, target: str, files: list) -> str:
 
 
 def _leaving_path(entries, inside) -> list:
-    """Die Gegenstellen-Einträge, die den Pfad verlassen: mindestens eine ihrer Gegenstellen
-    (`- Gegenstelle … [<datei>:<zeile>]`) liegt außerhalb der Dateien `inside`, oder der
-    Eintrag nennt keine (Besitz-Default der RTL). Idempotent."""
+    """Die Gegenstellen-Einträge, die die Dateien `inside` verlassen: mindestens eine ihrer
+    Gegenstellen (`- Gegenstelle … [<datei>:<zeile>]`) liegt außerhalb von `inside`, der
+    Eintrag nennt keine, oder er trägt eine Angabe ohne Datei im Repo (`Besitz (RTL)`,
+    `RTL_LINE_RE`). Idempotent."""
     out = []
     for entry in entries:
         refs = [m[1] for line in entry["lines"] if (m := COUNTERPART_REF_RE.match(line))]
-        if not refs or any(ref not in inside for ref in refs):
+        if (not refs or any(ref not in inside for ref in refs)
+                or any(RTL_LINE_RE.match(line) for line in entry["lines"])):
             out.append(entry)
     return out
 
@@ -1287,8 +1288,13 @@ def build_path_plan(repo, paths, profile, focus, with_tests, *, level=None, targ
 
     Der Plan trägt `mode: "path"` und `paths`, dazu `range` = `<base>..<target>` (ein
     Diff-Bereich über einen Baum, kein Log-Bereich), `log_base` null und `root` false; sonst
-    dieselben Felder und Dateien wie `build_plan`. Gegenstellen nur für Aufrufe, die den Pfad
-    verlassen (`_leaving_path`), im Speicher und in den Schlüsseln. `level` wie bei
+    dieselben Felder und Dateien wie `build_plan`; Speicher und Schlüssel ungefiltert — erst
+    `write_counterparts` behält je Paket nur Einträge, die dessen Dateien verlassen
+    (`_leaving_path`). Bekannte Grenze: Weil jede Zeile der Pfad-Dateien als geändert zählt,
+    lösen die Sammler jeden Aufruf auf (Auflösung, raise-Scans, Delphi-Units bei Bedarf),
+    auch die, deren Einträge der Filter danach verwirft; bei `--path .` oder einem großen
+    Quellordner kostet `plan` entsprechend Zeit. Vorab filtern ginge nicht: Wohin ein Aufruf
+    führt, steht erst nach der Auflösung fest. `level` wie bei
     `build_plan`. Ein leerer Pfad, ein Pfad, den das Ziel nicht hat, oder ein unbekanntes Ziel
     ist ein KitError; ohne reviewte Datei „nichts zu reviewen"; kein Lauf."""
     _check_plan_options(profile, focus, level)
@@ -1307,7 +1313,7 @@ def build_path_plan(repo, paths, profile, focus, with_tests, *, level=None, targ
     return _write_new_plan(repo, span, _path_command(wanted, profile, focus, with_tests, level,
                                                      target),
                            head, profile, focus, level, PATH_SPLIT_AT, PATH_PACKET_SIZE,
-                           packets, reviewed, not_reviewed, inside=set(reviewed))
+                           packets, reviewed, not_reviewed)
 
 
 # --- Paket-Bereiche und cleanup -------------------------------------------------------------
@@ -5023,8 +5029,9 @@ def write_counterparts(repo, run_id):
     Stellen, deren Aufrufstelle in der Spanne liegt (`_stored_found` mit Spannen, die eine
     Stelle dieses Filters) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
     Pfad-Modus (`mode: path`): Die Sammler bekommen den Span des Plans (Basis ist ein Baum, `range`
-    kein Log-Bereich), und es bleiben nur Einträge, deren Gegenstelle den Pfad verlässt
-    (`_leaving_path` über die reviewten Dateien); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
+    kein Log-Bereich), und je Paket bleiben nur Einträge, die die Dateien dieses Pakets
+    verlassen (`_leaving_path` über `files` des Pakets — die einzige Stelle dieses Filters;
+    der Speicher ist ungefiltert); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
     Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
@@ -5037,12 +5044,10 @@ def write_counterparts(repo, run_id):
     if not isinstance(plan_range, str) or not plan_range:
         raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
     # Pfad-Modus: `range` geht über einen Baum und ist kein Log-Bereich; die Sammler bekommen
-    # den Span des Plans, und nur Gegenstellen außerhalb der Pfad-Dateien bleiben.
-    inside = None
-    if plan.get("mode") == "path":
+    # den Span des Plans, und je Paket bleiben nur Gegenstellen außerhalb seiner Dateien.
+    path_mode = plan.get("mode") == "path"
+    if path_mode:
         plan_range = Span(plan["base"], plan["target"], plan["log_base"])
-        inside = set(plan.get("file_keys") or ()) or {
-            str(f) for packet in plan["packets"] for f in packet["files"]}
     quality = plan.get("focus") == "quality"
     stored = None if quality else load_collected(run_dir(repo, run_id))
     stored = stored if _collected_matches(plan, stored) else None
@@ -5068,8 +5073,9 @@ def write_counterparts(repo, run_id):
                             + [c.collect(repo, plan_range, packet["files"]) for c in live])
         elif not quality:
             found = _collect_all(repo, plan_range, packet["files"])
-        if found is not None and inside is not None:
-            found = found._replace(entries=_leaving_path(found.entries, inside))
+        if found is not None and path_mode:
+            found = found._replace(entries=_leaving_path(
+                found.entries, {str(f) for f in packet["files"]}))
         collected.append((packet, rng, found))
     # Die Hinweise erst nach allen Paketen: Delphi-Units werden bei Bedarf gescannt, und
     # welche nicht aufgehen, darf nicht von der Reihenfolge der Pakete abhängen.
@@ -5107,7 +5113,7 @@ def write_counterparts(repo, run_id):
                     notes.append(f"{len(others)} {collector.language}-Datei(en) außerhalb des "
                                  f"Pakets am ZIEL nicht lesbar ({reasons}) — dort keine "
                                  "Gegenstellen gesucht.")
-            if inside is not None:
+            if path_mode:
                 notes.insert(0, PATH_BLOCK_NOTE.format(paths=", ".join(plan["paths"])))
             shown_packet.update(unreadable=found.unparsed, notes=notes)
             body, shown = _render(shown_packet, found.entries, found.unresolved, cap)
