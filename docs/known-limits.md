@@ -1363,6 +1363,26 @@ Nicht in dieser Runde behoben, bewusst nur dokumentiert:
   gemergten Commits von test-first und skill-dir (17 Tasks), nicht der Kreislauf aus
   Review, Fix und erneutem Review; ein dritter Plan entfiel auf Wunsch des Nutzers.
 
+## subagent-dev — Befunde aus dem Bau von Spec 28 (2026-11-04)
+
+Drei Beobachtungen aus dem Bau von deep-review B (15 Tasks, Prüfpunkte, Verträge). Keine
+hat ein falsches Ergebnis geliefert; sie kosten Aufmerksamkeit, nicht Korrektheit.
+
+- **C1 meldet nach einem erledigten Prüfpunkt weiter FÄLLIG.** `checkpoint status
+  --after-task 5` blieb FÄLLIG, obwohl `review-state` `reviewed_tasks` mit 5 führte und
+  `last_reviewed` nach dem Fix lag (Bereich nur der Abgleich-Commit). C1 wertet
+  `reviewed_tasks` nicht. Nicht behoben, weil nur die Meldung betroffen ist. Umgang: den
+  Eintrag im `review-state` prüfen und mit der nächsten Task weitermachen.
+- **Die Vertragsprüfung wertet Rot- und Commit-Steps als fehlend,** wenn sie nicht im Diff
+  stehen, und „volle Suite“ als fehlend, wenn das test-first-Log nur `-k`-Läufe enthält,
+  obwohl Log und Commit vorhanden sind. Das ist Rauschen des Prüfers (Haiku), nicht ein
+  fehlender Step. Umgang: den Befund gegen Log und `git log` abgleichen; die volle Suite läuft
+  nach dem Merge, nicht in der Task.
+- **Ein Interface mit Datenartefakt braucht `token:`.** Eine Task, die eine Datei oder ein
+  Schema erzeugt, das spätere Tasks lesen, ohne ein Symbol zu liefern, wird sonst
+  `interfaces_unknown` und bekommt weder M1 noch C1. Umgang: das Artefakt als
+  `token:<name>` in `Produces:` und `Consumes:` führen.
+
 ## architecture-map
 
 Nach der ersten Review-Runde (3 Defekte, 3 Lücken, 2 Anmerkungen behoben — siehe
@@ -2276,9 +2296,6 @@ gibt, der Umgang damit.
   Kommentar am Zeilenende.
 - **`enclosing()` sucht linear über alle Routinen einer Unit** und läuft je Kandidat; in
   großen Units wächst die Zeit etwa quadratisch.
-- **Die Gegenstellen werden zweimal gesammelt:** `plan` über den ganzen Bereich für die
-  Schlüssel, `counterparts` je Paket noch einmal. Das kostet etwa das Doppelte, und ein
-  Sammelfehler bricht schon `plan` ab.
 
 **Folgeläufe (`--since`)**
 
@@ -2308,16 +2325,6 @@ gibt, der Umgang damit.
 
 **Bericht und Audit**
 
-- **`audit` liest den Bericht mit regulären Ausdrücken aus freiem Markdown.** Ein anderer
-  Gedankenstrich, Fettdruck oder eine Tabellenzeile statt der Fundzeile ergibt einen falschen
-  `report_mismatch`. Die Vorlage `assets/report-template.md` wörtlich zu füllen vermeidet das;
-  sauberer wäre, wenn das Skript die datentragenden Zeilen selbst schriebe.
-- **Die Zahlen in der Pakettabelle prüft `audit` nicht.** Geprüft werden Kopfzeile, Funde,
-  Abdeckung, Hinweise, Übernommen und die Fundzeilen.
-- **Die Vorlage nennt `SPLIT_AT` und `PACKET_SIZE` nicht,** obwohl `references/packets.md`
-  sagt, der Bericht nenne die Grenzwerte.
-- **`REPORT_BASE_LINES (20)` steht als Zahl in der Vorlage,** ohne dass ein Test sie gegen die
-  Konstante prüft.
 - **Das notierte Kommando ist relativ zum Skill-Ordner** (`python scripts/review_kit.py …` in
   `_meta.generated`) und nennt `--repo` nicht; `--report` und `--soll-file` stehen darin
   repo-relativ, aufgelöst werden sie aber gegen das Arbeitsverzeichnis. Erneut eintippen lässt
@@ -2374,15 +2381,14 @@ gibt, der Umgang damit.
 - **Lesesperre mit Lücken:** `Bash(python3:*)` bei `dr` umgeht jede Sperre. Bash-Regeln
   vergleichen nur den Anfang des Befehls. Projektordner, die während des Laufs entstehen, sind
   nicht gesperrt. Gegenmittel ist die Nachkontrolle `probe=` in `status.txt`.
-- **`dr` darf `report.md` nicht anlegen:** `run.sh` erlaubt nur
-  `Edit(./.skills/cache/deep-review/**)`, für eine neue Datei braucht es `Write`. In
-  `py-diff-dr-1` fehlte deshalb der Bericht, und `audit` blieb unvollständig.
-- **`match.py` sucht `findings.json` direkt in `.kit`,** `run.sh` legt den Lauf aber unter
-  `.kit/<lauf>/` ab. Die Vorauswahl fällt dann auf das Textfenster zurück, und die Treffer
-  müssen von Hand am `findings.json` geprüft werden.
-- **Der Paketblock kann im Fork stecken bleiben:** In `dl-diff-dr-1` gab der Agent den Block
-  nicht ausdrücklich an `/code-review` weiter, der Fork kannte ihn nur aus dem Verlauf. Die
-  Anti-Rationalisierungs-Tabelle der SKILL.md nennt das, verhindert es aber nicht.
+- **`dr` darf `report.md` nicht anlegen (erledigt durch `report`).** `run.sh` erlaubt nur
+  `Edit(./.skills/cache/deep-review/**)`; seit Spec 28 schreibt `review_kit.py report` den
+  Bericht, der Agent braucht dafür kein `Write`. Die Läufe vor Spec 28 (`py-diff-dr-1`) haben
+  den Bericht deshalb nicht.
+- **`match.py` findet `findings.json` auch unter `.kit/<lauf>/`** (`rglob`, seit d5c9b36). Der
+  frühere Eintrag, die Vorauswahl falle auf das Textfenster zurück, gilt nicht mehr. Bleibt:
+  Liegen mehrere Läufe unter `.kit`, nimmt `match.py` alle; die Treffer an der gewählten
+  `findings.json` prüfen.
 - **Eval 2 und 5 können zwei Läufe mischen,** wenn der Agent neu plant: Die Globs nehmen den
   alphabetisch ersten Lauf, für Plan und Audit getrennt.
 
@@ -2403,11 +2409,135 @@ gibt, der Umgang damit.
 - **Aufwand je Paket und Auflösung:** `_worktree_differs` kopiert den Index je Paket.
   `_factory` läuft je `raise` erneut über die ganze Funktion. `import_names` und
   `import_prefixes` gehen dieselben Importe zweimal durch.
-- **Eine Datei wird nie geteilt:** Ein neues Modul mit 5.000 Zeilen ist ein Paket und damit wieder
-  ein Review über tausende Zeilen. Gesehen am finalen Prüfpunkt (`review_kit.py` als p5).
 - **Unbekannter Empfänger mit eindeutigem Namen:** `s.find()` auf einem String kann eine
   eindeutige Methode `find` im Repo treffen. Der Eintrag ist dann als „Empfänger unbekannt, Name
   eindeutig“ markiert.
+
+### deep-review — Befunde aus dem Bau von Spec 28 (2026-11-04)
+
+Spec 28 (Marke, Stufen, Pfad-Modus, Spannen, TS/JS/C++/Go-Sammler, Urteile, Bericht aus dem
+Skript) behebt aus der Liste oben: die doppelte Sammlung der Gegenstellen, die nie geteilte
+Datei, den Bericht per Regex und den im Fork steckenbleibenden Block. Offen blieben nach
+zwei Fix-Runden je Prüfpunkt nur Funde ohne Absturz und ohne falsches Ergebnis (Fix-Regel).
+Je Grenze: was passiert, warum nicht behoben, was man stattdessen tut.
+
+**Aussagekraft**
+
+- **Die Marke ist Auskunft, kein Beleg.** `record` prüft, dass `marke` zur Paketdatei passt
+  (`dr-<paket>-<MARKER_HEX Hexzeichen>`); dass der Reviewer den Auftrag las, belegt das nicht,
+  ein Agent kann die Marke aus dem Auftrag abschreiben. Ein Gate, das es belegte, bräuchte
+  einen Hook (E2). Umgang: der Bericht nennt die Abdeckung `a/b` aus `audit` und nie
+  „geprüft“ allein; bei Zweifel ein Paket stichprobenartig neu reviewen.
+- **Präzision ist nur auf Python gemessen.** Treffer und Fehlalarme der Gegenstellen liegen
+  nur für den Python-Sammler vor; TS, JS, Go, C++ und Delphi sind durch Tests auf Formen
+  belegt, nicht durch eine Trefferquote. Umgang: Einträge dieser Sprachen als Hinweis lesen.
+- **Die Stufe im Plan ist die geplante, nicht die gelaufene.** `record` speichert die Stufe aus
+  dem Ergebnis des Reviewers; ob `/code-review` sie so ausführte, sieht das Skript nicht. Ob
+  die „zuletzt getippte Stufe“ von `/code-review` über Sitzungen gilt, ist ungeprüft (in
+  `~/.claude.json` fand sich kein Schlüssel). Umgang: `--level` im Aufruf mitgeben.
+- **`/code-review` hat einen eigenen Ausgabevertrag (JSON-Liste); die Vorlage verlangt das
+  Objekt `{marke,stufe,findings}`.** In allen Läufen lieferte es das Objekt; sonst weist
+  `record` ab. Der Test der Vorlage prüft nur Teilstrings, nicht `parse_args`. Der Fokus
+  `security` nennt in `s1.prompt.md` `/code-review <stufe>` als Aufruf, auch wenn
+  `/security-review` oder der Hauptagent läuft; `stufe` bleibt Pflicht.
+
+**Sammler (TS/JS, C++, Go)**
+
+- **TS/JS ohne Typinferenz und ohne Aliase.** Empfänger, die erst ein Typ klärt, und
+  umbenannte Importe (`import { a as b }`) löst der Sammler nicht auf; der Eintrag fehlt oder
+  steht als „Empfänger unbekannt“. Dazu: Klassenmethoden und Re-Exports (`export … from`)
+  werden nicht aufgelöst, ein Eintrag entsteht nur bei `throw` oder bei `async` ohne `await`,
+  und für geänderte Argumente fehlt der `Weg:`. Umgang: bei TS die Aufrufer mit `grep` im
+  Reviewer-Auftrag ergänzen.
+- **TS/JS-Dateien werden nur an Leerzeilen geteilt,** Python und Delphi an Definitionen. Die
+  Spanne endet dort, wo die nächste Leerzeile nach `SPAN_MIN_SHARE × packet_size` liegt, nicht
+  an einer Funktionsgrenze; eine Funktion kann zwei Spannen berühren.
+- **JSX wird heuristisch maskiert.** In `.js`-Dateien gelten die JSX-Regeln nicht (nur `.jsx`,
+  `.tsx`); in JSX-Text zählen `//` (etwa `http://`) und ein Anführungszeichen nach Leerzeichen
+  oder `>` als Code. Folge: ein Aufruf im Text wird gesammelt oder eine Zeile falsch
+  gemaskt. Umgang: JSX in `.js` nach `.jsx` benennen oder den Eintrag ignorieren.
+- **Der Namens-Rückfall greift nur bei eindeutigen Namen und nur bei direktem `throw`/`panic`,**
+  nicht transitiv: Wirft nur ein Aufgerufener, steht nichts. Bei C++ kürzt er `throw
+  std::out_of_range` zu `throw std` (der Typ wird am `::` abgeschnitten); der Name der Stelle
+  stimmt, der Typ nicht. Nicht behoben, weil nur die Anzeige betroffen ist. Umgang: die
+  Zeile `at <Datei>:<n>` öffnen.
+- **Neue Zeilenformate im Block müssen auf `AT_REF_RE` passen.** Der Pfad-Modus liest die Orte
+  per Regex aus dem Blocktext zurück (`_entry_refs`); eine Zeile ohne ` at <Datei>:<n>` lässt
+  den Eintrag dort fälschlich weg, und ein Pfad mit ` at ` wird falsch geschnitten (nur ein
+  zusätzlicher Eintrag).
+- **Der Index-Aufwand wächst mit der Zeilenlänge und mit mehrzeiligen Aufrufen.**
+  `_NameIndex.prepare` maskiert vor der Änderung alle Dateien mit dem Namen,
+  `_js_is_call` schneidet das Zeilenpräfix (quadratisch in sehr langen, etwa minifizierten
+  Zeilen). `node_modules` schließen drei Stellen aus, nicht das Index-Protokoll.
+- **Der Delphi-Speicher-Rückfall hat keinen Live-Zweig nach `--since`.** Er ist nicht von
+  Tests abgedeckt; der Docstring ist zu weit gefasst.
+- **`counterparts` bricht ganz ab, wenn `--soll-file` oder `references/review-brief.md` nicht
+  lesbar ist,** und liefert auch keine Blöcke. Das ist gewollt (fail-closed).
+
+**Spannen und Pfad-Modus**
+
+- **Die Pfad-Grenzwerte `PATH_SPLIT_AT = 6000` und `PATH_PACKET_SIZE = 3000` sind ungemessen,**
+  ebenso `SPAN_MIN_SHARE = 0.25`. Sie sind gesetzt, nicht aus Läufen abgeleitet. Umgang: für
+  große Pfade `--split-at` setzen und den Bericht auf verlorene Funde ansehen.
+- **Der Pfad-Modus reviewt den Pfad am Ziel (`--target`, Standard HEAD), nicht den
+  Arbeitsbaum.** Die Hilfscommits laufen über einen temporären Index (E6); ungespeicherte
+  Änderungen im Arbeitsbaum gehören nicht zum Prüfgegenstand. Das Skript sammelt die
+  Gegenstellen für den ganzen Pfad und streicht danach die internen (Kosten bei großen
+  Pfaden). `.skills/` wird nie reviewt.
+- **Spannen: Modusänderung und End-Newline.** Die Modusänderung einer geteilten Datei steht nur
+  im ersten Spannen-Paket (nur bei regulärer Basis-Datei). Eine reine Newline-Änderung der
+  letzten Basis-Zeile erscheint in keinem Paket-Diff; ein ergänztes End-Newline ist unsichtbar,
+  wenn das Ziel Zeilen in einer späteren Spanne anhängt, die Spannen-Summe liegt dann 2 unter
+  `numstat`, ohne Hinweis in `plan` oder Bericht.
+- **Gelöschte, leere, Symlink- und Submodul-Dateien werden nicht geteilt;** die
+  Python-Grenze liegt auf der ersten Dekorator-Zeile, Löschungen zählen am Hunk-Anker.
+- **`plan --since` diffed große Dateien zweimal** (kein Memo in `_file_spans`), Aufwand ohne
+  falsches Ergebnis.
+- **`_earlier_files` übernimmt die `reused_from`-Einträge eines unter der neuen Stufe
+  geplanten Laufs nicht, wenn die `Übergangen:`-Zeile fehlt.** Folge: nur ein erneutes Review, kein falsches Ergebnis.
+- **Die Projekt-Kopie (`.claude/skills/…`) bekommt in diesem Repo ein eigenes Paket,** und
+  nach einem Fix-Commit ist sie im Bereich noch veraltet; deep-review hat kein `--exclude`.
+  Nachprüfungen laufen deshalb über den Fix-Commit allein.
+
+**Urteile (`verify`, `verdict`)**
+
+- **`verify` kostet je Prüfauftrag rund 61.000 bis 64.000 Tokens** (in diesem Bau gemessen,
+  Sonnet). Das Profil `checkpoint` setzt `verify` und verlangt je Fund ohne `evidence` ein
+  Urteil, sonst ist `audit` unvollständig. Umgang: `--verify` nur dort, wo ein Fund das
+  Merge verhindern würde; Funde mit `evidence` zählen nicht als offen.
+- **Dass der Prüfer nur liest, ist nur verlangt.** Der Prüfauftrag und die SKILL.md sagen
+  „nur lesen“ (G1); das Skript sperrt Schreiben nicht und prüft nach dem Urteil nicht, ob
+  der Prüfer Quelldateien änderte. Umgang: nach `verdict` `git status` ansehen.
+- **Ein Urteil hängt am Fund-Hash** (file, line, summary, failure_scenario). Ändert `merge`
+  Text oder Zeile, gilt der Fund wieder als offen; ein Urteil wirkt erst nach erneutem
+  `merge`, bis dahin meldet `audit` `stale_verdicts`. Übernommene Urteile zählen, wenn der
+  frühere Lauf sie irgendwann hatte, auch ersetzte. `_earlier_verdicts` verliert sie still,
+  wenn der frühere Lauf fehlt (der Fund ist wieder offen, ohne Hinweis); `_inherited` liest
+  die Kette je Aufruf neu (O(k²)).
+- **`verify: true` steht nur bei `true` in `plan.json`;** fehlt das Feld, gilt `false`.
+
+**Bericht und Audit**
+
+- **Prüfung bis `## Einordnung`.** Das Skript schreibt den Teil davor (16 Zeilen plus 1 je Fund)
+  und prüft ihn; ab `## Einordnung` prüft `audit` nichts außer der Länge (`EINORDNUNG_MAX_LINES
+  = 8`, `REPORT_BASE_LINES` bleibt für den Skript-Teil). Die Regel für Lücken ist einfach: bei
+  Lücken zählt „nicht vollständig“ als Meldung, nur `unvollständig` oder `incomplete` hebt eine
+  Behauptung auf, und das Wort hebt jede Behauptung derselben Zeile auf.
+- **Berichte älterer Läufe melden einen `report_mismatch`,** wenn die Zählung sich geändert
+  hat (Pfad-Bericht nach dem Update; Spec-26-Bericht ohne `generated: … report`). Abhilfe:
+  `report --run <lauf>` erneut laufen lassen.
+- **Die Spalte Gegenstellen hängt davon ab, ob `counterparts` schon lief:** `report` liest
+  vorher das Kopf-Feld, danach den Speicher; `report` vor `counterparts`, `audit` danach kann
+  abweichen. Das Kopf-Feld ist editierbar, eine Änderung von Hand bleibt unbemerkt, und
+  `_block_count` liest den ganzen Block.
+- **`write_counterparts` liest `prompt.md` zur Längenprüfung erneut** (Effizienz), die
+  Filterkette steht doppelt.
+
+**Bench**
+
+- **`run.sh` (`crb`) liest den Block über das Kopfformat von `review_kit.py`** (Präfix
+  `Dateien (`, erlaubte Kopfzeilen). Ändert sich der Paketkopf, endet `crb` mit
+  `abbruch:block`; dann `run.sh` mit anpassen.
 
 ## Verweise
 
