@@ -356,7 +356,8 @@ Antwort `ask` mit „immer Rückfrage“. Danach:
   `push.default`); ohne Ziel `ask`.
 - nur `<remote>`: dasselbe `@{push}`, wenn dessen Remote `<remote>` ist; sonst `ask`.
 - `push.default=matching` oder ein gesetztes `remote.<remote>.push` → `ask` (der Push trifft
-  mehr als ein Ziel); ein `git -c …` vor `push` → `ask` (es kann das Ziel umlenken).
+  mehr als ein Ziel); `git -c …`, `--config-env`, `--git-dir` oder `--namespace` vor `push` →
+  `ask` (sie können das Ziel umlenken oder seine Bestimmung verfälschen).
 - `<remote> <refspec>` mit genau einem Refspec: `<src>` allein steht für `<src>:<src>`; eine
   Quelle `HEAD` wird zum aktuellen Zweig (`git rev-parse --abbrev-ref HEAD`; abgelöster `HEAD`
   → `ask`); eine Quelle, die ein Tag ist (`git show-ref --verify --quiet refs/tags/<src>`) →
@@ -396,8 +397,8 @@ Was `guard` nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungsz
 Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis zur Antwort des
 Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1). Spec 00 §4 nennt bisher nur
 08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort. Weiterhin nicht gesehen
-(known-limits): ein Ziel, das erst die Shell ausrechnet (`$VAR`, Globs), ein `cd` in einer
-Subshell, Wrapper außerhalb der Liste.
+(known-limits): ein Ziel, das erst die Shell ausrechnet (`$VAR`, Globs), Wrapper außerhalb der
+Liste. `(` und `)` trennen Teile wie `;`; nach einer Subshell gilt wieder das vorige Verzeichnis.
 
 ### Contract
 
