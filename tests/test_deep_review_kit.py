@@ -7222,7 +7222,8 @@ def test_b_cp4r2_f1_claim_rule_has_no_negation_window(tmp_path):
 def test_b_cp4r2_f2_claim_words_fertig_komplett_complete(tmp_path):
     kit = _kit()
     audit_with = _gap_audit(kit, tmp_path)
-    for line in ("Der Lauf ist fertig.", "Abdeckung komplett", "Review complete.",
+    # Nach Runde 2: das englische Wort nicht mehr (test_b_cp4r3_f1).
+    for line in ("Der Lauf ist fertig.", "Abdeckung komplett",
                  "KOMPLETT geprüft", "Das Review ist Vollständig."):
         assert len(audit_with(line)["report_mismatch"]) == 1, line
     # Jede Zeile ist ein Eintrag.
@@ -7231,8 +7232,7 @@ def test_b_cp4r2_f2_claim_words_fertig_komplett_complete(tmp_path):
     # Nur das ganze Wort.
     for line in ("Die Vollständigkeit fehlt noch.", "fertigstellen folgt", "completed later"):
         assert audit_with(line)["report_mismatch"] == [], line
-    for word in ("vollständig", "fertig", "komplett", "complete", "unvollständig",
-                 "incomplete"):
+    for word in ("vollständig", "fertig", "komplett", "unvollständig"):
         assert word in kit._claims_complete.__doc__, word
 
 
@@ -7298,8 +7298,10 @@ def test_b_cp4r2_f5_block_count_from_header_field(tmp_path):
     block.write_text(re.sub(r"\d+ Stelle\(n\) nach der Sammelregel", "Stellen: viele", text),
                      encoding="utf-8")
     assert rows() == [row(lines, item["counterparts"])]
-    # Ein Block ohne die Angabe (Lauf vor diesem Stand): „—", auch mit der alten Zählzeile.
-    block.write_text(text.replace(f" | counterparts: {item['counterparts']} -->", " -->", 1),
+    # Ein Block ohne die Angabe und ohne die alte Zählzeile: „—" (mit Zählzeile:
+    # test_b_cp4r3_f4).
+    old = text.replace(f" | counterparts: {item['counterparts']} -->", " -->", 1)
+    block.write_text(re.sub(r"\d+ Stelle\(n\) nach der Sammelregel", "Stellen: viele", old),
                      encoding="utf-8")
     assert rows() == [row(lines, "—")]
     assert not hasattr(kit, "BLOCK_COUNT_RE")
@@ -7313,8 +7315,7 @@ def test_b_cp4r2_f6_packets_md_names_einordnung_limit():
     assert "REPORT_BASE_LINES" not in doc
     assert f"| `EINORDNUNG_MAX_LINES` | {kit.EINORDNUNG_MAX_LINES} |" in doc
     assert "## Einordnung" in doc and "split: false" in doc
-    for word in ("`fertig`", "`komplett`", "`complete`", "`incomplete`", "un-vollständig",
-                 "counterparts: <n>"):
+    for word in ("`fertig`", "`komplett`", "un-vollständig", "counterparts: <n>"):
         assert word in doc, word
 
 
@@ -7341,3 +7342,85 @@ def test_b_cp4r2_f7_multiline_comments_do_not_count(tmp_path):
     lines = [f"Zeile {i}" for i in range(limit - 1)] + ["A <!-- x", "y --> B"]
     [mismatch] = audit_with(lines)["report_mismatch"]
     assert f"{limit + 1}" in mismatch, mismatch
+
+
+# --- Prüfpunkt 4, nach Runde 2 -------------------------------------------------------------------
+
+def test_b_cp4r3_f1_english_complete_is_no_claim(tmp_path):
+    kit = _kit()
+    audit_with = _gap_audit(kit, tmp_path)
+    # Die Einordnung zitiert das Audit-Feld: keine Behauptung.
+    data = audit_with("audit meldet `complete: false` (missing: p2)")
+    assert data["missing"] == ["p2"] and data["report_mismatch"] == [], data
+    for line in ("Review complete.", "COMPLETE"):
+        assert audit_with(line)["report_mismatch"] == [], line
+    # Die deutschen Wörter bleiben eine Behauptung.
+    for line in ("Review vollständig.", "Der Lauf ist fertig.", "Abdeckung komplett"):
+        assert len(audit_with(line)["report_mismatch"]) == 1, line
+    assert "complete" not in kit._claims_complete.__doc__.replace("_claims_complete", "")
+
+
+def test_b_cp4r3_f2_tool_without_slash_keeps_its_level(tmp_path):
+    kit = _kit()
+    cases = (("code-review high", "/code-review high"),
+             ("C:/Program Files/Git/code-review high", "/code-review high"),
+             ("C:\\Program Files\\Git\\code-review high", "/code-review high"),
+             ("security-review x", "/security-review x"),
+             ("code-review-light", "code-review-light"),
+             ("C:/tools/my-code-review high", "C:/tools/my-code-review high"))
+    for given, want in cases:
+        assert kit._canonical_tool(given) == want, given
+    for given in ("code-review high", "C:/Program Files/Git/code-review high"):
+        assert kit._is_code_review(given) is True, given
+        name = given.replace(":", "").replace("/", "-").replace(" ", "_")
+        root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)}, name=name)
+        kit.write_counterparts(root, run)
+        marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+        obj = {"marke": marked["packets"][0]["marker"], "findings": []}
+        # record verlangt eine Stufe, wie bei `/code-review high`.
+        with pytest.raises(kit.KitError, match="ohne stufe"):
+            kit.record(directory, "p1", given, _payload(tmp_path, obj, f"{name}-ohne.json"))
+        _rec(kit, directory, "p1", given, _payload(tmp_path, [], f"{name}.json"))
+        kit.merge(directory)
+        text = kit.render_report(directory)
+        assert "tool: /code-review high" in text.splitlines()[0], given
+        assert "--max-findings all" in text and "--max-findings default" in text, given
+
+
+def test_b_cp4r3_f3_comment_markers_in_inline_code_are_text(tmp_path):
+    kit = _kit()
+    audit_with = _gap_audit(kit, tmp_path)
+    tail = "Die Kopfzeile beginnt mit `<!--`.\nReview vollständig.\nSie endet auf `-->`."
+    [mismatch] = audit_with(tail)["report_mismatch"]
+    assert "Review vollständig." in mismatch, mismatch
+    assert kit._einordnung_lines(tail.split("\n")) == tail.split("\n")
+    # Ein Kommentar außerhalb von Inline-Code bleibt ein Kommentar, auch mit Code darin.
+    assert kit._einordnung_lines(["A <!-- `x` vollständig -->", "B"]) == ["A ", "B"]
+    assert kit._einordnung_lines(["`<!--` <!-- weg", "-->`-->` C"]) == ["`<!--` ", "`-->` C"]
+
+
+def test_b_cp4r3_f4_block_count_from_old_count_line(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _lib_run(kit, tmp_path)
+    [item] = kit.write_counterparts(root, run)
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    (directory / kit.COLLECTED_NAME).unlink()
+    rows = lambda: [ln for ln in kit.render_report(directory).splitlines()
+                    if ln.startswith("| p1 ")]
+    row = "| p1 | 1 | {} | {} | 0 |".format
+    lines = plan["packets"][0]["changed_lines"]
+    block = directory / "packets" / "p1.md"
+    text = block.read_text(encoding="utf-8")
+    # Alter Kopf (Lauf vor dem Kopf-Feld): die Zählzeile des Blocks gilt.
+    old = text.replace(f" | counterparts: {item['counterparts']} -->", " -->", 1)
+    assert f"{item['counterparts']} Stelle(n) nach der Sammelregel" in old
+    block.write_text(old, encoding="utf-8")
+    assert rows() == [row(lines, item["counterparts"])]
+    # Alter Kopf ohne Zählzeile, oder Kopf eines anderen Pakets: „—".
+    block.write_text(re.sub(r"\d+ Stelle\(n\) nach der Sammelregel", "Stellen", old),
+                     encoding="utf-8")
+    assert rows() == [row(lines, "—")]
+    block.write_text(old.replace("packet: p1 -->", "packet: p2 -->", 1), encoding="utf-8")
+    assert rows() == [row(lines, "—")]
+    assert "Sammelregel" in kit.OLD_BLOCK_COUNT_RE.pattern

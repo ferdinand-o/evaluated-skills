@@ -5179,16 +5179,19 @@ REPORT_DISCLAIMER = (
     "`/code-review --max-findings default`.")
 # G2 auf die Einordnung, je Zeile (`_claims_complete`): eines dieser Wörter (mit den deutschen
 # Adjektiv-Endungen) als ganzes Wort ist eine Vollständigkeitsbehauptung …
-REPORT_CLAIM_RE = re.compile(r"\b(?:(?:vollständig|fertig|komplett)(?:e[mnrs]?)?|complete)\b",
-                             re.IGNORECASE)
+REPORT_CLAIM_RE = re.compile(r"\b(?:vollständig|fertig|komplett)(?:e[mnrs]?)?\b", re.IGNORECASE)
 # … außer die Zeile nennt zugleich die Lücke mit einem dieser Wörter
-REPORT_GAP_RE = re.compile(r"\b(?:unvollständig(?:e[mnrs]?)?|incomplete)\b", re.IGNORECASE)
+REPORT_GAP_RE = re.compile(r"\bunvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
 REPORT_EMPHASIS_RE = re.compile(r"[*_`]+")   # Markdown-Hervorhebung zählt beim Lesen nicht
-# HTML-Kommentar in der Einordnung, auch über mehrere Zeilen (`_einordnung_lines`)
+# HTML-Kommentar in der Einordnung, auch über mehrere Zeilen (`_einordnung_lines`) …
 REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# … gesucht nur außerhalb von Inline-Code: eine Backtick-Spanne innerhalb einer Zeile
+REPORT_CODE_SPAN_RE = re.compile(r"(`+)[^\n]*?\1")
 # Die Zahl der Gegenstellen als letztes Feld der Kopfzeile von `packets/<id>.md`
 # (`write_counterparts`, gelesen von `_block_count`)
 BLOCK_COUNT_FIELD = "counterparts"
+# Nur für Läufe vor dem Kopf-Feld: die alte Zählzeile des Blocks (`_block_count`)
+OLD_BLOCK_COUNT_RE = re.compile(r"(\d+) Stelle\(n\) nach der Sammelregel\b")
 
 
 def _layout(directory) -> tuple[Path, str]:
@@ -5383,20 +5386,22 @@ SLASH_TOOLS = ("code-review", "security-review")
 # speichert eine mitgelieferte nicht. Jedes andere Werkzeug braucht ohne --no-block eine Stufe.
 LEVELLESS_TOOLS = frozenset({"/security-review", "Review ohne /security-review",
                              "Review ohne /code-review"})
-# Ein Pfad, wie ihn Git Bash (MSYS) aus `/code-review` macht: Laufwerk, Ordner, am Ende der
-# Name — `C:/Program Files/Git/code-review`.
-MSYS_TOOL_RE = re.compile(r"[A-Za-z]:/(?:.*/)?(" + "|".join(map(re.escape, SLASH_TOOLS)) + ")")
+# Ein Name aus SLASH_TOOLS ohne Schrägstrich, auch mit Rest (`code-review high`), oder ein
+# Pfad, wie ihn Git Bash (MSYS) aus `/code-review high` macht: Laufwerk, Ordner, als letzter
+# Pfadteil der Name mit Rest — `C:/Program Files/Git/code-review high`.
+MSYS_TOOL_RE = re.compile(r"(?:[A-Za-z]:/(?:.*/)?)?(" + "|".join(map(re.escape, SLASH_TOOLS))
+                          + r")((?: [^/]*)?)")
 
 
 def _canonical_tool(tool: str) -> str:
     """`--tool` in fester Form: `code-review` und `security-review` ohne Schrägstrich werden
-    `/code-review` und `/security-review`, ebenso ein Windows-Pfad, der auf einen der beiden
-    Namen endet (die MSYS-Umschreibung von `/code-review` unter Git Bash; `\\` zählt wie
-    `/`). Alles andere bleibt, wie es ist, etwa „Review ohne /code-review"."""
-    if tool in SLASH_TOOLS:
-        return "/" + tool
+    `/code-review` und `/security-review`, auch mit Rest nach einem Leerzeichen
+    (`code-review high` → `/code-review high`), ebenso ein Windows-Pfad, dessen letzter
+    Pfadteil einer der beiden Namen ist, mit oder ohne Rest (die MSYS-Umschreibung von
+    `/code-review high` unter Git Bash; `\\` zählt wie `/`). Alles andere bleibt, wie es
+    ist, etwa „Review ohne /code-review" oder „code-review-light"."""
     match = MSYS_TOOL_RE.fullmatch(tool.replace("\\", "/"))
-    return "/" + match[1] if match else tool
+    return "/" + match[1] + match[2] if match else tool
 
 
 def _is_code_review(tool: str) -> bool:
@@ -5806,16 +5811,19 @@ def _block_count(directory: Path, run_id: str, pid: str) -> str | None:
     """Die Zahl der Gegenstellen aus dem Feld `counterparts: <n>` (`BLOCK_COUNT_FIELD`) der
     Kopfzeile von `packets/<id>.md`, die `write_counterparts` dort speichert, wenn die Zeile
     sonst die Kopfzeile von `counterparts` für diesen Lauf und dieses Paket ist
-    (`_packet_header`). Der Fließtext des Blocks zählt nicht. Sonst None: Datei fehlt, nicht
-    lesbar, anderer Lauf oder anderes Paket, Kopfzeile ohne das Feld (ein Lauf vor diesem
-    Stand, Fokus quality)."""
+    (`_packet_header`). Der Fließtext des Blocks zählt dann nicht. Ist die Kopfzeile die alte
+    ohne das Feld (ein Lauf vor diesem Stand), gilt die alte Zählzeile des Blocks
+    (`OLD_BLOCK_COUNT_RE`). Sonst None: Datei fehlt, nicht lesbar, anderer Lauf oder anderes
+    Paket, weder Feld noch Zählzeile (Fokus quality)."""
     try:
         text = (directory / "packets" / f"{pid}.md").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    stem = _packet_header(run_id, pid).removesuffix(" -->\n")
-    match = re.fullmatch(re.escape(stem) + rf" \| {BLOCK_COUNT_FIELD}: ([0-9]+) -->",
-                         text.split("\n", 1)[0])
+    first, header = text.split("\n", 1)[0], _packet_header(run_id, pid)
+    stem = header.removesuffix(" -->\n")
+    match = re.fullmatch(re.escape(stem) + rf" \| {BLOCK_COUNT_FIELD}: ([0-9]+) -->", first)
+    if match is None and first + "\n" == header:
+        match = OLD_BLOCK_COUNT_RE.search(text)
     return None if match is None else match[1]
 
 
@@ -5927,19 +5935,26 @@ def _einordnung_lines(free: list) -> list:
     """Die Zeilen der Einordnung (ab `## Einordnung`, ohne die Überschrift) ohne
     HTML-Kommentare: jeder Kommentar `<!-- … -->` (`REPORT_COMMENT_RE`), auch über mehrere
     Zeilen, wird entfernt; seine Zeilenumbrüche bleiben, sodass Text davor und danach je auf
-    seiner Zeile bleibt. Ein nicht geschlossenes `<!--` bleibt Text."""
-    text = REPORT_COMMENT_RE.sub(lambda m: "\n" * m[0].count("\n"), "\n".join(free))
-    return text.split("\n")
+    seiner Zeile bleibt. Ein nicht geschlossenes `<!--` bleibt Text. Gesucht werden `<!--`
+    und `-->` nur außerhalb von Inline-Code (`REPORT_CODE_SPAN_RE`, Backtick-Spannen einer
+    Zeile): `` `<!--` `` ist Text und beginnt keinen Kommentar."""
+    text = "\n".join(free)
+    masked = REPORT_CODE_SPAN_RE.sub(lambda m: " " * len(m[0]), text)
+    parts, pos = [], 0
+    for match in REPORT_COMMENT_RE.finditer(masked):
+        parts += [text[pos:match.start()], "\n" * match[0].count("\n")]
+        pos = match.end()
+    return "".join(parts + [text[pos:]]).split("\n")
 
 
 def _claims_complete(line: str) -> bool:
     """Ob eine Zeile der Einordnung Vollständigkeit behauptet (G2, eine einfache Regel ohne
     Satzverständnis): Sie enthält eines der Wörter `vollständig`, `fertig`, `komplett` (auch
-    mit den Endungen -e, -em, -en, -er, -es) oder `complete` als ganzes Wort, Groß/Klein egal
-    (`REPORT_CLAIM_RE`), und enthält nicht zugleich `unvollständig` oder `incomplete`
-    (`REPORT_GAP_RE`). Also: „Vollständigkeit", „fertigstellen", „completed" und das Wort in
-    „unvollständig" sind keine Behauptung; „nicht vollständig" ist eine — wer die Lücke
-    nennt, schreibt „unvollständig". „un-vollständig" gilt nicht als „unvollständig" und
+    mit den Endungen -e, -em, -en, -er, -es) als ganzes Wort, Groß/Klein egal
+    (`REPORT_CLAIM_RE`), und enthält nicht zugleich `unvollständig` (`REPORT_GAP_RE`). Nur
+    deutsche Wörter: das englische Wort ist das Audit-Feld, das eine Einordnung zitiert. Also:
+    „Vollständigkeit", „fertigstellen" und das Wort in „unvollständig" sind keine
+    Behauptung; „nicht vollständig" ist eine — wer die Lücke nennt, schreibt „unvollständig". „un-vollständig" gilt nicht als „unvollständig" und
     meldet (entschieden: nur die eine Schreibweise hebt auf). Markdown-Hervorhebung (`*`,
     `_`, `` ` ``) wird vorher entfernt, HTML-Kommentare schon in `_einordnung_lines`."""
     line = REPORT_EMPHASIS_RE.sub("", line)
@@ -5974,8 +5989,8 @@ def _report_mismatch(report: Path, shown: str, run_id: str, expected: str,
     Im freien Teil gilt zweierlei (G2), beides auf seinen Zeilen ohne HTML-Kommentare
     (`_einordnung_lines`, auch mehrzeilige Kommentare). Meldet das Audit eine Lücke
     (`missing`, `stale`, `lost_findings`; `_RunState.gaps`), ist jede Zeile, die
-    Vollständigkeit behauptet (`_claims_complete`: „vollständig", „fertig", „komplett",
-    „complete" ohne „unvollständig"/„incomplete" in derselben Zeile), ein Eintrag. Und im
+    Vollständigkeit behauptet (`_claims_complete`: „vollständig", „fertig", „komplett"
+    ohne „unvollständig" in derselben Zeile), ein Eintrag. Und im
     Anti-Zeremonie-Fall (`split: false`) hat er höchstens `EINORDNUNG_MAX_LINES` Textzeilen:
     gezählt wird nach der Überschrift `## Einordnung`, ohne sie und ohne Zeilen, die nach dem
     Entfernen der Kommentare leer sind. Der Teil davor ist durch den Vergleich festgelegt;
