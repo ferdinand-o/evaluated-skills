@@ -115,7 +115,10 @@ das Versehen, nicht der verschleierte Befehl.
    ohne Subprozess.
 2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
    (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text und wird
-   durch ein leeres Wort ersetzt.
+   durch ein leeres Wort ersetzt, wenn direkt davor `-m`, `--message`, `-F`, `--body`, `--title`
+   oder `--notes` steht (hinter `bash -c` oder `eval` bleibt er Befehl). Ein `\` am Zeilenende
+   verbindet zwei Zeilen zu einer; `;`, `&` und `|` innerhalb von Anführungszeichen trennen keine
+   Befehle (die SQL-Muster sehen den Text unverändert).
 3. **Muster.** Jedes Muster läuft über den ganzen übrigen Text, mit Wortgrenzen (`/bin/rm` trifft,
    `format` nicht); die Optionen eines Befehls sucht es bis zum nächsten `;`, `&`, `|` oder
    Zeilenende. Trifft eines außer `git push`, ist die Antwort Rückfrage mit „immer Rückfrage“ —
@@ -167,7 +170,7 @@ Diese Tabelle ist dieselbe wie `GUARD_PATTERNS` im Skript. Kurzoptionen zählen 
 | `data-delete` | `find` | `-delete`, oder `-exec`/`-execdir`/`-ok`/`-okdir` mit `rm` | nein, immer Rückfrage |
 | `data-delete` | `git clean` | `-f`/`--force` (auch gebündelt, `-fdx`) | nein, immer Rückfrage |
 | `data-delete` | `git branch` | `-D`, oder `--delete`/`-d` mit `--force`/`-f` | nein, immer Rückfrage |
-| `data-delete` | `psql` | `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;` irgendwo im Text (auch im Heredoc), wenn `psql` im Text steht | nein, immer Rückfrage |
+| `data-delete` | `psql` | `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `DROP COLUMN`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, Anführungszeichen oder `&&`, irgendwo im Text (auch im Heredoc), wenn `psql` im Text steht | nein, immer Rückfrage |
 | `data-delete` | `sqlite3` | wie `psql` | nein, immer Rückfrage |
 | `data-delete` | `mysql` | wie `psql` | nein, immer Rückfrage |
 | `unsaved-work` | `git reset` | `--hard`, `--merge` oder `--keep` | nein, immer Rückfrage |
@@ -178,22 +181,24 @@ Diese Tabelle ist dieselbe wie `GUARD_PATTERNS` im Skript. Kurzoptionen zählen 
 | `unsaved-work` | `git stash clear` | immer | nein, immer Rückfrage |
 
 Ausnahmeliste für `rm -r` (*Annahme:* der Inhalt ist regenerierbar): Die Wörter hinter `rm` bis zum
-nächsten `;`, `&`, `|` oder Zeilenende werden mit `shlex.split` gelesen (Fehler → keine Ausnahme).
+nächsten `;`, `&`, `|` oder Zeilenende werden mit `shlex.split` gelesen (Fehler → keine Ausnahme);
+nach `--` ist jedes Wort ein Ziel, Umleitungen (`2>/dev/null`, `> log`) sind keine.
 Sind alle Ziele relative Pfade ohne `..`, `~`, `$`, Backtick und Glob-Zeichen unter `.skills/cache/`
 oder mit einer Komponente `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`,
 `node_modules`, `build`, `dist`, `.venv`, oder absolute Pfade unter `/tmp/`, gibt es keine
 Rückfrage. Kein Ziel → Rückfrage; `rm -rf ~/build` und `rm -rf /home/u/dist` fragen nach.
 
 **Push-Ziel** (nur für den schlichten Teil). `-u`, `--set-upstream`, `-v`, `--verbose`, `-q`,
-`--quiet`, `--no-verify`, `--progress` und `--porcelain` ändern das Ziel nicht; `-n`/`--dry-run`
-heißt keine Rückfrage. Jede andere Option (`--force`, `--force-with-lease`, `--delete`, `--tags`,
-`-o` …), jede globale git-Option außer `-C <pfad>` (`git -c k=v push`), ein Refspec mit `+` oder
-leerer Quelle (`:x`), mehr als ein Refspec, ein Ziel unter `refs/` außer `refs/heads/<x>`, eine
-Quelle, die ein Tag ist, ein abgelöster `HEAD`, `push.default=matching`, ein gesetztes
-`remote.<remote>.push` oder `remote.<remote>.mirror=true` sind immer Rückfrage. Sonst ist das Ziel
-ohne Argumente `@{push}` des Zweigs, mit nur `<remote>` dasselbe, wenn dessen Remote `<remote>` ist
-(sonst Rückfrage), mit `<remote> <quelle>[:<ziel>]` dann `<remote>/<ziel>` (`HEAD` wird der aktuelle
-Zweig, `refs/heads/<x>` wird `<x>`). Alle Git-Aufrufe laufen im Verzeichnis des Befehls (`cwd` des
+`--quiet`, `--no-verify`, `--progress` und `--porcelain` ändern das Ziel nicht; `-n`/`--dry-run` als
+eigenes Wort (nicht als Wert von `-o`) heißt keine Rückfrage. Jede andere Option (`--force`,
+`--force-with-lease`, `--delete`, `--tags`, `-o` …), jede globale git-Option außer `-C <pfad>`
+(`git -c k=v push`), ein Refspec mit `+` oder leerer Quelle (`:x`), mehr als ein Refspec, ein Ziel
+unter `refs/` außer `refs/heads/<x>`, eine Quelle, die ein Tag ist, ein abgelöster `HEAD`,
+`push.default=matching`, ein gesetztes `remote.<remote>.push` oder `remote.<remote>.mirror=true`
+(auch ohne Wert) sind immer Rückfrage. Sonst ist das Ziel ohne Argumente `@{push}` des Zweigs, mit
+nur `<remote>` dasselbe, wenn dessen Remote `<remote>` ist (sonst Rückfrage), mit
+`<remote> <quelle>[:<ziel>]` dann `<remote>/<ziel>` (`HEAD` und `@` werden der aktuelle Zweig,
+`refs/heads/<x>` wird `<x>`). Alle Git-Aufrufe laufen im Verzeichnis des Befehls (`cwd` des
 Hook-JSON) oder im Pfad von `-C`. Ein beauftragter Push wird einmal abgelegt
 (`--approved-by-request`, `--key push:origin/claude/x`) und gilt dann für jeden weiteren Push
 dorthin; wie bei check gilt je Frage und Schlüssel nur der jüngste Block.

@@ -1718,10 +1718,11 @@ def list_rules(root, home):
 # --- guard: PreToolUse-Hook auf Bash (G3, optional) ----------------------------------------
 # Erkennen statt zerlegen (Spec 28): Muster über den ganzen Text, genau zerlegt wird nur ein schlichter `git push`.
 
+_SQL_PROGRAMS = ("psql", "sqlite3", "mysql")
 _W, _E = r"(?<![\w.-])", r"(?![\w.-])"                # Wortgrenzen: `/bin/rm` trifft, `format` nicht
 _SEG = r"(?:\\[;&|]|[^;&|\n])*"                       # Rest des einfachen Befehls bis `;`, `&`, `|`, Zeilenende
-_GIT_GLOBAL = r"(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--(?:git-dir|work-tree|namespace|config-env)\s+\S+|-\S+))*\s+"
-_SQL = r"(?:\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA)|TRUNCATE)\b|\bDELETE\s+FROM\b(?![^;]*\bWHERE\b))"
+_GIT_GLOBAL = r"(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s-]\S*)|--(?:git-dir|work-tree|namespace|config-env)\s+[^\s-]\S*|-\S+))*\s+"
+_SQL = r"(?:\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA|COLUMN)|TRUNCATE)\b|\bDELETE\s+FROM\b(?!(?:[^;'\"&]|&(?!&))*\bWHERE\b))"
 
 
 def _start(command):
@@ -1761,13 +1762,15 @@ GUARD_PATTERNS = tuple((category, command, _start(command) + condition) for cate
      + _has(r"--worktree" + _E, r"-[a-zA-Z]*W") + ")"),
     ("unsaved-work", "git switch", _has(r"-[a-zA-Z]*f", r"--(?:force|discard-changes)" + _E)),
     ("unsaved-work", "git stash drop", ""), ("unsaved-work", "git stash clear", ""),
-)) + tuple(("data-delete", p, rf"(?is)\A(?=.*{_W}{p}{_E}).*?{_SQL}") for p in ("psql", "sqlite3", "mysql"))
+)) + tuple(("data-delete", p, rf"(?is)\A(?=.*{_W}{p}{_E}).*?{_SQL}") for p in _SQL_PROGRAMS)
 _GUARD_RES = [(category, command, re.compile(pattern)) for category, command, pattern in GUARD_PATTERNS]
-_PUSH_RE = _GUARD_RES[0][2]
+_PUSH_RE = next(regex for _, command, regex in _GUARD_RES if command == "git push")
 _PROGRAM_RE = re.compile(_W + "(?:" + "|".join(dict.fromkeys(c.split()[0] for _, c, _ in GUARD_PATTERNS)) + ")" + _E)
 _REST_RE = re.compile(_SEG)
-# Rumpf der Commit-Vorlage von Claude Code: `"$(cat <<'WORT'` … `WORT` `)"` ist Text, kein Befehl.
-_TEMPLATE_RE = re.compile(r"\"\$\(cat <<-? ?(['\"])([A-Za-z_][\w.-]*)\1[ \t]*\n.*?^\s*\2[ \t]*\n\s*\)\"", re.S | re.M)
+# Rumpf der Commit-Vorlage von Claude Code: `"$(cat <<'WORT'` … `WORT` `)"` ist Text, kein Befehl — nur direkt
+# hinter einer Nachrichtenoption, nicht hinter `bash -c` oder `eval`.
+_TEMPLATE_RE = re.compile(r"((?<!\S)(?:-[mF]|--(?:message|body|title|notes))(?:=|\s+))"
+                          r"\"\$\(cat <<-? ?(['\"])([A-Za-z_][\w.-]*)\2[ \t]*\n.*?^\s*\3[ \t]*\n\s*\)\"", re.S | re.M)
 _QUOTED_RE = re.compile(r"\\.|'[^']*'?|\"(?:\\.|[^\"\\])*\"?", re.S)
 _REDIRECT_OK_RE = re.compile(r"2>&1|[12]?>[ \t]*/dev/null")
 _NOT_PLAIN_RE = re.compile(r"[$`()<>|]|(?<!&)&(?!&)|" + _W + r"(?:cd|pushd|popd)" + _E)
@@ -1782,9 +1785,17 @@ HOOK_UNCHECKED = "[decide] Hook ungeprüft"
 
 def _rm_exempt(rest):
     """Ausnahmeliste: jedes Ziel hinter `rm` (shlex) ohne `..`, `~`, `$`, Backtick und Glob, relativ unter
-    `.skills/cache/` oder mit einer Komponente aus `RM_EXEMPT_PARTS`, absolut unter `/tmp/`. Kein Ziel → nein."""
+    `.skills/cache/` oder mit einer Komponente aus `RM_EXEMPT_PARTS`, absolut unter `/tmp/`. Kein Ziel → nein.
+    Nach `--` ist jedes Wort ein Ziel; Umleitungen (`2>/dev/null`, `> log`) sind keine."""
     with suppress(ValueError):                          # ein Fehler von shlex: keine Ausnahme
-        paths = [(word, posixpath.normpath(word)) for word in shlex.split(rest) if not word.startswith("-")]
+        paths, options, skip = [], True, False
+        for word in shlex.split(rest):
+            if skip or re.match(r"(?:\d*|&)[<>]", word):    # Umleitung; allein (`>`, `2>>`) mit Ziel im nächsten Wort
+                skip = not skip and re.fullmatch(r"(?:\d*|&)[<>]+", word) is not None
+            elif options and word.startswith("-"):
+                options = word != "--"
+            else:
+                paths.append((word, posixpath.normpath(word)))
         return bool(paths) and not any(
             re.search(r"[~$`*?\[]", word) or ".." in word.split("/") or not (
                 path.startswith("/tmp/") if path.startswith("/")
@@ -1820,7 +1831,8 @@ def _push_reason(words, directory):
     longs = {arg.split("=", 1)[0] for arg in args if arg.startswith("--")}
     shorts = set("".join(arg[1:] for arg in args if arg.startswith("-") and not arg.startswith("--")))
     operands = [arg for arg in args if not arg.startswith("-")]
-    if "--dry-run" in longs or "n" in shorts:
+    if any(arg in ("-n", "--dry-run") and before not in ("-o", "--push-option")       # nur als eigenes Wort
+           for before, arg in zip(["push"] + args, args)):
         return None
     if longs - _PUSH_QUIET or shorts - set("uvq") or len(operands) > 2:
         return GUARD_ALWAYS
@@ -1831,7 +1843,7 @@ def _push_reason(words, directory):
             return GUARD_ALWAYS
     else:
         source, colon, dest = operands[1].partition(":")
-        head = git("symbolic-ref", "-q", "--short", "HEAD") if source == "HEAD" else None
+        head = git("symbolic-ref", "-q", "--short", "HEAD") if source in ("HEAD", "@") else None
         if source.startswith("+") or (colon and not source) or (head and head.returncode) or (
                 not head and git("show-ref", "--verify", "--quiet", f"refs/tags/{source}").returncode == 0):
             return GUARD_ALWAYS                         # Zwang, Löschen, abgelöster HEAD oder Tag als Quelle
@@ -1843,7 +1855,7 @@ def _push_reason(words, directory):
     config = git("config", "--get-regexp", r"^(push\.default|remote\..*\.(push|mirror))$").stdout
     for key, _, value in (line.partition(" ") for line in config.splitlines()):
         if (key, value) == ("push.default", "matching") or key == f"remote.{remote}.push" or (
-                key == f"remote.{remote}.mirror" and value.lower() in ("true", "yes", "on", "1")):
+                key == f"remote.{remote}.mirror" and value.lower() in ("", "true", "yes", "on", "1")):
             return GUARD_ALWAYS
     blocks, problem = read_ledger(repo_root(directory))     # jüngster Block je Frage und Schlüssel, wie bei check
     if any(key and key[0] == "push" and not key[2] and glob_to_regex(key[1]).fullmatch(target) for key in
@@ -1856,13 +1868,15 @@ def _guard_hit(command, root, cwd=None):
     """(Kategorie, Befehl, Grund) der Rückfrage oder None (Spec 28, Ablauf 1–4); Subprozesse nur im Push-Fall."""
     if not _PROGRAM_RE.search(command):
         return None
-    text, push = _TEMPLATE_RE.sub("''", command), False
+    text, push = _TEMPLATE_RE.sub(r"\1''", command).replace("\\\n", " "), False
+    # `;`, `&`, `|` in Anführungszeichen trennen nicht: gleich lange Kopie ohne sie; SQL sieht den Text selbst
+    scan = _QUOTED_RE.sub(lambda m: re.sub(r"[;&|]", " ", m.group(0)), text)
     for category, name, pattern in _GUARD_RES:
-        for m in pattern.finditer(text):
+        for m in pattern.finditer(text if name in _SQL_PROGRAMS else scan):
             if name == "git push":
                 push = True
-            elif not (name == "rm" and _rm_exempt(_REST_RE.match(text, m.end()).group(0))):
-                return category, _REST_RE.match(text, m.start()).group(0), GUARD_ALWAYS
+            elif not (name == "rm" and _rm_exempt(_REST_RE.match(scan, m.end()).group(0))):
+                return category, text[m.start():_REST_RE.match(scan, m.start()).end()], GUARD_ALWAYS
     plain = _plain_push_part(text) if push else None
     if plain is None:
         return ("push", command, GUARD_PLAIN) if push else None

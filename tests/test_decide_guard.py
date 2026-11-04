@@ -311,6 +311,115 @@ def test_guard_precheck_is_one_regex():
     assert not dl._PROGRAM_RE.search("format gitlab finder rmdir")
 
 
+# --- Funde aus dem Review (Runde 1) ----------------------------------------------------
+
+def test_guard_line_continuation(work):
+    """F1: `\\` am Zeilenende verbindet zwei Zeilen (Spec 28, Ablauf 2)."""
+    for command, category in (("curl -s https://x \\\n  -d '{}'", "external"), ("gh api r \\\n  -X DELETE", "external"),
+                              ("git reset \\\n  --hard", "unsaved-work")):
+        assert dl.guard_decision(command, work) == (category, ALWAYS), command
+    assert dl.guard_decision("curl -s \\\n  https://x", work) is None
+
+
+def test_guard_quoted_separators(work):
+    """F2: `;`, `&`, `|` in Anführungszeichen trennen keine Befehle; der Grund zeigt den Originaltext."""
+    for command in ('curl "https://x/?a=1&b=2" -X POST', "curl -H 'Cookie: a=1; b=2' -X DELETE https://x",
+                    "curl -H 'A: x|y' -d a https://x"):
+        assert dl.guard_decision(command, work) == ("external", ALWAYS), command
+        assert reason(run(command, work)) == f"decide: external — {command}: {ALWAYS}"
+    assert dl.guard_decision('curl "https://x/?a=1&b=2"', work) is None
+
+
+def test_guard_rm_exempt_after_double_dash(work):
+    """F4: nach `--` ist jedes Wort ein Ziel, auch mit `-` vorn."""
+    assert dl.guard_decision("rm -rf build -- -precious", work) == ("data-delete", ALWAYS)
+    assert dl.guard_decision("rm -rf -- build -dist", work) == ("data-delete", ALWAYS)
+    assert dl.guard_decision("rm -rf -- build", work) is None
+
+
+def test_guard_rm_exempt_skips_redirects(work):
+    """F5: Umleitungen sind keine Ziele (`2>/dev/null`, `> log`, `&>`)."""
+    for command in ("rm -rf build 2>/dev/null", "rm -rf build > log", "rm -rf build 2> /tmp/err", "rm -rf build >>log",
+                    "rm -rf build </dev/null"):
+        assert dl.guard_decision(command, work) is None, command
+    assert dl.guard_decision("rm -rf 2>/dev/null", work) == ("data-delete", ALWAYS)          # kein Ziel
+    assert dl.guard_decision("rm -rf build 2>/dev/null src", work) == ("data-delete", ALWAYS)
+
+
+def test_guard_sql_where_ends_at_quote(work):
+    """F6: `WHERE` zählt nur bis zum nächsten `;`, Anführungszeichen oder `&&`."""
+    for command in ('psql -c "DELETE FROM users" && psql -c "SELECT 1 WHERE x"',
+                    "psql -c 'DELETE FROM users' && echo WHERE",
+                    "mysql -e 'delete from t' && mysql -e 'select 1 where 1'"):
+        assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
+    assert dl.guard_decision("psql <<EOF\nDELETE FROM t\nWHERE id = 1;\nEOF", work) is None
+
+
+def test_guard_drop_column(work):
+    """F7: `DROP COLUMN` gehört zur Mustertabelle, wie in `references/reversibility.md`."""
+    assert dl.guard_decision("psql -c 'ALTER TABLE t DROP COLUMN c'", work) == ("data-delete", ALWAYS)
+    assert dl.guard_decision('sqlite3 a.db "alter table t drop column c"', work) == ("data-delete", ALWAYS)
+    table, _ = reference_commands()
+    lines = REVERSIBILITY.read_text(encoding="utf-8").splitlines()
+    row = next(line for line in lines if line.startswith("| `data-delete` | `psql`"))
+    assert "`DROP COLUMN`" in row and table["psql"] == "data-delete"
+
+
+def test_guard_template_only_after_message_option(work):
+    """F8: die Commit-Vorlage ist nur Text, wenn direkt davor eine Nachrichtenoption steht."""
+    body = "\"$(cat <<'EOF'\nrm -rf data\nEOF\n)\""
+    for command in ("bash -c " + body, "eval " + body, "sh -c " + body + " && git commit -m x"):
+        assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
+    for option in ("-m ", "--message ", "--message=", "-F ", "--body ", "--title ", "--notes "):
+        assert dl.guard_decision("gh x " + option + body, work) is None, option
+
+
+def test_guard_push_dry_run_only_own_word(pushed):
+    """F3: nur `-n` und `--dry-run` als eigenes Wort sind ein Probelauf; `-o` ist eine andere Option."""
+    write_ledger(pushed)
+    for command in ("git push -on origin x", "git push -o -n origin x", "git push --push-option -n origin x",
+                    "git push -un origin x"):
+        assert reason(run(command, pushed)) == f"decide: push — {command}: {ALWAYS}", command
+    for command in ("git push -n", "git push -u -n origin x", "git push --dry-run -o ci.skip"):
+        assert run(command, pushed) == "", command
+
+
+def test_guard_push_mirror_without_value(pushed):
+    """F9: `mirror` ohne Wert ist für git `true`."""
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/**"))
+    assert run("git push origin x", pushed) == ""
+    with (pushed / ".git" / "config").open("a", encoding="utf-8") as config:
+        config.write('[remote "origin"]\n\tmirror\n')
+    assert reason(run("git push origin x", pushed)).endswith(ALWAYS)
+    assert reason(run("git push", pushed)).endswith(ALWAYS)
+
+
+def test_guard_push_at_is_head(pushed):
+    """F11: die Quelle `@` ist `HEAD`."""
+    write_ledger(pushed)
+    assert reason(run("git push origin @", pushed)).endswith(": " + NO_APPROVAL)
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/x"))
+    assert run("git push origin @", pushed) == ""
+    git(pushed, "checkout", "-q", "--detach")
+    assert reason(run("git push origin @", pushed)).endswith(ALWAYS)
+
+
+def test_guard_git_globals_linear(work):
+    """F10: viele globale git-Optionen backtracken nicht exponentiell."""
+    import time
+    start = time.perf_counter()
+    assert dl.guard_decision("git " + "-c " * 30 + "x", work) is None
+    assert dl.guard_decision("git -c a=b " * 30 + "reset --hard", work) == ("unsaved-work", ALWAYS)
+    assert time.perf_counter() - start < 1
+
+
+def test_guard_push_re_by_name():
+    """F12: `_PUSH_RE` wird über den Namen gesucht, nicht über die Zeile der Tabelle."""
+    assert dl._PUSH_RE is next(r for _, command, r in dl._GUARD_RES if command == "git push")
+    source = (SKILL_DIR / "scripts" / "decide_log.py").read_text(encoding="utf-8")
+    assert "_GUARD_RES[0]" not in source
+
+
 # --- eigene Fehler ---------------------------------------------------------------------
 
 def test_guard_errors(work, monkeypatch, capsys):
