@@ -130,7 +130,7 @@ im Profil `checkpoint` behebt subagent-dev die Funde über `fix-task`, sonst nen
 
 | Gedanke | Realität |
 | --- | --- |
-| „Das Paket ist klein, den Block lasse ich weg" | Der Block steckt im Auftrag `packets/<id>.prompt.md`; der Reviewer bekommt diese eine Datei, nicht den Bereich allein. |
+| „Das Paket ist klein, den Block lasse ich weg" | Der Block steckt im Paket-Auftrag `packets/<id>.prompt.md`; der Reviewer bekommt diese eine Datei, nicht den Bereich allein. |
 | „Das Audit meldet nur ein fehlendes Paket, ich nenne es trotzdem fertig" | Dann steht „unvollständig" mit dem Paket in der Übergabe. |
 | „Ich fasse zwei Pakete in einem Review zusammen" | `record` nimmt je Paket genau ein Ergebnis an; der Zuschnitt war der Zweck. |
 | „Ich nehme den Originalbereich, das ist einfacher" | Bei Hilfscommits zeigt er das ganze Branch-Diff, nicht das Paket. Nimm `<von>..<bis>` aus `counterparts`. |
