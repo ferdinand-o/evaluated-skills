@@ -69,7 +69,7 @@ Drei Durchsetzungsgrade, die jede Skill pro Gate deklariert — und eine Sprachr
 - **G2 Maschinelles Urteil** — ein Skript fällt das Urteil, der Aufruf bleibt freiwillig. Formulierung: „meldet Verstoß". Das ist der Normalfall in allen vierzehn Specs.
 - **G3 Hook** — `PreToolUse`/`Stop` in `settings.json` erzwingt es unabhängig vom Modell. Formulierung: „blockiert".
 
-**Kein G2-Gate darf sich „blockiert" nennen.** Die Specs 06, 07, 08 und 09 tun das derzeit („Blocker", „blockieren", „Abnahme-Blocker") und überschätzen damit ihre eigene Härte. Lohnend ist G3 nur dort, wo der Schaden irreversibel ist: `migration_gate.py` (08) und `check_ledger.py` (01) bekommen ein Hook-Snippet unter `assets/hooks/`, das der Nutzer bewusst installiert. Alles andere bleibt G2 und sagt das auch.
+**Kein G2-Gate darf sich „blockiert" nennen.** Die Specs 06, 07, 08 und 09 tun das derzeit („Blocker", „blockieren", „Abnahme-Blocker") und überschätzen damit ihre eigene Härte. Lohnend ist G3 nur dort, wo der Schaden irreversibel ist: `migration_gate.py` (08), `check_ledger.py` (01) und `decide_log.py guard` (28) bekommen ein Hook-Snippet unter `assets/hooks/`, das der Nutzer bewusst installiert. Alles andere bleibt G2 und sagt das auch.
 
 ### 5 · Routing
 
