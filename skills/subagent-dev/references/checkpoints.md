@@ -141,7 +141,12 @@ Prüfpunkt `base..HEAD`. Die Schalter für den Plan von deep-review kommen aus
   kennzeichnen. Nur die übrigen gehen in den Fix-Pfad.
 - **Keine Grenze von Verifikationen.** deep-review vereinigt die Funde aller Pakete in
   `.skills/cache/deep-review/<lauf>/findings.json`, ohne abzustimmen und ohne Status
-  `offen`; jeder Fund geht in den Fix-Pfad.
+  `offen`; jeder Fund außer einem widerlegten geht in den Fix-Pfad.
+- **Prüfen vor dem Bericht** (Profil `checkpoint` oder `--verify`): nach `merge` erst
+  `verify --run <lauf>`, je Auftrag ein Prüfer (Sonnet),
+  `verdict --run <lauf> --number <n> <datei>`, dann erneut `merge`; danach `report` und
+  `audit`. Fehlt einem Auftrag das Urteil, meldet `audit` `unverified`, und der Lauf ist
+  unvollständig.
 - **Übergabe:** deep-review nennt Lauf-ID, Bericht, Zahl der Funde und Abdeckung. Sagt sie
   „unvollständig", fehlen Pakete: den Lauf mit seinen Befehlen und `--run <lauf>` fortsetzen,
   nie mit einem zweiten `plan` über denselben Bereich (das gäbe einen zweiten Lauf). Erst

@@ -3521,7 +3521,7 @@ def test_f9_plan_since_returns_what_it_wrote(tmp_path, monkeypatch):
 
 FINDING_KEYS = ["file", "line", "summary", "failure_scenario", "packets", "reused_from", "sources"]
 AUDIT_KEYS = ["_meta", "complete", "coverage", "missing", "stale", "lost_findings",
-              "report_mismatch", "no_block", "below_level"]
+              "forged_verdicts", "report_mismatch", "no_block", "below_level"]
 
 
 def _payload(tmp_path, data, name="funde.json"):
@@ -7007,9 +7007,10 @@ def test_b_cp4r1_f1_skill_md_follows_report_and_prompt():
     skill = _doc("skills/deep-review/SKILL.md")
     flat = _flat(skill)
     assert len(skill.splitlines()) <= 150
-    # Schritt 6: Bericht vom Skript, kein toter Link auf die entfernte Vorlage.
+    # Schritt 7 (vor Prüfpunkt 8 Schritt 6): Bericht vom Skript, kein toter Link auf die
+    # entfernte Vorlage.
     assert "report-template" not in skill
-    step6 = flat[flat.index("6. **Bericht, Audit, Aufräumen.**"):flat.index("## Profile und Fokus")]
+    step6 = flat[flat.index("7. **Bericht, Audit, Aufräumen.**"):flat.index("## Profile und Fokus")]
     assert "review_kit.py\" report --run <lauf>" in step6
     assert "nur unter `## Einordnung` am Ende" in step6
     assert step6.index("report --run") < step6.index("audit --run") < step6.index("cleanup --run")
@@ -8884,7 +8885,8 @@ def test_b_verdict_needs_evidence(tmp_path, capsys):
     assert sorted(p.name for p in (directory / "verify").iterdir()) == ["1.md", "3.md", "4.md"]
     order = (directory / "verify" / "1.md").read_text(encoding="utf-8")
     assert order.startswith("<!-- skill: deep-review | schema: 1 | generated: python "
-                            f"scripts/review_kit.py verify --run {run} | finding: 1 -->")
+                            f"scripts/review_kit.py verify --run {run} | finding: 1 | key: "
+                            f"{kit._finding_key(findings[0])} -->")
     bis = plan["packets"][0]["range"].rpartition("..")[2]       # Commit: `bis` des Pakets p1
     for needle in ("a/x.py", "Zeile: 3", "x = 8", bis, "verify/1/work/", "-I", "bestätigt",
                    "widerlegt", "unklar", '"urteil"', '"beleg"', "konkreten Ablauf"):
@@ -8908,7 +8910,8 @@ def test_b_verdict_needs_evidence(tmp_path, capsys):
     assert "widerlegt" in capsys.readouterr().err
     assert give(1, {"urteil": "widerlegt", "beleg": "x.py:3 `x = 8` ist gültig"}) == 0
     assert give(3, {"urteil": "bestätigt"}) == 0
-    data = json.loads((verdicts / "1.json").read_text(encoding="utf-8"))
+    data = json.loads((verdicts / f"{kit._finding_key(findings[0])}.json").read_text(
+        encoding="utf-8"))
     assert data["_meta"]["skill"] == "deep-review" and data["_meta"]["run"] == run
     assert data["verdict"] == "widerlegt" and data["verdict_evidence"].startswith("x.py:3")
 
@@ -8948,3 +8951,215 @@ def test_b_verdict_needs_evidence(tmp_path, capsys):
     text = kit.render_report(directory2)
     assert "Urteile" not in text and "unverified" not in kit.audit(directory2, None)
     assert "verify" not in plain
+
+
+# --- Prüfpunkt 8, Runde 1: Urteile hängen am Fund, nicht an der Position ----------------------
+
+def _cp8_run(kit, root, **options):
+    """Lauf über zwei Pakete (p1: a/x.py, p2: b/y.py), `counterparts` gelaufen, nichts
+    aufgezeichnet."""
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False, **options)
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    directory = _run_path(root, plan)
+    return json.loads((directory / "plan.json").read_text(encoding="utf-8")), run, directory
+
+
+def _cp8_record(kit, root, tmp_path, plan, packet, findings):
+    run = plan["_meta"]["run"]
+    assert _cli(kit, root, "record", "--run", run, "--packet", packet, "--tool", "/code-review",
+                _payload(tmp_path, _object(plan, packet, findings), f"{run}-{packet}.json")) == 0
+
+
+def _cp8_give(kit, root, tmp_path, run, number, data):
+    return _cli(kit, root, "verdict", "--run", run, "--number", number,
+                _payload(tmp_path, data, f"urteil-{number}.json"))
+
+
+def _cp8_verdicts(directory):
+    data = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    return [(f["file"], f.get("verdict")) for f in data]
+
+
+def test_cp8r1_f1_docs_name_verify_and_verdict():
+    skill = (REPO_ROOT / "skills/deep-review/SKILL.md").read_text(encoding="utf-8")
+    checkpoints = (REPO_ROOT / "skills/subagent-dev/references/checkpoints.md").read_text(
+        encoding="utf-8")
+    for text in (skill, checkpoints):
+        assert "verify --run <lauf>" in text
+        assert "verdict --run <lauf> --number <n>" in text
+    assert len(skill.splitlines()) <= 150
+    # Der Schritt steht zwischen Vereinigen und Bericht.
+    assert skill.index("merge --run <lauf>") < skill.index("verify --run <lauf>") \
+        < skill.index("report --run <lauf>")
+
+
+def test_cp8r1_f2_since_takes_the_verdicts_of_reused_findings(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    git(root, "checkout", "--quiet", "-b", "fix", "t1")
+    first = kit.build_plan(root, "base..t1", "standard", "bugs", None, False, verify=True)
+    id1, dir1 = first["_meta"]["run"], _run_path(root, first)
+    held = _finding("a.py", 5, "load wirft ungefangen")
+    _record(kit, root, first, "p1", [held])
+    kit.merge(dir1)
+    assert _cli(kit, root, "verdict", "--run", id1, "--number", 1,
+                _payload(tmp_path, {"urteil": "widerlegt", "beleg": "a.py:5 fängt ab"})) == 0
+    kit.merge(dir1)
+    assert _cp8_verdicts(dir1) == [("a.py", "widerlegt")]
+
+    # Folgelauf: a.py unverändert übernommen, mit dem Urteil; ein dritter Lauf behält es.
+    _commit_only(root, "fix c2", "c.py", SINCE_C + "# geprüft\n")
+    second = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False, verify=True)
+    id2 = second["_meta"]["run"]
+    done = kit.plan_since(root, id2, [id1])
+    [back] = done["file_keys"]["a.py"]["findings"]
+    assert back["verdict"] == "widerlegt" and back["verdict_evidence"] == "a.py:5 fängt ab"
+    dir2 = _run_path(root, second)
+    plan2 = json.loads((dir2 / "plan.json").read_text(encoding="utf-8"))
+    for packet in plan2["packets"]:
+        _record(kit, root, plan2, packet["id"], [])
+    kit.merge(dir2)
+    assert _cp8_verdicts(dir2) == [("a.py", "widerlegt")]
+    assert kit.write_verify(dir2) == []
+    kit.write_report(dir2)
+    audit = kit.audit(dir2, None)
+    assert audit["unverified"] == [] and audit["complete"] is True, audit
+    third = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False, verify=True)
+    again = kit.plan_since(root, third["_meta"]["run"], [id2])
+    assert again["file_keys"]["a.py"]["findings"][0]["verdict"] == "widerlegt"
+
+
+def test_cp8r1_f3_newer_verdict_wins_over_higher_number(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _verify_run(kit, root, tmp_path, verify=True)
+    findings = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    key = kit._finding_key(findings[0])
+    digest = kit._plan_digest(plan, run)
+    folder = directory / "verdicts"
+    # Zwei Urteile alter Form (E8, `verdicts/<n>.json`) zum selben Fund: 3.json zuerst, 2.json
+    # später — das spätere gilt, nicht die höhere Nummer.
+    now = dt.datetime.now().timestamp()
+    for name, given, moment in (("3.json", "unklar", now - 100), ("2.json", "bestätigt", now - 50)):
+        kit.write_json(folder / name, {"generated": "alt", "run": run, "plan": digest},
+                       {"number": int(name[0]), "finding": key, "verdict": given})
+        os.utime(folder / name, (moment, moment))
+    kit.merge(directory)
+    assert _cp8_verdicts(directory)[0] == ("a/x.py", "bestätigt")
+    # Ein neues Urteil (mit `recorded`) ersetzt beide.
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "x.py:3"}) == 0
+    assert json.loads((folder / f"{key}.json").read_text(encoding="utf-8"))["_meta"]["recorded"]
+    kit.merge(directory)
+    assert _cp8_verdicts(directory)[0] == ("a/x.py", "widerlegt")
+    # recorded geht vor mtime: ein altes Urteil mit jüngerer mtime, aber älterem recorded.
+    kit.write_json(folder / "7.json", {"generated": "alt", "run": run, "plan": digest,
+                                       "recorded": "2000-01-01T00:00:00+00:00"},
+                   {"number": 7, "finding": key, "verdict": "unklar"})
+    kit.merge(directory)
+    assert _cp8_verdicts(directory)[0] == ("a/x.py", "widerlegt")
+
+
+def test_cp8r1_f5_verdict_only_from_verdicts_folder(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _verify_run(kit, root, tmp_path, verify=True)
+    path = directory / "findings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for finding in data["findings"]:
+        finding["verdict"] = "bestätigt"                     # von Hand, ohne `verdict`
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    kit.write_report(directory)
+    audit = kit.audit(directory, None)
+    assert audit["unverified"] == [1, 3, 4] and audit["complete"] is False, audit
+    assert audit["forged_verdicts"] == [1, 2, 3, 4]
+    lines = kit.render_report(directory).splitlines()
+    assert "- Urteile: 0 bestätigt, 0 widerlegt, 0 unklar, 3 offen" in lines
+    assert "- `a/x.py:3` — Grenze falsch" in lines
+    # Mit echten Urteilen und merge: nichts gefälscht, alles beurteilt.
+    for number in (1, 3, 4):
+        assert _cp8_give(kit, root, tmp_path, run, number,
+                         {"urteil": "widerlegt", "beleg": f"x.py:{number}"}) == 0
+    kit.merge(directory)
+    kit.write_report(directory)
+    audit = kit.audit(directory, None)
+    assert audit["forged_verdicts"] == [] and audit["complete"] is True, audit
+    # Ein Urteil in findings.json, das nicht zu verdicts/ passt, gilt als offen.
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["findings"][0]["verdict"] = "bestätigt"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    audit = kit.audit(directory, None)
+    assert audit["forged_verdicts"] == [1] and audit["unverified"] == [1], audit
+
+
+def test_cp8r1_f6_verdict_mark_only_with_verify(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _verify_run(kit, root, tmp_path)
+    assert "verify" not in plan
+    kit.write_verify(directory)
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "x.py:3"}) == 0
+    kit.merge(directory)
+    assert _cp8_verdicts(directory)[0] == ("a/x.py", "widerlegt")
+    lines = kit.render_report(directory).splitlines()
+    assert "- `a/x.py:3` — Grenze falsch" in lines
+    assert not any("[widerlegt]" in line or line.startswith("- Urteile:") for line in lines)
+
+
+def test_cp8r1_f7_f8_verify_skips_judged_and_clears_old_orders(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _verify_run(kit, root, tmp_path, verify=True)
+    orders = directory / "verify"
+    assert [p.name for p in kit.write_verify(directory)] == ["1.md", "3.md", "4.md"]
+    work = orders / "1" / "work"
+    work.mkdir(parents=True)
+    (work / "notiz.txt").write_text("x\n", encoding="utf-8")
+    (orders / "9.md").write_text("alter Auftrag\n", encoding="utf-8")
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "x.py:3"}) == 0
+    assert _cp8_give(kit, root, tmp_path, run, 3, {"urteil": "unklar"}) == 0
+    # Ohne merge: das Urteil in verdicts/ genügt, Fund 1 und 3 bekommen keinen Auftrag mehr.
+    assert [p.name for p in kit.write_verify(directory)] == ["4.md"]
+    assert sorted(p.name for p in orders.iterdir() if p.is_file()) == ["4.md"]
+    assert (work / "notiz.txt").is_file()                    # Arbeitsordner bleiben
+    kit.merge(directory)
+    assert [p.name for p in kit.write_verify(directory)] == ["4.md"]
+
+
+def test_cp8r1_f9_verdict_goes_to_the_finding_of_its_order(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _cp8_run(kit, root, verify=True)
+    _cp8_record(kit, root, tmp_path, plan, "p2", [_finding("b/y.py", 4, "B")])
+    kit.merge(directory)
+    kit.write_verify(directory)                              # 1.md für B
+    order = (directory / "verify" / "1.md").read_text(encoding="utf-8")
+    [b] = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    assert f"| key: {kit._finding_key(b)} -->" in order.splitlines()[0]
+    # Inzwischen wird p1 angenommen: A steht jetzt an Position 1.
+    _cp8_record(kit, root, tmp_path, plan, "p1", [_finding("a/x.py", 3, "A")])
+    kit.merge(directory)
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "y.py:4"}) == 0
+    kit.merge(directory)
+    assert _cp8_verdicts(directory) == [("a/x.py", None), ("b/y.py", "widerlegt")]
+
+
+def test_cp8r1_f10_new_verdict_does_not_overwrite_another_finding(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _cp8_run(kit, root, verify=True)
+    _cp8_record(kit, root, tmp_path, plan, "p2", [_finding("b/y.py", 4, "B")])
+    kit.merge(directory)
+    kit.write_verify(directory)
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "y.py:4"}) == 0
+    kit.merge(directory)
+    _cp8_record(kit, root, tmp_path, plan, "p1", [_finding("a/x.py", 3, "A")])
+    kit.merge(directory)
+    assert [p.name for p in kit.write_verify(directory)] == ["1.md"]     # nur A
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "bestätigt"}) == 0
+    kit.merge(directory)
+    assert _cp8_verdicts(directory) == [("a/x.py", "bestätigt"), ("b/y.py", "widerlegt")]
+    kit.write_report(directory)
+    audit = kit.audit(directory, None)
+    assert audit["unverified"] == [] and audit["complete"] is True, audit

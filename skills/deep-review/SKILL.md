@@ -64,9 +64,10 @@ keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD b
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" merge --run <lauf>
    ```
-   Schreibt `findings.json`; Funde derselben Datei im Abstand von höchstens drei Zeilen werden
-   einer, alle Quellen bleiben darin.
-6. **Bericht, Audit, Aufräumen.** `report --run <lauf>` schreibt `report.md` im Laufordner;
+   Schreibt `findings.json`; Funde einer Datei bis drei Zeilen auseinander werden einer.
+6. **Prüfen** (Profil `checkpoint` oder `--verify`): `verify --run <lauf>`, je Auftrag ein Prüfer
+   (Sonnet), `verdict --run <lauf> --number <n> <datei>`, dann erneut `merge`.
+7. **Bericht, Audit, Aufräumen.** `report --run <lauf>` schreibt `report.md` im Laufordner;
    eigene Einordnung nur unter `## Einordnung` am Ende, davor änderst du nichts:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" report --run <lauf>
