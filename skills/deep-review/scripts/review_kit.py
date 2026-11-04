@@ -1183,12 +1183,20 @@ def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile:
 # zählt jede Zeile der Pfad-Dateien als neu. Die Hilfscommits je Paket baut wie immer
 # `make_packet_range` (temporärer Index, E6).
 
-COUNTERPART_REF_RE = re.compile(r"- Gegenstelle .*? \[(.+?):\d+\]: ")   # Ort einer Gegenstelle
+# Orte, die die Sammler in einen Eintrag schreiben (`Collected`): Gegenstelle, `raise … at`,
+# `inherited … at`, `deklariert:`, die Wegzeilen nach `geändert: …; Weg:` (Ort der Zeile und
+# `[datei:zeile]` der Weitergabe) — je Treffer Datei und Zeile.
+COUNTERPART_REF_RE = re.compile(r"- Gegenstelle .*? \[(.+?):(\d+)\]: ")   # Ort einer Gegenstelle
+AT_REF_RE = re.compile(r"\s+(?:raise|inherited)\b.* at (.+):(\d+)$")
+DECLARED_REF_RE = re.compile(r"\s+deklariert: (.+):(\d+)$")
+FLOW_HEAD_RE = re.compile(r"\s+geändert: .*; Weg:$")
+FLOW_REF_RE = re.compile(r" {4}(.+?):(\d+): ")
+FLOW_CALL_REF_RE = re.compile(r"\S+ -> .*\[(.+?):(\d+)\]$")
 RTL_LINE_RE = re.compile(r"\s*Besitz \(RTL\): ")   # Angabe ohne Datei im Repo
 PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Gegenstellen in Dateien dieses Pakets stehen nicht im "
                    "Block — diese Dateien reviewt dieses Paket selbst; Gegenstellen in anderen "
-                   "Dateien (auch anderer Pakete des Pfads) und Besitz-Defaults der RTL stehen "
-                   "hier.")
+                   "Dateien oder Spannen (auch anderer Pakete des Pfads) und Besitz-Defaults der "
+                   "RTL stehen hier.")
 
 
 def _path_list(paths) -> list:
@@ -1220,18 +1228,23 @@ def _path_list(paths) -> list:
 def _path_files(repo: Path, target: str, paths: list) -> list:
     """Die Dateien der `paths` im Baum von `target` (Ordner rekursiv, auch Symlinks und
     Submodule), ohne `.skills/`, sortiert — ein `ls-tree` über alle Pfade (in Stücken,
-    `_literal_chunks`). Ein Pfad ohne Datei dort: KitError."""
+    `_literal_chunks`). Ein Pfad ohne Datei dort: KitError — geprüft je Pfad per Bisektion
+    in der sortierten Liste (`path` selbst oder der erste Eintrag ab `path/`)."""
     files: set[str] = set()
     for chunk in _literal_chunks(paths):
         out = _git(repo, "ls-tree", "-r", "-z", "--name-only", "--full-tree", target, "--",
                    *chunk)
         files.update(p for p in out.split("\0") if p and not _under_skills(p))
+    ordered = sorted(files)
     for path in paths:
         prefix = "" if path == "." else path + "/"
-        if not any(f == path or f.startswith(prefix) for f in files):
+        pos = bisect.bisect_left(ordered, path)
+        hit = pos < len(ordered) and ordered[pos] == path
+        pos = bisect.bisect_left(ordered, prefix)
+        if not (hit or (pos < len(ordered) and ordered[pos].startswith(prefix))):
             raise KitError(f"Pfad {path!r} fehlt am Ziel {target[:SHORT_SHA_LEN]} "
                            "(oder enthält nur .skills/)")
-    return sorted(files)
+    return ordered
 
 
 def _tree_without(repo: Path, target: str, files: list) -> str:
@@ -1246,15 +1259,34 @@ def _tree_without(repo: Path, target: str, files: list) -> str:
         return _git(repo, "write-tree", env=env).strip()
 
 
-def _leaving_path(entries, inside) -> list:
-    """Die Gegenstellen-Einträge, die die Dateien `inside` verlassen: mindestens eine ihrer
-    Gegenstellen (`- Gegenstelle … [<datei>:<zeile>]`) liegt außerhalb von `inside`, der
-    Eintrag nennt keine, oder er trägt eine Angabe ohne Datei im Repo (`Besitz (RTL)`,
-    `RTL_LINE_RE`). Idempotent."""
+def _entry_refs(lines) -> list:
+    """Die Orte `(datei, zeile)` eines Eintrags nach seiner Überschrift: jede Zeilenform der
+    Sammler mit Ort (`COUNTERPART_REF_RE`, `AT_REF_RE`, `DECLARED_REF_RE`, die Wegzeilen nach
+    `FLOW_HEAD_RE` mit `FLOW_REF_RE` und `FLOW_CALL_REF_RE`)."""
+    refs, in_flow = [], False
+    for line in lines[1:]:
+        if in_flow and (m := FLOW_REF_RE.match(line)):
+            refs.append((m[1], int(m[2])))
+            if c := FLOW_CALL_REF_RE.match(line[m.end():]):
+                refs.append((c[1], int(c[2])))
+            continue
+        in_flow = bool(FLOW_HEAD_RE.match(line))
+        m = (COUNTERPART_REF_RE.match(line) or AT_REF_RE.match(line)
+             or DECLARED_REF_RE.match(line))
+        if m:
+            refs.append((m[1], int(m[2])))
+    return refs
+
+
+def _leaving_path(entries, inside, spans) -> list:
+    """Die Gegenstellen-Einträge, die das Paket verlassen: mindestens einer ihrer Orte
+    (`_entry_refs`) liegt nicht in den Dateien `inside` oder dort außerhalb der Spannen `spans`
+    (`_in_spans`, eine Datei ohne Spanne zählt ganz), der Eintrag nennt keinen, oder er trägt
+    eine Angabe ohne Datei im Repo (`Besitz (RTL)`, `RTL_LINE_RE`). Idempotent."""
     out = []
     for entry in entries:
-        refs = [m[1] for line in entry["lines"] if (m := COUNTERPART_REF_RE.match(line))]
-        if (not refs or any(ref not in inside for ref in refs)
+        refs = _entry_refs(entry["lines"])
+        if (not refs or any(f not in inside or not _in_spans(spans, f, n) for f, n in refs)
                 or any(RTL_LINE_RE.match(line) for line in entry["lines"])):
             out.append(entry)
     return out
@@ -1289,10 +1321,10 @@ def build_path_plan(repo, paths, profile, focus, with_tests, *, level=None, targ
     Der Plan trägt `mode: "path"` und `paths`, dazu `range` = `<base>..<target>` (ein
     Diff-Bereich über einen Baum, kein Log-Bereich), `log_base` null und `root` false; sonst
     dieselben Felder und Dateien wie `build_plan`; Speicher und Schlüssel ungefiltert — erst
-    `write_counterparts` behält je Paket nur Einträge, die dessen Dateien verlassen
-    (`_leaving_path`). Bekannte Grenze: Weil jede Zeile der Pfad-Dateien als geändert zählt,
-    lösen die Sammler jeden Aufruf auf (Auflösung, raise-Scans, Delphi-Units bei Bedarf),
-    auch die, deren Einträge der Filter danach verwirft; bei `--path .` oder einem großen
+    `write_counterparts` behält je Paket nur Einträge, die dessen Dateien und Spannen
+    verlassen (`_leaving_path`). Bekannte Grenze: Weil jede Zeile der Pfad-Dateien als
+    geändert zählt, lösen die Sammler jeden Aufruf auf (Auflösung, raise-Scans, Delphi-Units
+    bei Bedarf), auch die, deren Einträge der Filter danach verwirft; bei `--path .` oder einem großen
     Quellordner kostet `plan` entsprechend Zeit. Vorab filtern ginge nicht: Wohin ein Aufruf
     führt, steht erst nach der Auflösung fest. `level` wie bei
     `build_plan`. Ein leerer Pfad, ein Pfad, den das Ziel nicht hat, oder ein unbekanntes Ziel
@@ -5030,8 +5062,8 @@ def write_counterparts(repo, run_id):
     Stelle dieses Filters) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
     Pfad-Modus (`mode: path`): Die Sammler bekommen den Span des Plans (Basis ist ein Baum, `range`
     kein Log-Bereich), und je Paket bleiben nur Einträge, die die Dateien dieses Pakets
-    verlassen (`_leaving_path` über `files` des Pakets — die einzige Stelle dieses Filters;
-    der Speicher ist ungefiltert); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
+    verlassen (`_leaving_path` über `files` und Spannen des Pakets — die einzige Stelle
+    dieses Filters; der Speicher ist ungefiltert); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
     Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
@@ -5044,7 +5076,8 @@ def write_counterparts(repo, run_id):
     if not isinstance(plan_range, str) or not plan_range:
         raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
     # Pfad-Modus: `range` geht über einen Baum und ist kein Log-Bereich; die Sammler bekommen
-    # den Span des Plans, und je Paket bleiben nur Gegenstellen außerhalb seiner Dateien.
+    # den Span des Plans, und je Paket bleiben Einträge mit einem Ort außerhalb seiner Dateien
+    # und Spannen.
     path_mode = plan.get("mode") == "path"
     if path_mode:
         plan_range = Span(plan["base"], plan["target"], plan["log_base"])
@@ -5075,7 +5108,7 @@ def write_counterparts(repo, run_id):
             found = _collect_all(repo, plan_range, packet["files"])
         if found is not None and path_mode:
             found = found._replace(entries=_leaving_path(
-                found.entries, {str(f) for f in packet["files"]}))
+                found.entries, {str(f) for f in packet["files"]}, spans))
         collected.append((packet, rng, found))
     # Die Hinweise erst nach allen Paketen: Delphi-Units werden bei Bedarf gescannt, und
     # welche nicht aufgehen, darf nicht von der Reihenfolge der Pakete abhängen.

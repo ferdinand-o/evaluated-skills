@@ -8195,3 +8195,72 @@ def test_b_path_files_one_ls_tree(tmp_path, monkeypatch):
     assert len(calls) == 1
     with pytest.raises(kit.KitError, match=r"Pfad 'fehlt' fehlt am Ziel"):
         kit._path_files(root, head, ["src", "fehlt"])
+
+
+SPAN_M = ("def run():\n    try:\n        return f(1)\n    except ValueError:\n        return None\n"
+          + "".join(f"\n\ndef pad_{i}():\n    return {i}\n" for i in range(3))
+          + "\n\ndef f(x):\n    if x:\n        raise KeyError(\"m\")\n    return x\n")
+
+
+def test_b_path_mode_inside_per_span(tmp_path, monkeypatch):
+    """Funde 5077 und 8131: Eine in Spannen geteilte Datei — der Aufrufer mit `except
+    ValueError` in Spanne 1, die werfende Gegenstelle in Spanne 2 eines anderen Pakets: der
+    Eintrag bleibt im Block des Aufrufer-Pakets."""
+    kit = _kit()
+    root = _bare_repo(tmp_path / "repo", {"src/m.py": SPAN_M})
+    monkeypatch.setattr(kit, "PATH_SPLIT_AT", 5)
+    monkeypatch.setattr(kit, "PATH_PACKET_SIZE", 12)
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    spans = {p["id"]: kit._packet_spans(p) for p in plan["packets"]}
+    caller = next(p for p in plan["packets"] if kit._in_spans(spans[p["id"]], "src/m.py", 4))
+    f_line = SPAN_M.splitlines().index("def f(x):") + 1
+    assert spans[caller["id"]] and not kit._in_spans(spans[caller["id"]], "src/m.py", f_line)
+    items = {i["packet"]: i for i in kit.write_counterparts(root, plan["_meta"]["run"])}
+    block = (root / items[caller["id"]]["path"]).read_text(encoding="utf-8")
+    assert "except ValueError" in block and f"[src/m.py:{f_line}]" in block
+    assert "KeyError" in block and items[caller["id"]]["counterparts"] >= 1
+
+
+FLOW_A = ("from src.b import h\n\n\ndef g(flag=False):\n    return h(flag=flag)\n\n\n"
+          "def run():\n    return g(flag=True)\n")
+FLOW_B = "def h(flag=False):\n    if flag:\n        return 1\n    return 0\n"
+
+
+def test_b_path_mode_keeps_flow_leaving_packet(tmp_path, monkeypatch):
+    """Fund 1256: Liegt die Gegenstelle im Paket, führt aber eine `Weg:`-Zeile in eine Datei
+    eines anderen Pakets, bleibt der Eintrag im Block; liegen alle Orte im Paket, fällt er."""
+    kit = _kit()
+    root = _bare_repo(tmp_path / "repo", {"src/__init__.py": "", "src/a.py": FLOW_A,
+                                          "src/b.py": FLOW_B})
+    monkeypatch.setattr(kit, "PATH_SPLIT_AT", 5)
+    monkeypatch.setattr(kit, "PATH_PACKET_SIZE", 10)
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    owner = next(p for p in plan["packets"] if "src/a.py" in p["files"])
+    assert "src/b.py" not in owner["files"]
+    items = {i["packet"]: i for i in kit.write_counterparts(root, plan["_meta"]["run"])}
+    block = (root / items[owner["id"]]["path"]).read_text(encoding="utf-8")
+    assert "ruft g(...)" in block and "src/b.py:2: if flag:" in block
+    entry = {"file": "src/a.py", "line": 9, "kind": "call",
+             "lines": ["### src/a.py:9 ruft g(...)", "- Gegenstelle g [src/a.py:4]: g(flag)",
+                       "  geändert: flag=True; Weg:", "    src/a.py:5: if flag: x"]}
+    assert kit._leaving_path([entry], {"src/a.py"}, {}) == []
+    for ref in ("    raise KeyError at src/b.py:3", "  deklariert: src/b.py:1",
+                "  inherited Create(AOwner) at src/b.py:7",
+                "    src/a.py:5: flag -> h(flag=...) [src/b.py:1]"):
+        moved = {**entry, "lines": entry["lines"] + [ref]}
+        assert kit._leaving_path([moved], {"src/a.py"}, {}) == [moved], ref
+
+
+def test_b_path_files_same_for_file_dir_and_dot(tmp_path):
+    """Fund 1229: `_path_files` prüft je Pfad per Bisektion; das Ergebnis für Datei-, Ordner-
+    und `.`-Pfade bleibt gleich, ein Präfix ohne `/` (`src` gegen `srcx`) zählt nicht."""
+    kit = _kit()
+    root = _path_repo(tmp_path / "repo")
+    head = _rev(root, "HEAD")
+    every = kit._path_files(root, head, ["."])
+    assert "srcx/c.py" in every and "lib/errors.py" in every and every == sorted(every)
+    assert kit._path_files(root, head, ["lib/errors.py"]) == ["lib/errors.py"]
+    assert kit._path_files(root, head, ["srcx"]) == ["srcx/c.py"]
+    assert kit._path_files(root, head, [".", "src"]) == every
+    with pytest.raises(kit.KitError, match=r"Pfad 'sr' fehlt am Ziel"):
+        kit._path_files(root, head, ["src", "sr"])
