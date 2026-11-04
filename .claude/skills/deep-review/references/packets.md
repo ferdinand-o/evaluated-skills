@@ -222,8 +222,9 @@ Beleg ([review-brief.md](review-brief.md#rückgabeformat)). Über 40.000 Zeichen
 die Größe, abgebrochen wird nicht.
 
 Die Kopfzeile von `packets/<id>.md` endet auf `| counterparts: <n> -->`: die Zahl der
-Gegenstellen des Pakets, maschinenlesbar. Fehlt der Gegenstellen-Speicher von `plan`, liest
-der Bericht die Spalte Gegenstellen dort, nicht aus dem Text des Blocks. Nur bei einem Block
+Gegenstellen des Pakets, maschinenlesbar. Der Bericht liest die Spalte
+Gegenstellen aus diesem Feld, nicht aus dem Text des Blocks; nur ohne Block (`counterparts`
+lief noch nicht) zählt er aus dem Speicher von `plan`. Nur bei einem Block
 ohne dieses Feld (Lauf vor dieser Regel) gilt die alte Zählzeile `<n> Stelle(n) nach der
 Sammelregel`; ohne beides (Fokus `quality`) ergibt sich „—“.
 

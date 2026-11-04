@@ -183,7 +183,8 @@ Dateien (<n>):
 
 - `| counterparts: <n>` in der Kopfzeile ist die Zahl der Gegenstellen des Pakets, maschinenlesbar
   (Bericht und `packets.md`); bei Fokus `quality` fehlt das Feld. Im Pfad-Modus zählen nur
-  Einträge, die das Paket verlassen; die Spalte Gegenstellen im Bericht zeigt dieselbe Zahl.
+  Einträge, die das Paket verlassen; die Spalte Gegenstellen im Bericht liest dieses Feld
+  (nur ohne Block zählt sie aus dem Speicher).
 - Hat eine Zeile mehrere Einträge für denselben Namen, trägt die Überschrift die Spalte:
   `### <datei>:<zeile>:<spalte> …`.
 - Zeilen unter einer Gegenstelle bei TypeScript/JavaScript und Namens-Rückfall: `wirft: <Typ>`
