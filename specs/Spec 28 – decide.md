@@ -326,10 +326,25 @@ dazu die Dauer. Bei `git` nehmen `-C`, `-c`, `--git-dir`, `--work-tree`, `--name
 Verzeichnis für die folgenden Teile; `cd` ohne Ziel, `cd -` oder ein Ziel mit `$`/`~` macht es
 unbekannt, und ein folgender Push fragt dann nach.
 
-**Heredocs.** Vor dem Zerlegen schneidet `guard` jeden Heredoc-Rumpf (`<<WORT`, `<<-WORT`,
-`<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) aus dem Text; der Rumpf ist kein Befehl. Steht der
-Heredoc an `psql`, `sqlite3` oder `mysql`, prüft `guard` den Rumpf auf `DROP`, `TRUNCATE` und
-`DELETE FROM` ohne `WHERE` wie ein Argument.
+**Heredocs.** Vor dem Zerlegen schneidet `guard` einen Heredoc-Rumpf (`<<WORT`, `<<-WORT`,
+`<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) nur aus, wenn die Zeile bis `<<` ausgeglichene
+Anführungszeichen hat und das Programm davor keine Shell ist (`bash`, `sh`, `zsh`, `dash`,
+`ksh`, `ssh`); bei einer Shell bleibt der Rumpf Befehlstext und wird wie jeder andere geprüft.
+Steht der Heredoc an einem SQL-Programm der Tabelle, prüft `guard` den Rumpf auf `DROP`,
+`TRUNCATE` und `DELETE FROM` ohne `WHERE` wie ein Argument; die SQL-Programme kommen aus
+derselben Liste wie die Tabelle.
+
+**Was guard nicht zerlegt, wird Rückfrage** (Prüfpunkt nach Task 3, Runde 2). Steht im Text ein
+Programmname der Tabelle und dazu `$(` oder ein Backtick außerhalb von einfachen
+Anführungszeichen, antwortet `guard` mit `ask` und „Befehl nicht zerlegbar“, statt die
+Ersetzung auszuwerten. `(` und `)` trennen keine Teile; führende `(` und schließende `)` an
+einem Wort fallen weg (`(cd x && git reset --hard)` und `find . \( … \) -delete` bleiben
+lesbar), und nach einem Wort mit `(` oder `)` gilt das Verzeichnis als unbekannt. `cd` wirkt
+nur über `&&`, `||`, `;` und Zeilenumbruch, nicht über `|` oder `&`; `pushd`, `popd` und ein
+`cd`, dessen Ziel nicht feststeht, machen das Verzeichnis unbekannt. Bei `find` werden die Wörter
+nach `-exec`, `-execdir`, `-ok`, `-okdir` bis `;` oder `+` als eigener Befehl geprüft.
+Wrapper werden auch mit Pfad erkannt (`/usr/bin/env`); `sudo -r/-t/--role/--type` nehmen ihren
+Wert mit, `env -S` → `ask`. Ohne Refspec fragt ein Push auch bei `remote.<r>.mirror=true`.
 
 **Weitere Befehle** (Prüfpunkt nach Task 3), alle „immer Rückfrage“: `unsaved-work` —
 `git switch -f`, `git switch --discard-changes`, `git reset --merge`, `git reset --keep`;
@@ -340,9 +355,10 @@ Heredoc an `psql`, `sqlite3` oder `mysql`, prüft `guard` den Rumpf auf `DROP`, 
 `poetry publish`.
 
 **Kosten je Bash-Aufruf.** Enthält der Text keinen Programmnamen der Tabelle (ein Regex vor
-jedem Zerlegen), endet `guard` ohne Git-Aufruf und ohne Ausgabe. Das Snippet ruft `python3`
-und fällt auf `python` zurück; fehlen beide, gibt es die Meldung „[decide] Hook ungeprüft —
-kein Python“.
+jedem Zerlegen, genau eine Stelle im Code), endet `guard` ohne Git-Aufruf und ohne Ausgabe; die
+Repo-Wurzel bestimmt es erst danach und nur einmal je Verzeichnis. Das Snippet nimmt `python3`,
+sonst `python`, jeweils nur, wenn es mindestens Python 3.8 ist; sonst gibt es die Meldung
+„[decide] Hook ungeprüft — kein Python 3“.
 
 **Push-Ziel.** Optionen ohne Wirkung auf das Ziel (`-u`, `--set-upstream`, `-v`, `--verbose`,
 `-q`, `--quiet`, `--no-verify`, `--progress`, `--porcelain`) werden übersprungen; `-n` und
@@ -398,7 +414,8 @@ Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis
 Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1). Spec 00 §4 nennt bisher nur
 08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort. Weiterhin nicht gesehen
 (known-limits): ein Ziel, das erst die Shell ausrechnet (`$VAR`, Globs), Wrapper außerhalb der
-Liste. `(` und `)` trennen Teile wie `;`; nach einer Subshell gilt wieder das vorige Verzeichnis.
+Liste, ein Programm, das Befehle aus einer Datei oder Variable ausführt (`bash script.sh`,
+`eval "$X"`).
 
 ### Contract
 
