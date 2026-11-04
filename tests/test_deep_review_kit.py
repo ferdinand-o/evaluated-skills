@@ -6726,3 +6726,196 @@ def test_b_cp3_f9_one_header_helper_and_one_id_check(tmp_path, monkeypatch):
         kit.write_prompt(directory, {**plan["packets"][0], "range": "a..b"}, "Block", "medium")
     with pytest.raises(kit.KitError, match="geprüft: p1"):
         kit.record(directory, "p1", "/code-review", "-")
+
+
+# --- Spec 28, Prüfpunkt 3, Runde 2 ------------------------------------------------------------
+
+PACKET_BLOCK_FILE_RE = re.compile(r"packets/[\w<>-]+\.md")     # packets/<id>.md, nicht .prompt.md
+
+
+def test_b_cp3r2_f7_prompt_and_brief_hand_over_the_prompt_file(tmp_path):
+    kit = _kit()
+    for focus in ("bugs", "quality", "security"):
+        (tmp_path / focus).mkdir()
+        root = _two_packet_repo(tmp_path / focus)
+        plan = kit.build_plan(root, "base..HEAD", "standard", focus, 10, False)
+        kit.write_counterparts(root, plan["_meta"]["run"])
+        prompt = _prompt(_run_path(root, plan), "s1" if focus == "security" else "p1")
+        assert "unten in dieser Datei" in _flat(_task_part(prompt)), focus
+        assert not PACKET_BLOCK_FILE_RE.search(prompt), focus
+        assert "`[]`" not in prompt, focus
+    # Die Referenz: Fassung 1 gibt packets/<id>.prompt.md weiter, keine Fassung und kein
+    # Rückgabeformat nennt packets/<id>.md als Übergabe oder `[]` als Antwort.
+    brief = _doc("skills/deep-review/references/review-brief.md")
+    for head in ("## Fassung 1: `/code-review`, Fokus `bugs`", "## Fassung 2: Fokus `quality`",
+                 "## Fokus `security`", "## Rückgabeformat"):
+        section = _doc_section(brief, head)
+        assert not PACKET_BLOCK_FILE_RE.search(section), head
+        assert "`[]`" not in section, head
+    assert "packets/<id>.prompt.md" in _doc_section(brief, "## Fassung 1: `/code-review`, Fokus `bugs`")
+
+
+def test_b_cp3r2_f2_stufe_only_with_code_review(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    # Fokus security: der Auftrag nennt kein /code-review und verlangt keine Stufe.
+    (tmp_path / "sec").mkdir()
+    sec_root = _two_packet_repo(tmp_path / "sec")
+    sec = kit.build_plan(sec_root, "base..HEAD", "standard", "security", None, False)
+    kit.write_counterparts(sec_root, sec["_meta"]["run"])
+    sec_dir = _run_path(sec_root, sec)
+    prompt = _prompt(sec_dir, "s1")
+    for word in ("/code-review", '"stufe"', "`stufe`", "Stufe:", "<stufe>"):
+        assert word not in prompt, word
+    marked = json.loads((sec_dir / "plan.json").read_text(encoding="utf-8"))
+    obj = {"marke": marked["packets"][0]["marker"], "findings": []}
+    data = _rec(kit, sec_dir, "s1", "security-review", _payload(tmp_path, obj, "s1.json"))
+    assert data["_meta"]["tool"] == "/security-review" and "level" not in data
+    audit = kit.audit(sec_dir, None)
+    assert audit["below_level"] == [] and audit["no_block"] == []
+    # plan nennt bei security nicht /code-review.
+    capsys.readouterr()
+    assert _cli(kit, sec_root, "plan", "--range", "base..HEAD", "--focus", "security") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "Reviews: 1 × /security-review oder Review im Hauptkontext" in out
+    assert not any("/code-review" in line for line in out)
+
+    # Fokus bugs: nur /code-review braucht stufe; andere Werkzeuge dürfen sie weglassen.
+    (tmp_path / "bugs").mkdir()
+    root = _two_packet_repo(tmp_path / "bugs")
+    plan, run, directory = _marked_run(kit, root)
+    bare = _object(plan, "p1", [])
+    del bare["stufe"]
+    with pytest.raises(kit.KitError, match="stufe"):
+        kit.record(directory, "p1", "code-review", _payload(tmp_path, bare, "cr.json"))
+    data = kit.record(directory, "p1", "Review ohne /code-review",
+                      _payload(tmp_path, bare, "main.json"))
+    assert "level" not in data
+    low = _object(plan, "p2", [], stufe="low")
+    assert kit.record(directory, "p2", "Review ohne /code-review",
+                      _payload(tmp_path, low, "low.json"))["level"] == "low"
+    audit = kit.audit(directory, None)
+    assert audit["below_level"] == ["p2"] and audit["no_block"] == []
+
+    # --since: ein security-Ergebnis ohne Stufe zählt mit der Stufe seines Plans.
+    since_root = _since_repo(tmp_path / "since")
+    first = kit.build_plan(since_root, "base..t1", "standard", "security", None, False)
+    kit.write_counterparts(since_root, first["_meta"]["run"])
+    first_dir = _run_path(since_root, first)
+    marked = json.loads((first_dir / "plan.json").read_text(encoding="utf-8"))
+    obj = {"marke": marked["packets"][0]["marker"], "findings": [_finding("a.py", 5, "S")]}
+    assert "level" not in _rec(kit, first_dir, "s1", "security-review", _payload(tmp_path, obj))
+    follow = kit.build_plan(since_root, "base..t2", "standard", "security", None, False)
+    done = kit.apply_since(follow, [first_dir])
+    assert done["file_keys"]["a.py"]["reused_from"] == first["_meta"]["run"]
+
+
+def test_b_cp3r2_f8_no_block_flag_always_marks_the_result(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    # Passende Marke, ohne stufe, --no-block: no_block gesetzt, kein level.
+    bare = _object(plan, "p1", [])
+    del bare["stufe"]
+    data = _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, bare, "p1.json"),
+                no_block=True)
+    assert data["no_block"] is True and "level" not in data
+    # Passende Marke mit stufe: geprüft und als level gespeichert, no_block bleibt.
+    with pytest.raises(kit.KitError, match="stufe"):
+        _rec(kit, directory, "p2", "/code-review",
+             _payload(tmp_path, _object(plan, "p2", [], stufe="mittel"), "bad.json"),
+             no_block=True)
+    data = _rec(kit, directory, "p2", "/code-review",
+                _payload(tmp_path, _object(plan, "p2", [], stufe="low"), "p2.json"),
+                no_block=True)
+    assert data["no_block"] is True and data["level"] == "low"
+    audit = kit.audit(directory, None)
+    assert audit["no_block"] == ["p1", "p2"] and audit["below_level"] == ["p2"]
+
+
+def test_b_cp3r2_f3_marker_up_front_and_size_hint(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    for packet in plan["packets"]:
+        marker = packet["marker"]
+        lines = _prompt(directory, packet["id"]).rstrip("\n").splitlines()
+        assert lines[0].startswith("<!-- skill: deep-review")
+        assert lines[1].startswith(f"Paket-Marke: {marker} — ")
+        assert "letzten Zeile" in lines[1] and "Rückgabeformat" in lines[1]
+        assert lines[-1] == f"Paket-Marke: {marker}"
+        assert [line for line in lines if line == f"Paket-Marke: {marker}"] == [lines[-1]]
+    # Das Objekt mit der Marke wird angenommen wie bisher.
+    assert _rec(kit, directory, "p1", "/code-review",
+                _payload(tmp_path, _object(plan, "p1", []), "p1.json"))["marke"] == \
+        plan["packets"][0]["marker"]
+    # counterparts nennt eine große prompt.md mit ihrer Größe, ohne abzubrechen.
+    assert kit.PROMPT_WARN_CHARS == 40000
+    capsys.readouterr()
+    assert _cli(kit, root, "counterparts", "--run", run) == 0
+    assert "Zeichen" not in capsys.readouterr().out
+    monkeypatch.setattr(kit, "PROMPT_WARN_CHARS", 100)
+    assert _cli(kit, root, "counterparts", "--run", run) == 0
+    out = capsys.readouterr().out
+    for pid in ("p1", "p2"):
+        size = len(_prompt(directory, pid))
+        assert size > 100
+        assert f"packets/{pid}.prompt.md hat {size} Zeichen" in out, out
+
+
+def test_b_cp3r2_f6_since_takes_results_by_their_stored_level(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    soll = tmp_path / "soll.md"
+    soll.write_text("# Soll\n", encoding="utf-8")
+    first = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False, "medium")
+    run_1 = first["_meta"]["run"]
+    kit.write_counterparts(root, run_1)
+    directory = _run_path(root, first)
+    marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    obj = _object(marked, "p1", [_finding("a.py", 5, "A")], stufe="high")
+    assert _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, obj))["level"] == "high"
+    follow = kit.build_plan(root, "base..t2", "checkpoint", "bugs", None, False)
+    assert follow["level"] == "high"
+    done = kit.apply_since(follow, [directory])
+    assert done["file_keys"]["a.py"]["reused_from"] == run_1
+    assert done["file_keys"]["a.py"]["findings"] == [_found(first, _finding("a.py", 5, "A"))]
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--profile", "checkpoint",
+                "--soll-file", soll, "--since", run_1) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "Übernommen (--since): 1 Datei(en)" in lines
+    assert not any(line.startswith("Übergangen") for line in lines)
+
+
+def test_b_cp3r2_f5_plan_reads_earlier_results_once(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    plan_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False, "high")
+    run_a = plan_a["_meta"]["run"]
+    kit.write_counterparts(root, run_a)
+    directory = _run_path(root, plan_a)
+    marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    obj = _object(marked, "p1", [_finding("a.py", 5, "A")], stufe="medium")
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, obj))
+    reads, digests = [], []
+    real_read, real_digest = kit._read_result, kit._plan_digest
+
+    def read_spy(path, *args, **kwargs):
+        reads.append(Path(path))
+        return real_read(path, *args, **kwargs)
+
+    def digest_spy(plan, run_id, *args, **kwargs):
+        digests.append(run_id)
+        return real_digest(plan, run_id, *args, **kwargs)
+
+    monkeypatch.setattr(kit, "_read_result", read_spy)
+    monkeypatch.setattr(kit, "_plan_digest", digest_spy)
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--level", "high", "--since", run_a) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"Übergangen: {run_a} p1 (Stufe medium unter high)" in lines
+    assert [p for p in reads if p.parent.parent.name == run_a] == [directory / "results" / "p1.json"]
+    assert digests.count(run_a) == 1

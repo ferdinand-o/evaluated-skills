@@ -33,18 +33,19 @@ Je Paket in Plan-Reihenfolge ein Aufruf:
   Übernahme (eine Datei in `file_keys` hat `reused_from`) bekommt auch ein einzelnes Paket
   Hilfscommits, und dann ist es deren `<von>..<bis>`. Ein `--since`, das nichts übernommen
   hat, lässt den Plan, wie er war.
-- Den Inhalt von `packets/<id>.md` gibst du **jedem Unteragenten unverändert** mit: nicht
-  gekürzt, nicht umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht
-  aufgelösten Stellen und eine Kappung bleiben stehen.
-- Bei Delphi-Dateien im Paket gibst du zusätzlich [delphi.md](delphi.md) mit.
-- Im Profil `checkpoint` hängst du das Soll aus `--soll-file` an, als eigenen Abschnitt
+- Den Inhalt von `packets/<id>.prompt.md` (Auftrag, Block, Rückgabeformat und Marke) gibst du
+  **jedem Unteragenten unverändert** mit: nicht gekürzt, nicht umformuliert, nicht nach
+  Verdacht ausgewählt. Auch der Satz zu den nicht aufgelösten Stellen und eine Kappung bleiben
+  stehen.
+- Bei Delphi-Dateien im Paket steht [delphi.md](delphi.md) schon darin.
+- Im Profil `checkpoint` steht das Soll aus `--soll-file` schon darin, als eigener Abschnitt
   „Soll“ unter dem Auftrag.
 
 Auftrag an den Reviewer (Platzhalter in `<…>` ersetzt du):
 
-> Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) auf Fehler im Verhalten. Unten steht der
-> Paketblock mit den Gegenstellen der geänderten Aufrufe, `except`-Klauseln und (Delphi)
-> Freigaben, mechanisch gesammelt.
+> Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) auf Fehler im Verhalten. Der Paketblock
+> mit den Gegenstellen der geänderten Aufrufe, `except`-Klauseln und (Delphi) Freigaben,
+> mechanisch gesammelt, steht unten in dieser Datei.
 >
 > 1. **Prüfe den Vertrag der Gegenstelle.** Nimm jeden Eintrag unter „Gegenstellen“ und
 >    vergleiche, was die geänderte Stelle annimmt, mit dem, was die Gegenstelle zusagt:
@@ -63,7 +64,7 @@ Auftrag an den Reviewer (Platzhalter in `<…>` ersetzt du):
 >
 > Paketblock:
 >
-> `<Inhalt von packets/<id>.md, unverändert>`
+> `<der Block, von counterparts unten eingesetzt>`
 
 Der Fund an einer Gegenstelle hat als `file` die Datei der Gegenstelle, nicht die des
 Aufrufers. Der Aufrufer steht dann in `summary`.
@@ -76,6 +77,7 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 
 > Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) ausschließlich auf Wartbarkeit, Doppelung
 > und Vereinfachung. Fehler im Verhalten und Sicherheit melde nicht, auch wenn du welche siehst.
+> Der Paketblock steht unten in dieser Datei.
 >
 > Melde einen Fund nur mit Grundlage, und nenne sie in `summary` nach „Grundlage:“. Gültig
 > sind drei:
@@ -94,7 +96,7 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 >
 > Paketblock:
 >
-> `<Inhalt von packets/<id>.md, unverändert>`
+> `<der Block, von counterparts unten eingesetzt>`
 
 ## Fokus `security`
 
@@ -133,8 +135,9 @@ Kopfzeile und in der Übergabe, wie beim Review ohne /code-review.
 Was oben steht, entscheidest du als Hauptagent. Der Reviewer bekommt in beiden Fällen nur
 diesen Auftrag; `counterparts` schreibt ihn in `packets/s1.prompt.md`.
 
-> Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) ausschließlich auf Sicherheit. Unten steht
-> der Paketblock mit den Gegenstellen der geänderten Aufrufe als Kontext.
+> Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) ausschließlich auf Sicherheit. Der
+> Paketblock mit den Gegenstellen der geänderten Aufrufe steht als Kontext unten in dieser
+> Datei.
 >
 > 1. **Eingaben von außen.** Wo kommen Daten aus Anfrage, Datei, Umgebung, Kommandozeile oder
 >    Netz in die geänderten Zeilen, und werden sie geprüft, bevor sie wirken?
@@ -148,11 +151,11 @@ diesen Auftrag; `counterparts` schreibt ihn in `packets/s1.prompt.md`.
 > 5. Melde nur, was du mit einem konkreten Ablauf belegen kannst: Eingabe, Weg, Schaden.
 >    Fehler im Verhalten ohne Folge für die Sicherheit und Wartbarkeit melde nicht.
 > 6. **Rückgabe.** Antworte nur mit dem JSON-Objekt aus dem [Rückgabeformat](#rückgabeformat)
->    (`marke`, `stufe`, `findings`), bei keinem Fund mit `"findings": []`.
+>    (`marke`, `findings`), bei keinem Fund mit `"findings": []`.
 >
 > Paketblock:
 >
-> `<Inhalt von packets/<id>.md, unverändert>`
+> `<der Block, von counterparts unten eingesetzt>`
 
 ## Review ohne /code-review
 
@@ -201,12 +204,14 @@ Regeln:
 Die Antwort ist ein JSON-Objekt `{"marke", "stufe", "findings"}`:
 
 - `marke`: die Marke aus der letzten Zeile von `packets/<id>.prompt.md` (`Paket-Marke: …`),
-  genau so.
-- `stufe`: die Stufe, mit der `/code-review` wirklich lief (`low`, `medium`, `high`, `xhigh`
-  oder `max`). Die Stufe in `packets/<id>.prompt.md` ist die Vorgabe für den Aufruf
-  `/code-review <stufe>`, kein Wert zum Abschreiben: Lief es niedriger, steht hier die
-  niedrigere, und `audit` nennt das Paket unter `below_level`.
-- `findings`: die Liste der Funde, bei keinem Fund `[]`.
+  genau so; dieselbe Marke steht vorn in der Zeile nach der Kopfzeile.
+- `stufe`: nur nach `/code-review` die Stufe, mit der es wirklich lief (`low`, `medium`,
+  `high`, `xhigh` oder `max`). Die Stufe in `packets/<id>.prompt.md` ist die Vorgabe für den
+  Aufruf `/code-review <stufe>`, kein Wert zum Abschreiben: Lief es niedriger, steht hier die
+  niedrigere, und `audit` nennt das Paket unter `below_level`. Nach `/security-review` und
+  bei einem Review im Hauptkontext gibt es keine Stufe; das Feld fehlt dann (der Auftrag von
+  `s1` verlangt keines), und es gilt die Stufe des Plans.
+- `findings`: die Liste der Funde, leer bei keinem Fund.
 
 Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py record` annimmt:
 
@@ -232,7 +237,9 @@ Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py recor
 - Ein Paket ohne Funde liefert das Objekt mit `"findings": []`. Weglassen des Ergebnisses ist
   kein Ergebnis; `audit` meldet das Paket dann unter `missing`.
 - Eine bloße Liste der Funde nimmt `record` nur mit `--no-block` an, also ohne
-  Gegenstellen-Block; `audit` nennt das Paket dann unter `no_block`.
+  Gegenstellen-Block; `audit` nennt das Paket dann unter `no_block`. `--no-block` vermerkt
+  das immer, auch bei einem Objekt mit passender Marke; eine genannte `stufe` wird auch dann
+  geprüft und gespeichert.
 - Weitere Felder fallen weg.
 
 `record` prüft jeden Fund so, und **ein** ungültiger Fund macht die ganze Liste ungültig; es
@@ -240,7 +247,7 @@ wird nichts geschrieben:
 
 | Prüfung | angenommen | abgewiesen |
 | --- | --- | --- |
-| Antwort | Objekt mit der Marke des Pakets unter `marke`, einer Stufe unter `stufe` und der Liste unter `findings`; mit `--no-block` auch eine bloße Liste oder ein Objekt ohne passende Marke; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, ohne `--no-block` eine bloße Liste, keine oder eine fremde Marke, keine oder eine unbekannte Stufe; stdin kein UTF-8, Datei kein UTF-8 |
+| Antwort | Objekt mit der Marke des Pakets unter `marke`, der Liste unter `findings` und bei `--tool code-review` einer Stufe unter `stufe` (sonst optional); mit `--no-block` auch eine bloße Liste oder ein Objekt ohne passende Marke; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, ohne `--no-block` eine bloße Liste, keine oder eine fremde Marke, bei `--tool code-review` ohne `--no-block` keine Stufe, eine unbekannte Stufe; stdin kein UTF-8, Datei kein UTF-8 |
 | Fund | ein Objekt | alles andere, etwa ein Text oder eine Liste |
 | `file` | nicht leerer Text; `\` wird `/`, `./` fällt weg, ein absoluter Pfad im Repo wird relativ | fehlt, leer oder kein Text; ein Glied `..`; ein absoluter Pfad außerhalb des Repos |
 | `line` | ganze Zahl ≥ 0; Text `12`, `L12`, `12-14`, `12 - 14`, `12–14`, `L12-L14`, `12 bis 14` (vertauschte Enden werden sortiert, `12-12` wird 12); `null`, fehlt oder leerer Text wird `null` | negative Zahl, Kommazahl, `true`/`false`, Objekt, Liste; Text ohne diese Form, etwa `"near 40"`, `"ca. 12"` oder `"12, 15"` |
