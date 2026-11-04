@@ -137,8 +137,9 @@ hat nur die Einordnung.
 
 Die Kopfzeile von `packets/<id>.md` endet auf `| counterparts: <n> -->`: die Zahl der
 Gegenstellen des Pakets, maschinenlesbar. Fehlt der Gegenstellen-Speicher von `plan`, liest
-der Bericht die Spalte Gegenstellen dort, nicht aus dem Text des Blocks. Ein Block ohne dieses
-Feld (Lauf vor dieser Regel, Fokus `quality`) ergibt „—“.
+der Bericht die Spalte Gegenstellen dort, nicht aus dem Text des Blocks. Nur bei einem Block
+ohne dieses Feld (Lauf vor dieser Regel) gilt die alte Zählzeile `<n> Stelle(n) nach der
+Sammelregel`; ohne beides (Fokus `quality`) ergibt sich „—“.
 
 ## Datei-Schlüssel
 
@@ -231,13 +232,16 @@ geschrieben) nennen weiter den Lauf aus `file_keys`.
 `audit` vergleicht alles vor der ersten Zeile `## Einordnung` mit dem Text von `report`. Für
 die Einordnung danach gelten zwei einfache Regeln. Vorher werden HTML-Kommentare `<!-- … -->`
 entfernt, auch über mehrere Zeilen; Text davor und danach bleibt je auf seiner Zeile.
+`<!--` und `-->` zählen nur außerhalb von Inline-Code: in einer Backtick-Spanne derselben
+Zeile (`` `<!--` ``) sind sie Text.
 
 - **Keine Vollständigkeit bei Lücken.** Meldet das Audit `missing`, `stale` oder
   `lost_findings`, ist jede Zeile ein Eintrag in `report_mismatch`, die eines der Wörter
-  `vollständig`, `fertig`, `komplett` (auch mit -e, -em, -en, -er, -es) oder `complete` als
-  ganzes Wort enthält, Groß/Klein egal, und nicht zugleich `unvollständig` oder `incomplete`.
+  `vollständig`, `fertig`, `komplett` (auch mit -e, -em, -en, -er, -es) als ganzes Wort
+  enthält, Groß/Klein egal, und nicht zugleich `unvollständig`. Englische Wörter zählen
+  nicht: ``audit meldet `complete: false` `` zitiert das Audit-Feld und meldet nicht.
   Es gibt keine Suche nach Verneinungen: „nicht vollständig“ meldet, „unvollständig“ nicht.
-  „Vollständigkeit“, „fertigstellen“ und „completed“ sind andere Wörter. „un-vollständig“
+  „Vollständigkeit“ und „fertigstellen“ sind andere Wörter. „un-vollständig“
   ist nicht die Schreibweise `unvollständig` und meldet. „Die Abdeckung ist unvollständig;
   vollständig wird sie erst nach p3.“ meldet nicht.
 - **Kurz bei einem Paket.** Bei `split: false` höchstens `EINORDNUNG_MAX_LINES` Textzeilen,
@@ -245,7 +249,9 @@ entfernt, auch über mehrere Zeilen; Text davor und danach bleibt je auf seiner 
   Kommentare leer sind.
 
 Das Werkzeug gilt als `/code-review`, wenn sein Name (nach `record`) `/code-review` ist oder mit
-`/code-review ` beginnt, etwa `/code-review high`. Dann steht im Bericht der Hinweis zu
+`/code-review ` beginnt, etwa `/code-review high`. `record` ergänzt den Schrägstrich auch bei
+`code-review high` und bei einem Git-Bash-Pfad, dessen letzter Pfadteil so beginnt
+(`C:/Program Files/Git/code-review high`); ebenso für `security-review`. Dann steht im Bericht der Hinweis zu
 `--max-findings`. `record` verlangt dort wie bei jedem Werkzeug mit Stufe eine `stufe`.
 
 ## Fortsetzen eines Laufs
