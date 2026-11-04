@@ -303,7 +303,8 @@ zusammengesetzte Wörter entsteht, sieht `guard` nicht (known-limits).
 2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
    (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text, kein
    Befehl, wenn direkt davor `-m` (auch gebündelt, `-am`), `--message`, `-F`, `--body`, `--title` oder `--notes` steht;
-   er endet am ersten Endwort und wird vor den folgenden Schritten durch ein leeres Wort ersetzt. Ein `\` am Zeilenende
+   er endet am ersten Endwort und wird vor den folgenden Schritten durch ein leeres Wort ersetzt —
+   außer im Text steht `bash`, `sh`, `zsh`, `dash`, `ksh` oder `eval`. Ein `\` am Zeilenende
    verbindet zwei Zeilen zu einer; `;`, `&` und `|` innerhalb von Anführungszeichen trennen
    keine Befehle.
 3. **Muster.** Jedes Muster der Tabelle läuft über den ganzen übrigen Text. Trifft eines außer
@@ -311,9 +312,10 @@ zusammengesetzte Wörter entsteht, sieht `guard` nicht (known-limits).
    Zeichenkette steht (unnötige Rückfrage statt übersehenem Befehl).
 4. **Push genau.** Trifft nur das Push-Muster, prüft `guard`, ob der Text **schlicht** ist: außerhalb
    von Anführungszeichen kein `$`, kein Backtick, kein `(`, `)`, `<`, `>` (außer `2>&1` und
-   `>/dev/null`), kein `|`, kein Heredoc und kein `cd`, `pushd`, `popd`; innerhalb doppelter
+   `>/dev/null` als ganzes Wort), kein `|`, kein Heredoc und kein `cd`, `pushd`, `popd`; innerhalb doppelter
    Anführungszeichen kein unmaskiertes `$(` und kein unmaskierter Backtick. Die Teile zwischen
-   `&&` und `;` sind dann einfache Befehle, genau einer davon ist `git push`. Nur dann zerlegt
+   `&&` und `;` sind dann einfache Befehle, genau einer davon ist `git push`, und jeder andere
+   git-Befehl ist `add`, `commit`, `status`, `log`, `diff`, `show` oder `fetch`. Nur dann zerlegt
    `guard` diesen einen Teil mit `shlex.split` und bestimmt das Ziel nach „Push-Ziel“ unten; sonst
    `ask` mit „Befehl nicht schlicht“.
 
@@ -650,7 +652,7 @@ der Aufgabe nicht auslöst — vom Nutzer als Routing-Lücke dokumentiert statt 
 **Zyklus 2 (2026-11-04):** Plan `docs/superpowers/plans/2026-11-04-decide-slim.md`; Bau nach
 `skill-forge` (17) Schritt 3 bis 7. Gemessen wird danach: Zeilen von `decide_log.py` und
 SKILL.md vorher und nachher, Punkte in known-limits, Aufrufe bei der Übergabe (3 → 1), Evals mit
-Skill. **Stand 2026-11-04: gebaut** — `decide_log.py` 2245 → 2021 Zeilen (davon 216 neuer
+Skill. **Stand 2026-11-04: gebaut** — `decide_log.py` 2245 → 2030 Zeilen (davon 227 neuer
 optionaler Hook `guard`), SKILL.md 143 → 110, Übergabe ein Aufruf, Evals mit Skill 4 von 5 (Eval 2
 wie bisher rot), Stichprobe: `ask` in `claude -p` in beiden Modi abgelehnt
 (`docs/superpowers/reports/decide-report.md`, Abschnitt Zyklus 2).

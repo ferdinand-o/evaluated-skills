@@ -553,29 +553,54 @@ def test_hook_snippet(work, tmp_path):
     assert json.loads(done.stdout) == {"systemMessage": "[decide] Hook ungeprüft — kein Python"}
 
 
-# --- Nacharbeit aus dem Review: _read_untracked ----------------------------------------
-# Gehört inhaltlich zu check; steht hier, weil tests/test_decide_log.py nicht in der Allowlist
-# dieser Task liegt.
+# --- finaler Prüfpunkt Zyklus 2 --------------------------------------------------------
 
-def test_read_untracked_closes_descriptor_when_fdopen_fails(tmp_path, monkeypatch):
-    path = tmp_path / "a.txt"
-    path.write_text("a\n", encoding="utf-8")
-    opened, closed = [], []
-    real_open, real_close = os.open, os.close
+def test_guard_push_after_state_change_is_not_plain(pushed):
+    """Ein git-Befehl vor dem Push, der Zweig, Upstream oder Konfiguration ändern kann, macht ihn unschlicht."""
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/**"))
+    for command in ("git switch main && git push -u origin HEAD", "git checkout main && git push",
+                    "git config push.default matching; git push", "git -C . switch y && git push"):
+        assert reason(run(command, pushed)) == f"decide: push — {command}: {PLAIN}", command
+    assert run("git add a && git commit -m x && git status && git push origin x", pushed) == ""
 
-    def fake_open(*args, **kwargs):
-        fd = real_open(*args, **kwargs)
-        opened.append(fd)
-        return fd
 
-    def fake_close(fd):
-        closed.append(fd)
-        return real_close(fd)
+def test_guard_quoted_method(work):
+    """Eine Methode in Anführungszeichen zählt wie ohne."""
+    for command in ("curl -X 'DELETE' https://x", 'curl -X "POST" https://x', 'curl --request "DELETE" https://x',
+                    "gh api -X 'DELETE' repos/o/r", 'gh api --method "PATCH" repos/o/r'):
+        assert dl.guard_decision(command, work) == ("external", ALWAYS), command
+    for command in ("curl -X 'GET' https://x", 'gh api --method "GET" repos/o/r'):
+        assert dl.guard_decision(command, work) is None, command
 
-    def fail(*args, **kwargs):
-        raise OSError("fdopen kaputt")
-    monkeypatch.setattr(dl.os, "open", fake_open)
-    monkeypatch.setattr(dl.os, "close", fake_close)
-    monkeypatch.setattr(dl.os, "fdopen", fail)
-    assert dl._read_untracked(path) is None
-    assert opened and closed == opened
+
+def test_guard_rm_exempt_no_braces(work):
+    """Klammererweiterung ist ein Glob-Zeichen: keine Ausnahme."""
+    for command in ("rm -rf node_modules/{,../src}", "rm -rf /tmp/{,../home/u}"):
+        assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
+
+
+def test_guard_template_not_with_shell(work):
+    """Steht eine Shell oder `eval` im Text, bleibt die Vorlage Befehl, auch hinter `-m`."""
+    body = "\"$(cat <<'EOF'\nrm -rf src\nEOF\n)\""
+    for command in ("bash -c -m " + body, "bash -cm " + body, "sh -c -m " + body):
+        assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
+
+
+def test_guard_sql_shows_statement(work):
+    """Der Grund zeigt bei SQL die Anweisung, nicht den ersten Befehl des Texts."""
+    out = run("cd db && psql -c 'DROP TABLE orders'", work)
+    assert "DROP TABLE orders" in reason(out) and "— cd db" not in reason(out)
+
+
+def test_guard_redirect_only_whole_word(pushed):
+    """`>/dev/null` zählt nur als ganzes Wort."""
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/**"))
+    command = "git push origin x >/dev/null.bak"
+    assert reason(run(command, pushed)) == f"decide: push — {command}: {PLAIN}"
+
+
+def test_guard_cli_with_extra_args_exits_zero(work):
+    """`decide_log.py guard --` endet wie `guard` mit Exit 0."""
+    done = subprocess.run([sys.executable, str(SKILL_DIR / "scripts" / "decide_log.py"), "guard", "--"],
+                          input=payload("ls", work), capture_output=True, text=True, cwd=work)
+    assert done.returncode == 0 and done.stdout == "", done

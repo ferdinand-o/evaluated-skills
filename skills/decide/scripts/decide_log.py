@@ -1744,13 +1744,13 @@ GUARD_PATTERNS = tuple((category, command, _start(command) + condition) for cate
     ("push", "git push", ""), ("push", "gh pr merge", ""), ("push", "gh release create", ""),
     *(("external", f"gh {w}", "") for w in ("pr create", "pr comment", "pr close", "pr review", "pr edit", "issue create",
                                             "issue close", "issue comment", "repo delete", "release delete")),
-    ("external", "gh api", _has(r"-X\s*(?!(?i:get)\b)\w", r"--method[=\s]\s*(?!(?i:get)\b)\w", r"-[fF]",
+    ("external", "gh api", _has(r"-X\s*['\"]?(?!(?i:get)\b)\w", r"--method[=\s]\s*['\"]?(?!(?i:get)\b)\w", r"-[fF]",
                                 r"--(?:field|raw-field|input)" + _E)),
     *(("external", f"{program} publish", "") for program in ("npm", "yarn", "pnpm", "cargo", "uv", "poetry")),
     *(("external", command, "") for command in ("twine upload", "docker push", "terraform apply", "terraform destroy",
                                                 "kubectl apply", "kubectl delete")),
     ("external", "curl", _has(r"-[a-zA-WYZ]*[dFT]", r"--(?:data|form)[\w-]*", r"--(?:json|upload-file)" + _E,
-                              r"-[a-zA-Z]*X\s*(?!(?:GET|HEAD)\b)\w", r"--request[=\s]\s*(?!(?:GET|HEAD)\b)\w")),
+                              r"-[a-zA-Z]*X\s*['\"]?(?!(?:GET|HEAD)\b)\w", r"--request[=\s]\s*['\"]?(?!(?:GET|HEAD)\b)\w")),
     ("external", "wget", _has(r"--(?:post-data|post-file|method)" + _E)),
     ("data-delete", "rm", _has(r"-[a-zA-Z]*[rR]", r"--recursive" + _E)),      # Ausnahmeliste: `_rm_exempt`
     ("data-delete", "find", _has(r"-delete" + _E, rf"-(?:exec|execdir|ok|okdir)\s{_SEG}?{_W}rm{_E}")),
@@ -1768,13 +1768,17 @@ _GUARD_RES = [(category, command, re.compile(pattern)) for category, command, pa
 _PUSH_RE = next(regex for _, command, regex in _GUARD_RES if command == "git push")
 _PROGRAM_RE = re.compile(_W + "(?:" + "|".join(dict.fromkeys(c.split()[0] for _, c, _ in GUARD_PATTERNS)) + ")" + _E)
 _REST_RE = re.compile(_SEG)
+_SQL_RE = re.compile(_SQL, re.I | re.S)
+_SHELL_RE = re.compile(_W + r"(?:bash|sh|zsh|dash|ksh|eval)" + _E)   # dann bleibt die Vorlage Befehl
+# git-Befehle, die vor einem schlichten Push stehen dürfen: sie ändern weder Zweig noch Upstream noch Konfiguration
+_PUSH_SAFE_BEFORE = frozenset({"add", "commit", "status", "log", "diff", "show", "fetch"})
 # Rumpf der Commit-Vorlage von Claude Code: `"$(cat <<'WORT'` … `WORT` `)"` ist Text, kein Befehl — nur direkt
 # hinter einer Nachrichtenoption, nicht hinter `bash -c` oder `eval`.
 _TEMPLATE_RE = re.compile(r"((?<!\S)(?:-[a-zA-Z]*[mF]|--(?:message|body|title|notes))(?:=|\s+))"
                           r"\"\$\(cat <<-? ?(['\"])([A-Za-z_][\w.-]*)\2[ \t]*\n"
                           r"(?:(?!^[ \t]*\3[ \t]*$).)*^[ \t]*\3[ \t]*\n\s*\)\"", re.S | re.M)  # bis zum ersten Endwort
 _QUOTED_RE = re.compile(r"\\.|'[^']*'?|\"(?:\\.|[^\"\\])*\"?", re.S)
-_REDIRECT_OK_RE = re.compile(r"2>&1|[12]?>[ \t]*/dev/null")
+_REDIRECT_OK_RE = re.compile(r"(?:2>&1|[12]?>[ \t]*/dev/null)(?![^\s;&|])")
 _NOT_PLAIN_RE = re.compile(r"[$`()<>|]|(?<!&)&(?!&)|" + _W + r"(?:cd|pushd|popd)" + _E)
 _PUSH_QUIET = frozenset({"--set-upstream", "--verbose", "--quiet", "--no-verify", "--progress", "--porcelain"})
 RM_EXEMPT_PREFIX = ".skills/cache/"                 # Ausnahmeliste für `rm -r` (Annahme Spec 28: regenerierbar)
@@ -1799,7 +1803,7 @@ def _rm_exempt(rest):
             else:
                 paths.append((word, posixpath.normpath(word)))
         return bool(paths) and not any(
-            re.search(r"[~$`*?\[]", word) or ".." in word.split("/") or not (
+            re.search(r"[~$`*?\[{]", word) or ".." in word.split("/") or not (
                 path.startswith("/tmp/") if path.startswith("/")
                 else path.startswith(RM_EXEMPT_PREFIX) or RM_EXEMPT_PARTS & set(path.split("/")))
             for word, path in paths)
@@ -1814,8 +1818,11 @@ def _plain_push_part(text):
     for m in _REDIRECT_OK_RE.finditer(masked):
         masked, text = (s[:m.start()] + " " * len(m.group(0)) + s[m.end():] for s in (masked, text))
     cuts = [0] + [i for m in re.finditer(r"&&|;|\n", masked) for i in m.span()] + [len(text)]
-    pushes = [part for part in (text[a:b] for a, b in zip(cuts[::2], cuts[1::2])) if _PUSH_RE.search(part)]
-    if not _NOT_PLAIN_RE.search(masked) and len(pushes) == 1 and _PUSH_RE.match(pushes[0].strip()):
+    parts = [text[a:b].strip() for a, b in zip(cuts[::2], cuts[1::2])]
+    pushes = [part for part in parts if _PUSH_RE.search(part)]
+    others = [part.split()[1:2] for part in parts if part.split()[:1] == ["git"] and part not in pushes]
+    if (not _NOT_PLAIN_RE.search(masked) and len(pushes) == 1 and _PUSH_RE.match(pushes[0])
+            and all(word and word[0] in _PUSH_SAFE_BEFORE for word in others)):
         with suppress(ValueError):                      # ein Fehler von shlex: nicht schlicht
             return pushes[0], shlex.split(pushes[0])
     return None
@@ -1870,7 +1877,8 @@ def _guard_hit(command, root, cwd=None):
     """(Kategorie, Befehl, Grund) der Rückfrage oder None (Spec 28, Ablauf 1–4); Subprozesse nur im Push-Fall."""
     if not _PROGRAM_RE.search(command):
         return None
-    text, push = _TEMPLATE_RE.sub(r"\1''", command).replace("\\\n", " "), False
+    text = command if _SHELL_RE.search(command) else _TEMPLATE_RE.sub(r"\1''", command)
+    text, push = text.replace("\\\n", " "), False
     # `;`, `&`, `|` in Anführungszeichen trennen nicht: gleich lange Kopie ohne sie; SQL sieht den Text selbst
     scan = _QUOTED_RE.sub(lambda m: re.sub(r"[;&|]", " ", m.group(0)), text)
     for category, name, pattern in _GUARD_RES:
@@ -1878,7 +1886,8 @@ def _guard_hit(command, root, cwd=None):
             if name == "git push":
                 push = True
             elif not (name == "rm" and _rm_exempt(_REST_RE.match(scan, m.end()).group(0))):
-                return category, text[m.start():_REST_RE.match(scan, m.start()).end()], GUARD_ALWAYS
+                start = _SQL_RE.search(text).start() if name in _SQL_PROGRAMS else m.start()
+                return category, text[start:_REST_RE.match(scan, start).end()], GUARD_ALWAYS
     plain = _plain_push_part(text) if push else None
     if plain is None:
         return ("push", command, GUARD_PLAIN) if push else None
@@ -1967,7 +1976,7 @@ def build_parser():
 def main(argv):
     """Einstieg; `argv` ohne Programmnamen (None: `sys.argv[1:]`). Gibt den Exit-Code zurück."""
     argv = sys.argv[1:] if argv is None else list(argv)
-    if argv == ["guard"]:
+    if argv[:1] == ["guard"]:
         return _guard_main()                        # vor allem anderen: der Hook endet immer mit 0
     args = build_parser().parse_args(argv)
     root = repo_root(Path.cwd())

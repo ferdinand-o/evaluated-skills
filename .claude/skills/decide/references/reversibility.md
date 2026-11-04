@@ -116,7 +116,7 @@ das Versehen, nicht der verschleierte Befehl.
 2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
    (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text und wird
    durch ein leeres Wort ersetzt, wenn direkt davor `-m` (auch gebündelt, `-am`), `--message`, `-F`, `--body`,
-   `--title` oder `--notes` steht; er endet am ersten Endwort (hinter `bash -c` oder `eval` bleibt er Befehl). Ein `\` am Zeilenende
+   `--title` oder `--notes` steht; er endet am ersten Endwort. Steht irgendwo im Text `bash`, `sh`, `zsh`, `dash`, `ksh` oder `eval`, bleibt er Befehl. Ein `\` am Zeilenende
    verbindet zwei Zeilen zu einer; `;`, `&` und `|` innerhalb von Anführungszeichen trennen keine
    Befehle (die SQL-Muster sehen den Text unverändert).
 3. **Muster.** Jedes Muster läuft über den ganzen übrigen Text, mit Wortgrenzen (`/bin/rm` trifft,
@@ -126,11 +126,13 @@ das Versehen, nicht der verschleierte Befehl.
    `-m '…'`).
 4. **Push genau.** Trifft nur `git push`, muss der Text **schlicht** sein: außerhalb von
    Anführungszeichen kein `$`, kein Backtick, kein `(`, `)`, `<`, `>` (außer `2>&1` und
-   `>/dev/null`), kein `|`, kein einzelnes `&`, kein Heredoc und kein `cd`, `pushd`, `popd`;
+   `>/dev/null`, `2>/dev/null` als ganzes Wort), kein `|`, kein einzelnes `&`, kein Heredoc und kein `cd`, `pushd`, `popd`;
    innerhalb doppelter Anführungszeichen kein unmaskiertes `$(` und kein unmaskierter Backtick
    (Klammern und Backticks in `-m '…'` sind schlicht, ein Backtick in `-m "…"` nicht). Die
    Teile zwischen `&&`, `;` und Zeilenumbruch sind dann einfache Befehle, genau einer davon beginnt
-   mit `git … push`; nur ihn zerlegt guard mit `shlex.split`. Sonst — auch bei einem Fehler von
+   mit `git … push`, und jeder andere git-Befehl darunter ist `add`, `commit`, `status`, `log`,
+   `diff`, `show` oder `fetch` (ein `git switch main && git push` ändert das Ziel nach der
+   Prüfung); nur ihn zerlegt guard mit `shlex.split`. Sonst — auch bei einem Fehler von
    `shlex` — „Befehl nicht schlicht“.
 
 Diese Tabelle ist dieselbe wie `GUARD_PATTERNS` im Skript. Kurzoptionen zählen auch gebündelt

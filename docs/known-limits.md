@@ -2302,6 +2302,13 @@ Was ungemessen bleibt und wo es beißt, nach Themen:
   zweiten Befehls; ein zitiertes Wort, das wie eine Umleitung aussieht (`rm -rf build '2>' x`),
   fällt mit dem folgenden aus der Zielprüfung; ein `DELETE FROM` ohne `WHERE` im Heredoc, dem eine
   spätere Zeile mit `WHERE` folgt.
+- **Gemeldet am finalen Prüfpunkt, nicht behoben:** `git checkout <tree-ish> <pfad>` (`git
+  checkout main a.txt`) überschreibt Dateien ohne Rückfrage; `check --range ':/<text>'` findet die
+  Revision nicht, weil `^{commit}` an den Suchtext angehängt wird; ein schlichter Push startet bis zu
+  fünf git-Prozesse (einer davon `repo_root`, der mit `@{push}` in einem Aufruf ginge);
+  `guard_decision` trägt einen Parameter `root`, den nur Tests nutzen. Steht `sh` oder `bash` in
+  einer Commit-Nachricht, wird die Vorlage nicht ausgeblendet → unnötige Rückfrage, wenn die
+  Nachricht auch Befehlswörter enthält.
 - **Das Hook-Snippet prüft keine Python-Version.** Ein `python` 2 oder ein python3 vor 3.8 endet
   mit SyntaxError statt mit „[decide] Hook ungeprüft“.
 - **`test_guard_table_matches_reference` vergleicht nur Befehlsnamen und Kategorien.** Die Spalte

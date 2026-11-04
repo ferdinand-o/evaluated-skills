@@ -2269,3 +2269,29 @@ def test_brief_reference_sentence(capsys):
         dl.main(["brief", "--topic", "x"])
     assert exit_info.value.code == 2
     assert "brief" in capsys.readouterr().err
+
+
+# --- _read_untracked -------------------------------------------------------------------
+
+def test_read_untracked_closes_descriptor_when_fdopen_fails(tmp_path, monkeypatch):
+    path = tmp_path / "a.txt"
+    path.write_text("a\n", encoding="utf-8")
+    opened, closed = [], []
+    real_open, real_close = os.open, os.close
+
+    def fake_open(*args, **kwargs):
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def fake_close(fd):
+        closed.append(fd)
+        return real_close(fd)
+
+    def fail(*args, **kwargs):
+        raise OSError("fdopen kaputt")
+    monkeypatch.setattr(dl.os, "open", fake_open)
+    monkeypatch.setattr(dl.os, "close", fake_close)
+    monkeypatch.setattr(dl.os, "fdopen", fail)
+    assert dl._read_untracked(path) is None
+    assert opened and closed == opened

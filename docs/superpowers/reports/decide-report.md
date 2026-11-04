@@ -195,13 +195,13 @@ Nutzer geben, keine Tokenvernichtung. Plan `docs/superpowers/plans/2026-11-04-de
 
 | Messgröße | vorher (94526fe) | nachher |
 | --- | --- | --- |
-| `decide_log.py` Zeilen | 2245 | 2021 |
-| davon `guard` | — | 216 (Hook neu, optional, G3) |
+| `decide_log.py` Zeilen | 2245 | 2030 |
+| davon `guard` | — | 227 (Hook neu, optional, G3) |
 | SKILL.md Zeilen | 143 | 110 |
-| Punkte in known-limits (decide) | 42 | 50 |
+| Punkte in known-limits (decide) | 42 | 51 |
 | Aufrufe bei der Übergabe | 3 (`check`, `summary`, `open`) | 1 (`check`, ohne Dateien `open`) |
 | Unterbefehle | 7 mit `brief` | 7 mit `guard`, ohne `brief` |
-| Testfunktionen decide | 178 | 161 |
+| Testfunktionen decide | 178 | 168 |
 | Evals mit Skill | 4 von 5 | 4 von 5 |
 
 - **`check`** nimmt genau eine Revision und gibt Zusammenfassung und offene Fragen in derselben
@@ -213,8 +213,8 @@ Nutzer geben, keine Tokenvernichtung. Plan `docs/superpowers/plans/2026-11-04-de
   Der erste Entwurf zerlegte die Shell; nach zwei Fix-Runden mit je neuen Randfällen (guard bei
   gut 535 Zeilen, Datei bei 2323) entschied der Nutzer „Erkennen statt zerlegen“: Muster über den
   ganzen Text, genau zerlegt wird nur ein schlichter `git push`. Danach 202 Zeilen, nach zwei
-  Review-Runden 216.
-- **known-limits** wuchs um 8 Punkte: gestrichen sind 6 (`#-`/`#+`, Anzeigename „in <rev>“, drei zu
+  Review-Runden und dem finalen Prüfpunkt 227.
+- **known-limits** wuchs um 9 Punkte (einer davon sammelt die Reste des finalen Prüfpunkts): gestrichen sind 6 (`#-`/`#+`, Anzeigename „in <rev>“, drei zu
   `brief`, einer aus `brief` wanderte zum Auftrag); neu sind 5 zu `check` mit einer Revision, einer
   zum Auftrag als G1 und 7 zu `guard`. Die Zahl steigt, weil der Hook neu ist, nicht weil der Rest
   unsicherer wurde.
@@ -258,6 +258,10 @@ beiden Modi zu. Je ein Lauf; ohne installierte Skill.
 - Task 4 (SKILL.md, Sonnet): Vertragsprüfung fand die Schlusszeile nur gekürzt zitiert; im
   Hauptagenten ergänzt. Gestrichen wurden Contract-Punkte, die Eiserne Regel oder Ablauf schon
   tragen.
+- Finaler Prüfpunkt über `b0e02cd..HEAD` (decide-Dateien): 13 Funde, 8 im Hauptagenten behoben
+  (Push nach `git switch` in derselben Kette, Methode in Anführungszeichen bei `curl`/`gh api`,
+  Klammererweiterung bei `rm`, Vorlage hinter `bash -cm`, SQL-Anzeige, `>/dev/null` nur als Wort,
+  `guard --`, Test an den richtigen Ort), 5 nach known-limits.
 - Task 4 lief parallel zur Fix-Runde von `guard` in eigenem Worktree (keine gemeinsame Datei);
   beide wurden per Rebase gemergt.
 
