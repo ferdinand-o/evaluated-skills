@@ -8459,3 +8459,206 @@ def test_b_new_collectors_flow_through_counterpart_store(tmp_path, monkeypatch):
     block = (root / item["path"]).read_text(encoding="utf-8")
     assert "ruft check(...)" in block and "throw RangeError at src/util.ts:3" in block
     assert "nicht aufgelöst" in block
+
+
+# --- Prüfpunkt 7, Runde 1: Funde zu den Sammlern TypeScript und Namens-Rückfall -------------
+
+CP7_STORE = ("export class NotFoundError extends Error {}\n"
+             "export function load(id: string): string {\n"
+             "  if (!id) throw new NotFoundError(id);\n"
+             "  return id;\n"
+             "}\n")
+CP7_APP = ("import { load } from '../lib/store';\n"
+           "\n"
+           "export function get(id: string) {\n"
+           "  try {\n"
+           "    return load(id);\n"
+           "  } catch (e) {\n"
+           "    return null;\n"
+           "  }\n"
+           "}\n")
+
+
+def _cp7_repo(tmp_path, before, after):
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    return _commit_repo(root, before, after)
+
+
+def test_cp7_typescript_changed_catch_shows_throws_of_try_calls(tmp_path):
+    kit = _kit()
+    narrowed = CP7_APP.replace("    return null;\n",
+                               "    if (e instanceof TimeoutError) return null;\n    throw e;\n")
+    root = _cp7_repo(tmp_path, {"lib/store.ts": CP7_STORE, "src/app.ts": CP7_APP},
+                     {"src/app.ts": narrowed})
+    found = kit.collect_typescript(root, "base..HEAD", ["src/app.ts"])
+    assert [(e["line"], e["kind"]) for e in found.entries] == [(6, "except")]
+    assert found.entries[0]["lines"] == [
+        "### src/app.ts:6 catch (e)",
+        "- Gegenstelle load [lib/store.ts:2]: function load(id: string): string",
+        "  wirft: NotFoundError",
+        "    throw NotFoundError at lib/store.ts:3"]
+    # unverändertes catch: kein Eintrag
+    root2 = _cp7_repo(tmp_path / "b", {"lib/store.ts": CP7_STORE, "src/app.ts": CP7_APP},
+                      {"src/app.ts": CP7_APP.replace("get(id", "fetch(id")})
+    assert kit.collect_typescript(root2, "base..HEAD", ["src/app.ts"]).entries == []
+
+
+CP7_VIEW = ("export function renderA(a, b) {\n"
+            "  const v = <div><p>{a}</p>{b && <i>x</i>}</div>;\n"
+            "  if (!b) throw new RenderError('x');\n"
+            "  return v;\n"
+            "}\n"
+            "export function renderB(a, b) {\n"
+            "  const v = <p>Don't {a.map(x => (\n"
+            "    <i>{x}</i>\n"
+            "  ))}</p>;\n"
+            "  if (!b) throw new RenderError(\"y\");\n"
+            "  return v;\n"
+            "}\n")
+
+
+def test_cp7_jsx_tags_and_apostrophes_do_not_hide_braces(tmp_path):
+    kit = _kit()
+    main = "import { renderA, renderB } from './view';\n\nrenderA(1, 2);\nrenderB(1, 2);\n"
+    root = _cp7_repo(tmp_path, {"src/view.tsx": CP7_VIEW, "src/main.ts": "export {};\n"},
+                     {"src/main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["src/main.ts"])
+    assert [(e["line"], e["lines"][-1]) for e in found.entries] == [
+        (3, "    throw RenderError at src/view.tsx:3"),
+        (4, "    throw RenderError at src/view.tsx:10")]
+    sf = kit._SrcFile(CP7_VIEW.encode(), True, jsx=True)
+    assert "</p>" in sf.masked and "Don't" in sf.masked and "'x'" not in sf.masked
+
+
+def test_cp7_call_sites_are_not_quadratic(tmp_path):
+    kit = _kit()
+    n = 12000
+    ts = ("import { useState } from 'react';\n\nexport function big() {\n"
+          + "  useState(0);\n" * n + "}\n")
+    java = ("class Big {\n  void run() {\n" + "    helper(1);\n" * n + "  }\n}\n")
+    helper = ("class H {\n  static void helper(int i) {\n"
+              "    throw new IllegalStateException();\n  }\n}\n")
+    root = _cp7_repo(tmp_path, {"big.ts": ts, "Big.java": java, "H.java": helper},
+                     {"big.ts": ts.replace("useState(0);\n}", "useState(1);\n}"),
+                      "Big.java": java.replace("helper(1);\n  }", "helper(2);\n  }")})
+    import time
+    t0 = time.perf_counter()
+    ts_found = kit.collect_typescript(root, "base..HEAD", ["big.ts"])
+    t1 = time.perf_counter()
+    name_found = kit.collect_by_name(root, "base..HEAD", ["Big.java"])
+    t2 = time.perf_counter()
+    assert ts_found.unresolved == 1
+    assert [e["line"] for e in name_found.entries] == [n + 2]
+    assert t1 - t0 < 2 and t2 - t1 < 2, (t1 - t0, t2 - t1)
+
+
+def test_cp7_js_throws_depth_does_not_depend_on_call_order(tmp_path):
+    kit = _kit()
+    lib = ("export function f{s}() {{ {first}(); {second}(); }}\n"
+           "function g{s}() {{ h{s}(); }}\n"
+           "function h{s}() {{ k{s}(); }}\n"
+           "function k{s}() {{ throw new KError(); }}\n")
+    one = lib.format(s="1", first="g1", second="h1")
+    two = lib.format(s="2", first="h2", second="g2")
+    main = "import { f1 } from './one';\nimport { f2 } from './two';\n\nf1();\nf2();\n"
+    root = _cp7_repo(tmp_path, {"one.ts": one, "two.ts": two, "main.ts": "export {};\n"},
+                     {"main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["main.ts"])
+    assert [(e["line"], e["lines"][-1]) for e in found.entries] == [
+        (4, "    throw KError at one.ts:4"), (5, "    throw KError at two.ts:4")]
+
+
+CP7_CPP = ("int Parser::parse(const char *s) {\n"
+           "  throw ParseError();\n"
+           "}\n"
+           "char *dup(const char *s) {\n"
+           "  throw DupError();\n"
+           "}\n"
+           "std::vector<int>& Foo::items() const {\n"
+           "  throw ItemsError();\n"
+           "}\n"
+           "Foo::Foo(int x) : a(x), b(x) {\n"
+           "  throw CtorError();\n"
+           "}\n"
+           "T& pick(int i) noexcept(false) override {\n"
+           "  throw PickError();\n"
+           "}\n")
+
+
+def test_cp7_name_fallback_knows_cpp_definitions(tmp_path):
+    kit = _kit()
+    defs = kit._name_defs(kit._SrcFile(CP7_CPP.encode(), False), "typed")
+    assert [(d.name, d.line, d.body is not None) for d in defs] == [
+        ("parse", 1, True), ("dup", 4, True), ("items", 7, True), ("Foo", 10, True),
+        ("pick", 13, True)]
+    main = "int main() {\n  p.parse(x);\n  dup(s);\n  return 0;\n}\n"
+    root = _cp7_repo(tmp_path, {"parser.cpp": CP7_CPP, "main.cpp": "int main() {\n}\n"},
+                     {"main.cpp": main})
+    found = kit.collect_by_name(root, "base..HEAD", ["main.cpp"])
+    assert [(e["line"], e["lines"][1].split(":")[0]) for e in found.entries] == [
+        (2, "- Gegenstelle parse [parser.cpp"), (3, "- Gegenstelle dup [parser.cpp")]
+    assert "    throw ParseError at parser.cpp:2" in found.entries[0]["lines"]
+
+
+def test_cp7_swift_kotlin_declaration_without_body_takes_no_other_body():
+    kit = _kit()
+    swift = ("protocol P {\n    func foo() throws\n}\nfunc bar() {\n    fatalError(\"x\")\n}\n"
+             "protocol Q { func baz() throws }\nfunc qux() { fatalError(\"y\") }\n"
+             "func multi(a: Int)\n    -> Int\n{\n    return a\n}\n")
+    kotlin = ("interface I {\n    fun foo2(): Int\n}\nabstract fun abs(): Int\n"
+              "fun bar2() {\n    throw IllegalStateException(\"x\")\n}\n")
+    got = {d.name: d.body is not None
+           for group, text in (("swift", swift), ("kotlin", kotlin))
+           for d in kit._name_defs(kit._SrcFile(text.encode(), False), group)}
+    assert got == {"foo": False, "bar": True, "baz": False, "qux": True, "multi": True,
+                   "foo2": False, "abs": False, "bar2": True}
+
+
+def test_cp7_changed_file_under_node_modules_has_own_reason(tmp_path):
+    kit = _kit()
+    rel = "node_modules/foo/index.js"
+    root = _cp7_repo(tmp_path, {rel: "module.exports = 1;\n"}, {rel: "module.exports = 2;\n"})
+    found = kit.collect_typescript(root, "base..HEAD", [rel])
+    assert found.unparsed == [(rel, kit.SKIP_NODE_MODULES)]
+    block = kit.render_block({"id": "p1", "files": [rel], "range": "a..b",
+                              "unreadable": found.unparsed}, found.entries, 0, None)
+    assert f"- `{rel}` — {kit.SKIP_NODE_MODULES}" in block
+    assert "nicht lesbar" not in block and kit.NOT_IN_TARGET not in block
+
+
+def test_cp7_method_shorthand_is_not_a_call(tmp_path):
+    kit = _kit()
+    util = "export function check(x) {\n  throw new CheckError();\n}\n"
+    main = ("import { check } from './u';\n"
+            "class X {\n"
+            "  check(x) {\n"
+            "    return check(x);\n"
+            "  }\n"
+            "}\n"
+            "const o = { check(y) { return y; } };\n")
+    root = _cp7_repo(tmp_path, {"u.ts": util, "main.ts": "import { check } from './u';\n"},
+                     {"main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["main.ts"])
+    assert [e["line"] for e in found.entries] == [4]
+
+
+def test_cp7_resolve_dot_from_repo_root():
+    kit = _kit()
+    index = kit._JsIndex({"main.ts": b"", "index.ts": b"", "src/main.ts": b"",
+                          "src/index.ts": b""})
+    assert index.resolve("main.ts", ".") == "index.ts"
+    assert index.resolve("main.ts", "./") == "index.ts"
+    assert index.resolve("src/main.ts", ".") == "src/index.ts"
+    assert index.resolve("src/main.ts", "..") == "index.ts"
+
+
+def test_cp7_name_index_masks_only_files_with_the_name():
+    kit = _kit()
+    index = kit._NameIndex({"lib/lib.go": GO_LIB.encode(),
+                            "third/big.c": b"int other(void) {\n  return 1;\n}\n",
+                            "third/mention.c": b"/* Check( */\nint x(void) {\n  return 0;\n}\n"})
+    assert index.masked() == set()
+    assert [rel for rel, _d in index.defs_of("Check")] == ["lib/lib.go"]
+    assert index.masked() == {"lib/lib.go", "third/mention.c"}
+    assert index.defs_of("other") and index.masked() == set(index.sources)
