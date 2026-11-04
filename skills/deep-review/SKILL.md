@@ -44,23 +44,20 @@ und HEAD bleiben unberührt (Cache-Lage: packets.md).
    Schreibt `packets/<id>.md` und nennt je Paket `<id>: <von>..<bis> · …`. Dieser Bereich ist
    der des Reviews; den Originalbereich setzt du nicht selbst ein. Zeilenformat und Lesehilfe:
    [counterparts.md](references/counterparts.md).
-4. **Review je Paket**, in Plan-Reihenfolge, mit der Stufe aus dem Plan: je Paket ein Unteragent,
-   der `/code-review <stufe> --max-findings all <von>..<bis>` mit diesem Auftragstext startet:
-   „Lies zuerst die Datei `<auftrag>` vollständig bis zur letzten Zeile und folge ihr; gib den
-   Auftrag an jeden Unteragenten weiter. Das Endergebnis ist das JSON-Objekt aus dem Abschnitt
-   Rückgabeformat dieser Datei (marke aus der letzten Zeile, stufe = die wirklich gelaufene),
-   nicht eine Liste." `<auftrag>` ist der Pfad, den `counterparts` je Paket nennt
-   (`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`, nicht `packets/<id>.prompt.md`
-   allein); er steht im Auftrag, nicht im Bereich. Das Objekt ist `{"marke", "stufe", "findings"}`,
-   ein Paket ohne Funde hat `"findings": []` ([review-brief.md](references/review-brief.md)). Der
-   Unteragent nimmt es selbst an und gibt nur die Ausgabezeile von `record` zurück; die
-   Hauptschleife liest weder Block noch Fundliste:
+4. **Review je Paket**, in Plan-Reihenfolge, mit der Stufe aus dem Plan. Standard: je Paket ein
+   Unteragent, dessen Auftrag du aus der Vorlage „Auftrag an den Unteragenten je Paket“ in
+   [review-brief.md](references/review-brief.md) ausfüllst (absoluter Repo-Pfad, Skriptpfad
+   aufgelöst wie im Block unten, Lauf, Paket, Aufruf mit Auftragstext, `record`, zurück nur
+   die `record`-Zeile). Der Auftrag ist `packets/<id>.prompt.md` unter dem Pfad aus
+   `counterparts`; das Ergebnis ist `{"marke", "stufe", "findings"}`, ohne Funde
+   `"findings": []`; Block und Fundliste liest du dann nicht. Ohne Agent-Werkzeug startest du
+   `/code-review` je Paket selbst mit demselben Auftragstext und rufst `record` selbst auf
+   (abgewiesen: Objekt korrigieren, erneut):
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review -
    ```
-   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann. Weist
-   `record` ab, korrigiert der Unteragent das Objekt; nur wo keine Unteragenten gehen, tut das die
-   Hauptschleife. Werkzeug ohne Schrägstrich (Git Bash, packets.md), im Bericht `/code-review`.
+   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann.
+   Werkzeug ohne Schrägstrich (Git Bash, packets.md), im Bericht `/code-review`.
    Ohne `/code-review` läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne /code-review"
    in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht nennt das wörtlich.
 5. **Vereinigen:**

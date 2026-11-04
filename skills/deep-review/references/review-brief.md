@@ -2,12 +2,13 @@
 
 Referenz für den Hauptagenten (Ablauf Schritt 4). Hier steht, was du einem Reviewer je Paket
 sagst und in welcher Form das Ergebnis zurückkommt, in drei Fassungen, dazu der Auftrag an den
-Prüfer von `verify`:
+Unteragenten je Paket und an den Prüfer von `verify`:
 
 | Fassung | wann |
 | --- | --- |
 | [Fokus `bugs` mit `/code-review`](#fassung-1-code-review-fokus-bugs) | Normalfall, auch Profil `checkpoint` |
 | [Fokus `quality`](#fassung-2-fokus-quality) | „Wartbarkeit“, „Qualität“, „Code-Hygiene“ |
+| [Auftrag an den Unteragenten je Paket](#auftrag-an-den-unteragenten-je-paket) | Fassung 1 und 2: was die Hauptschleife je Paket einem Unteragenten schickt (Standard) |
 | [Review ohne /code-review](#review-ohne-code-review) | `/code-review` ist nicht verfügbar (claude.ai, andere Agenten) |
 | [Prüfer-Auftrag für `verify`](#prüfer-auftrag-für-verify) | ein Fund soll unabhängig geprüft werden (Profil `checkpoint` oder `--verify`) |
 
@@ -30,10 +31,11 @@ von `plan` nennt sie; Standard `medium`, im Profil `checkpoint` `high`):
 /code-review <stufe> --max-findings all <von>..<bis>
 ```
 
-Der Auftrag ist die Datei `packets/<id>.prompt.md`. Den Pfad der Datei nennt `counterparts`;
-er steht nicht im Aufruf, sondern im Auftragstext an den Reviewer: „Lies zuerst die Datei
-`packets/<id>.prompt.md` vollständig bis zur letzten Zeile …“. Ein Unteragent je Paket bekommt
-den Aufruf und diesen Auftragstext samt Pfad.
+Der Auftrag ist die Datei `packets/<id>.prompt.md` des Laufs. Ihren Pfad nennt `counterparts`
+je Paket, relativ zum Repo (`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`); er
+steht nicht im Aufruf, sondern absolut im Auftragstext an den Reviewer. Aufruf, Auftragstext
+und `record` schickt die Hauptschleife je Paket einem Unteragenten, wörtlich nach der Vorlage
+unter [Auftrag an den Unteragenten je Paket](#auftrag-an-den-unteragenten-je-paket).
 
 - `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
   (`<id>: <bereich> · …`). Den Originalbereich setzt du nicht selbst ein: Er ist es nur bei
@@ -83,6 +85,53 @@ Der Fund an einer Gegenstelle hat als `file` die Datei der Gegenstelle, nicht di
 Aufrufers. Der Aufrufer steht dann in `summary`. Eine Gegenstelle mit „(Name eindeutig, ohne
 Sammler)“ ist nur nach Namen gefunden; der Reviewer prüft am Aufruf, ob sie gemeint ist
 ([counterparts.md](counterparts.md#namens-rückfall)).
+
+## Auftrag an den Unteragenten je Paket
+
+Standard für Fassung 1 und 2: je Paket, in Plan-Reihenfolge, ein Unteragent. Die Hauptschleife
+füllt diese Vorlage aus und schickt sie als ganzen Auftrag; sie liest danach weder Block noch
+Fundliste, nur die Zeile, die der Unteragent zurückgibt (Spec 28, Ergebnis der Sonde B).
+
+| Platzhalter | setzt die Hauptschleife ein |
+| --- | --- |
+| `<repo>` | absoluter Pfad der Repo-Wurzel, für die `plan` lief (`git -C <ordner von --repo> rev-parse --show-toplevel`); `counterparts` nennt Pfade relativ dazu |
+| `<skript>` | absoluter Pfad von `review_kit.py`, so wie er in den Aufrufen der SKILL.md aufgelöst steht; `${CLAUDE_SKILL_DIR}` ist im Unteragenten nicht gesetzt, darum nie die Variable einsetzen |
+| `<lauf>` | die Lauf-ID aus der ersten Ausgabezeile von `plan` |
+| `<id>`, `<von>..<bis>`, `<auftrag>` | aus der Zeile `<id>: <von>..<bis> · <auftrag> · …` von `counterparts` |
+| `<stufe>` | die Stufe des Plans (Zeile `Reviews:`) |
+
+```text
+Arbeite im Repository <repo>: führe zuerst `cd "<repo>"` aus, alle Befehle laufen dort.
+Lauf <lauf>, Paket <id>.
+
+1. Starte `/code-review <stufe> --max-findings all <von>..<bis>` mit diesem Auftragstext:
+   „Lies zuerst die Datei `<repo>/<auftrag>` vollständig bis zur letzten Zeile und folge ihr;
+   gib den Auftrag an jeden Unteragenten weiter. Das Endergebnis ist das JSON-Objekt aus dem
+   Abschnitt Rückgabeformat dieser Datei (marke aus der letzten Zeile, stufe = die wirklich
+   gelaufene), nicht eine Liste."
+2. Gib das Objekt, das /code-review liefert ({"marke", "stufe", "findings"}, ohne Funde
+   "findings": []), unverändert auf stdin an record:
+   python "<skript>" record --repo "<repo>" --run <lauf> --packet <id> --tool code-review - <<'EOF'
+   <das JSON-Objekt>
+   EOF
+3. Weist record ab, korrigiere das Objekt nach der Meldung, ohne einen Fund wegzulassen, und
+   rufe record erneut auf, bis es angenommen ist.
+4. Antworte nur mit der Ausgabezeile von record („<id>: <n> Fund(e) angenommen → …“), ohne
+   Objekt und ohne Fundliste.
+```
+
+- `<repo>/<auftrag>` ist der absolute Pfad der Datei; der kurze Pfad `packets/<id>.prompt.md`
+  allein findet sie nicht, und ein relativer scheitert, wenn der Unteragent woanders startet
+  (etwa bei `--repo ../projekt`).
+- Fokus `quality` (Fassung 2): dieselbe Vorlage; den Auftrag dafür hat `counterparts` schon
+  in die Datei geschrieben.
+- Fokus `security` mit `/security-review` (nur wenn der Umfang sich deckt, [Fokus
+  `security`](#fokus-security)): `/security-review` statt des Aufrufs, im Auftragstext ohne
+  „stufe = …“, und `--tool security-review`.
+- Ohne Agent-Werkzeug (deep-review läuft selbst als Unteragent, oder der Kontext hat keines)
+  startet die Hauptschleife `/code-review` je Paket selbst mit demselben Auftragstext (Schritt
+  1, ab „Lies zuerst“) und ruft `record` wie in Schritt 2 und 3 selbst auf. Fehlt
+  `/code-review`, gilt [Review ohne /code-review](#review-ohne-code-review).
 
 ## Fassung 2: Fokus `quality`
 
@@ -181,7 +230,8 @@ Leser weiß, dass hier kein eigener Unteragent und kein zweiter Blick gelesen ha
 
 Je Paket, in Plan-Reihenfolge, eines nach dem anderen:
 
-1. Lies `packets/<id>.prompt.md` ganz (Auftrag, Block und Marke).
+1. Lies die Datei, die `counterparts` für das Paket nennt
+   (`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`), ganz (Auftrag, Block und Marke).
 2. Lies die Änderung mit `git diff <von>..<bis>` (nur die Paketdateien). `<von>..<bis>` ist
    immer der Bereich, den `counterparts` für das Paket ausgegeben hat, auch bei `split: false`:
    Beim Wurzel-Commit und nach `--since` mit Übernahme sind es Hilfscommits, nicht der

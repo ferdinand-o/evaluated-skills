@@ -239,7 +239,7 @@ eine Assertion auf den Bericht aus dem Skript, und seine Notes verlieren den Ver
 
 | # | id | Klasse | Fixture | Assertions | Diskriminator |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `anti-ceremony-small-range-one-packet` | contract | `dr-seeded` | wie Spec 26, dazu `file_matches` `.skills/cache/deep-review/*/report.md` auf `generated: python scripts/review_kit\.py report` | den Bericht mit dieser Kopfzeile schreibt nur `review_kit.py report` |
+| 1 | `anti-ceremony-small-range-one-packet` | contract | `dr-seeded` | wie Spec 26, ohne `file_max_lines` (Länge prüft audit über `EINORDNUNG_MAX_LINES`), dazu `file_matches` `.skills/cache/deep-review/*/report.md` auf `generated: python scripts/review_kit\.py report` | den Bericht mit dieser Kopfzeile schreibt nur `review_kit.py report` |
 | 2 | `large-range-is-split-and-covered` | contract | `dr-split` | wie Spec 26 | wie Spec 26 |
 | 3 | `narrowed-except-gets-callee-raises` | contract | `dr-contract` | wie Spec 26 | wie Spec 26 |
 | 4 | `delphi-extract-shows-ownership` | contract | `dr-delphi` | wie Spec 26 | wie Spec 26 |

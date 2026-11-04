@@ -6014,16 +6014,53 @@ def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, c
     ws = prepare(tmp_path / "ws", None, SEEDED)
     directory, _plan = _eval_flow(kit, ws.root, ["--range", "base..HEAD"], "/code-review", capsys)
     assert all(check(a, ws.root, ws.baseline).ok for a in first.must)
-    # Ein aufgeblähter Bericht: audit meldet ihn unter report_mismatch.
+    # Ein aufgeblähter Bericht: drei Einordnungszeilen über EINORDNUNG_MAX_LINES, unabhängig
+    # davon, wie lang der Skript-Teil ist; audit meldet ihn unter report_mismatch.
     report = directory / "report.md"
     text = report.read_text(encoding="utf-8")
-    padding = 55 - len(text.splitlines())
-    report.write_text(text + "".join(f"Weitere Anmerkung {i}.\n" for i in range(padding)),
-                      encoding="utf-8")
-    kit.audit(directory, None)
+    extra = "".join(f"Weitere Anmerkung {i}.\n" for i in range(kit.EINORDNUNG_MAX_LINES + 3))
+    report.write_text(text + "\n## Einordnung\n\n" + extra, encoding="utf-8")
+    data = kit.audit(directory, None)
+    limit = f"erlaubt sind {kit.EINORDNUNG_MAX_LINES}"
+    assert any(limit in m for m in data["report_mismatch"]), data
     results = {(a.type, a.pattern): check(a, ws.root, ws.baseline).ok for a in first.must}
     assert results[("file_matches", r'"report_mismatch":\s*\[\]')] is False
     assert results[("file_matches", r'"complete":\s*true')] is False
+
+
+def test_cp10r2_step4_subagent_template_is_executable():
+    """Prüfpunkt 10, Runde 2 (B): Schritt 4 ist für Hauptschleife und Unteragent wörtlich
+    ausführbar — feste Vorlage mit absolutem Repo- und Skriptpfad, Lauf, Paket, record."""
+    kit = _kit()
+    brief = _doc("skills/deep-review/references/review-brief.md")
+    template = _flat(_doc_section(brief, "## Auftrag an den Unteragenten je Paket"))
+    for part in ('`cd "<repo>"`', "Lauf <lauf>, Paket <id>",
+                 "`/code-review <stufe> --max-findings all <von>..<bis>`",
+                 "`<repo>/<auftrag>`", "nicht eine Liste",
+                 'python "<skript>" record --repo "<repo>" --run <lauf> --packet <id> '
+                 "--tool code-review -",
+                 "rufe record erneut auf", "Antworte nur mit der Ausgabezeile von record",
+                 "`${CLAUDE_SKILL_DIR}` ist im Unteragenten nicht gesetzt",
+                 "Ohne Agent-Werkzeug"):
+        assert part in template, part
+    # F5: Fassung 1 schreibt den kurzen Pfad nicht mehr als Auftragstext vor.
+    first = _flat(_doc_section(brief, "## Fassung 1: `/code-review`, Fokus `bugs`"))
+    assert "Lies zuerst die Datei `packets/<id>.prompt.md`" not in first
+    assert "`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`" in first
+    # Der eingelesene Auftrag (Fassung 1) bleibt ohne die Vorlage für die Hauptschleife.
+    assert "<skript>" not in kit._brief_text("bugs") and "record" not in kit._brief_text("bugs")
+    # F2–F4: SKILL.md verweist auf die Vorlage, statt den Auftragstext auszuschreiben, und nennt
+    # den Weg ohne Agent-Werkzeug.
+    skill = _flat(_doc("skills/deep-review/SKILL.md"))
+    step4 = skill[skill.index("4. **Review je Paket**"):skill.index("5. **Vereinigen:**")]
+    assert "Vorlage „Auftrag an den Unteragenten je Paket“" in step4
+    assert "Lies zuerst" not in step4
+    assert "Ohne Agent-Werkzeug startest du `/code-review` je Paket selbst" in step4
+    # F1: Spec 28 Eval 1 sagt, dass file_max_lines fehlt, wie evals.json.
+    spec = _doc("specs/Spec 28 – deep-review-b.md")
+    [row] = [line for line in spec.splitlines()
+             if line.startswith("| 1 | `anti-ceremony-small-range-one-packet`")]
+    assert "ohne `file_max_lines`" in row and "`EINORDNUNG_MAX_LINES`" in row
 
 
 # --- Finaler Prüfpunkt, Runde 2, Paket A: Attribut-Auflösung, Shallow-Hinweis ---------------
