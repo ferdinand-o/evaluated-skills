@@ -1439,6 +1439,7 @@ def _cmd_checkpoint(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 
 FIX_STATUSES = ("bestätigt", "plausibel")
+FIX_REFUTED = "widerlegt"   # `verdict` eines Funds in findings.json von deep-review (Spec 28): fällt weg
 FIX_TASK_NAME = "fix-task.md"
 FIX_LINE_RE = re.compile(r"\s*[Ll]?(\d+)(?:\s*(?:-|–|bis)\s*[Ll]?(\d+))?\s*")  # wie LINE_TEXT_RE in review_kit.py
 FIX_DRIVE_RE = re.compile(r"[A-Za-z]:(/|$)")   # `C:/…`, `C:` — `a:notes.md` ist ein Dateiname
@@ -1596,15 +1597,17 @@ def _pair(line: object, summary: object, scenario: object) -> str:
     return f"{line}: {text}" if text else str(line)
 
 
-def _list_findings(items: list, root: Path, free: bool) -> list[dict]:
+def _list_findings(items: list, root: Path, free: bool, numbers: list | None = None) -> list[dict]:
     """Funde aus einer Liste mit `file`, `line`, `summary`, `failure_scenario` (geprüft von
     `_checked_finding`). `line` ist eine Zahl, ein Text `a-b` oder null. Hat ein Fund
     `sources` (vereinigter Fund von `review_kit.py merge`), steht je verschiedener Quelle ein
     Paar `<line>: <summary>; <failure_scenario>` (gleiche Quellen aus mehreren Paketen einmal),
     und das Kriterium nennt die Spanne aller Quellzeilen; sonst `summary; failure_scenario`
-    wie bei der /code-review-Liste. `packets` und `reused_from` bleiben unbeachtet."""
+    wie bei der /code-review-Liste. `packets` und `reused_from` bleiben unbeachtet. `numbers`:
+    die Nummer je Eintrag (Standard 1, 2, …) — so behält ein Fund nach dem Weglassen widerlegter
+    seine Nummer aus findings.json."""
     out = []
-    for i, raw in enumerate(items, 1):
+    for i, raw in zip(numbers or range(1, len(items) + 1), items):
         f = _checked_finding(i, raw, root, free)
         lines = f.get("line")
         reason = "; ".join(x for x in (f.get("summary"), f.get("failure_scenario")) if x)
@@ -1633,18 +1636,43 @@ def _deep_review_findings(path: Path, whole: dict, root: Path) -> list[dict]:
     if "packet" in meta:
         raise PlanParseError(f"{path}: ist ein Paket-Ergebnis, nicht findings.json (`_meta.packet` = "
                              f"{meta['packet']!r}); erst `review_kit.py merge --run <lauf>`, dann dessen findings.json")
-    return _findings_list(path, whole, "findings.json", root, free=False)
+    return _findings_list(path, whole, "findings.json", root, free=False, skip_refuted=True)
 
 
-def _findings_list(path: Path, whole: dict, what: str, root: Path, free: bool) -> list[dict]:
+def _is_refuted(item: object) -> bool:
+    return isinstance(item, dict) and item.get("verdict") == FIX_REFUTED
+
+
+def _refuted_count(path: Path) -> int:
+    """Die Zahl der Funde mit `verdict` widerlegt in einer findings.json von deep-review; 0 für
+    alles andere (auch unlesbar — `_read_findings` hat es dann schon gemeldet)."""
+    try:
+        whole = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return 0
+    meta = whole.get("_meta") if isinstance(whole, dict) else None
+    items = whole.get("findings") if isinstance(whole, dict) else None
+    if not (isinstance(meta, dict) and meta.get("skill") == "deep-review" and "packet" not in meta
+            and isinstance(items, list)):
+        return 0
+    return sum(map(_is_refuted, items))
+
+
+def _findings_list(path: Path, whole: dict, what: str, root: Path, free: bool,
+                   skip_refuted: bool = False) -> list[dict]:
     """Die Liste unter `findings` eines Objekts (fehlt sie, gibt es keine Funde); `what` nennt
-    das Format in der Meldung „ohne Funde“."""
+    das Format in der Meldung „ohne Funde“. Mit `skip_refuted` (findings.json von deep-review)
+    fallen Funde mit `verdict` widerlegt weg; `bestätigt`, `unklar` und Funde ohne Urteil
+    bleiben, mit ihrer Nummer in der Liste. Sind alle widerlegt, gibt es nichts zu beheben."""
     items = whole.get("findings", [])
     if not isinstance(items, list):
         raise PlanParseError(f"{path}: `findings` ist keine Liste")
     if not items:
         raise PlanParseError(f"{path}: {what} ohne Funde")
-    return _list_findings(items, root, free)
+    numbers = [n for n, item in enumerate(items, 1) if not (skip_refuted and _is_refuted(item))]
+    if not numbers:
+        raise PlanParseError(f"{path}: alle {len(items)} Funde sind {FIX_REFUTED} — nichts zu beheben")
+    return _list_findings([items[n - 1] for n in numbers], root, free, numbers)
 
 
 def _verdict_findings(path: Path, rows: list[tuple[int, object]], root: Path) -> list[dict]:
@@ -1743,7 +1771,12 @@ def fix_task_from_verdicts(verdicts_path: Path | str, out_dir: Path | str) -> Pa
                      f.get("reason", ""))
                     for f in findings],
     )
-    doc = PlanDoc(global_constraints="- Je Fund zuerst ein Test, der rot ist; Änderungen nur in der Allowlist.", tasks=[task])
+    constraints = "- Je Fund zuerst ein Test, der rot ist; Änderungen nur in der Allowlist."
+    refuted = _refuted_count(verdicts_path)
+    if refuted:
+        constraints += (f"\n- Weggelassen: {refuted} widerlegte {'Fund' if refuted == 1 else 'Funde'} "
+                        f"(verdict {FIX_REFUTED} in findings.json); die Nummern der Funde bleiben die von findings.json.")
+    doc = PlanDoc(global_constraints=constraints, tasks=[task])
     command = f"python skills/subagent-dev/scripts/plan_to_tasks.py fix-task --verdicts {shlex.quote(str(verdicts_path))}"
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / FIX_TASK_NAME
