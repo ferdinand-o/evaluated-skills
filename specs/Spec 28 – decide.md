@@ -328,8 +328,9 @@ unbekannt, und ein folgender Push fragt dann nach.
 
 **Heredocs.** Vor dem Zerlegen schneidet `guard` einen Heredoc-Rumpf (`<<WORT`, `<<-WORT`,
 `<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) nur aus, wenn die Zeile bis `<<` ausgeglichene
-Anführungszeichen hat und das Programm davor keine Shell ist (`bash`, `sh`, `zsh`, `dash`,
-`ksh`, `ssh`); bei einer Shell bleibt der Rumpf Befehlstext und wird wie jeder andere geprüft.
+Anführungszeichen hat und in der Zeile keine Shell vorkommt (`bash`, `sh`, `zsh`, `dash`,
+`ksh`, `ssh`, auch hinter `|`); sonst bleibt der Rumpf Befehlstext und wird wie jeder andere
+geprüft.
 Steht der Heredoc an einem SQL-Programm der Tabelle, prüft `guard` den Rumpf auf `DROP`,
 `TRUNCATE` und `DELETE FROM` ohne `WHERE` wie ein Argument; die SQL-Programme kommen aus
 derselben Liste wie die Tabelle.
@@ -337,7 +338,10 @@ derselben Liste wie die Tabelle.
 **Was guard nicht zerlegt, wird Rückfrage** (Prüfpunkt nach Task 3, Runde 2). Steht im Text ein
 Programmname der Tabelle und dazu `$(` oder ein Backtick außerhalb von einfachen
 Anführungszeichen, antwortet `guard` mit `ask` und „Befehl nicht zerlegbar“, statt die
-Ersetzung auszuwerten. `(` und `)` trennen keine Teile; führende `(` und schließende `)` an
+Ersetzung auszuwerten. Ausgenommen ist die Commit-Vorlage von Claude Code,
+`"$(cat <<'WORT' … WORT
+)"` mit `WORT` in Anführungszeichen: Sie wird vorher ein Wort mit dem
+Rumpf als Text. `(` und `)` trennen keine Teile; führende `(` und schließende `)` an
 einem Wort fallen weg (`(cd x && git reset --hard)` und `find . \( … \) -delete` bleiben
 lesbar), und nach einem Wort mit `(` oder `)` gilt das Verzeichnis als unbekannt. `cd` wirkt
 nur über `&&`, `||`, `;` und Zeilenumbruch, nicht über `|` oder `&`; `pushd`, `popd` und ein

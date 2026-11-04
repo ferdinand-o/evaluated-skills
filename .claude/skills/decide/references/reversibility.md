@@ -106,19 +106,37 @@ hat keine Pfadmuster und steht deshalb nicht in der Tabelle; check vergleicht si
 ## Befehle, die guard erkennt
 
 `decide_log.py guard` ist ein optionaler `PreToolUse`-Hook auf Bash (`assets/hooks/decide-guard.json`,
-die Skill installiert ihn nie). Er zerlegt den Befehl an `&&`, `||`, `;`, `|`, `&` und
-Zeilenumbruch außerhalb von Anführungszeichen (`(` und `)` trennen auch), überspringt je Teil
-führende Zuweisungen und die Wrapper `sudo`, `doas`, `env`, `timeout`, `nice`, `ionice`, `stdbuf`,
-`nohup`, `time`, `command`, `exec` samt Optionen und Werten, bei `git` die globalen Optionen samt
-Wert (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, auch `--opt=wert`;
-`-C <pfad>` setzt das Verzeichnis), und erkennt Kurzoptionen auch gebündelt (`-rf`, `-sSd`,
-`-XPOST`). `cd <dir>` als eigener Teil setzt das Verzeichnis für die folgenden Teile, nach einer
-Subshell `( … )` gilt wieder das vorige; `cd` ohne Ziel, `cd -` oder ein Ziel mit `$`/`~` macht es
-unbekannt, ein folgender Push fragt dann nach. `>|` ist eine Umleitung wie `>`. Ein Heredoc-Rumpf
-(`<<WORT`, `<<-WORT`, `<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) ist kein Befehl; steht der
-Heredoc an `psql`, `sqlite3` oder `mysql`, wird der Rumpf wie ein Argument auf `DROP`, `TRUNCATE`
-und `DELETE FROM` ohne `WHERE` geprüft. Enthält der Text keinen Programmnamen der Tabelle, endet
-guard ohne Git-Aufruf und ohne Ausgabe. Ein erkannter Teil wird zur Rückfrage an den
+die Skill installiert ihn nie). Enthält der Text keinen Programmnamen der Tabelle, endet guard
+ohne Git-Aufruf und ohne Ausgabe; die Repo-Wurzel bestimmt es erst danach, einmal je Verzeichnis.
+Er zerlegt den Befehl an `&&`, `||`, `;`, `|`, `&` und Zeilenumbruch außerhalb von
+Anführungszeichen; `(` und `)` trennen nicht, führende `(` und schließende `)` fallen von jedem Wort
+ab (`(cd x && git reset --hard)`, `find . \( … \) -delete`). Je Teil überspringt er führende
+Zuweisungen und die Wrapper `sudo`, `doas`, `env`, `timeout`, `nice`, `ionice`, `stdbuf`, `nohup`,
+`time`, `command`, `exec`, auch mit Pfad (`/usr/bin/env`), samt Optionen und Werten (`sudo -u`,
+`-g`, `-r`, `-t`, `--role`, `--type` …), bei `git` die globalen Optionen samt Wert (`-C`, `-c`,
+`--git-dir`, `--work-tree`, `--namespace`, `--config-env`, auch `--opt=wert`; `-C <pfad>` setzt das
+Verzeichnis), und erkennt Kurzoptionen auch gebündelt (`-rf`, `-sSd`, `-XPOST`). Bei `find` sind die
+Wörter nach `-exec`, `-execdir`, `-ok`, `-okdir` bis `;` oder `+` ein eigener Befehl. `>|` ist eine
+Umleitung wie `>`.
+
+**Verzeichnis.** `cd <dir>` setzt das Verzeichnis für die folgenden Teile, aber nur über `&&`, `||`,
+`;` und Zeilenumbruch, nicht über `|` oder `&`. `cd` ohne Ziel, `cd -`, ein Ziel mit `$`/`~`,
+`pushd`, `popd` und ein Wort mit führendem `(` oder schließendem `)` machen es unbekannt; ein folgender Push fragt dann
+nach.
+
+**Heredocs.** Ein Heredoc-Rumpf (`<<WORT`, `<<-WORT`, `<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`)
+wird nur ausgeschnitten, wenn die Zeile bis `<<` ausgeglichene Anführungszeichen hat und keine Shell
+(`bash`, `sh`, `zsh`, `dash`, `ksh`, `ssh`) enthält; sonst bleibt er Befehlstext und wird wie jeder
+andere geprüft. Steht der Heredoc an `psql`, `sqlite3` oder `mysql`, wird der Rumpf wie ein Argument
+auf `DROP`, `TRUNCATE` und `DELETE FROM` ohne `WHERE` geprüft. Die Commit-Vorlage
+`git commit -m "$(cat <<'EOF'` … `EOF` `)"` (Wort in doppelten Anführungszeichen, `WORT` in
+Anführungszeichen) gilt als ein Wort mit dem Rumpf als Text; das ist keine Ersetzung im Sinn des
+nächsten Absatzes.
+
+**Was guard nicht zerlegt, wird Rückfrage.** Steht im Text ein Programmname der Tabelle und dazu
+`$(` oder ein Backtick außerhalb von einfachen Anführungszeichen (auch im Rumpf eines Heredocs ohne
+Anführungszeichen), `env -S` oder unbalancierte Anführungszeichen, antwortet guard mit `ask` und
+„Befehl nicht zerlegbar“, statt den Text auszuwerten. Ein erkannter Teil wird zur Rückfrage an den
 Nutzer (`ask`); nur `git push` mit freigegebenem Ziel geht still durch. Diese Tabelle ist dieselbe
 Liste wie `GUARD_COMMANDS` im Skript:
 
@@ -158,7 +176,7 @@ Liste wie `GUARD_COMMANDS` im Skript:
 | `data-delete` | `psql` | `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` (ohne Groß-/Kleinschreibung) in einem Argument | nein, immer Rückfrage |
 | `data-delete` | `sqlite3` | wie `psql` | nein, immer Rückfrage |
 | `data-delete` | `mysql` | wie `psql` | nein, immer Rückfrage |
-| `data-delete` | `find` | `-delete` oder `-exec`/`-execdir rm` | nein, immer Rückfrage |
+| `data-delete` | `find` | `-delete` oder `rm` hinter `-exec`, `-execdir`, `-ok`, `-okdir`; ein anderer Befehl dort wird wie ein eigener geprüft | nein, immer Rückfrage |
 | `unsaved-work` | `git reset` | `--hard`, `--merge` oder `--keep` | nein, immer Rückfrage |
 | `unsaved-work` | `git checkout` | `--`, `.`, `-f`/`--force` oder ein Argument, das als Pfad im Arbeitsverzeichnis existiert | nein, immer Rückfrage |
 | `unsaved-work` | `git restore` | immer, außer nur mit `--staged`/`-S` ohne `--worktree`/`-W` | nein, immer Rückfrage |
@@ -176,7 +194,7 @@ ohne `..`, `~` und `$`; ein absoluter Pfad ist nur unter `/tmp/` ausgenommen.
 `--force-with-lease`, `--delete`, `--tags`, `--all`, `--mirror`, `-o` …) ist immer Rückfrage. Ohne
 Argumente ist das Ziel `@{push}` des Zweigs (berücksichtigt `pushRemote` und `push.default`; ohne
 Ziel: Rückfrage), mit nur `<remote>` dasselbe, wenn dessen Remote `<remote>` ist (sonst Rückfrage);
-`push.default=matching` oder ein gesetztes `remote.<remote>.push` sind dabei Rückfrage, ebenso
+`push.default=matching`, ein gesetztes `remote.<remote>.push` oder `remote.<remote>.mirror=true` sind dabei Rückfrage, ebenso
 `git -c`, `--config-env`, `--git-dir` oder `--namespace` vor `push` und ein unbekanntes Verzeichnis
 nach `cd`. Mit genau einem Refspec ist das Ziel `<remote>/<ziel>`: `HEAD` wird der aktuelle Zweig
 (abgelöster `HEAD`: Rückfrage), `refs/heads/<x>` wird `<x>`; eine Quelle, die ein Tag ist, ein
@@ -188,11 +206,12 @@ Block.
 
 Der Grund der Rückfrage lautet „decide: <kategorie> — <befehl, höchstens 80 Zeichen>: <grund>“ mit
 „immer Rückfrage“, „keine Freigabe mit Schlüssel push:<ziel> in docs/big-decisions.md“ oder
-„Befehl nicht zerlegbar“ (unbalancierte Anführungszeichen und ein Programmname der Tabelle im
-Text). Ein eigener Fehler des Hooks hält nichts an: `{"systemMessage": "[decide] Hook ungeprüft —
-<grund>"}`, Exit 0. Was guard nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungszeichen,
-`bash -c`, `eval`, `xargs`, Aliase, Skripte, ein Heredoc ohne Anführungszeichen, Wrapper außerhalb
-der Liste, Werkzeuge außer Bash —, sieht es nicht; deshalb nennt
+„Befehl nicht zerlegbar“ (unbalancierte Anführungszeichen, `$(` oder ein Backtick außerhalb
+einfacher Anführungszeichen, `env -S` — jeweils mit einem Programmnamen der Tabelle im Text). Ein
+eigener Fehler des Hooks hält nichts an: `{"systemMessage": "[decide] Hook ungeprüft —
+<grund>"}`, Exit 0; ebenso ohne Python ab 3.8 („[decide] Hook ungeprüft — kein Python 3“). Was guard
+nicht sieht — `bash -c`, `eval`, `xargs`, Aliase, Skripte, ein Ziel, das erst die Shell ausrechnet
+(`$VAR`, Globs), Wrapper außerhalb der Liste, Werkzeuge außer Bash —, prüft es nicht; deshalb nennt
 check `push`, `external`, `data-delete` und `unsaved-work` weiter als ungeprüft.
 
 ## Bis zur Freigabe bleibt alles stehen
