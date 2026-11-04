@@ -31,20 +31,23 @@ von `plan` nennt sie; Standard `medium`, im Profil `checkpoint` `high`):
 ```
 
 Der Auftrag ist die Datei `packets/<id>.prompt.md`. Den Pfad der Datei nennt `counterparts`;
-er steht im Aufruf, und das Review liest die Datei bis zur letzten Zeile. Ein Unteragent je
-Paket bekommt den Aufruf samt Pfad.
+er steht nicht im Aufruf, sondern im Auftragstext an den Reviewer: „Lies zuerst die Datei
+`packets/<id>.prompt.md` vollständig bis zur letzten Zeile …“. Ein Unteragent je Paket bekommt
+den Aufruf und diesen Auftragstext samt Pfad.
 
 - `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
   (`<id>: <bereich> · …`). Den Originalbereich setzt du nicht selbst ein: Er ist es nur bei
-  `split: false` ohne Wurzel-Commit. Beim Wurzel-Commit (`root: true`) und nach `--since` mit
+  `split: false` ohne Wurzel-Commit und außerhalb des Pfad-Modus. Im Pfad-Modus (`mode: path`),
+  beim Wurzel-Commit (`root: true`) und nach `--since` mit
   Übernahme (eine Datei in `file_keys` hat `reused_from`) bekommt auch ein einzelnes Paket
   Hilfscommits, und dann ist es deren `<von>..<bis>`. Ein `--since`, das nichts übernommen
   hat, lässt den Plan, wie er war.
 - Die Datei `packets/<id>.prompt.md` (Auftrag, Block, Rückgabeformat und Marke) gibst du
   **jedem Unteragenten unverändert** mit, als Pfad oder als ganzen Text: nicht gekürzt, nicht
   umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht aufgelösten Stellen
-  und eine Kappung bleiben stehen. Im Pfad-Modus (`mode: path`) steht dort statt eines
-  Diff-Bereichs der Pfad mit dem Ziel; die Dateien stehen als neu.
+  und eine Kappung bleiben stehen. Im Pfad-Modus (`mode: path`) steht dort unter dem
+  Bereich `<von>..<bis>` zusätzlich der Pfad mit dem Ziel; die Dateien stehen als neu, der
+  Aufruf bleibt `/code-review <stufe> --max-findings all <von>..<bis>`.
 - Hat das Paket eine Spanne, nennt die Datei sie (`datei:von-bis`): Nur diese Zeilen sind
   geändert, der Rest der Datei steht auf dem Stand des Ziels.
 - Bei Delphi-Dateien im Paket steht [delphi.md](delphi.md) schon darin.
@@ -216,7 +219,7 @@ Regeln:
 Die Antwort ist ein JSON-Objekt `{"marke", "stufe", "findings"}`:
 
 - `marke`: die Marke aus der letzten Zeile von `packets/<id>.prompt.md` (`Paket-Marke: …`),
-  genau so; dieselbe Marke steht vorn in der Zeile nach der Kopfzeile.
+  genau so; nur dort steht sie, die Zeile nach der Kopfzeile verweist bloß auf das Ende.
 - `stufe`: nur nach `/code-review` die Stufe, mit der es wirklich lief (`low`, `medium`,
   `high`, `xhigh` oder `max`). Die Stufe in `packets/<id>.prompt.md` ist die Vorgabe für den
   Aufruf `/code-review <stufe>`, kein Wert zum Abschreiben: Lief es niedriger, steht hier die

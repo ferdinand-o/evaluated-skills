@@ -7823,7 +7823,8 @@ def _block_count(directory: Path, run_id: str, pid: str) -> str | None:
 def _counterpart_cell(plan: dict, packet: dict, stored, directory: Path, run_id: str) -> str:
     """Spalte Gegenstellen eines Pakets: bei Fokus quality `NOT_COLLECTED_QUALITY`, ein Paket
     nur aus Dateien ohne Sammler `NO_COLLECTOR`, sonst die Zahl der Gegenstellen seiner
-    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt). Fehlt der
+    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt; im
+    Pfad-Modus wie dort nur die Einträge, die das Paket verlassen, `_leaving_path`). Fehlt der
     Speicher oder passt er nicht zum Plan (`stored` None: `plan` konnte ihn nicht schreiben —
     `build_plan` unterdrückt den Fehler —, oder ein Lauf aus Spec 26), die Zahl aus dem Block
     `packets/<id>.md`, den `counterparts` dann live gesammelt hat (`_block_count`); fehlt
@@ -7835,7 +7836,11 @@ def _counterpart_cell(plan: dict, packet: dict, stored, directory: Path, run_id:
         return NO_COLLECTOR
     if stored is None:
         return _block_count(directory, run_id, packet["id"]) or REPORT_NO_DATA
-    return str(len(_stored_found(stored, files, _packet_spans(packet)).entries))
+    spans = _packet_spans(packet)
+    entries = _stored_found(stored, files, spans).entries
+    if plan.get("mode") == "path":
+        entries = _leaving_path(entries, set(files), spans)
+    return str(len(entries))
 
 
 def _finding_line(finding: dict, verify: bool = False) -> str:
