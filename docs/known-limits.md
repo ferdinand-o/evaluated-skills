@@ -2126,8 +2126,9 @@ schreibt `.skills/cache/test-first/log.md`. Was ungemessen bleibt und wo es bei�
 Gebaut nach Spec 28 (2026-11-03). Tier 1: `decide_log.py` meldet, hält aber niemanden an;
 Einordnung, Themenwahl, Untergrenze und das Unterlassen des teuren Schritts verlangt die
 SKILL.md (G1). Stand der Eval-Läufe: `claude -p` 2.1.316 ohne Permission-Host, mit Skill 4 von
-5 grün (e171b54), ohne Skill 0 von 5 vor e171b54. Was ungemessen bleibt und wo es beißt, nach
-Themen:
+5 grün (e171b54), ohne Skill 0 von 5 vor e171b54. Zyklus 2 (2026-11-04, Verschlankung): mit
+Skill 4 von 5 (`claude -p` 2.1.318, Eval 2 rot wie bisher), dazu der optionale Hook `guard` (G3).
+Was ungemessen bleibt und wo es beißt, nach Themen:
 
 ### Messung und Routing
 
@@ -2180,19 +2181,25 @@ Themen:
   `app/models.py` ohne Migration ändert, meldet `check` nicht.
 - **Eine Freigabe gilt je Schlüssel, `#<text>` je Datei.** Ein Block `migration:migrations/`
   gibt jede Datei darunter frei, auch eine, die der Auftrag nicht meinte. Mit `#<text>` muss der
-  Text in einer hinzugefügten, mit `#-<text>` in einer entfernten Zeile der jeweiligen Datei stehen
-  (eine Freigabe zum Hinzufügen gibt das Löschen derselben Migration nicht frei); ein Text, der in
-  einer Datei passt, gibt dort frei, ohne dass die Wahl dahinter geprüft wird. `rule:`-Schlüssel
-  vergleicht `check` nie.
-- **Eine geänderte Zeile trifft `#-<text>` und `#<text>`.** Git zeigt sie als entfernte und
-  hinzugefügte Zeile. Eine Freigabe zum Entfernen (`#-python-dateutil`) gibt so auch das Ändern der
-  Zeile frei, eine zum Hinzufügen (`migration:migrations/#add_index`) das Umschreiben einer schon
-  angewandten Migration. Gemessen von Hand: `add_index('t','c')` → `add_index('t','d')` unter
-  `#-add_index` meldet `check` nicht.
-- **`schema` der Ablage blieb 1, obwohl sich die Bedeutung der Schlüssel während des Baus änderte.**
-  `#-<text>` hieß in einer Zwischenfassung „Text mit `-`“, `#+<text>` bis Final-R3 „Text mit `+`“.
-  Vertretbar, weil decide vorher nirgends veröffentlicht war; eine Ablage aus einer Zwischenfassung
-  würde ohne Hinweis anders gelesen.
+  Text in einer hinzugefügten Zeile der jeweiligen Datei stehen; ein Löschen gibt kein Schlüssel
+  frei, und ein Text, der in einer Datei passt, gibt dort frei, ohne dass die Wahl dahinter geprüft
+  wird. Eine geänderte Zeile zeigt Git als entfernte und hinzugefügte; `#add_index` gibt so auch
+  das Umschreiben einer schon angewandten Migration frei. `rule:`-Schlüssel vergleicht `check` nie.
+- **`schema` der Ablage blieb 1, obwohl Zyklus 2 `#-<text>` und `#+<text>` strich.** Ein alter
+  Block mit solchem Schlüssel gibt nichts mehr frei; `check` meldet die Stelle mit Hinweis, nicht
+  als Fehler der Ablage. Vertretbar, weil decide vorher nirgends veröffentlicht war.
+- **`check` nimmt genau eine Revision.** Ein Bereich (`a..b`, `a...b`, `^a`) endet mit Exit 2
+  „ungeprüft — check nimmt eine Revision“; einen PR-Diff oder einen Bereich prüft der Nutzer selbst.
+  Eine Revision, die existiert, aber kein Commit ist (`HEAD^{tree}`, ein Tag auf einen Baum), heißt
+  „nicht gefunden“. Die Ablage liest `check` immer aus der Arbeitskopie, nie aus der Revision.
+- **Exit 2 von `check` geht nach stderr, samt Zusammenfassung und offenen Fragen.** Ein Aufrufer,
+  der nur stdout liest, sieht die Übergabe nicht.
+- **Unversionierte Symlinks meldet `check` immer „unlesbar — selbst prüfen“,** versionierte über
+  ihren Linktext; ebenso unversionierte Dateien über 1 MiB.
+- **Fehlt `docs/big-decisions.md`, sagt `check` das nur an Stellen, die eine Freigabe bräuchten.**
+- **Hängt git, kommt auch die Meldung zu einem Bereich oder einer fehlenden Revision erst nach
+  `GIT_TIMEOUT`.** Die Wurzel bestimmt das Skript zweimal (`repo_root`, `_work_tree`); `open`,
+  `summary` und `resolve` fallen ohne Git auf das cwd zurück.
 - **Ein Pfad, der nicht UTF-8 ist, bekommt keine Zeilen.** `changed_lines` sucht den Kopf
   `diff --git`, den `_git_quoted` aus dem dekodierten Pfad nachbildet; Bytes, die kein UTF-8 sind,
   liest das Skript als Ersatzzeichen, und so findet es den Block des Pfads nicht. Die Zeilen bleiben
@@ -2206,9 +2213,6 @@ Themen:
 - **Fixtures unter `evals/fixtures/*/migrations/` meldet `check` in diesem Repo.** Das Muster
   `**/migrations/` trifft `evals/fixtures/dc-models/migrations/0001_initial.py`. Wer die Fixture
   ändert und `check` über den Diff laufen lässt, bekommt eine Stelle `migration` für Testdaten.
-- **Der Anzeigename „docs/big-decisions.md in <rev>“ entsteht an drei Stellen** (`LEDGER_SHOWN`
-  mit `rev`, mit `end` und im Fall „fehlt in“). Ändert jemand eine, weichen die Meldungen
-  auseinander; Tests prüfen den Wortlaut je Fall, nicht die Gleichheit.
 - **`glob_to_regex` verspricht im Docstring „je Muster einmal übersetzt (`lru_cache`)“, ein Test
   dafür fehlt.** Entfällt der Dekorator, bleibt alles grün und `check` übersetzt je Datei neu.
 - **Der Testhelfer `unreadable()` ersetzt `Path.read_bytes` für jede Datei namens `log.md`**
@@ -2262,19 +2266,46 @@ Themen:
   weiter, bis jemand ihn mit `resolve` beantwortet. Gemeldet von der Mini-Runde am finalen
   Prüfpunkt (6603098), nicht behoben.
 
-### brief
+### Auftrag an Subagenten
 
-- **`load_subagent_sentence` erkennt „kein Abschnitt“ am Wortlaut der Meldung von
-  `_section_lines`** (`problem.startswith(f"{where}: kein Abschnitt")`). Ändert jemand den Text
-  dort, wird aus „Satz fehlt“ eine rohe Meldung, ohne dass ein Test es zeigt.
-- **`check_brief` und `_check_brief` sind zwei Einstiege für einen optionalen Parameter.** Ein
-  Aufrufer, der die Wurzel kennt, muss den privaten nehmen.
+- **Der Auftrag ist ganz G1.** Seit Zyklus 2 gibt es kein `brief`; `references/brief.md` ist eine
+  Vorlage. Ob ein Auftrag neutral fragt, die sechs Felder trägt und mit dem festen Satz endet,
+  prüft kein Skript.
 - **Das Format „Auftrag: „…““ steht in `add_big` (`f"Auftrag: „{approved}“"`) und als Regex in
-  `_REQUEST_SOURCE_RE`.** Eine Änderung am Format macht freigegebene Aufträge in `brief` zu
-  „wie im Auftrag“ statt zum Zitat.
-- **Ein Satz im Modul-Docstring zu `_section_lines` macht den Bezug von „sie“ unklar**
-  („Fehlt sie oder parst sie nicht, ist die Datei nicht lesbar“ — die Überschrift oder die
-  Datei?). Gemeint ist: fehlt die Überschrift.
+  `_REQUEST_SOURCE_RE`.** Eine Änderung an einer Stelle lässt `resolve` einen freigegebenen Auftrag
+  als Antwort statt als Zitat zeigen.
+
+### guard (optionaler Hook)
+
+- **`guard` erkennt Muster, es zerlegt keine Shell** (Spec 28, Nutzer 2026-11-04). Es sieht nur
+  Bash, nur die Befehle der Tabelle in `reversibility.md` und nur, was im Text steht: nicht, was
+  über Variablen, Aliase, Skripte, `eval`, `bash -c` mit zusammengesetztem Text, MCP-Werkzeuge
+  oder andere Werkzeuge als Bash entsteht. Schutzziel ist das Versehen, nicht der verschleierte
+  Befehl.
+- **Nur ein Push hat eine Freigabe über die Ablage.** Ein beauftragtes Löschen, ein `gh pr create`
+  oder `terraform apply` fragt jedes Mal (Annahme: selten genug). Die Ausnahmeliste für `rm -r`
+  ist eine Annahme (Inhalt regenerierbar); sie gilt relativ zum Hook-cwd, nicht zur Repo-Wurzel,
+  und `.skills/cache` selbst ist nicht ausgenommen, nur was darunter liegt.
+- **Stichprobe beim Bau (Zyklus 2): `claude -p` 2.1.318 lehnt ein `ask` ab, in
+  `--permission-mode default` und in `bypassPermissions`.** Beide Läufe in einem Wegwerf-Repo mit
+  lokalem Bare-Remote: kein Push, die Antwort nannte die Meldung des Hooks und legte die Freigabe
+  nicht selbst an (ohne installierte Skill). Ein Lauf je Modus; andere Versionen ungemessen.
+- **Unnötige Rückfragen statt übersehener Befehle:** ein Muster in einer Zeichenkette, ein
+  Shell-Kommentar, ein zitierter Bezeichner zwischen `DELETE FROM` und `WHERE`, eine Commit-Vorlage
+  direkt an der Option (`-m"$(cat …`) oder mit `\`-Umbruch dazwischen.
+- **Übersehen (gemessen im Review, nicht behoben):** `git checkout <pfad>` ohne `--`;
+  `$X` in doppelten Anführungszeichen lässt einen Push schlicht, der Zweig wird wörtlich gelesen;
+  globale git-Optionen mit getrenntem Wert außer `-C`, `-c`, `--git-dir`, `--work-tree`,
+  `--namespace`, `--config-env` (`git --exec-path x push`) verdecken den Push; ein Remote-Name mit
+  `/` wird für `remote.<r>.push` und `.mirror` nur am ersten Segment geprüft; in
+  `bash -c "git restore src; git restore --staged b"` sieht das restore-Muster das `--staged` des
+  zweiten Befehls; ein zitiertes Wort, das wie eine Umleitung aussieht (`rm -rf build '2>' x`),
+  fällt mit dem folgenden aus der Zielprüfung; ein `DELETE FROM` ohne `WHERE` im Heredoc, dem eine
+  spätere Zeile mit `WHERE` folgt.
+- **Das Hook-Snippet prüft keine Python-Version.** Ein `python` 2 oder ein python3 vor 3.8 endet
+  mit SyntaxError statt mit „[decide] Hook ungeprüft“.
+- **`test_guard_table_matches_reference` vergleicht nur Befehlsnamen und Kategorien.** Die Spalte
+  „erkannt, wenn“ in `reversibility.md` kann von den Regexen abweichen, ohne dass ein Test es zeigt.
 
 ### Tests der Skill
 

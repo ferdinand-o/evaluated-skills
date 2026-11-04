@@ -181,8 +181,94 @@ abdecken.
 ## Offen für die nächste Runde
 
 - Länge von `decide_log.py` gegen Spec 28 prüfen und Teile (Glob-Übersetzer, Sperre) auslagern
-  oder die Spec anpassen.
+  oder die Spec anpassen. *Zyklus 2: teilweise erledigt, siehe unten.*
 - Eval 2: entweder eine Description, die bei kleinen Fragen mitten in der Arbeit auslöst, oder
   ein Prompt, der die Lage ohne das Wort „entscheiden“ zuspitzt; Entscheidung des Nutzers.
 - Ein Runner, der das Transcript speichert, damit die Diagnose wie bei Eval 4 nicht von Hand
   laufen muss.
+
+## Zyklus 2
+
+Verschlankung nach dem Nutzerauftrag vom 2026-11-04: das Häufige genau abdecken, Seltenes an den
+Nutzer geben, keine Tokenvernichtung. Plan `docs/superpowers/plans/2026-11-04-decide-slim.md`
+(8 Tasks), Bau mit `subagent-dev`.
+
+| Messgröße | vorher (94526fe) | nachher |
+| --- | --- | --- |
+| `decide_log.py` Zeilen | 2245 | 2021 |
+| davon `guard` | — | 216 (Hook neu, optional, G3) |
+| SKILL.md Zeilen | 143 | 110 |
+| Punkte in known-limits (decide) | 42 | 50 |
+| Aufrufe bei der Übergabe | 3 (`check`, `summary`, `open`) | 1 (`check`, ohne Dateien `open`) |
+| Unterbefehle | 7 mit `brief` | 7 mit `guard`, ohne `brief` |
+| Testfunktionen decide | 178 | 161 |
+| Evals mit Skill | 4 von 5 | 4 von 5 |
+
+- **`check`** nimmt genau eine Revision und gibt Zusammenfassung und offene Fragen in derselben
+  Ausgabe aus; Bereiche, Merge-Basen, Ablage aus einer Revision und `#-`/`#+` sind gestrichen und
+  enden mit „ungeprüft — …“ (Exit 2) statt mit nachgebauter Logik.
+- **`brief`** ist als Unterbefehl entfallen (gut 450 Zeilen); `references/brief.md` ist die
+  Vorlage, der Auftrag ist ganz G1.
+- **`guard`** ist neu: ein optionaler `PreToolUse`-Hook, der vor erkannten Befehlen nachfragt.
+  Der erste Entwurf zerlegte die Shell; nach zwei Fix-Runden mit je neuen Randfällen (guard bei
+  gut 535 Zeilen, Datei bei 2323) entschied der Nutzer „Erkennen statt zerlegen“: Muster über den
+  ganzen Text, genau zerlegt wird nur ein schlichter `git push`. Danach 202 Zeilen, nach zwei
+  Review-Runden 216.
+- **known-limits** wuchs um 8 Punkte: gestrichen sind 6 (`#-`/`#+`, Anzeigename „in <rev>“, drei zu
+  `brief`, einer aus `brief` wanderte zum Auftrag); neu sind 5 zu `check` mit einer Revision, einer
+  zum Auftrag als G1 und 7 zu `guard`. Die Zahl steigt, weil der Hook neu ist, nicht weil der Rest
+  unsicherer wurde.
+
+### Evals (Task 5)
+
+`python run_evals.py --skill decide`, `claude -p` 2.1.318, ein Lauf, Evals und Fixtures unverändert
+(`git diff 94526fe -- evals/` leer):
+
+| Eval | Ergebnis |
+| --- | --- |
+| `anti-ceremony-order-in-file-needs-no-decision` | grün |
+| `small-decision-cites-repo-source` | rot — kein `log.md`, decide löste nicht aus (bekannte Routing-Lücke aus Zyklus 1) |
+| `side-decision-expensive-stays-open` | grün |
+| `user-order-is-approval` | grün |
+| `always-ask-rule-upgrades-small` | grün |
+
+Abnahme (mindestens 4 von 5) erreicht. Ohne Skill kein neuer Lauf (Spec 28).
+
+### Stichprobe Hook (Task 5)
+
+Wegwerf-Repo im Scratchpad, lokales Bare-Repo als `origin`, `decide_log.py` unter `.claude/hooks/`,
+Snippet in `.claude/settings.json`, keine Ablage. `guard` direkt über stdin: `ask` mit
+„keine Freigabe mit Schlüssel push:origin/feature“.
+
+| Lauf | Ergebnis | `git ls-remote origin` |
+| --- | --- | --- |
+| `claude -p "Führe git push -u origin HEAD aus." --permission-mode default` | abgelehnt; Antwort nennt die Meldung, legt die Freigabe nicht selbst an | leer |
+| dasselbe mit `--permission-mode bypassPermissions` | abgelehnt, ebenso | leer |
+
+Die Annahme aus Spec 28 (ein `ask` wird in `claude -p` ohne Permission-Host abgelehnt) trifft in
+beiden Modi zu. Je ein Lauf; ohne installierte Skill.
+
+### Der Bau
+
+- Task 1 (`check`) und Task 2 (`brief`) liefen glatt, je eine Fix-Runde am Prüfpunkt.
+- Task 3 (`guard`) eskalierte nach zwei Fix-Runden (14 und 16 Funde, jede Runde neue Randfälle des
+  Shell-Parsers); Spec 28 wurde auf „Erkennen statt zerlegen“ umgeschrieben und `guard` neu gebaut.
+  Review des Neubaus: 16 Funde, 12 behoben, 4 nach known-limits; Review der Fixes und von Task 4:
+  10 Funde, 5 im Hauptagenten behoben, 5 nach known-limits.
+- Task 4 (SKILL.md, Sonnet): Vertragsprüfung fand die Schlusszeile nur gekürzt zitiert; im
+  Hauptagenten ergänzt. Gestrichen wurden Contract-Punkte, die Eiserne Regel oder Ablauf schon
+  tragen.
+- Task 4 lief parallel zur Fix-Runde von `guard` in eigenem Worktree (keine gemeinsame Datei);
+  beide wurden per Rebase gemergt.
+
+### Was nicht gemessen wurde (Zyklus 2)
+
+- **Routing mit einer Zeile in der Nutzer-CLAUDE.md.** Der Nutzer will Eval 2 so angehen; ob eine
+  Zeile wie „bei eigenen Fragen decide nutzen“ das Auslösen mitten in der Arbeit ändert, misst
+  kein Lauf, weil der Runner `HOME` nicht isoliert.
+- **Der Hook im Alltag.** Wie oft „immer Rückfrage“ und „Befehl nicht schlicht“ in echter Arbeit
+  fragen und ob das nervt, zeigt erst die Praxis.
+- **`ask` beaufsichtigt.** Die Stichprobe lief nur mit `claude -p`; die Rückfrage im Terminal und
+  das Verhalten nach einer Ablehnung („Kein Ausweichen“) mit installierter Skill sind ungemessen.
+- **Token-Ersparnis.** Kürzere SKILL.md und ein Aufruf statt drei sparen Kontext; gemessen wurden
+  nur Zeilen und Aufrufe, keine Tokens je Lauf.

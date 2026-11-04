@@ -650,7 +650,10 @@ der Aufgabe nicht auslöst — vom Nutzer als Routing-Lücke dokumentiert statt 
 **Zyklus 2 (2026-11-04):** Plan `docs/superpowers/plans/2026-11-04-decide-slim.md`; Bau nach
 `skill-forge` (17) Schritt 3 bis 7. Gemessen wird danach: Zeilen von `decide_log.py` und
 SKILL.md vorher und nachher, Punkte in known-limits, Aufrufe bei der Übergabe (3 → 1), Evals mit
-Skill.
+Skill. **Stand 2026-11-04: gebaut** — `decide_log.py` 2245 → 2021 Zeilen (davon 216 neuer
+optionaler Hook `guard`), SKILL.md 143 → 110, Übergabe ein Aufruf, Evals mit Skill 4 von 5 (Eval 2
+wie bisher rot), Stichprobe: `ask` in `claude -p` in beiden Modi abgelehnt
+(`docs/superpowers/reports/decide-report.md`, Abschnitt Zyklus 2).
 
 Plan mit `impl-plan` (16) unter `docs/superpowers/plans/`; Bau nach `skill-forge` (17) Schritt 3
 bis 7.
