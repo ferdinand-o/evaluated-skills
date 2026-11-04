@@ -153,7 +153,6 @@ VERIFY_DIR = "verify"        # Prüfaufträge `verify/<n>.md` im Laufordner
 VERDICTS_DIR = "verdicts"    # Urteile `verdicts/<fund-identität>.json` im Laufordner
 FINDING_KEY_CHARS = 16       # Länge der Fund-Identität (Hex) in einem Urteil
 VERIFY_ORDER_RE = re.compile(r"[0-9]+\.md")          # ein Prüfauftrag in `verify/`
-VERIFY_KEY_RE = re.compile(r"\| finding: ([0-9]+) \| key: ([0-9a-f]+) -->")
 # Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: Beide Profile reviewen denselben
 # Bereich; checkpoint hat als Soll die Datei aus `--soll-file` (Pflicht) statt der
 # Commit-Messages, ein Soll mindestens so genau. Also übernimmt standard aus beiden,
@@ -6348,7 +6347,9 @@ def _clean_reused(item, index: int, repo: Path) -> dict:
     der ihn gemeldet hat (`apply_since`). Fehlt `run` (Plan von vor dieser Regel), fehlt es
     auch danach; ein `run`, das keine Lauf-ID ist, ist ein KitError. Ebenso `verdict` (eines
     aus `VERDICTS`) und `verdict_evidence` (Text): das Urteil, das der frühere Lauf zu diesem
-    Fund hatte (`apply_since`, Spec 28 Schritt 6); ein anderes Urteil ist ein KitError."""
+    Fund hatte (`apply_since`, Spec 28 Schritt 6); ein anderes Urteil und `widerlegt` ohne
+    nichtleeres `verdict_evidence` (wie in `verdict`) sind ein KitError. Ob der frühere Lauf
+    das Urteil wirklich hatte, prüft `_inherited`."""
     clean = _clean_finding(item, index, repo)
     if "run" in item:
         if not isinstance(item["run"], str) or not RUN_ID_RE.fullmatch(item["run"]):
@@ -6360,6 +6361,8 @@ def _clean_reused(item, index: int, repo: Path) -> dict:
         if item["verdict"] not in VERDICTS or not (evidence is None or isinstance(evidence, str)):
             raise KitError(f"Fund {index} ({clean['file']}): verdict {item['verdict']!r} ist "
                            f"keines aus {', '.join(VERDICTS)} oder verdict_evidence kein Text")
+        if item["verdict"] == "widerlegt" and not (evidence and evidence.strip()):
+            raise KitError(f"Fund {index} ({clean['file']}): widerlegt ohne verdict_evidence")
         clean["verdict"] = item["verdict"]
         if evidence and evidence.strip():
             clean["verdict_evidence"] = evidence.strip()
@@ -7313,6 +7316,24 @@ def _plan_spans(plan: dict) -> dict:
     return out
 
 
+def _judged_findings(plan: dict, keyed: dict, accepted: dict, given: dict,
+                     inherited: dict) -> list:
+    """Die vereinigten Funde eines Laufs, je mit seinem Urteil — die eine Rechnung für `merge`
+    und `_source_verdicts` (`--since`): `_merge_sources` über `_sources` (angenommene
+    Ergebnisse `accepted`, übernommene Funde aus `keyed`), Pakete in Plan-Reihenfolge, mit den
+    Spannen des Plans (`_plan_spans`); dazu `verdict` und, wenn genannt, `verdict_evidence`
+    nach `_verdict_for` (`given`: die Urteile aus `verdicts/`, `inherited`: `_inherited`)."""
+    rank = {p["id"]: i for i, p in enumerate(plan["packets"])}
+    merged = _merge_sources(_sources(accepted, keyed), rank, _plan_spans(plan))
+    for finding in merged:
+        found = _verdict_for(finding, given, inherited)
+        if found is not None:
+            finding["verdict"] = found[0]
+            if found[1]:
+                finding["verdict_evidence"] = found[1]
+    return merged
+
+
 def merge(run_path):
     """`merge --run <lauf>`: `findings.json` aus allen angenommenen Ergebnissen und den
     übernommenen Funden des Plans (Spec 26, Ablauf Schritt 5; auch die `outside`-Elemente der
@@ -7343,16 +7364,9 @@ def merge(run_path):
     with _plan_lock(directory, run_id):
         plan, keyed = _checked_plan(directory, run_id)
         accepted, _stale = _results(directory, plan, run_id, repo)
-        rank = {p["id"]: i for i, p in enumerate(plan["packets"])}
-        merged = _merge_sources(_sources(accepted, keyed), rank, _plan_spans(plan))
         digest = _plan_digest(plan, run_id)
-        given, inherited = _load_verdicts(directory, run_id, digest), _inherited(keyed)
-        for finding in merged:
-            found = _verdict_for(finding, given, inherited)
-            if found is not None:
-                finding["verdict"], evidence = found
-                if evidence:
-                    finding["verdict_evidence"] = evidence
+        merged = _judged_findings(plan, keyed, accepted, _load_verdicts(directory, run_id, digest),
+                                  _inherited(directory, keyed))
         meta = {"generated": f"{SCRIPT_CMD} merge --run {run_id}", "run": run_id,
                 "plan": digest}
         return write_json(directory / "findings.json", meta, {"findings": merged})
@@ -7391,27 +7405,46 @@ def _finding_key(finding: dict) -> str:
         :FINDING_KEY_CHARS]
 
 
-def _verdict_time(meta: dict, mtime: float) -> float:
-    """Wann ein Urteil geschrieben wurde, in Sekunden seit der Epoche: `_meta.recorded` (ISO,
-    von `verdict`; ohne Zone UTC), sonst — ältere Urteile ohne das Feld — die mtime der Datei."""
+def _verdict_order(meta: dict, data: dict, name: str) -> tuple:
+    """Sortierschlüssel „wie neu ist ein Urteil": eines mit `_meta.recorded` (ISO, von
+    `verdict`; ohne Zone UTC) nach diesem Zeitpunkt, und jedes davon neuer als alle ohne das
+    Feld. Ohne `recorded` (Läufe von vor dieser Regel) gilt deren Regel: die höhere Nummer
+    (`number`, sonst die Nummer im Dateinamen `<n>.json`) — nie die mtime, die ein Kopieren
+    ändert."""
     recorded = meta.get("recorded")
     if isinstance(recorded, str):
         with contextlib.suppress(ValueError):
             moment = dt.datetime.fromisoformat(recorded)
             if moment.tzinfo is None:
                 moment = moment.replace(tzinfo=dt.timezone.utc)
-            return moment.timestamp()
-    return mtime
+            return 1, moment.timestamp(), name
+    number = data.get("number")
+    if isinstance(number, bool) or not isinstance(number, int):
+        stem = name[:-len(".json")]
+        number = int(stem) if stem.isdigit() else 0
+    return 0, number, name
 
 
-def _load_verdicts(directory: Path, run_id: str, digest: str) -> dict:
-    """Die Urteile aus `verdicts/`: `{Fund-Identität: (Urteil, Beleg oder None)}`. Gelesen
-    werden beide Formen: `verdicts/<fund-identität>.json` (`verdict`) und die ältere
-    `verdicts/<n>.json` (E8). Angenommen ist eine Datei, die `verdict` für diesen Lauf und
-    diesen Plan geschrieben hat (`_meta.run`, `_meta.plan`) mit einem Urteil aus `VERDICTS`
-    und einer Identität (`finding`); alles andere zählt nicht. Bei zwei Urteilen zum selben
-    Fund gilt das neuere (`_verdict_time`: `_meta.recorded`, sonst die mtime), nicht die
-    höhere Nummer."""
+def _given_verdict(item) -> tuple | None:
+    """`(Urteil, Beleg oder None)` aus einem Urteils-Objekt (`verdict`, `verdict_evidence`),
+    oder None: ein Urteil nicht aus `VERDICTS`, oder `widerlegt` ohne Beleg."""
+    if not isinstance(item, dict) or item.get("verdict") not in VERDICTS:
+        return None
+    evidence = item.get("verdict_evidence")
+    evidence = evidence.strip() or None if isinstance(evidence, str) else None
+    if item["verdict"] == "widerlegt" and evidence is None:
+        return None
+    return item["verdict"], evidence
+
+
+def _verdict_history(directory: Path, run_id: str, digest: str) -> dict:
+    """Alle Urteile aus `verdicts/`: `{Fund-Identität: [(Urteil, Beleg oder None), …]}`, das
+    geltende zuletzt. Gelesen werden beide Formen: `verdicts/<fund-identität>.json`
+    (`verdict`, mit den ersetzten Urteilen unter `history`) und die ältere `verdicts/<n>.json`
+    (E8). Angenommen ist eine Datei, die `verdict` für diesen Lauf und diesen Plan geschrieben
+    hat (`_meta.run`, `_meta.plan`) mit einer Identität (`finding`) und einem Urteil nach
+    `_given_verdict`; alles andere zählt nicht. Bei zwei Urteilen zum selben Fund gilt das
+    neuere (`_verdict_order`)."""
     folder = directory / VERDICTS_DIR
     if not folder.is_dir():
         return {}
@@ -7421,19 +7454,29 @@ def _load_verdicts(directory: Path, run_id: str, digest: str) -> dict:
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            mtime = path.stat().st_mtime
         except (OSError, ValueError):
             continue
         meta = data.get("_meta") if isinstance(data, dict) else None
         if not isinstance(meta, dict) or meta.get("run") != run_id or meta.get("plan") != digest \
-                or data.get("verdict") not in VERDICTS or not isinstance(data.get("finding"), str):
+                or _given_verdict(data) is None or not isinstance(data.get("finding"), str):
             continue
-        found.append((_verdict_time(meta, mtime), path.name, data))
-    out = {}
-    for _moment, _name, data in sorted(found, key=lambda item: item[:2]):
-        evidence = data.get("verdict_evidence")
-        out[data["finding"]] = (data["verdict"], evidence if isinstance(evidence, str) else None)
+        found.append((_verdict_order(meta, data, path.name), data))
+    out: dict[str, list] = {}
+    for _order, data in sorted(found, key=lambda item: item[0]):
+        earlier = data.get("history") if isinstance(data.get("history"), list) else []
+        seen = out.setdefault(data["finding"], [])
+        for got in map(_given_verdict, [*earlier, data]):
+            if got is not None:
+                if got in seen:
+                    seen.remove(got)
+                seen.append(got)
     return out
+
+
+def _load_verdicts(directory: Path, run_id: str, digest: str) -> dict:
+    """Die geltenden Urteile aus `verdicts/`: `{Fund-Identität: (Urteil, Beleg oder None)}`,
+    je das neueste aus `_verdict_history`."""
+    return {key: seen[-1] for key, seen in _verdict_history(directory, run_id, digest).items()}
 
 
 def _source_ident(file, run, source: dict) -> str:
@@ -7444,19 +7487,49 @@ def _source_ident(file, run, source: dict) -> str:
                        source.get("failure_scenario")], ensure_ascii=False)
 
 
-def _inherited(keyed: dict) -> dict:
+def _inherited(directory, keyed: dict, seen=frozenset()) -> dict:
     """Die Urteile, die übernommene Funde aus ihrem früheren Lauf mitbringen (`apply_since`):
     `{_source_ident: (Urteil, Beleg oder None)}` über `file_keys[…].findings` und
-    `outside[…].finding` (geprüft von `_checked_plan`)."""
-    out = {}
+    `outside[…].finding` (geprüft von `_checked_plan`) — nur die, die der Lauf, aus dem der
+    Eintrag übernommen ist (`reused_from`), selbst zu dieser Quelle hatte (`_earlier_verdicts`:
+    seine Dateien unter `verdicts/` sind die Quelle der Wahrheit, nicht `plan.json`). Ein Urteil
+    ohne passende Datei im früheren Lauf, oder dessen Lauf fehlt, zählt nicht: der Fund ist
+    offen. `directory`: der Ordner des Laufs, dessen `file_keys` das sind; `seen`: die Läufe,
+    die schon geprüft werden (gegen Kreise)."""
+    directory = Path(directory)
+    seen = seen | {directory.name}
+    out, known = {}, {}
     for info in keyed.values():
-        if not isinstance(info.get("reused_from"), str) or not isinstance(info.get("findings"), list):
+        earlier = info.get("reused_from")
+        if not isinstance(earlier, str) or not isinstance(info.get("findings"), list):
             continue
         for f in [*info["findings"], *(item["finding"] for item in info.get("outside", []))]:
-            if f.get("verdict") in VERDICTS:
-                ident = _source_ident(f["file"], f.get("run", info["reused_from"]), f)
-                out[ident] = (f["verdict"], f.get("verdict_evidence"))
+            got = _given_verdict(f)
+            if got is None:
+                continue
+            if earlier not in known:
+                known[earlier] = _earlier_verdicts(directory.parent, earlier, seen)
+            ident = _source_ident(f["file"], f.get("run", earlier), f)
+            if got in known[earlier].get(ident, ()):
+                out[ident] = got
     return out
+
+
+def _earlier_verdicts(cache: Path, run_id: str, seen: frozenset) -> dict:
+    """Was ein früherer Lauf `cache/<run_id>/` je Quelle an Urteilen kennt (`_source_verdicts`),
+    für die Probe in `_inherited`. Ein Lauf ohne gültige Lauf-ID, ohne Plan, mit einem Plan, den
+    `_checked_plan` nicht annimmt, oder einer, der schon geprüft wird (`seen`), kennt keine."""
+    if run_id in seen or not RUN_ID_RE.fullmatch(run_id):
+        return {}
+    directory = cache / run_id
+    try:
+        plan, keyed = _checked_plan(directory, run_id)
+    except KitError:
+        return {}
+    digest = _plan_digest(plan, run_id)
+    accepted = {packet["id"]: result
+                for packet, result, _level in _accepted_results(directory, plan, digest)}
+    return _source_verdicts(directory, run_id, plan, keyed, accepted, digest, seen)
 
 
 def _verdict_for(finding: dict, given: dict, inherited: dict):
@@ -7487,33 +7560,38 @@ def _verdict_for(finding: dict, given: dict, inherited: dict):
 
 
 def _source_verdicts(directory: Path, run_id: str, plan: dict, keyed: dict,
-                     accepted: dict, digest: str) -> dict:
-    """Die Urteile eines früheren Laufs je Quelle (`_source_ident`), für `apply_since`: die
-    übernommenen (`_inherited`), darüber je vereinigtem Fund sein Urteil (`_verdict_for`) für
-    jede seiner Quellen. Die Funde werden aus den angenommenen Ergebnissen neu vereinigt wie
-    in `merge`, nicht aus `findings.json` gelesen; Urteile nur aus `verdicts/`. `digest`:
-    der Fingerabdruck seines Plans (`_plan_digest`)."""
-    inherited = _inherited(keyed)
-    given = _load_verdicts(directory, run_id, digest)
-    if not given:
-        return inherited
-    rank = {p["id"]: i for i, p in enumerate(plan["packets"])}
-    out = dict(inherited)
-    for finding in _merge_sources(_sources(accepted, keyed), rank, _plan_spans(plan)):
-        found = _verdict_for(finding, given, inherited)
-        if found is not None:
-            for source in finding["sources"]:
-                out[_source_ident(finding["file"], source.get("reused_from") or run_id,
-                                  source)] = found
+                     accepted: dict, digest: str, seen=frozenset()) -> dict:
+    """Die Urteile eines früheren Laufs je Quelle (`_source_ident`), für `apply_since` und die
+    Probe in `_inherited`: `{Quelle: [(Urteil, Beleg oder None), …]}`, das geltende zuletzt.
+    Je vereinigtem Fund (`_judged_findings`, dieselbe Rechnung wie `merge`, nicht aus
+    `findings.json` gelesen) für jede seiner Quellen alle Urteile, die `verdicts/` zu ihm hat
+    (`_verdict_history`), und sein geltendes (`_verdict_for`); vorne die übernommenen, die
+    `_inherited` annimmt. `digest`: der Fingerabdruck seines Plans (`_plan_digest`)."""
+    inherited = _inherited(directory, keyed, seen)
+    history = _verdict_history(directory, run_id, digest)
+    given = {key: items[-1] for key, items in history.items()}
+    out = {ident: [item] for ident, item in inherited.items()}
+    for finding in _judged_findings(plan, keyed, accepted, given, inherited):
+        current = _given_verdict(finding)
+        if current is None:
+            continue
+        for source in finding["sources"]:
+            ident = _source_ident(finding["file"], source.get("reused_from") or run_id, source)
+            items = out.setdefault(ident, [])
+            for got in [*history.get(_finding_key(finding), ()), current]:
+                if got in items:
+                    items.remove(got)
+                items.append(got)
     return out
 
 
 def _judged_finding(finding: dict, judged: dict) -> dict:
-    """`finding` (mit `run`) mit dem Urteil aus `judged` (`_source_verdicts`) als `verdict` und
-    `verdict_evidence`, ohne Urteil ohne beide Felder."""
+    """`finding` (mit `run`) mit dem geltenden Urteil aus `judged` (`_source_verdicts`, das
+    letzte der Liste) als `verdict` und `verdict_evidence`, ohne Urteil ohne beide Felder."""
     out = {k: v for k, v in finding.items() if k not in ("verdict", "verdict_evidence")}
     found = judged.get(_source_ident(out.get("file"), out.get("run"), out))
-    if found is not None:
+    if found:
+        found = found[-1]
         out["verdict"] = found[0]
         if found[1]:
             out["verdict_evidence"] = found[1]
@@ -7555,8 +7633,10 @@ class _RunState(NamedTuple):
     Pakete ohne angenommenes Ergebnis (`missing`), die Funde aus `findings.json` (nur wenn
     `merge` sie für diesen Plan schrieb; ein Urteil darin nur, wenn es zu `verdicts/` passt),
     die verlorenen Funde (`_lost`), `unverified`: bei einem Plan mit `verify: true` die Nummern
-    der Funde ohne `evidence` und ohne Urteil (sonst leer), und `forged`: die Nummern der Funde,
-    deren Urteil in `findings.json` nicht zu `verdicts/` passt (`_checked_verdicts`)."""
+    der Funde ohne `evidence` und ohne Urteil (sonst leer), `forged`: die Nummern der Funde,
+    deren Urteil in `findings.json` nicht zu `verdicts/` passt, und `stale_verdicts`: die
+    Nummern der Funde, deren Urteil es gab, die aber ein neueres haben — `merge` fehlt
+    (`_checked_verdicts`)."""
     plan: dict
     keyed: dict
     digest: str
@@ -7567,14 +7647,16 @@ class _RunState(NamedTuple):
     lost: list
     unverified: list = []
     forged: list = []
+    stale_verdicts: list = []
 
     @property
     def gaps(self) -> bool:
         """Die Abdeckungsregel von `audit`: eine Lücke, wenn ein Paket ohne angenommenes
         Ergebnis ist, eine Ergebnisdatei nicht angenommen ist, ein Fund fehlt, ein Urteil in
-        `findings.json` nicht zu `verdicts/` passt oder (Plan mit `verify: true`) ein
-        Prüfauftrag ohne Urteil ist."""
-        return bool(self.missing or self.stale or self.lost or self.unverified or self.forged)
+        `findings.json` nicht zu `verdicts/` passt oder nach einem neueren Urteil `merge` fehlt
+        oder (Plan mit `verify: true`) ein Prüfauftrag ohne Urteil ist."""
+        return bool(self.missing or self.stale or self.lost or self.unverified or self.forged
+                    or self.stale_verdicts)
 
     def verdict_counts(self) -> tuple:
         """`(bestätigt, widerlegt, unklar, offen)` über die Funde aus `findings.json`; offen
@@ -7612,30 +7694,42 @@ def _run_state(directory: Path, run_id: str, repo: Path) -> _RunState:
     missing = [p["id"] for p in plan["packets"] if p["id"] not in accepted]
     findings = _merged_findings(directory / "findings.json", run_id, digest)
     lost = _lost(_sources(accepted, keyed), findings)
-    findings, forged = _checked_verdicts(findings, _load_verdicts(directory, run_id, digest),
-                                         _inherited(keyed))
+    findings, forged, stale_verdicts = _checked_verdicts(
+        findings, _verdict_history(directory, run_id, digest), _inherited(directory, keyed))
     state = _RunState(plan, keyed, digest, accepted, stale, missing, findings, lost,
-                      forged=forged)
+                      forged=forged, stale_verdicts=stale_verdicts)
     return state._replace(unverified=state.unverified_findings() if plan_verify(plan) else [])
 
 
-def _checked_verdicts(findings: list, given: dict, inherited: dict) -> tuple[list, list]:
-    """Die Urteile in `findings.json` gegen `verdicts/` abgleichen (G2): Ein Fund behält
-    `verdict` und `verdict_evidence` nur, wenn `merge` sie so schreiben würde
-    (`_verdict_for`); sonst fallen beide weg — der Fund gilt als offen —, und seine Nummer
-    (1-basiert) steht in der zweiten Liste. Ein Urteil, das nur in `verdicts/` steht (noch
-    ohne `merge`), ändert hier nichts. Rückgabe: (Funde, Nummern)."""
-    out, forged = [], []
+def _checked_verdicts(findings: list, history: dict, inherited: dict) -> tuple:
+    """Die Urteile in `findings.json` gegen `verdicts/` abgleichen (G2). `history`: alle
+    Urteile je Fund-Identität, das geltende zuletzt (`_verdict_history`); `inherited`: die
+    übernommenen, die der frühere Lauf belegt (`_inherited`). Ein Fund behält `verdict` und
+    `verdict_evidence`, wenn `merge` sie so schreiben würde (`_verdict_for`). Gab es genau
+    dieses Urteil (eine Datei in `verdicts/` zu seiner Identität, auch ein ersetztes, oder das
+    übernommene), gilt aber inzwischen ein anderes, fehlt nur `merge`: er behält es, und seine
+    Nummer steht in der dritten Liste (`stale_verdicts`). Sonst ist es gefälscht: beide Felder
+    fallen weg — der Fund gilt als offen —, und seine Nummer (1-basiert) steht in der zweiten
+    Liste. Ein Urteil, das nur in `verdicts/` steht (noch ohne `merge`), ändert hier nichts.
+    Rückgabe: (Funde, gefälschte Nummern, Nummern ohne `merge`)."""
+    given = {key: items[-1] for key, items in history.items()}
+    out, forged, stale = [], [], []
     for number, finding in enumerate(findings, 1):
         if "verdict" in finding or "verdict_evidence" in finding:
+            have = (finding.get("verdict"), finding.get("verdict_evidence") or None)
             want = _verdict_for(finding, given, inherited)
-            have = (finding.get("verdict"), finding.get("verdict_evidence"))
-            if want is None or have != (want[0], want[1] or None):
+            before = _verdict_for(finding, {}, inherited)
+            if want is not None and have == (want[0], want[1] or None):
+                pass
+            elif have in history.get(_finding_key(finding), ()) or \
+                    (before is not None and have == (before[0], before[1] or None)):
+                stale.append(number)
+            else:
                 forged.append(number)
                 finding = {k: v for k, v in finding.items()
                            if k not in ("verdict", "verdict_evidence")}
         out.append(finding)
-    return out, forged
+    return out, forged, stale
 
 
 def _reviews_line(plan: dict, below=()) -> str:
@@ -7890,6 +7984,9 @@ def _gap_text(state: _RunState) -> str:
         parts.append(f"unverified: {', '.join(map(str, state.unverified))}")
     if state.forged:
         parts.append(f"forged_verdicts: {', '.join(map(str, state.forged))}")
+    if state.stale_verdicts:
+        parts.append(f"stale_verdicts: {', '.join(map(str, state.stale_verdicts))} "
+                     "(merge fehlt)")
     return "; ".join(parts)
 
 
@@ -7984,8 +8081,11 @@ def audit(run_path, report_path):
     (Prüfauftrag ohne Urteil; `verdict`, danach `merge`). `forged_verdicts` die Nummern der
     Funde, deren Urteil in `findings.json` nicht zu `verdicts/` passt (`_checked_verdicts`,
     etwa von Hand geschrieben); sie gelten als offen, bis `merge` `findings.json` neu
-    schreibt — `fix-task` (subagent-dev) liest `findings.json` nach `merge`. `complete` ist
-    wahr nur, wenn diese sechs Listen leer sind. Dazu zwei Auskünfte, die `complete` nicht ändern (Spec 28, Contract): `no_block`,
+    schreibt — `fix-task` (subagent-dev) liest `findings.json` nach `merge`. `stale_verdicts`
+    die Nummern der Funde, deren Urteil es in `verdicts/` gab (oder übernommen), die aber
+    inzwischen ein neueres haben: `merge` fehlt, keine Fälschung. `complete` ist wahr nur,
+    wenn diese sieben Listen leer sind. Dazu zwei Auskünfte, die `complete` nicht ändern
+    (Spec 28, Contract): `no_block`,
     die Pakete mit angenommenem Ergebnis ohne Marke des Pakets (`record --no-block`, auch ein
     Ergebnis aus Spec 26), und `below_level`, die Pakete, deren gespeicherte Stufe unter der
     des Plans (`_review_level`; bei Fokus security ohne Stufe immer leer) liegt; beide in
@@ -8008,32 +8108,16 @@ def audit(run_path, report_path):
                                 "total": len(state.plan["packets"])},
                    "missing": state.missing, "stale": state.stale, "lost_findings": state.lost,
                    **({"unverified": state.unverified} if plan_verify(state.plan) else {}),
-                   "forged_verdicts": state.forged,
+                   "forged_verdicts": state.forged, "stale_verdicts": state.stale_verdicts,
                    "report_mismatch": mismatch, "no_block": state.no_block(),
                    "below_level": [pid for pid, _level in state.below_level()]}
         return write_json(directory / "audit.json", meta, payload)
 
 
 def _verify_header(run_id: str, number: int, key: str) -> str:
-    """Kopfzeile eines Prüfauftrags: Nummer des Funds und seine Identität (`_finding_key`) —
-    `verdict` hängt das Urteil an diese Identität, nicht an die Position (`_order_key`)."""
+    """Kopfzeile eines Prüfauftrags: Nummer des Funds und seine Identität (`_finding_key`)."""
     return (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: {SCRIPT_CMD} "
             f"verify --run {run_id} | finding: {number} | key: {key} -->\n")
-
-
-def _order_key(directory: Path, run_id: str, number: int):
-    """Die Fund-Identität aus der Kopfzeile von `verify/<number>.md`, wenn `verify` den
-    Auftrag für diesen Lauf geschrieben hat (`VERIFY_KEY_RE`, gleiche Nummer); sonst None —
-    kein Auftrag oder einer von vor dieser Regel ohne `key`."""
-    try:
-        with (directory / VERIFY_DIR / f"{number}.md").open(encoding="utf-8") as handle:
-            head = handle.readline()
-    except (OSError, UnicodeDecodeError):
-        return None
-    match = VERIFY_KEY_RE.search(head)
-    if match is None or int(match[1]) != number or f"verify --run {run_id} |" not in head:
-        return None
-    return match[2]
 
 
 def _verify_commit(plan: dict, finding: dict) -> str:
@@ -8051,7 +8135,8 @@ def _verify_order(run_id: str, plan: dict, number: int, finding: dict) -> str:
     where = finding.get("file")
     line = finding.get("line")
     scenario = _one_line(finding.get("failure_scenario") or "(kein Szenario genannt)")
-    return (_verify_header(run_id, number, _finding_key(finding))
+    key = _finding_key(finding)
+    return (_verify_header(run_id, number, key)
             + f"# Prüfauftrag {number}: {where}\n\n"
             "Ein anderer Reviewer hat hier einen Fehler behauptet. Du prüfst die Behauptung "
             "unabhängig: Lies den Code selbst, bestätige oder widerlege sie mit einem "
@@ -8060,17 +8145,20 @@ def _verify_order(run_id: str, plan: dict, number: int, finding: dict) -> str:
             f"- Zeile: {'(nicht genannt)' if line is None else line}\n"
             f"- Commit: `{_verify_commit(plan, finding)}` (lies den Stand dieses Commits, "
             "etwa mit `git show <commit>:<datei>`)\n"
-            f"- Szenario laut Reviewer: {scenario}\n\n"
+            f"- Szenario laut Reviewer: {scenario}\n"
+            f"- Schlüssel des Funds: `{key}` (gib ihn unverändert zurück)\n\n"
             "## Grenzen\n\n"
-            f"- Schreibe nur unter `{VERIFY_DIR}/{number}/work/` (im Laufordner); sonst "
+            f"- Schreibe nur unter `{VERIFY_DIR}/{key}/work/` (im Laufordner); sonst "
             "schreibst du nirgends.\n"
             "- Startest du Python, dann nur mit `-I`; Code aus dem Repo importierst oder "
             "startest du nicht, du liest ihn.\n\n"
             "## Rückgabeformat\n\n"
             "Antworte nur mit einem JSON-Objekt:\n\n"
             "```json\n"
-            '{"urteil": "bestätigt|widerlegt|unklar", "beleg": "..."}\n'
+            f'{{"key": "{key}", "urteil": "bestätigt|widerlegt|unklar", "beleg": "..."}}\n'
             "```\n\n"
+            "- `key`: Pflicht, der Schlüssel oben — an ihm hängt dein Urteil, nicht an der "
+            "Nummer des Auftrags.\n"
             "- `bestätigt`: Der Ablauf tritt ein; `beleg` nennt ihn mit `Datei:Zeile`.\n"
             "- `widerlegt`: Der Ablauf tritt nicht ein; `beleg` ist Pflicht und nennt, was "
             "ihn verhindert (zitierte Zeilen mit `Datei:Zeile` oder Befehl und Ausgabe).\n"
@@ -8081,18 +8169,21 @@ def _verify_order(run_id: str, plan: dict, number: int, finding: dict) -> str:
 def write_verify(run_path):
     """`verify --run <lauf>`: je Fund in `findings.json` ohne `evidence` den Prüfauftrag
     `verify/<n>.md` schreiben (Spec 28, Ablauf Schritt 6). `n` ist die 1-basierte Nummer des
-    Funds in `findings.json`, die Nummer, die `verdict --number` nimmt. Der Auftrag trägt die
-    HTML-Kopfzeile (E3) mit `key: <fund-identität>` (`_finding_key`), Datei, Zeile, `failure_scenario`, den Commit (`_verify_commit`: `bis`
-    des Pakets, sonst das Ziel), die Schreibgrenze `verify/<n>/work/`, `-I` für Python und das
-    Rückgabeformat `{"urteil", "beleg"}` — ohne `summary`, damit der Prüfer die Behauptung
-    nicht abschreibt. Funde mit `evidence` gelten als belegt und bekommen keinen Auftrag; im
-    Bericht zählen sie nicht unter „offen". Ebenso Funde, die schon ein Urteil haben
-    (`_verdict_for`: in `verdicts/`, auch vor dem nächsten `merge`, oder aus dem früheren Lauf
-    übernommen); ein `unklar` prüft nach, wer `verdict --number <n>` erneut aufruft. Ohne
-    `findings.json` zu diesem Plan (erst `merge`) ein KitError. Die Aufträge sind nicht an
+    Funds in `findings.json`. Der Auftrag trägt die HTML-Kopfzeile (E3) mit
+    `key: <fund-identität>` (`_finding_key`), Datei, Zeile, `failure_scenario`, den Schlüssel
+    des Funds, den Commit (`_verify_commit`: `bis` des Pakets, sonst das Ziel), die
+    Schreibgrenze `verify/<fund-identität>/work/` (je Fund, nicht je Nummer: nach einer
+    Neunummerierung findet kein Prüfer die Dateien eines anderen Funds), `-I` für Python und
+    das Rückgabeformat `{"key", "urteil", "beleg"}` mit dem Schlüssel — `verdict` hängt das
+    Urteil an diesen Schlüssel, nicht an die Nummer. Ohne `summary`, damit der Prüfer die
+    Behauptung nicht abschreibt. Funde mit `evidence` gelten als belegt und bekommen keinen
+    Auftrag; im Bericht zählen sie nicht unter „offen". Ebenso Funde, die schon ein Urteil
+    haben (`_verdict_for`: in `verdicts/`, auch vor dem nächsten `merge`, oder aus dem früheren
+    Lauf übernommen); ein `unklar` prüft nach, wer `verdict` mit dessen Schlüssel erneut
+    aufruft. Ohne `findings.json` zu diesem Plan (erst `merge`) ein KitError. Die Aufträge sind nicht an
     `verify: true` im Plan gebunden; nur `audit` und der Bericht verlangen die Urteile erst
     dann. Vorher werden alle alten Aufträge `verify/<n>.md` gelöscht (die Arbeitsordner
-    `verify/<n>/work/` bleiben), damit kein Auftrag zu einer alten Nummer liegen bleibt.
+    bleiben), damit nur die Aufträge des jetzigen Stands liegen.
     Rückgabe: die geschriebenen Pfade."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
@@ -8103,7 +8194,8 @@ def write_verify(run_path):
         if findings is None:
             raise KitError(f"findings.json von Lauf {run_id} fehlt oder gehört zu einem "
                            f"anderen Plan — erst `{SCRIPT_CMD} merge --run {run_id}`")
-        given, inherited = _load_verdicts(directory, run_id, digest), _inherited(keyed)
+        given = _load_verdicts(directory, run_id, digest)
+        inherited = _inherited(directory, keyed)
         orders = directory / VERIFY_DIR
         if orders.is_dir():
             for old in orders.iterdir():
@@ -8121,35 +8213,44 @@ def write_verify(run_path):
         return written
 
 
-def verdict(run_path, number, payload_path):
-    """`verdict --run <lauf> --number <n> <datei|->`: das Urteil des Prüfers zu Prüfauftrag
-    `n` annehmen (Spec 28, Ablauf Schritt 6). `payload_path` ist das Objekt
-    `{"urteil": "bestätigt|widerlegt|unklar", "beleg": "..."}`. Ein anderes Urteil, `widerlegt`
-    ohne nichtleeren `beleg` (der Beleg wie `evidence`), kein Objekt oder eine unbekannte
-    Nummer ist ein KitError, nichts wird geschrieben. Der Fund ist der, für den `verify` den
-    Auftrag `verify/<n>.md` schrieb (`key` in dessen Kopfzeile, `_order_key`), auch wenn ein
-    späteres `merge` ihn umnummeriert hat; hat `findings.json` ihn nicht mehr, ein KitError.
-    Ohne Auftrag (oder einen von vor dieser Regel) ist es Fund `n` aus `findings.json`.
-    Geschrieben wird `verdicts/<fund-identität>.json` mit `_meta` (`generated`, `run`, `plan`,
-    `recorded`: Zeitpunkt in UTC), `number`, `finding` (die Identität, `_finding_key`),
-    `verdict` und, wenn genannt, `verdict_evidence`. Ein zweites Urteil zum selben Fund
-    ersetzt das erste (ein `unklar` darf nachgeprüft werden); ein Urteil zu einem anderen Fund
-    berührt es nie. Das Urteil kommt erst mit dem nächsten `merge` in `findings.json`.
-    Rückgabe: das geschriebene Objekt."""
+def verdict(run_path, payload_path, number=None):
+    """`verdict --run <lauf> [--number <n>] <datei|->`: das Urteil eines Prüfers annehmen
+    (Spec 28, Ablauf Schritt 6). `payload_path` ist das Objekt
+    `{"key": "<fund-identität>", "urteil": "bestätigt|widerlegt|unklar", "beleg": "..."}`,
+    wie der Prüfauftrag es verlangt: Der Fund ist der mit diesem Schlüssel (`_finding_key`),
+    gleich an welcher Stelle er inzwischen in `findings.json` steht; `number` zählt dann nicht.
+    Ein `key`, den kein Fund in `findings.json` hat, ist ein KitError. Fehlt `key`, ist
+    `number` Pflicht und meint Fund `n` der aktuellen `findings.json` — ein Rückfall, der
+    unsicher ist: Hat ein `merge` seit dem Auftrag neu nummeriert, trifft das Urteil einen
+    anderen Fund. Ein anderes Urteil, `widerlegt` ohne nichtleeren `beleg` (der Beleg wie
+    `evidence`), ein `key`, der kein Text ist, kein Objekt oder eine unbekannte Nummer ist ein
+    KitError, nichts wird geschrieben. Geschrieben wird `verdicts/<fund-identität>.json` mit
+    `_meta` (`generated`, `run`, `plan`, `recorded`: Zeitpunkt in UTC), `number` (die jetzige
+    Nummer des Funds), `finding` (die Identität), `verdict` und, wenn genannt,
+    `verdict_evidence`. Ein zweites Urteil zum selben Fund ersetzt das erste (ein `unklar` darf
+    nachgeprüft werden); das ersetzte steht danach unter `history` (`_verdict_history`), damit
+    `audit` ein Urteil in `findings.json` von vor dem letzten `merge` nicht für gefälscht hält.
+    Ein Urteil zu einem anderen Fund berührt es nie. Das Urteil kommt erst mit dem nächsten
+    `merge` in `findings.json`. Rückgabe: das geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
     data = _read_json(payload_path)
     if not isinstance(data, dict):
-        raise KitError('Urteil muss ein Objekt {"urteil", "beleg"} sein')
-    given, evidence = data.get("urteil"), data.get("beleg")
+        raise KitError('Urteil muss ein Objekt {"key", "urteil", "beleg"} sein')
+    given, evidence, key = data.get("urteil"), data.get("beleg"), data.get("key")
     if given not in VERDICTS:
         raise KitError(f"urteil {given!r} ist keines aus {', '.join(VERDICTS)} — nicht angenommen")
     if evidence is not None and not isinstance(evidence, str):
         raise KitError("beleg muss Text sein — nicht angenommen")
+    if key is not None and not isinstance(key, str):
+        raise KitError("key muss der Schlüssel aus dem Prüfauftrag sein (Text) — nicht angenommen")
     evidence = (evidence or "").strip()
     if given == "widerlegt" and not evidence:
         raise KitError("widerlegt braucht einen beleg (zitierte Zeilen mit Datei:Zeile oder "
                        "Befehl und Ausgabe) — nicht angenommen")
+    if key is None and number is None:
+        raise KitError('Urteil ohne "key": --number <n> nennen (Fund n der aktuellen '
+                       "findings.json) oder den Schlüssel aus dem Prüfauftrag zurückgeben")
     with _plan_lock(directory, run_id):
         plan, _keyed = _checked_plan(directory, run_id)
         digest = _plan_digest(plan, run_id)
@@ -8157,26 +8258,48 @@ def verdict(run_path, number, payload_path):
         if findings is None:
             raise KitError(f"findings.json von Lauf {run_id} fehlt oder gehört zu einem "
                            f"anderen Plan — erst `{SCRIPT_CMD} merge --run {run_id}`")
-        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
-            raise KitError(f"Fund {number!r} gibt es nicht: Nummern ab 1")
-        key = _order_key(directory, run_id, number)
+        keys = [_finding_key(f) for f in findings]
         if key is None:
-            if number > len(findings):
+            if isinstance(number, bool) or not isinstance(number, int) or number < 1 \
+                    or number > len(findings):
                 raise KitError(f"Fund {number!r} gibt es nicht: findings.json von Lauf {run_id} "
                                f"hat {len(findings)} Fund(e), Nummern ab 1")
-            key = _finding_key(findings[number - 1])
-        elif key not in {_finding_key(f) for f in findings}:
-            raise KitError(f"Prüfauftrag {number} gilt einem Fund ({key}), den findings.json "
-                           f"von Lauf {run_id} nicht mehr hat — erst `{SCRIPT_CMD} verify "
-                           f"--run {run_id}`, dann den neuen Auftrag prüfen")
+            key = keys[number - 1]
+        elif key not in keys:
+            raise KitError(f"Schlüssel {key} gehört zu keinem Fund in findings.json von Lauf "
+                           f"{run_id} — erst `{SCRIPT_CMD} verify --run {run_id}`, dann den "
+                           "neuen Auftrag prüfen")
         shown = "-" if str(payload_path) == "-" else _shown_path(repo, payload_path)
-        meta = {"generated": f"{SCRIPT_CMD} verdict --run {run_id} --number {number} "
-                             f"{shlex.quote(shown)}", "run": run_id, "plan": digest,
-                "recorded": _now().isoformat()}
-        payload = {"number": number, "finding": key, "verdict": given}
+        meta = {"generated": f"{SCRIPT_CMD} verdict --run {run_id} {shlex.quote(shown)}",
+                "run": run_id, "plan": digest, "recorded": _now().isoformat()}
+        payload = {"number": keys.index(key) + 1, "finding": key, "verdict": given}
         if evidence:
             payload["verdict_evidence"] = evidence
-        return write_json(directory / VERDICTS_DIR / f"{key}.json", meta, payload)
+        target = directory / VERDICTS_DIR / f"{key}.json"
+        earlier = _replaced_verdicts(target, run_id, digest)
+        if earlier:
+            payload["history"] = earlier
+        return write_json(target, meta, payload)
+
+
+def _replaced_verdicts(path: Path, run_id: str, digest: str) -> list:
+    """Die Urteile, die ein neues Urteil in `path` ersetzt: dessen `history` und es selbst, je
+    `{"verdict", "verdict_evidence"?, "recorded"?}` — nur, wenn `verdict` die Datei für diesen
+    Lauf und Plan schrieb; sonst []."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    meta = data.get("_meta") if isinstance(data, dict) else None
+    if not isinstance(meta, dict) or meta.get("run") != run_id or meta.get("plan") != digest:
+        return []
+    out = [h for h in data.get("history") or () if _given_verdict(h) is not None] \
+        if isinstance(data.get("history"), list) else []
+    if _given_verdict(data) is not None:
+        out.append({k: v for k, v in (("verdict", data["verdict"]),
+                                      ("verdict_evidence", data.get("verdict_evidence")),
+                                      ("recorded", meta.get("recorded"))) if v is not None})
+    return out
 
 
 # --- Kommandozeile ---------------------------------------------------------------------------
@@ -8311,14 +8434,15 @@ def _cmd_verify(args) -> int:
     for path in written:
         print(f"{(CACHE_DIR / args.run / VERIFY_DIR / path.name).as_posix()}")
     print(f"verify: {_counted(len(written), 'Prüfauftrag', 'Prüfaufträge')} — je Auftrag ein "
-          f"Prüfer, sein Urteil nimmt `verdict --run {args.run} --number <n>` an")
+          f"Prüfer, sein Urteil (mit dem Schlüssel des Auftrags) nimmt "
+          f"`verdict --run {args.run} <datei>` an")
     return 0
 
 
 def _cmd_verdict(args) -> int:
     repo = _toplevel(args.repo)
-    data = verdict(run_dir(repo, _check_run_id(args.run)), args.number, args.payload)
-    print(f"Fund {args.number}: {data['verdict']} → "
+    data = verdict(run_dir(repo, _check_run_id(args.run)), args.payload, args.number)
+    print(f"Fund {data['number']} ({data['finding']}): {data['verdict']} → "
           f"{(CACHE_DIR / args.run / VERDICTS_DIR / (data['finding'] + '.json')).as_posix()} — "
           "erst `merge` trägt es in findings.json ein")
     return 0
@@ -8415,10 +8539,12 @@ def _parser() -> argparse.ArgumentParser:
 
     vrd = sub.add_parser("verdict", parents=[common], help="Urteil eines Prüfers annehmen")
     vrd.add_argument("--run", required=True)
-    vrd.add_argument("--number", required=True, type=int,
-                     help="Nummer des Funds in findings.json (1-basiert)")
-    vrd.add_argument("payload", help='JSON-Objekt {"urteil": "bestätigt|widerlegt|unklar", '
-                                     '"beleg": "..."} (- für stdin)')
+    vrd.add_argument("--number", type=int, default=None,
+                     help="nur ohne key im Objekt: Nummer des Funds in der aktuellen "
+                          "findings.json (1-basiert; unsicher nach Neunummerierung)")
+    vrd.add_argument("payload", help='JSON-Objekt {"key": "<schlüssel>", "urteil": '
+                                     '"bestätigt|widerlegt|unklar", "beleg": "..."} '
+                                     '(- für stdin)')
     vrd.set_defaults(func=_cmd_verdict)
 
     rep = sub.add_parser("report", parents=[common],

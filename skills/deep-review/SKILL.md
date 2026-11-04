@@ -66,7 +66,7 @@ keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD b
    ```
    Schreibt `findings.json`; Funde einer Datei bis drei Zeilen auseinander werden einer.
 6. **Prüfen** (Profil `checkpoint` oder `--verify`): `verify --run <lauf>`, je Auftrag ein Prüfer
-   (Sonnet), `verdict --run <lauf> --number <n> <datei>`, dann erneut `merge`.
+   (Sonnet) mit dem Schlüssel des Funds im Objekt, `verdict --run <lauf> <datei>`, dann `merge`.
 7. **Bericht, Audit, Aufräumen.** `report --run <lauf>` schreibt `report.md` im Laufordner;
    eigene Einordnung nur unter `## Einordnung` am Ende, davor änderst du nichts:
    ```bash

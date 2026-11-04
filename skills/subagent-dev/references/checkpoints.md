@@ -143,8 +143,9 @@ Prüfpunkt `base..HEAD`. Die Schalter für den Plan von deep-review kommen aus
   `.skills/cache/deep-review/<lauf>/findings.json`, ohne abzustimmen und ohne Status
   `offen`; jeder Fund außer einem widerlegten geht in den Fix-Pfad.
 - **Prüfen vor dem Bericht** (Profil `checkpoint` oder `--verify`): nach `merge` erst
-  `verify --run <lauf>`, je Auftrag ein Prüfer (Sonnet),
-  `verdict --run <lauf> --number <n> <datei>`, dann erneut `merge`; danach `report` und
+  `verify --run <lauf>`, je Auftrag ein Prüfer (Sonnet), der den Schlüssel des Funds aus dem
+  Auftrag im Objekt zurückgibt (`{"key", "urteil", "beleg"}`; das Urteil hängt am Schlüssel,
+  nicht an der Nummer), `verdict --run <lauf> <datei>`, dann erneut `merge`; danach `report` und
   `audit`. Fehlt einem Auftrag das Urteil, meldet `audit` `unverified`, und der Lauf ist
   unvollständig.
 - **Übergabe:** deep-review nennt Lauf-ID, Bericht, Zahl der Funde und Abdeckung. Sagt sie
