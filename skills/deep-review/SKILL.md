@@ -43,39 +43,39 @@ keinen Lauf committet; die `.gitignore` des Repos, Arbeitsbaum, Index und HEAD b
    Schreibt `packets/<id>.md` und nennt je Paket `<id>: <von>..<bis> · …`. Dieser Bereich ist
    der des Reviews; den Originalbereich setzt du nicht selbst ein. Zeilenformat und Lesehilfe:
    [counterparts.md](references/counterparts.md).
-4. **Review je Paket**, in Plan-Reihenfolge, eines nach dem anderen:
+4. **Review je Paket**, in Plan-Reihenfolge, eines nach dem anderen, mit der Stufe aus dem Auftrag:
    ```
-   /code-review --max-findings all <von>..<bis>
+   /code-review <stufe> --max-findings all <von>..<bis>
    ```
-   Den Block aus `packets/<id>.md` gibst du dem Reviewer **unverändert** mit, bei Delphi-Dateien
-   dazu [delphi.md](references/delphi.md). Auftrag und Rückgabeformat:
-   [review-brief.md](references/review-brief.md). Danach das Ergebnis annehmen lassen, ein
-   Paket ohne Funde mit `[]`:
+   Der Reviewer bekommt `packets/<id>.prompt.md` **unverändert** (Auftrag, Block, Rückgabeformat,
+   Marke; den Pfad nennt `counterparts`) und liest es bis zur letzten Zeile. Seine Antwort ist
+   das Objekt `{"marke", "stufe", "findings"}` aus dem Rückgabeformat der Datei, ein Paket ohne
+   Funde mit `"findings": []` ([review-brief.md](references/review-brief.md)). Dann:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review <datei|->
    ```
+   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann.
    Das Werkzeug steht ohne Schrägstrich: Git Bash unter Windows schreibt ein Argument mit `/`
-   am Anfang in einen Windows-Pfad um. `record` speichert `code-review` als `/code-review`,
-   und so heißt es in der Kopfzeile des Berichts.
-   Eine abgewiesene Liste korrigierst du und rufst `record` erneut auf. Ohne `/code-review`
-   (claude.ai, andere Agenten) läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne
-   /code-review" in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht
-   nennt das wörtlich.
+   am Anfang in einen Windows-Pfad um; der Bericht nennt es `/code-review`. Eine abgewiesene
+   Antwort korrigierst du und rufst `record` erneut auf. Ohne `/code-review` (claude.ai,
+   andere Agenten) läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne /code-review"
+   in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht nennt das wörtlich.
 5. **Vereinigen:**
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" merge --run <lauf>
    ```
    Schreibt `findings.json`; Funde derselben Datei im Abstand von höchstens drei Zeilen werden
    einer, alle Quellen bleiben darin.
-6. **Bericht, Audit, Aufräumen.** Den Bericht schreibst du nach
-   [report-template.md](assets/report-template.md) in `report.md` des Laufordners, jeden
-   Platzhalter ersetzt. Dann:
+6. **Bericht, Audit, Aufräumen.** `report --run <lauf>` schreibt `report.md` im Laufordner;
+   eigene Einordnung nur unter `## Einordnung` am Ende, davor änderst du nichts:
    ```bash
+   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" report --run <lauf>
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" audit --run <lauf>
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" cleanup --run <lauf>
    ```
    `audit` endet mit Exit 1 bei einer Lücke; `audit.json` ist trotzdem geschrieben. Meldet es
-   `report_mismatch`, korrigierst du den Bericht und prüfst erneut. `cleanup --stale --run
+   `report_mismatch`, schreibt `report --run` den Bericht neu, oder du berichtigst die
+   Einordnung; dann erneut `audit`. `cleanup --stale --run
    <lauf>` löscht die Refs aller anderen Läufe, `cleanup --stale` ohne `--run` löscht die
    Refs **jedes** Laufs; beide auch die eines Laufs, der in einem anderen Worktree noch offen
    ist. Also `--stale` nur, wenn kein anderer Lauf offen ist.
@@ -120,7 +120,7 @@ test-first für den Regressionstest.
 - **Anti-Zeremonie-Fall.** Bis `--split-at` (Standard 800) geänderte Zeilen ist der Plan ein
   Paket (`split: false`); ohne Wurzel-Commit läuft ein `/code-review` über den Originalbereich,
   ohne Hilfscommits. Für jeden Plan mit `split: false`, auch beim Wurzel-Commit, prüft `audit`
-  den Bericht auf höchstens 20 Zeilen plus eine je Fund. Nach `--since` mit Übernahme steht
+  die Einordnung auf höchstens 8 Textzeilen. Nach `--since` mit Übernahme steht
   `split: true`, auch bei einem Paket (etwa Fokus `security`); dort prüft `audit` die Länge nicht.
 
 ## Anti-Rationalisierung
@@ -131,7 +131,7 @@ test-first für den Regressionstest.
 | „Das Audit meldet nur ein fehlendes Paket, ich nenne es trotzdem fertig" | Dann steht „unvollständig" mit dem Paket in der Übergabe. |
 | „Ich fasse zwei Pakete in einem Review zusammen" | `record` nimmt je Paket genau ein Ergebnis an; der Zuschnitt war der Zweck. |
 | „Ich nehme den Originalbereich, das ist einfacher" | Bei Hilfscommits zeigt er das ganze Branch-Diff, nicht das Paket. Nimm `<von>..<bis>` aus `counterparts`. |
-| „Ein Paket ohne Funde braucht kein `record`" | Ohne Ergebnis ist das Paket nicht reviewt; es bekommt `[]`. |
+| „Ein Paket ohne Funde braucht kein `record`" | Ohne Ergebnis ist das Paket nicht reviewt; es bekommt `"findings": []`. |
 | „Ein kleiner Bereich braucht trotzdem sechs Schritte mit Hilfscommits" | Bis `--split-at` (Standard 800 Zeilen) ist es ein Paket und ein kurzer Bericht. |
 
 ## Abgrenzung

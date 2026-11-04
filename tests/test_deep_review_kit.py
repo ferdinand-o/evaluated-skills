@@ -3862,10 +3862,10 @@ def test_b_report_is_written_by_the_script(tmp_path, capsys):
     text = kit.write_report(directory).read_text(encoding="utf-8")
     counted = len(text.splitlines()) - 1        # ohne Kopfzeile; der Bericht hat keine Kommentare
     assert counted <= kit.REPORT_BASE_LINES + 1, text
-    free = kit.REPORT_BASE_LINES + 1 - counted
     report = directory / "report.md"
-    for extra, ok in ((free, True), (free + 1, False)):
-        tail = ["", "## Einordnung"] + [f"Zeile {i}" for i in range(extra - 2)]
+    # Die Grenze gilt nur für die Einordnung (Prüfpunkt 4, Runde 1, F6).
+    for extra, ok in ((kit.EINORDNUNG_MAX_LINES, True), (kit.EINORDNUNG_MAX_LINES + 1, False)):
+        tail = ["", "## Einordnung"] + [f"Zeile {i}" for i in range(extra)]
         report.write_text(text + "\n".join(tail) + "\n", encoding="utf-8")
         data = kit.audit(directory, None)
         assert (data["report_mismatch"] == []) is ok, data["report_mismatch"]
@@ -4586,17 +4586,17 @@ def test_cp6_f15_run_path_parameter_and_report_length(tmp_path):
                _payload(tmp_path, [_finding("a.py", n, f"F{n}") for n in (3, 13, 23)]))
     merged = kit.merge(directory)["findings"]
     assert len(merged) == 3
-    base = len(_report(directory, run, merged, "1/1").read_text(encoding="utf-8").splitlines())
-    for total, ok in ((24, True), (30, False)):
-        # _report fügt `extra` mit einer Leerzeile und `## Einordnung` an.
-        report = _report(directory, run, merged, "1/1",
-                         extra=[f"Zeile {i}" for i in range(total - base - 2)])
-        assert len(report.read_text(encoding="utf-8").splitlines()) == total
+    # Die Grenze gilt nur für die Einordnung (Prüfpunkt 4, Runde 1, F6); _report fügt `extra`
+    # mit einer Leerzeile und `## Einordnung` an.
+    limit = kit.EINORDNUNG_MAX_LINES
+    for count, ok in ((limit, True), (limit + 6, False)):
+        _report(directory, run, merged, "1/1", extra=[f"Zeile {i}" for i in range(count)])
         mismatch = kit.audit(directory, None)["report_mismatch"]
         if ok:
             assert mismatch == [], mismatch
         else:
-            assert any("30" in m and "24" in m for m in mismatch), mismatch
+            assert any(f"{limit + 6} Textzeilen" in m and f"erlaubt sind {limit}" in m
+                       for m in mismatch), mismatch
     # Mit mehreren Paketen (split: true) gilt die Grenze des Anti-Zeremonie-Falls nicht.
     (tmp_path / "zwei").mkdir()
     root2 = _two_packet_repo(tmp_path / "zwei")
@@ -4621,19 +4621,21 @@ def _gap_run(kit, tmp_path, findings):
 
 
 def test_cp6b_f1_to_f3_claim_comes_from_the_script_einordnung_is_free(tmp_path):
-    # Spec 28: Die Muster für „vollständig" (ganzes Wort, Beugung, Verneinung, Fundzeilen) sind
-    # weg. Die Behauptung schreibt das Skript; vor `## Einordnung` ist jede andere Zeile eine
-    # Abweichung, ab `## Einordnung` schreibt der Hauptagent frei.
+    # Spec 28: Die Behauptung in der Abdeckungszeile schreibt das Skript; vor `## Einordnung`
+    # ist jede andere Zeile eine Abweichung. Ab `## Einordnung` schreibt der Hauptagent frei,
+    # nur „vollständig" bei einer Lücke nicht (Prüfpunkt 4, Runde 1, F5; verneint erlaubt).
     kit = _kit()
     run, directory, merged = _gap_run(kit, tmp_path,
                                       [_finding("a/x.py", 3, "vollständige Prüfung fehlt")])
     text = kit.write_report(directory).read_text(encoding="utf-8")
     assert "- Abdeckung: 1/2 — unvollständig" in text.splitlines()
-    for line in ("Fazit — vollständig reviewt", "- `a/x.py:4` — vollständig",
-                 "Das Review ist **nicht** vollständig."):
+    assert kit.audit(directory, None)["report_mismatch"] == []   # Fundzeile im Skript-Teil
+    for line, claims in (("Fazit — vollständig reviewt", True), ("- `a/x.py:4` — vollständig", True),
+                         ("Das Review ist **nicht** vollständig.", False)):
         _report(directory, run, merged, "1/2", claim="unvollständig", extra=[line])
         data = kit.audit(directory, None)
-        assert data["missing"] == ["p2"] and data["report_mismatch"] == [], (line, data)
+        assert data["missing"] == ["p2"], (line, data)
+        assert len(data["report_mismatch"]) == claims, (line, data)
         report = directory / "report.md"
         report.write_text(text.replace("- Ohne Block:", f"{line}\n- Ohne Block:"),
                           encoding="utf-8")
@@ -5128,15 +5130,18 @@ def test_cp8b_f3_audit_checks_notes_reused_and_comment_lines(tmp_path, monkeypat
     _record(kit, root, plan, "p1", [], tool="/code-review")
     kit.merge(directory)
     written = kit.write_report(directory).read_text(encoding="utf-8").splitlines()
-    # _report fügt eine Leerzeile, `## Einordnung` und die zwei Kommentarzeilen an.
-    free = kit.REPORT_BASE_LINES - (len(written) - 1) - 2
-    for fill, ok in ((free, True), (free + 1, False)):
+    assert len(written) - 1 <= kit.REPORT_BASE_LINES
+    # _report fügt eine Leerzeile, `## Einordnung` und die zwei Kommentarzeilen an; gezählt
+    # wird nur die Einordnung (Prüfpunkt 4, Runde 1, F6).
+    limit = kit.EINORDNUNG_MAX_LINES
+    for fill, ok in ((limit, True), (limit + 1, False)):
         report = _report(directory, run, [], "1/1",
                          extra=["<!-- eins -->", "  <!-- zwei -->  "]
                          + [f"Zeile {i}" for i in range(fill)])
         lines = report.read_text(encoding="utf-8").splitlines()
-        other = [ln for ln in lines[1:] if not re.fullmatch(r"\s*<!--.*?-->\s*", ln)]
-        assert len(other) == kit.REPORT_BASE_LINES + (not ok), len(other)
+        free = lines[lines.index("## Einordnung") + 1:]
+        other = [ln for ln in free if ln.strip() and not re.fullmatch(r"\s*<!--.*?-->\s*", ln)]
+        assert len(other) == limit + (not ok), len(other)
         mismatch = kit.audit(directory, None)["report_mismatch"]
         assert (mismatch == []) is ok, mismatch
 
@@ -6976,3 +6981,192 @@ def test_b_cp3r3_f3_security_since_has_no_level(tmp_path, monkeypatch, capsys):
     plan_b = json.loads((kit.run_dir(root, run_b) / "plan.json").read_text(encoding="utf-8"))
     assert plan_b["file_keys"]["a.py"]["reused_from"] == run_a
     assert [f["summary"] for f in plan_b["file_keys"]["a.py"]["findings"]] == ["S"]
+
+
+# --- Spec 28, Prüfpunkt 4, Runde 1: Funde F1–F6 zu `report --run` ----------------------------
+
+def test_b_cp4r1_f1_skill_md_follows_report_and_prompt():
+    skill = _doc("skills/deep-review/SKILL.md")
+    flat = _flat(skill)
+    assert len(skill.splitlines()) <= 150
+    # Schritt 6: Bericht vom Skript, kein toter Link auf die entfernte Vorlage.
+    assert "report-template" not in skill
+    step6 = flat[flat.index("6. **Bericht, Audit, Aufräumen.**"):flat.index("## Profile und Fokus")]
+    assert "review_kit.py\" report --run <lauf>" in step6
+    assert "nur unter `## Einordnung` am Ende" in step6
+    assert step6.index("report --run") < step6.index("audit --run") < step6.index("cleanup --run")
+    # Schritt 4: Auftrag ist packets/<id>.prompt.md, Antwort das Objekt, leeres Paket mit
+    # "findings": [], --no-block nur ohne die Datei.
+    step4 = flat[flat.index("4. **Review je Paket**"):flat.index("5. **Vereinigen:**")]
+    assert "`packets/<id>.prompt.md`" in step4
+    assert '`{"marke", "stufe", "findings"}`' in step4 and '`"findings": []`' in step4
+    assert "`--no-block` nur, wenn der Reviewer die Datei nicht bekam" in step4
+    assert "mit `[]`" not in skill and "es bekommt `[]`" not in skill
+
+
+def _lib_run(kit, tmp_path, split_at=None):
+    """Repo, in dem app/m.py `f` aus lib.py ruft (Gegenstellen > 0), und ein Lauf darüber."""
+    root = _commit_repo(tmp_path, {"app/m.py": "", "lib.py": LIB_STRICT},
+                        {"app/m.py": "from lib import f\n\n\ndef run():\n    return f(2)\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", split_at, False)
+    return root, plan, plan["_meta"]["run"], _run_path(root, plan)
+
+
+def test_b_cp4r1_f2_counterpart_cell_from_block_without_store(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _lib_run(kit, tmp_path)
+    [item] = kit.write_counterparts(root, run)
+    assert item["counterparts"] > 0
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    rows = lambda: [ln for ln in kit.render_report(directory).splitlines()
+                    if ln.startswith("| p1 ")]
+    row = "| p1 | 1 | {} | {} | 0 |".format
+    lines = plan["packets"][0]["changed_lines"]
+    with_store = rows()
+    assert with_store == [row(lines, item["counterparts"])]
+    # Speicher fehlt (etwa weil plan ihn nicht schreiben konnte): die Zahl aus dem Block.
+    (directory / kit.COLLECTED_NAME).unlink()
+    assert rows() == with_store
+    # Speicher passt nicht zum Plan: ebenso.
+    stored = {"target": "0" * 40, "base": plan["base"], "focus": "bugs", "files": {},
+              "not_indexed": {}}
+    kit.store_collected(directory, stored)
+    assert rows() == with_store
+    # Ein Block eines anderen Pakets oder Laufs zählt nicht; ohne Block „—".
+    block = directory / "packets" / "p1.md"
+    text = block.read_text(encoding="utf-8")
+    block.write_text(text.replace("packet: p1 -->", "packet: p2 -->", 1), encoding="utf-8")
+    assert rows() == [row(lines, "—")]
+    block.unlink()
+    assert rows() == [row(lines, "—")]
+    assert "packets/<id>.md" in kit._counterpart_cell.__doc__
+
+
+def test_b_cp4r1_f3_disclaimer_only_with_code_review(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    kit.write_counterparts(root, run)
+    # Ohne Ergebnis sieht der Plan /code-review vor: der Hinweis steht.
+    assert "--max-findings default" in kit.render_report(directory)
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    text = kit.render_report(directory)
+    assert "--max-findings all" in text and "--max-findings default" in text
+    assert "Auskunft" in text and "kein Beleg" in text
+    # Review im Hauptkontext statt /code-review: kein Hinweis zu --max-findings.
+    root2, plan2, run2, dir2 = _single_run(kit, tmp_path, {"a.py": _lines(5)}, name="haupt")
+    kit.write_counterparts(root2, run2)
+    _rec(kit, dir2, "p1", "Review ohne /code-review", _payload(tmp_path, []))
+    kit.merge(dir2)
+    text = kit.write_report(dir2).read_text(encoding="utf-8")
+    assert "--max-findings" not in text and "/code-review` ohne Stufe" not in text
+    assert "Auskunft" in text and "kein Beleg" in text
+    assert kit.audit(dir2, None)["complete"] is True
+    # Fokus security: weder vor noch nach dem Ergebnis.
+    sec = kit.build_plan(root, "base..HEAD", "standard", "security", None, False)
+    sec_dir = _run_path(root, sec)
+    assert "--max-findings" not in kit.render_report(sec_dir)
+    kit.write_counterparts(root, sec["_meta"]["run"])
+    marked = json.loads((sec_dir / "plan.json").read_text(encoding="utf-8"))
+    obj = {"marke": marked["packets"][0]["marker"], "findings": []}
+    kit.record(sec_dir, "s1", "security-review", _payload(tmp_path, obj, "s1.json"))
+    kit.merge(sec_dir)
+    text = kit.write_report(sec_dir).read_text(encoding="utf-8")
+    assert "--max-findings" not in text and "Auskunft" in text
+    assert kit.audit(sec_dir, None)["complete"] is True
+
+
+def test_b_cp4r1_f4_render_and_write_share_one_locked_helper(tmp_path, monkeypatch):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(5)})
+    # Kein eigener Rumpf: weder Text noch Sperre in den beiden öffentlichen Funktionen.
+    for func in (kit.render_report, kit.write_report):
+        names = func.__code__.co_names
+        assert "_report_text" not in names and "_plan_lock" not in names, func.__name__
+    calls = []
+    real = kit._locked_report
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(kit, "_locked_report", spy)
+    text = kit.render_report(directory)
+    assert not (directory / "report.md").exists()
+    path = kit.write_report(directory)
+    assert path == directory / "report.md" and path.read_text(encoding="utf-8") == text
+    assert len(calls) == 2
+
+
+def test_b_cp4r1_f5_einordnung_must_not_claim_complete_with_gaps(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    directory = _run_path(root, plan)
+    kit.write_counterparts(root, run)
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, []))
+    kit.merge(directory)
+    report = directory / "report.md"
+
+    def audit_with(tail):
+        text = kit.write_report(directory).read_text(encoding="utf-8")
+        report.write_text(text + "\n## Einordnung\n\n" + tail + "\n", encoding="utf-8")
+        return kit.audit(directory, None)
+
+    assert "- Abdeckung: 1/2 — unvollständig" in kit.render_report(directory).splitlines()
+    data = audit_with("Das Review ist vollständig, alle Pakete geprüft.")
+    assert data["missing"] == ["p2"] and data["complete"] is False
+    [mismatch] = data["report_mismatch"]
+    assert "Einordnung" in mismatch and "vollständig" in mismatch and "p2" in mismatch, mismatch
+    for claim in ("Eine **vollständige** Prüfung.", "Vollständig geprüft."):
+        assert len(audit_with(claim)["report_mismatch"]) == 1, claim
+    # Verneint oder als „unvollständig" ist es keine Behauptung.
+    for denial in ("Das Review ist unvollständig: p2 fehlt.",
+                   "Das Review ist nicht vollständig, p2 fehlt.",
+                   "Die Vollständigkeit fehlt noch."):
+        assert audit_with(denial)["report_mismatch"] == [], denial
+    # Ohne Lücke darf die Einordnung „vollständig" sagen.
+    _rec(kit, directory, "p2", "/code-review", _payload(tmp_path, [], "p2.json"))
+    kit.merge(directory)
+    data = audit_with("Das Review ist vollständig.")
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+
+
+def test_b_cp4r1_f6_length_limit_counts_only_einordnung(tmp_path):
+    kit = _kit()
+    root, plan, run, directory = _single_run(kit, tmp_path, {"a.py": _lines(12)})
+    kit.write_counterparts(root, run)
+    found = [_finding("a.py", 2, "A"), _finding("a.py", 6, "B"), _finding("a.py", 10, "C")]
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, found))
+    assert len(kit.merge(directory)["findings"]) == 3
+    text = kit.write_report(directory).read_text(encoding="utf-8")
+    # Anti-Zeremonie: der Skript-Teil eines kleinen Laufs bleibt kurz.
+    assert len(text.splitlines()) - 1 <= kit.REPORT_BASE_LINES + 3, text
+    report = directory / "report.md"
+
+    def audit_with(lines):
+        body = "\n## Einordnung\n\n" + "\n".join(lines) + "\n"
+        report.write_text(text + body, encoding="utf-8")
+        return kit.audit(directory, None)
+
+    # Der Fall aus dem Fund: zwei Vermerke „laut fix-task … behoben".
+    data = audit_with(["- `a.py:2` laut fix-task-1 behoben.", "- `a.py:6` laut fix-task-1 behoben."])
+    assert data["report_mismatch"] == [] and data["complete"] is True, data
+    limit = kit.EINORDNUNG_MAX_LINES
+    # Gezählt werden Textzeilen ab `## Einordnung`: Überschrift, Leerzeilen und Zeilen nur
+    # aus einem HTML-Kommentar nicht.
+    padded = [x for i in range(limit) for x in (f"Zeile {i}", "", "<!-- k -->")]
+    assert audit_with(padded)["report_mismatch"] == []
+    [mismatch] = audit_with([f"Zeile {i}" for i in range(limit + 1)])["report_mismatch"]
+    assert f"{limit + 1}" in mismatch and f"{limit}" in mismatch and "Einordnung" in mismatch
+    # split: true: keine Grenze.
+    (tmp_path / "zwei").mkdir()
+    root2 = _two_packet_repo(tmp_path / "zwei")
+    plan2, run2 = _split_plan(kit, root2)
+    dir2 = _run_path(root2, plan2)
+    text2 = kit.write_report(dir2).read_text(encoding="utf-8")
+    (dir2 / "report.md").write_text(
+        text2 + "\n## Einordnung\n\n" + "\n".join(f"Zeile {i}" for i in range(limit + 5)) + "\n",
+        encoding="utf-8")
+    assert kit.audit(dir2, None)["report_mismatch"] == []
