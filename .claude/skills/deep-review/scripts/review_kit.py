@@ -4213,10 +4213,11 @@ BRIEF_SECURITY_TASK = "### Auftrag an den Reviewer"
 BRIEF_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")     # Verweis auf einen Anker der Referenz
 REFERENCES_DIR = Path(__file__).parent.parent / "references"
 HTML_HEAD_RE = re.compile(r"\A\s*(?:<!--.*?-->\s*)+", re.DOTALL)   # Kopfzeile(n) einer Referenz
-# Zeile direkt nach der Kopfzeile von packets/<id>.prompt.md: wer nur den Anfang liest, sieht
-# Marke und Ort des Rückgabeformats. Nicht gleich der letzten Zeile `Paket-Marke: <marke>`.
-PROMPT_MARKER_HINT = ("Paket-Marke: {marker} — Rückgabeformat am Ende dieser Datei; lies die "
-                      "Datei bis zur letzten Zeile.")
+# Zeile direkt nach der Kopfzeile von packets/<id>.prompt.md: wer nur den Anfang liest, erfährt,
+# wo Rückgabeformat und Marke stehen, sieht die Marke aber nicht — sie steht nur in der letzten
+# Zeile `Paket-Marke: <marke>`, damit sie erst nach vollständigem Lesen sichtbar ist.
+PROMPT_MARKER_HINT = ("Rückgabeformat und Paket-Marke stehen am Ende dieser Datei; lies sie bis "
+                      "zur letzten Zeile.")
 PROMPT_WARN_CHARS = 40000   # darüber nennt counterparts die Größe der prompt.md (kein Abbruch)
 # Was `plan` bei Fokus security als Review nennt: dort läuft kein /code-review mit Stufe.
 SECURITY_REVIEWS = "/security-review oder Review im Hauptkontext"
@@ -4351,17 +4352,17 @@ def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
 
 def write_prompt(run_path, packet, block, level, *, inputs=None):
     """`packets/<id>.prompt.md` im Laufordner `run_path` schreiben (Spec 28, Ablauf Schritt 3):
-    die Kopfzeile wie bei `packets/<id>.md` (`_packet_header`), direkt darunter die Marke mit
-    dem Hinweis, dass Rückgabeformat und Marke am Ende stehen (`PROMPT_MARKER_HINT`; die Zeile
-    ist nicht gleich der letzten), der Auftragstext aus
+    die Kopfzeile wie bei `packets/<id>.md` (`_packet_header`), direkt darunter der Hinweis,
+    dass Rückgabeformat und Marke am Ende stehen (`PROMPT_MARKER_HINT`, ohne die Marke selbst:
+    sie steht nur in der letzten Zeile), der Auftragstext aus
     `references/review-brief.md` (`_brief_text`, nach dem Fokus des Plans), der Bereich
     `<von>..<bis>` (`packet["range"]`), die Stufe `level`, im Profil `checkpoint` das Soll
     (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
     `packets/<id>.md` ohne Kopfzeile, ohne Änderung), bei Delphi-Dateien im Paket (`files`) die
     Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
-    Vorgabe für den Aufruf, im Beispiel die Marke vorausgefüllt, `stufe` als Platzhalter:
-    einzusetzen ist die Stufe, mit der `/code-review` wirklich lief) und als letzte Zeile
-    `Paket-Marke: <marke>`. `level` None (Fokus security, `_review_level`): kein
+    Vorgabe für den Aufruf, `marke` und `stufe` im Beispiel als Platzhalter: einzusetzen sind
+    die Marke aus der letzten Zeile und die Stufe, mit der `/code-review` wirklich lief) und als
+    letzte Zeile `Paket-Marke: <marke>` — die einzige Stelle der Datei mit der Marke. `level` None (Fokus security, `_review_level`): kein
     `/code-review`, also weder Stufe im Bereich noch Vorgabe und `stufe` im Rückgabeformat.
     `packet` trägt `id`, `range`, `marker` und `files`. `inputs`
     (`_PromptInputs`) reicht `write_counterparts` für alle Pakete einmal herein; ohne liest
@@ -4379,7 +4380,7 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
         inputs = _prompt_inputs(repo, _read_plan(directory / "plan.json", run_id),
                                 _has_delphi(packet))
     task = inputs.task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
-    parts = [PROMPT_MARKER_HINT.format(marker=marker), task,
+    parts = [PROMPT_MARKER_HINT, task,
              f"## Bereich\n\n`{rng}`" + (f"\n\nStufe: {level}" if level is not None else "")]
     if inputs.soll:
         parts.append(f"## Soll\n\n{inputs.soll}")
@@ -4387,19 +4388,19 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     if _has_delphi(packet):
         parts.append(inputs.delphi if inputs.delphi is not None else _delphi_text())
     if level is None:
-        ask, stufe, rule = ("Antworte nur mit einem JSON-Objekt in dieser Form; `marke` setzt du "
-                            "genau so ein:", "", "")
+        ask, stufe, rule = ("Antworte nur mit einem JSON-Objekt in dieser Form; für `<marke>` "
+                            "die Marke aus der letzten Zeile dieser Datei:", "", "")
     else:
         ask = (f"Vorgabe für den Aufruf: `/code-review {level}`. Antworte nur mit einem "
-               "JSON-Objekt in dieser Form; `marke` setzt du genau so ein, für `<stufe>` die "
-               "Stufe, mit der `/code-review` wirklich lief:")
+               "JSON-Objekt in dieser Form; für `<marke>` die Marke aus der letzten Zeile "
+               "dieser Datei, für `<stufe>` die Stufe, mit der `/code-review` wirklich lief:")
         stufe = ' "stufe": "<stufe>",'
         rule = (f"\n- `stufe` ist die Stufe, mit der `/code-review` wirklich lief "
                 f"(`{'`, `'.join(LEVELS)}`), nicht abgeschrieben: Lief es unter `{level}`, "
                 "steht hier die niedrigere.")
     parts.append(
         f"## Rückgabeformat\n\n{ask}\n\n"
-        f'```json\n{{"marke": "{marker}",{stufe} "findings": [\n'
+        f'```json\n{{"marke": "<marke>",{stufe} "findings": [\n'
         '  {"file": "...", "line": 12, "summary": "...", "failure_scenario": "...", '
         '"evidence": "..."}\n]}\n```\n\n'
         "- `findings` sind die Funde im Format oben (`file`, `line`, `summary`, "
@@ -4919,7 +4920,9 @@ def apply_since(plan, run_dirs, passed_over=None):
     Ebenso zählen nur Ergebnisse, deren gespeicherte Stufe (ohne Feld die Stufe ihres Plans,
     `plan_level`: `level`, ohne den Standard seines Profils) in `LEVELS` mindestens so hoch ist
     wie die des neuen Plans — ein Review auf `low` trägt keinen Plan auf `high`, weder als
-    passender Lauf noch als Glied einer Kette (`_earlier_files` mit `min_level`). Mit einer
+    passender Lauf noch als Glied einer Kette (`_earlier_files` mit `min_level`). Bei Fokus
+    `security` gibt es keine Stufe (`_review_level` ist None, auch mit `--level`): Dort wird
+    weder ein Ergebnis noch ein Lauf nach seiner Stufe übergangen. Mit einer
     Liste `passed_over` hängt `apply_since` daran je übergangenen Lauf und je übergangenes
     Ergebnis ein `_PassedOver` in der Reihenfolge von `run_dirs`, für die Ausgabe von `plan`;
     ein Lauf, dessen geplante Stufe darunter liegt und von dem kein Ergebnis zählt, steht dort
@@ -4990,7 +4993,8 @@ def apply_since(plan, run_dirs, passed_over=None):
                        f"ist keine Stufe aus {', '.join(LEVELS)})")
     new = copy.deepcopy(plan)
     own_run = (plan.get("_meta") or {}).get("run") if isinstance(plan.get("_meta"), dict) else None
-    earlier, repo, need, passed = {}, None, plan_level(plan), []
+    # Fokus security hat keine Stufe (`_review_level`): dort wird nach Stufe nichts übergangen.
+    earlier, repo, need, passed = {}, None, _review_level(plan), []
     for directory in run_dirs:
         run_id, eplan = _earlier_plan(directory)
         if run_id == own_run:
@@ -4998,7 +5002,7 @@ def apply_since(plan, run_dirs, passed_over=None):
         why = _since_skip(plan, eplan)
         if why is None:
             files = _earlier_files(Path(directory), eplan, need)
-            if not files.counted and _below(plan_level(eplan), need):
+            if need is not None and not files.counted and _below(plan_level(eplan), need):
                 why = f"Stufe {plan_level(eplan)} unter {need}"
         if why is not None:
             passed.append(_PassedOver(run_id, None, why))
@@ -5362,6 +5366,10 @@ def _read_result(path: Path, pid: str, run_id: str, digest: str, repo: Path):
 
 # Werkzeuge, die `record` mit Schrägstrich speichert (`_canonical_tool`).
 SLASH_TOOLS = ("code-review", "security-review")
+# Werkzeuge ohne Stufe, nach `_canonical_tool`: `record` verlangt dort keine `stufe` und
+# speichert eine mitgelieferte nicht. Jedes andere Werkzeug braucht ohne --no-block eine Stufe.
+LEVELLESS_TOOLS = frozenset({"/security-review", "Review ohne /security-review",
+                             "Review ohne /code-review"})
 # Ein Pfad, wie ihn Git Bash (MSYS) aus `/code-review` macht: Laufwerk, Ordner, am Ende der
 # Name — `C:/Program Files/Git/code-review`.
 MSYS_TOOL_RE = re.compile(r"[A-Za-z]:/(?:.*/)?(" + "|".join(map(re.escape, SLASH_TOOLS)) + ")")
@@ -5389,12 +5397,15 @@ def record(run_path, packet, tool, payload_path, no_block=False):
     ohne Funde. `marke` muss die Marke des Pakets aus `plan.json` sein (`counterparts` hat sie
     vergeben), `stufe` eine aus `LEVELS` — die Stufe, mit der `/code-review` lief; liegt sie
     unter der Stufe des Plans, wird das Ergebnis angenommen und `audit` nennt es unter
-    `below_level`. Pflicht ist `stufe` nur bei `tool` `/code-review`; bei anderen Werkzeugen
-    (`/security-review`, Review im Hauptkontext) gibt es keine, und ohne Feld gilt die Stufe
-    des Plans. Eine bloße Liste, ein Objekt ohne Marke oder mit der Marke eines anderen
-    Pakets, bei `/code-review` ohne Stufe, oder mit unbekannter Stufe ist ein KitError, nichts
-    wird geschrieben. `no_block=True` (`--no-block`) nimmt eine bloße Liste oder ein Objekt
-    ohne passende Marke an (die Stufe ist dann optional, aber wenn genannt, gültig) und setzt
+    `below_level`. Die Werkzeuge aus `LEVELLESS_TOOLS` (`/security-review`, „Review ohne
+    /security-review", „Review ohne /code-review") haben keine Stufe: `stufe` ist dort nicht
+    verlangt, eine mitgelieferte wird weder geprüft noch gespeichert (`ignored_level` im
+    Rückgabeobjekt, nicht in der Datei), und es gilt die Stufe des Plans. Bei jedem anderen
+    Werkzeug ist `stufe` Pflicht. Eine bloße Liste, ein Objekt ohne Marke oder mit der Marke
+    eines anderen Pakets, ohne Stufe bei einem Werkzeug außerhalb von `LEVELLESS_TOOLS`, oder
+    mit unbekannter Stufe ist ein KitError, nichts wird geschrieben. `no_block=True`
+    (`--no-block`) nimmt eine bloße Liste oder ein Objekt ohne passende Marke an (die Stufe
+    ist dann optional, aber wenn genannt, gültig) und setzt
     immer `no_block: true`, auch bei passender Marke. Angenommen wird nur, wenn das Paket im
     Plan steht und noch kein Ergebnis hat; sonst — und bei ungültigen Funden oder einem leeren
     Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des Plans
@@ -5409,6 +5420,9 @@ def record(run_path, packet, tool, payload_path, no_block=False):
         raise KitError(f"--tool braucht das Werkzeug des Reviews (eine Zeile), nicht {tool!r}")
     tool = _canonical_tool(tool.strip())
     marke, stufe, items, bare = _read_payload(payload_path)
+    ignored = None
+    if tool in LEVELLESS_TOOLS:
+        ignored, stufe = stufe, None
     findings = [_clean_finding(item, i, repo) for i, item in enumerate(items, 1)]
     with _plan_lock(directory, run_id):
         plan = _read_plan(directory / "plan.json", run_id)
@@ -5438,9 +5452,9 @@ def record(run_path, packet, tool, payload_path, no_block=False):
             if not valid:
                 raise KitError(f"Marke {marke!r} gehört nicht zu Paket {packet} — nicht "
                                "angenommen")
-            if stufe is None and tool == "/code-review":
+            if stufe is None and tool not in LEVELLESS_TOOLS:
                 raise KitError(f"Ergebnis für Paket {packet} ohne stufe (die Stufe, mit der "
-                               f"/code-review lief: {', '.join(LEVELS)}) — nicht angenommen")
+                               f"{tool} lief: {', '.join(LEVELS)}) — nicht angenommen")
         if stufe is not None and (not isinstance(stufe, str) or stufe not in LEVELS):
             raise KitError(f"stufe {stufe!r} ist keine Stufe aus {', '.join(LEVELS)} — nicht "
                            "angenommen")
@@ -5456,7 +5470,10 @@ def record(run_path, packet, tool, payload_path, no_block=False):
             payload["level"] = stufe
         if no_block:
             payload["no_block"] = True
-        return write_json(target, meta, payload)
+        data = write_json(target, meta, payload)
+        if ignored is not None:
+            data = {**data, "ignored_level": ignored}
+        return data
 
 
 class _Source(NamedTuple):
@@ -5854,7 +5871,8 @@ def audit(run_path, report_path):
     sind. Dazu zwei Auskünfte, die `complete` nicht ändern (Spec 28, Contract): `no_block`,
     die Pakete mit angenommenem Ergebnis ohne Marke des Pakets (`record --no-block`, auch ein
     Ergebnis aus Spec 26), und `below_level`, die Pakete, deren gespeicherte Stufe unter der
-    des Plans (`plan_level`) liegt; beide in Plan-Reihenfolge. Ein Plan, den `_checked_plan` nicht annimmt, ist ein KitError. Rückgabe: das
+    des Plans (`_review_level`; bei Fokus security ohne Stufe immer leer) liegt; beide in
+    Plan-Reihenfolge. Ein Plan, den `_checked_plan` nicht annimmt, ist ein KitError. Rückgabe: das
     geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
@@ -5869,10 +5887,10 @@ def audit(run_path, report_path):
         lost = _lost(_sources(accepted, keyed), merged)
         mismatch = _report_mismatch(report, shown, run_id, plan, merged, accepted,
                                     bool(missing or stale or lost))
-        wanted = LEVELS.index(plan_level(plan))
+        wanted = _review_level(plan)
         no_block = [pid for pid, r in accepted.items() if r.no_block]
-        below = [pid for pid, r in accepted.items()
-                 if r.level is not None and LEVELS.index(r.level) < wanted]
+        below = [] if wanted is None else [pid for pid, r in accepted.items()
+                                           if r.level is not None and _below(r.level, wanted)]
         command = f"{SCRIPT_CMD} audit --run {run_id}"
         if report_path is not None:
             command += f" --report {shlex.quote(shown)}"
@@ -5978,6 +5996,8 @@ def _cmd_record(args) -> int:
     print(f"{args.packet}: {len(data['findings'])} Fund(e) angenommen"
           f"{' (ohne Gegenstellen-Block)' if data.get('no_block') else ''} → "
           f"{(CACHE_DIR / args.run / RESULTS_DIR / f'{args.packet}.json').as_posix()}")
+    if "ignored_level" in data:
+        print(f"stufe {data['ignored_level']!r} ignoriert: {data['_meta']['tool']} hat keine Stufe")
     return 0
 
 
