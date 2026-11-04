@@ -14,11 +14,13 @@ ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittr
 `build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
 Python (`collect_python`; Zielcode nur per `ast` gelesen) und Delphi (`collect_delphi`,
 Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
-`write_counterparts`; dazu die Datei-Schlüssel (`file_keys`) und die Folgeläufe
+`write_counterparts` (Spec 28: die Gegenstellen sammelt `plan` einmal und legt sie je Datei
+im Laufordner ab, `store_collected`/`load_collected`; die Stufe je Paket steht als `level`
+im Plan); dazu die Datei-Schlüssel (`file_keys`) und die Folgeläufe
 (`apply_since`, `plan_since`); `record` (Ergebnis je Paket), `merge` (`findings.json`),
 `audit` (`audit.json`) und `main` mit den Unterbefehlen
 
-    plan --range R [--profile P] [--focus F] [--split-at N] [--since L[,L…]]
+    plan --range R [--profile P] [--focus F] [--level S] [--split-at N] [--since L[,L…]]
          [--soll-file D] [--with-tests]
     counterparts --run L
     record --run L --packet ID --tool T DATEI|-
@@ -126,6 +128,11 @@ MESSAGE_CACHE_SIZE = 64   # Commit-Messages so vieler Bereiche je Prozess zwisch
 
 PROFILES = ("standard", "checkpoint")
 FOCI = ("bugs", "security", "quality")
+# Stufe je Paket für `/code-review <stufe>` (Spec 28, Ablauf Schritt 2): Standard je Profil aus
+# der Sonde B; `max` nur mit ausdrücklichem `--level max`. Ein Plan ohne `level` (Spec 26)
+# liest sich mit dem Standard seines Profils (`plan_level`, E8).
+LEVELS = ("low", "medium", "high", "xhigh", "max")
+PROFILE_LEVELS = {"standard": "medium", "checkpoint": "high"}
 # Aus welchen Profilen ein Folgelauf (`--since`) übernimmt: Beide Profile reviewen denselben
 # Bereich; checkpoint hat als Soll die Datei aus `--soll-file` (Pflicht) statt der
 # Commit-Messages, ein Soll mindestens so genau. Also übernimmt standard aus beiden,
@@ -648,13 +655,24 @@ def _new_run_dir(repo: Path, sha: str) -> tuple[str, Path]:
     raise KitError("keine freie Lauf-ID gefunden")
 
 
-def _plan_command(rng: str, profile: str, focus: str, split_at: int, with_tests: bool) -> str:
+def _plan_command(rng: str, profile: str, focus: str, split_at: int, with_tests: bool,
+                  level=None) -> str:
     cmd = (f"{SCRIPT_CMD} plan --range {shlex.quote(rng)} --profile {profile} "
            f"--focus {focus} --split-at {split_at}")
+    cmd += f" --level {level}" if level is not None else ""
     return cmd + (" --with-tests" if with_tests else "")
 
 
-def build_plan(repo, rng, profile, focus, split_at, with_tests):
+def plan_level(plan) -> str:
+    """Stufe der Reviews eines Plans: `level`, ohne (Plan aus Spec 26) der Standard seines
+    Profils aus `PROFILE_LEVELS` (E8)."""
+    level = plan.get("level")
+    if level is not None:
+        return level
+    return PROFILE_LEVELS.get(plan.get("profile"), PROFILE_LEVELS["standard"])
+
+
+def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     """Paketplan für `rng` schreiben und zurückgeben (Spec 26, Ablauf Schritt 2).
 
     `rng` None = der letzte Commit. Der Bereich wird einmal aufgelöst und steht dreifach
@@ -686,13 +704,22 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
     aufgelösten Bereich (`Span`), sie lösen ihn nicht neu auf. Die Lauf-ID
     steht in `_meta.run`; `plan.json` liegt in `run_dir(repo, run)`. `--since` übernimmt
     erst `plan_since` auf dem geschriebenen Plan. Scheitert das Schreiben (oder das Sammeln
-    der Schlüssel), bleibt kein Laufordner zurück."""
+    der Schlüssel), bleibt kein Laufordner zurück.
+
+    `level` (Spec 28): die Stufe je Paket für `/code-review`, None = Standard des Profils
+    (`PROFILE_LEVELS`; `max` also nur ausdrücklich); eine Stufe außerhalb von `LEVELS` ist ein
+    KitError. Die Gegenstellen, die für die Schlüssel ohnehin gesammelt werden, legt
+    `store_collected` je Datei im Laufordner ab; `write_counterparts` liest sie dort
+    (`load_collected`) statt sie je Paket noch einmal zu sammeln. Fokus `quality` sammelt
+    nichts und legt nichts ab."""
     if profile not in PROFILES:
         raise KitError(f"Profil {profile!r} unbekannt — erlaubt: {', '.join(PROFILES)}")
     if focus not in FOCI:
         raise KitError(f"Fokus {focus!r} unbekannt — erlaubt: {', '.join(FOCI)}")
     if profile == "checkpoint" and focus != "bugs":
         raise KitError("Profil checkpoint prüft nur Fokus bugs")
+    if level is not None and level not in LEVELS:
+        raise KitError(f"Stufe {level!r} unbekannt — erlaubt: {', '.join(LEVELS)}")
     split_at = SPLIT_AT if split_at is None else split_at
     if not isinstance(split_at, int) or isinstance(split_at, bool) or split_at < 1:
         raise KitError(f"split_at muss eine positive Zahl sein, nicht {split_at!r}")
@@ -738,8 +765,14 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
     packets = [{**p, "range": None if split or root else resolved, "reused_from": None}
                for p in packed]
 
-    # Der schon aufgelöste Span geht an die Sammler: kein zweites Auflösen der SHAs.
-    entries = [] if focus == "quality" else _collect_all(repo, span, list(reviewed)).entries
+    # Der schon aufgelöste Span geht an die Sammler: kein zweites Auflösen der SHAs. Je Datei
+    # abgelegt (`store_collected`), damit `counterparts` nicht noch einmal sammelt.
+    collected = None
+    entries = []
+    if focus != "quality":
+        per_file: dict = {}
+        entries = _collect_all(repo, span, list(reviewed), per_file).entries
+        collected = _collected_payload(repo, span, focus, list(reviewed), per_file)
     keys = file_keys(repo, span.target, list(reviewed), entries)
     base_blobs = _file_blobs(repo, span.base, list(reviewed))
     target_blobs = _file_blobs(repo, span.target, list(reviewed))
@@ -748,7 +781,8 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
              for path, lines in reviewed.items()}
 
     run_id, directory = _new_run_dir(repo, span.target)
-    meta = {"generated": _plan_command(rng, profile, focus, split_at, with_tests), "run": run_id}
+    meta = {"generated": _plan_command(rng, profile, focus, split_at, with_tests, level),
+            "run": run_id}
     payload = {
         "range": resolved,
         "base": span.base,
@@ -757,6 +791,7 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
         "root": root,
         "profile": profile,
         "focus": focus,
+        "level": PROFILE_LEVELS[profile] if level is None else level,
         "split": split,
         "split_at": split_at,
         "packet_size": packet_size,
@@ -766,6 +801,11 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests):
         "not_reviewed": not_reviewed,
     }
     try:
+        if collected is not None:
+            # Nur ein Zwischenspeicher: was `write_json` nicht schreiben kann, sammelt
+            # `counterparts` selbst; ein Fehler der Platte bleibt ein Fehler.
+            with contextlib.suppress(KitError):
+                store_collected(directory, collected)
         return write_json(directory / "plan.json", meta, payload)
     except BaseException:
         shutil.rmtree(directory, ignore_errors=True)
@@ -953,6 +993,8 @@ def _read_plan(path: Path, run_id: str) -> dict:
     for key in ("log_base", "range"):
         if plan.get(key) is not None and not isinstance(plan[key], str):
             raise bad(f"{key} ist weder Text noch null")
+    if plan.get("level") is not None and plan["level"] not in LEVELS:
+        raise bad(f"level {plan['level']!r} ist keine Stufe aus {', '.join(LEVELS)}")
     if not isinstance(plan["packets"], list):
         raise bad("packets ist keine Liste")
     seen = set()
@@ -2184,7 +2226,7 @@ def _python_sites(index: _PyIndex, rel: str, tree, lines: set, unresolved: set) 
     return entries
 
 
-def collect_python(repo, rng, files):
+def collect_python(repo, rng, files, per_file=None):
     """Gegenstellen der geänderten Python-Zeilen (Spec 26, Ablauf Schritt 3).
 
     `rng` wie bei `numstat` (`BASIS..ZIEL`, eine Revision, ein Paket-Bereich `von..bis`);
@@ -2198,12 +2240,19 @@ def collect_python(repo, rng, files):
     geänderter `except`-Klausel die Ausnahmen der Aufrufe im try-Block; je geändertem
     Schlüsselwort-Argument sein Weg bis zu den Bedingungen (`FLAG_DEPTH`). Eine Stelle steht
     im Ergebnis, wenn eine ihrer Definitionen etwas wirft oder sie ein geändertes
-    Schlüsselwort-Argument hat. Rückgabe: `Collected(entries, unresolved, unparsed)`."""
+    Schlüsselwort-Argument hat. Rückgabe: `Collected(entries, unresolved, unparsed)`;
+    `per_file` (ein Dict) bekommt dazu je eigener Datei ihren Anteil (`_collect`)."""
     return _collect(repo, rng, files, _is_python, _python_index,
-                    lambda index, rel: index.trees.get(rel), _python_sites)
+                    lambda index, rel: index.trees.get(rel), _python_sites, per_file=per_file)
 
 
-def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None) -> Collected:
+def _entry_order(entry) -> tuple:
+    """Reihenfolge der Einträge eines Sammlers: Datei, Zeile, Art."""
+    return entry["file"], entry["line"], entry["kind"]
+
+
+def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None,
+             per_file=None) -> Collected:
     """Gerüst beider Sammler: die Dateien aus `files`, die `accepts` annimmt (außerhalb von
     `.skills/`), der Index am ZIEL (`build_index(repo, ziel)`, mit `unreadable`), je Datei
     ihr gelesener Stand (`parsed(index, pfad)`, None ohne — für jede eigene Datei, auch ohne
@@ -2212,7 +2261,14 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
     mit `partial(stand, zeilen)`, ein Grund für geänderte Zeilen, die der Sammler nicht
     gelesen hat (None ohne). Eigene Dateien ohne lesbaren Stand stehen in `unparsed` mit dem
     Grund aus `unreadable`, sonst `NOT_IN_TARGET`; teilweise gelesene mit dem Grund von
-    `partial`."""
+    `partial`.
+
+    `per_file` (ein Dict oder None) bekommt je eigener Datei `{"entries": ihre Einträge
+    (sortiert), "unresolved": die nicht aufgelösten Stellen, die beim Sammeln dieser Datei
+    gezählt wurden, als sortierte Liste `[datei, zeile, spalte]`, "unparsed": Grund oder
+    None}` — `store_collected` legt das ab. Die Stellen jeder Datei hängen nicht von den
+    anderen ab; die Vereinigung der `unresolved` der Paketdateien zählt also, was ein Sammeln
+    nur über die Paketdateien zählte."""
     repo = _toplevel(repo)
     wanted = sorted({str(f) for f in files if accepts(str(f)) and not _under_skills(str(f))})
     if not wanted:
@@ -2221,6 +2277,7 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
     index = build_index(repo, span.target)
     unresolved: set = set()
     entries = []
+    mine: dict[str, tuple] = {}
     items = {rel: parsed(index, rel) for rel in wanted if rel not in index.unreadable}
     unparsed = {rel: index.unreadable[rel] for rel in wanted if rel in index.unreadable}
     for rel, lines in sorted(_changed_lines(repo, span, wanted).items()):
@@ -2228,13 +2285,23 @@ def _collect(repo, rng, files, accepts, build_index, parsed, sites, partial=None
             continue
         item = items.get(rel)
         if item is not None:
-            entries += sites(index, rel, item, lines, unresolved)
+            counted: set = set()
+            found = sites(index, rel, item, lines, counted)
+            entries += found
+            unresolved |= counted
+            mine[rel] = (found, counted)
             reason = partial(item, lines) if partial is not None else None
             if reason:
                 unparsed[rel] = reason
         else:
             unparsed[rel] = index.unreadable.get(rel, NOT_IN_TARGET)
-    entries.sort(key=lambda e: (e["file"], e["line"], e["kind"]))
+    entries.sort(key=_entry_order)
+    if per_file is not None:
+        for rel in wanted:
+            found, counted = mine.get(rel, ([], set()))
+            per_file[rel] = {"entries": sorted(found, key=_entry_order),
+                             "unresolved": [list(item) for item in sorted(counted)],
+                             "unparsed": unparsed.get(rel)}
     return Collected(entries, len(unresolved), sorted(unparsed.items()))
 
 
@@ -3753,7 +3820,7 @@ def _delphi_sites(index: _PasIndex, rel: str, unit: _PasUnit, lines: set,
     return entries
 
 
-def collect_delphi(repo, rng, files):
+def collect_delphi(repo, rng, files, per_file=None):
     """Gegenstellen der geänderten Delphi-Zeilen (Spec 26, Ablauf Schritt 3), per Text-Scanner.
 
     `rng` und `files` wie bei `collect_python`; gezählt nur `.pas`, `.dpr`, `.dpk` (ohne
@@ -3791,9 +3858,10 @@ def collect_delphi(repo, rng, files):
     Format wie bei `Collected`, Arten `call` und `owner`; `unresolved` zählt Aufrufe auf
     unbekanntem Empfänger mit mehr als `AMBIGUOUS_MAX` gleichnamigen Methoden (ohne Klammer:
     mit überhaupt welchen), auf Units außerhalb des Repos und auf Units im Repo, deren Blöcke
-    nicht aufgehen. Rückgabe: `Collected(entries, unresolved, unparsed)`."""
+    nicht aufgehen. Rückgabe: `Collected(entries, unresolved, unparsed)`; `per_file` wie bei
+    `collect_python`."""
     return _collect(repo, rng, files, _is_delphi, _delphi_index, _PasIndex.unit, _delphi_sites,
-                    _branch_reason)
+                    _branch_reason, per_file=per_file)
 
 
 def _branch_reason(unit: _PasUnit, lines: set):
@@ -3813,8 +3881,8 @@ def _branch_reason(unit: _PasUnit, lines: set):
 
 class _Collector(NamedTuple):
     """Ein Sammler der Gegenstellen: Sprache (für den Hinweis am Paketende), Endungen (klein),
-    Sammelfunktion `(repo, rng, files) -> Collected`, Index am ZIEL `(repo, ziel)` mit
-    `not_indexed()`."""
+    Sammelfunktion `(repo, rng, files, per_file=None) -> Collected` (`per_file` wie bei
+    `_collect`), Index am ZIEL `(repo, ziel)` mit `not_indexed()`."""
     language: str
     suffixes: frozenset
     collect: object
@@ -3829,11 +3897,15 @@ COLLECTORS = (_Collector("Python", PYTHON_SUFFIXES, collect_python, _python_inde
 COUNTERPART_SUFFIXES = frozenset().union(*(c.suffixes for c in COLLECTORS))  # mit Sammler
 
 
-def _collect_all(repo, rng, files) -> Collected:
+def _collect_all(repo, rng, files, per_file=None) -> Collected:
     """Die Gegenstellen aller Sammler (`COLLECTORS`) über dieselbe Dateiliste: jeder
     ignoriert fremde Endungen. Einträge zusammen nach Datei, Zeile, Art; `unresolved`
-    addiert, `unparsed` vereinigt. Für `write_counterparts` und die Datei-Schlüssel."""
-    results = [c.collect(repo, rng, files) for c in COLLECTORS]
+    addiert, `unparsed` vereinigt. Für `write_counterparts` und die Datei-Schlüssel;
+    `per_file` (Dict) bekommt je Datei mit Sammler ihren Anteil (`_collect`)."""
+    if per_file is None:
+        results = [c.collect(repo, rng, files) for c in COLLECTORS]
+    else:
+        results = [c.collect(repo, rng, files, per_file=per_file) for c in COLLECTORS]
     return Collected(
         sorted((e for r in results for e in r.entries),
                key=lambda e: (e["file"], e["line"], e["kind"])),
@@ -3982,6 +4054,110 @@ def render_block(packet, entries, unresolved, cap):
     return _render(packet, entries, unresolved, cap)[0]
 
 
+COLLECTED_NAME = "counterparts.json"   # Gegenstellen je Datei im Laufordner (Spec 28, E3)
+COLLECTED_EMPTY = {"entries": [], "unresolved": [], "unparsed": None}   # Datei ohne Sammler
+
+
+def _collected_payload(repo: Path, span: Span, focus: str, files, per_file: dict) -> dict:
+    """Inhalt des Gegenstellen-Speichers für `store_collected`: der Fingerabdruck (`target`,
+    `base`, `focus`, die Dateiliste als Schlüssel von `files`), je Datei ihr Anteil aus
+    `per_file` (`_collect`; eine Datei ohne Sammler mit `COLLECTED_EMPTY`) und `not_indexed`:
+    je Sprache mit eigenen Dateien die nicht durchsuchten Dateien am ZIEL als Liste von Paaren
+    `[pfad, grund]` (ein Pfad, der kein UTF-8 ist, escapt wie in `not_reviewed`; eine Liste,
+    damit die Zahl auch dann stimmt) — nach dem Sammeln gelesen, denn Delphi scannt Units erst
+    bei Bedarf."""
+    files = sorted({str(f) for f in files})
+    not_indexed = {}
+    for collector in COLLECTORS:
+        if any(collector.accepts(path) for path in files):
+            missing = collector.index(repo, span.target).not_indexed()
+            not_indexed[collector.language] = [
+                [path if _is_utf8(path) else _escaped(path), reason]
+                for path, reason in sorted(missing.items())]
+    return {"target": span.target, "base": span.base, "focus": focus,
+            "files": {path: per_file.get(path, COLLECTED_EMPTY) for path in files},
+            "not_indexed": not_indexed}
+
+
+def store_collected(run_path, collected):
+    """Die Gegenstellen eines Plans je Datei im Laufordner ablegen: `<lauf>/counterparts.json`
+    über `write_json` (`_meta` mit `generated` und `run`). `collected` wie
+    `_collected_payload` ihn liefert (ein mitgegebenes `_meta` wird ersetzt). Rückgabe: das
+    geschriebene Objekt."""
+    directory = Path(run_path)
+    run_id = _check_run_id(directory.name)
+    payload = {key: value for key, value in collected.items() if key != "_meta"}
+    meta = {"generated": f"{SCRIPT_CMD} plan (Gegenstellen je Datei)", "run": run_id}
+    return write_json(directory / COLLECTED_NAME, meta, payload)
+
+
+def _is_entry(entry) -> bool:
+    return (isinstance(entry, dict) and isinstance(entry.get("file"), str)
+            and isinstance(entry.get("line"), int) and isinstance(entry.get("kind"), str)
+            and isinstance(entry.get("lines"), list)
+            and all(isinstance(line, str) for line in entry["lines"]))
+
+
+def _is_record(record) -> bool:
+    return (isinstance(record, dict) and isinstance(record.get("entries"), list)
+            and all(_is_entry(e) for e in record["entries"])
+            and isinstance(record.get("unresolved"), list)
+            and all(isinstance(item, list) and len(item) == 3 for item in record["unresolved"])
+            and (record.get("unparsed") is None or isinstance(record["unparsed"], str)))
+
+
+def load_collected(run_path):
+    """Den Gegenstellen-Speicher des Laufs lesen (`store_collected`); None, wenn er fehlt,
+    nicht lesbar ist oder nicht die Form hat — dann sammelt `write_counterparts` selbst. Ob
+    er zum Plan passt, prüft `_collected_matches`."""
+    try:
+        data = json.loads((Path(run_path) / COLLECTED_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(data, dict) and isinstance(data.get("_meta"), dict)
+            and data["_meta"].get("skill") == SKILL_NAME
+            and all(isinstance(data.get(key), str) for key in ("target", "base", "focus"))
+            and isinstance(data.get("files"), dict)
+            and all(_is_record(r) for r in data["files"].values())
+            and isinstance(data.get("not_indexed"), dict)
+            and all(isinstance(pairs, list) and all(
+                isinstance(pair, list) and len(pair) == 2
+                and all(isinstance(x, str) for x in pair) for pair in pairs)
+                for pairs in data["not_indexed"].values())):
+        return None
+    return data
+
+
+def _collected_matches(plan: dict, stored) -> bool:
+    """Passt der Speicher zum Plan? Ziel, Basis und Fokus gleich, die Dateiliste die des Plans
+    (`file_keys`; auch nach `--since`, das nur die Pakete umpackt), jede Paketdatei darin und
+    für jede Sprache mit Dateien darin `not_indexed`."""
+    if stored is None:
+        return False
+    if (stored["target"], stored["base"], stored["focus"]) != (
+            plan["target"], plan["base"], plan.get("focus")):
+        return False
+    files = set(stored["files"])
+    keyed = plan.get("file_keys")
+    if isinstance(keyed, dict) and files != set(keyed):
+        return False
+    if not all(str(f) in files for packet in plan["packets"] for f in packet["files"]):
+        return False
+    return all(collector.language in stored["not_indexed"] for collector in COLLECTORS
+               if any(collector.accepts(path) for path in files))
+
+
+def _stored_found(stored: dict, files) -> Collected:
+    """`Collected` der Paketdateien aus dem Speicher — dasselbe, was `_collect_all` über die
+    Paketdateien sammelte: Einträge nach Datei, Zeile, Art; nicht aufgelöste Stellen als
+    Vereinigung; nicht lesbare Dateien mit Grund."""
+    records = [(str(f), stored["files"][str(f)]) for f in files]
+    entries = sorted((e for _f, r in records for e in r["entries"]), key=_entry_order)
+    unresolved = {tuple(item) for _f, r in records for item in r["unresolved"]}
+    unparsed = sorted((f, r["unparsed"]) for f, r in records if r["unparsed"] is not None)
+    return Collected(entries, len(unresolved), unparsed)
+
+
 def write_counterparts(repo, run_id):
     """`counterparts --run <lauf>`: je Paket des Plans `packets/<id>.md` im Laufordner.
 
@@ -4002,7 +4178,10 @@ def write_counterparts(repo, run_id):
     die Hinweise entstehen erst, wenn alle Pakete gesammelt sind, also unabhängig von ihrer
     Reihenfolge), bei Fokus `quality` statt Gegenstellen `intro` = `QUALITY_INTRO`.
     Höchstens `BLOCK_MAX_CHARS` Zeichen je Datei, Kopfzeile eingeschlossen. Schreibt atomar,
-    überschreibt einen früheren Block. Rückgabe: je Paket in
+    überschreibt einen früheren Block. Gesammelt wird nur, wenn der Speicher von `plan`
+    (`load_collected`) fehlt oder nicht zum Plan passt (`_collected_matches`); sonst kommen
+    Einträge, nicht aufgelöste Stellen, nicht lesbare Dateien und `not_indexed` aus dem
+    Speicher, und der Block ist byte-gleich. Rückgabe: je Paket in
     Plan-Reihenfolge `{"packet", "range" (der Bereich von `make_packet_range`, wie er im Plan
     steht), "path" (repo-relativ), "counterparts", "shown", "unresolved"}`."""
     repo = _toplevel(repo)
@@ -4012,11 +4191,15 @@ def write_counterparts(repo, run_id):
     if not isinstance(plan_range, str) or not plan_range:
         raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
     quality = plan.get("focus") == "quality"
+    stored = None if quality else load_collected(run_dir(repo, run_id))
+    stored = stored if _collected_matches(plan, stored) else None
     collected = []
     for packet in plan["packets"]:
         rng = make_packet_range(repo, run_id, packet["id"], None, None)
         found = None
-        if not quality:
+        if stored is not None:
+            found = _stored_found(stored, packet["files"])
+        elif not quality:
             found = _collect_all(repo, plan_range, packet["files"])
         collected.append((packet, rng, found))
     # Die Hinweise erst nach allen Paketen: Delphi-Units werden bei Bedarf gescannt, und
@@ -4039,12 +4222,15 @@ def write_counterparts(repo, run_id):
                 own = {str(f) for f in packet["files"] if collector.accepts(str(f))}
                 if not own:
                     continue
-                if target is None:
-                    target = split_range(repo, plan_range).target
-                others = {p: r for p, r in collector.index(repo, target).not_indexed().items()
-                          if p not in own}
+                if stored is not None:
+                    missing = stored["not_indexed"][collector.language]
+                else:
+                    if target is None:
+                        target = split_range(repo, plan_range).target
+                    missing = collector.index(repo, target).not_indexed().items()
+                others = [(p, r) for p, r in missing if p not in own]
                 if others:
-                    reasons = ", ".join(sorted(set(others.values())))
+                    reasons = ", ".join(sorted({r for _p, r in others}))
                     notes.append(f"{len(others)} {collector.language}-Datei(en) außerhalb des "
                                  f"Pakets am ZIEL nicht lesbar ({reasons}) — dort keine "
                                  "Gegenstellen gesucht.")
@@ -5296,7 +5482,8 @@ def _cmd_plan(args) -> int:
         soll = _shown_path(repo, soll_path)
     ignore = repo / CACHE_DIR / CACHE_IGNORE
     fresh = not os.path.lexists(ignore)
-    plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at, args.with_tests)
+    plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at, args.with_tests,
+                      args.level)
     # build_plan legt die .gitignore des Cache-Ordners an, wenn sie fehlte; das sagt plan.
     created = fresh and os.path.lexists(ignore)
     run_id = plan["_meta"]["run"]
@@ -5326,6 +5513,7 @@ def _cmd_plan(args) -> int:
         print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen")
     if not plan["packets"]:
         print("Pakete: keine — alle Dateien übernommen")
+    print(f"Reviews: {len(plan['packets'])} × /code-review {plan_level(plan)}")
     reused = [p for p, info in plan["file_keys"].items() if info.get("reused_from")]
     if reused:
         print(f"Übernommen (--since): {len(reused)} Datei(en)")
@@ -5396,6 +5584,10 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--range", dest="rng", help="BASIS..ZIEL oder Revision (Default: HEAD)")
     plan.add_argument("--profile", choices=PROFILES, default="standard")
     plan.add_argument("--focus", choices=FOCI, default="bugs")
+    plan.add_argument("--level", choices=LEVELS, default=None,
+                      help="Stufe je Paket für /code-review (Default: "
+                           + ", ".join(f"{p} {lv}" for p, lv in PROFILE_LEVELS.items())
+                           + "; max nur ausdrücklich)")
     plan.add_argument("--split-at", type=int, default=None, help=f"Default {SPLIT_AT}")
     plan.add_argument("--since", help="frühere Läufe, durch Komma getrennt")
     plan.add_argument("--soll-file", help="Soll für das Profil checkpoint (dort Pflicht)")

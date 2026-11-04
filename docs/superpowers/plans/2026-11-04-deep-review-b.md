@@ -23,6 +23,10 @@ gespeicherten Läufe `py-diff-dr-1` (7/8: P1–P6, R1) und `dl-diff-dr-1` (6/6) 
 `docs/known-limits.md` ist veraltet und wird in Task 13 berichtigt. Das Spec-Review schätzt
 die Hauptschleife der beiden Abnahme-Läufe auf rund 2,17 und 1,70 USD; Task 2 misst das nach.
 
+**Lesson aus dem Bau (Task 3):** Eine Konstante auf Modulebene steht in `Interfaces:` als
+`token:NAME`, nicht als nackter Bezeichner: `verify` sucht nackte Bezeichner per `ast` nur unter
+Funktionen und Klassen und meldet die Konstante sonst als `missing`.
+
 **Lesson aus Spec 23, 24 und 26:** Fixture-Werte nie als Beispiel in SKILL.md oder References;
 `verify` vor jedem Merge mit `rc=$?` auswerten, nie hinter `tail`.
 
@@ -103,7 +107,7 @@ schon hier, weil sie dieselbe Datei betrifft.
 ### Task 2: Sonde B
 
 Messung vor dem Bau. Ohne Freigabe des Nutzers läuft kein bezahlter Lauf; dann bleiben die
-Annahmen der Spec stehen, `PROFILE_LEVELS` setzt `high` für beide Profile, Schritt 4 bleibt im
+Annahmen der Spec stehen, `token:PROFILE_LEVELS` setzt `high` für beide Profile, Schritt 4 bleibt im
 Hauptkontext, und der Report sagt das.
 
 **Files:**
@@ -145,7 +149,7 @@ Hauptkontext, und der Report sagt das.
 
 **Interfaces:**
 - Consumes: `token:Sonde B`
-- Produces: `fn:store_collected(run_path, collected)`, `fn:load_collected(run_path)`, `PROFILE_LEVELS`
+- Produces: `fn:store_collected(run_path, collected)`, `fn:load_collected(run_path)`, `token:PROFILE_LEVELS`
 
 - [ ] **Step 1: Test schreiben** — `test_b_counterparts_collected_once`: nach `plan` liegt
       der Speicher im Laufordner, `counterparts` ruft `collect_python` und `collect_delphi`
@@ -157,7 +161,7 @@ Hauptkontext, und der Report sagt das.
 - [ ] **Step 3: Implementieren** — `build_plan` legt die gesammelten Einträge mit
       `store_collected` ab (JSON mit `_meta`, je Datei Einträge und nicht aufgelöste);
       `write_counterparts` nimmt `load_collected` und sammelt nur, wenn der Speicher fehlt
-      oder nicht zum Plan passt; `LEVELS`, `PROFILE_LEVELS` mit den Werten aus Task 2.
+      oder nicht zum Plan passt; `LEVELS`, `token:PROFILE_LEVELS` mit den Werten aus Task 2.
 - [ ] **Step 4: Grün sehen**, volle Suite.
 - [ ] **Step 5: Commit.**
 
@@ -168,7 +172,7 @@ Hauptkontext, und der Report sagt das.
 - Modify: `tests/test_deep_review_kit.py`
 
 **Interfaces:**
-- Consumes: `fn:load_collected(run_path)`, `PROFILE_LEVELS`
+- Consumes: `fn:load_collected(run_path)`, `token:PROFILE_LEVELS`
 - Produces: `fn:packet_marker(packet_id)`, `fn:write_prompt(run_path, packet, block, level)`, `fn:record(run_path, packet, tool, payload_path, no_block)`
 
 - [ ] **Step 1: Test schreiben** — `test_b_record_needs_packet_marker`: `counterparts`
