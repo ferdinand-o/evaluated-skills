@@ -313,7 +313,36 @@ Verzeichnis für Upstream, Zweig und Ablage. Kurzoptionen dürfen gebündelt sei
 
 Ausnahmeliste für `rm` (*Annahme:* Inhalt dort ist regenerierbar): `.skills/cache` als Präfix,
 sonst die Komponenten `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`,
-`node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe.
+`node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe — nur für relative Pfade ohne `..`,
+`~` und `$`; ein absoluter Pfad ist nur unter `/tmp/` ausgenommen. Bleibt nach dem Zerlegen kein
+Ziel übrig, ist die Antwort `ask`.
+
+**Was vor dem Programm steht** (Prüfpunkt nach Task 3). Übersprungen werden Zuweisungen
+(`VAR=x`) und die Wrapper `sudo`, `doas`, `env`, `timeout`, `nice`, `ionice`, `stdbuf`, `nohup`,
+`time`, `command`, `exec` samt ihren Optionen; Optionen mit Wert (`sudo -u/--user/-g/--group`,
+`env -u`, `nice -n`, `ionice -c/-n`, `timeout -s/-k`) nehmen das nächste Wort mit, `timeout`
+dazu die Dauer. Bei `git` nehmen `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`,
+`--config-env` ihren Wert mit (auch als `--opt=wert`). `cd <dir>` als eigener Teil setzt das
+Verzeichnis für die folgenden Teile; `cd` ohne Ziel, `cd -` oder ein Ziel mit `$`/`~` macht es
+unbekannt, und ein folgender Push fragt dann nach.
+
+**Heredocs.** Vor dem Zerlegen schneidet `guard` jeden Heredoc-Rumpf (`<<WORT`, `<<-WORT`,
+`<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) aus dem Text; der Rumpf ist kein Befehl. Steht der
+Heredoc an `psql`, `sqlite3` oder `mysql`, prüft `guard` den Rumpf auf `DROP`, `TRUNCATE` und
+`DELETE FROM` ohne `WHERE` wie ein Argument.
+
+**Weitere Befehle** (Prüfpunkt nach Task 3), alle „immer Rückfrage“: `unsaved-work` —
+`git switch -f`, `git switch --discard-changes`, `git reset --merge`, `git reset --keep`;
+`data-delete` — `find` mit `-delete` oder `-exec rm`; `external` — `gh api` mit Methode außer
+`GET` (`-X`, `--method`) oder mit `-f`, `-F`, `--field`, `--raw-field`, `--input`;
+`gh pr comment`, `gh pr close`, `gh pr review`, `gh pr edit`, `gh repo delete`,
+`gh release delete`; `yarn publish`, `pnpm publish`, `cargo publish`, `uv publish`,
+`poetry publish`.
+
+**Kosten je Bash-Aufruf.** Enthält der Text keinen Programmnamen der Tabelle (ein Regex vor
+jedem Zerlegen), endet `guard` ohne Git-Aufruf und ohne Ausgabe. Das Snippet ruft `python3`
+und fällt auf `python` zurück; fehlen beide, gibt es die Meldung „[decide] Hook ungeprüft —
+kein Python“.
 
 **Push-Ziel.** Optionen ohne Wirkung auf das Ziel (`-u`, `--set-upstream`, `-v`, `--verbose`,
 `-q`, `--quiet`, `--no-verify`, `--progress`, `--porcelain`) werden übersprungen; `-n` und
@@ -322,12 +351,16 @@ sonst die Komponenten `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cach
 `--follow-tags`, `--all`, `--mirror`, `--prune`, `--repo`, `-o`, `--push-option` — macht die
 Antwort `ask` mit „immer Rückfrage“. Danach:
 
-- keine Argumente: der Upstream des aktuellen Zweigs
-  (`git rev-parse --abbrev-ref --symbolic-full-name @{u}`); ohne Upstream `ask`.
-- nur `<remote>`: `<remote>/<aktueller zweig>`.
+- keine Argumente: das Push-Ziel des aktuellen Zweigs
+  (`git rev-parse --abbrev-ref --symbolic-full-name @{push}`, berücksichtigt `pushRemote` und
+  `push.default`); ohne Ziel `ask`.
+- nur `<remote>`: dasselbe `@{push}`, wenn dessen Remote `<remote>` ist; sonst `ask`.
+- `push.default=matching` oder ein gesetztes `remote.<remote>.push` → `ask` (der Push trifft
+  mehr als ein Ziel); ein `git -c …` vor `push` → `ask` (es kann das Ziel umlenken).
 - `<remote> <refspec>` mit genau einem Refspec: `<src>` allein steht für `<src>:<src>`; eine
   Quelle `HEAD` wird zum aktuellen Zweig (`git rev-parse --abbrev-ref HEAD`; abgelöster `HEAD`
-  → `ask`); ein Ziel `refs/heads/<x>` wird `<x>`, jedes andere Ziel unter `refs/` → `ask`; ein
+  → `ask`); eine Quelle, die ein Tag ist (`git show-ref --verify --quiet refs/tags/<src>`) →
+  `ask`; ein Ziel `refs/heads/<x>` wird `<x>`, jedes andere Ziel unter `refs/` → `ask`; ein
   Refspec mit führendem `+` oder mit leerer Quelle (`:<dst>`, löscht den entfernten Zweig) →
   `ask`. Ziel ist `<remote>/<dst>`.
 - mehr als ein Refspec: `ask`.
@@ -362,7 +395,9 @@ Was `guard` nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungsz
 (MCP) —, sieht es nicht; die Schlusszeile von `check` bleibt deshalb unverändert. Gegenüber
 Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis zur Antwort des
 Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1). Spec 00 §4 nennt bisher nur
-08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort.
+08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort. Weiterhin nicht gesehen
+(known-limits): ein Ziel, das erst die Shell ausrechnet (`$VAR`, Globs), ein `cd` in einer
+Subshell, Wrapper außerhalb der Liste.
 
 ### Contract
 
