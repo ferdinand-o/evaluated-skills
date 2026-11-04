@@ -78,8 +78,6 @@ FACTORY_DEPTH = 2         # raise fabrik(...): Fabriken in Fabriken so tief auf 
 FLAG_DEPTH = 4            # Weg eines Schlüsselwort-Arguments durch die Gegenstellen
 AMBIGUOUS_MAX = 3         # mehr gleichnamige Definitionen ohne Importbezug: nicht raten
 EXTERNAL = "extern"       # Empfänger eines Attribut-Aufrufs ist ein Modul außerhalb des Repos
-REPORT_BASE_LINES = 20    # Anti-Zeremonie: Skript-Teil des Berichts (ohne Kopfzeile) bei einem
-                          # Paket höchstens so viele Zeilen plus eine je Fund (`_report_text`)
 EINORDNUNG_MAX_LINES = 8  # Anti-Zeremonie (`split: false`): Textzeilen ab `## Einordnung`
 
 SKILL_NAME = "deep-review"
@@ -4241,10 +4239,14 @@ def _check_packet_id(packet_id) -> str:
     return packet_id
 
 
-def _packet_header(run_id: str, pid: str) -> str:
-    """Die Kopfzeile von `packets/<id>.md` und `packets/<id>.prompt.md`, mit Zeilenende."""
+def _packet_header(run_id: str, pid: str, counterparts: int | None = None) -> str:
+    """Die Kopfzeile von `packets/<id>.md` und `packets/<id>.prompt.md`, mit Zeilenende. Mit
+    `counterparts` (nur `packets/<id>.md`, nicht bei Fokus quality) endet sie auf
+    `| counterparts: <n> -->` (`BLOCK_COUNT_FIELD`): die Zahl der Gegenstellen des Pakets,
+    maschinenlesbar für `_block_count`."""
+    count = "" if counterparts is None else f" | {BLOCK_COUNT_FIELD}: {counterparts}"
     return (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
-            f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+            f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid}{count} -->\n")
 
 
 def packet_marker(packet_id) -> str:
@@ -4428,17 +4430,18 @@ def write_counterparts(repo, run_id):
     die Paketdateien — dieselben geänderten Zeilen wie im Paket-Bereich, der Code aber am
     ZIEL des Plans (`bis^{tree}` weicht bei einer Datei/Ordner-Kollision ab). Die Datei
     beginnt mit der Kopfzeile `<!-- skill: deep-review | schema: 1 | generated: … | packet:
-    <id> -->`, dann der Block von `render_block` (über `_render`, dieselben vier Parameter,
-    für die Zahl der gezeigten Stellen) für eine Kopie des Pakets mit den optionalen
-    Schlüsseln: `unreadable` = `Collected.unparsed` (eigene Dateien ohne lesbaren Stand am
-    ZIEL, mit Grund in der Dateiliste), `notes` = je Sprache mit eigenen Dateien im Paket die
-    übrigen nicht durchsuchten Dateien dieser Sprache im Repo als eine Zahl mit den
-    vorkommenden Gründen (`not_indexed` des Index: ohne Submodule und ohne Symlinks auf
-    gelesene Dateien; bei Delphi dazu die Units, die das Sammeln der Paketdateien aller
-    Pakete gescannt hat und deren Blöcke nicht aufgehen — die Hinweise entstehen erst, wenn
-    alle Pakete gesammelt sind, also unabhängig von ihrer Reihenfolge), bei Fokus `quality`
-    statt Gegenstellen `intro` = `QUALITY_INTRO`. Höchstens `BLOCK_MAX_CHARS` Zeichen je
-    Datei, Kopfzeile eingeschlossen. Schreibt atomar, überschreibt einen früheren Block.
+    <id> | counterparts: <n> -->` (`_packet_header`; `counterparts` die Zahl der
+    Gegenstellen, bei Fokus quality ohne dieses Feld), dann der Block von `render_block` (über
+    `_render`, dieselben vier Parameter, für die Zahl der gezeigten Stellen) für eine Kopie des
+    Pakets mit den optionalen Schlüsseln: `unreadable` = `Collected.unparsed` (eigene Dateien
+    ohne lesbaren Stand am ZIEL, mit Grund in der Dateiliste), `notes` = je Sprache mit eigenen
+    Dateien im Paket die übrigen nicht durchsuchten Dateien dieser Sprache im Repo als eine Zahl
+    mit den vorkommenden Gründen (`not_indexed` des Index: ohne Submodule und ohne Symlinks auf
+    gelesene Dateien; bei Delphi dazu die Units, die das Sammeln der Paketdateien aller Pakete
+    gescannt hat und deren Blöcke nicht aufgehen — die Hinweise entstehen erst, wenn alle Pakete
+    gesammelt sind, also unabhängig von ihrer Reihenfolge), bei Fokus `quality` statt
+    Gegenstellen `intro` = `QUALITY_INTRO`. Höchstens `BLOCK_MAX_CHARS` Zeichen je Datei,
+    Kopfzeile eingeschlossen. Schreibt atomar, überschreibt einen früheren Block.
 
     Gesammelt wird nur, wenn der Speicher von `plan` (`load_collected`) fehlt oder nicht zum
     Plan passt (`_collected_matches`); sonst kommen Einträge, nicht aufgelöste Stellen, nicht
@@ -4486,7 +4489,7 @@ def write_counterparts(repo, run_id):
     for packet, rng, found in collected:
         pid = packet["id"]
         shown_packet = {**packet, "range": rng, "marker": markers[pid]}
-        header = _packet_header(run_id, pid)
+        header = _packet_header(run_id, pid, None if found is None else len(found.entries))
         cap = BLOCK_MAX_CHARS - len(header)
         if found is None:
             shown_packet["intro"] = QUALITY_INTRO
@@ -5165,27 +5168,27 @@ REPORT_SOURCE_REASONS = (REASON_SOURCE_NOT_UTF8,)
 REPORT_TRUST_NOTE = (
     "Dass je Paket ein Review lief, ist Auskunft des Hauptagenten, kein Beleg; belegt ist nur, "
     "was `audit` an angenommenen Ergebnissen zählt.")
-CODE_REVIEW = "/code-review"     # das Werkzeug in fester Form (`_canonical_tool`)
-# Nur, wenn die Kopfzeile `CODE_REVIEW` als Werkzeug nennt (`_report_text`): an REPORT_TRUST_NOTE
-# angehängt, in derselben Zeile.
+CODE_REVIEW = "/code-review"     # fester Name (`_canonical_tool`, `_is_code_review`)
+# Nur, wenn die Kopfzeile ein Werkzeug nach `_is_code_review` nennt (`_report_text`): an
+# REPORT_TRUST_NOTE angehängt, in derselben Zeile.
 REPORT_DISCLAIMER = (
     "`--max-findings all` hebt nur die Kappung der Funde je Review auf und belegt nicht, dass "
     "kein Fehler übrig blieb. Es bleibt danach "
     "als Wahl des Nutzers gesetzt, und `/code-review` ohne Stufe nimmt die zuletzt getippte "
     "Stufe; deep-review setzt nichts zurück, zurück geht es mit "
     "`/code-review --max-findings default`.")
-# G2 auf die Einordnung: „vollständig" und seine Adjektiv-Endungen als ganzes Wort, nicht
-# „unvollständig" und nicht „Vollständigkeit" (`_claims_complete`)
-REPORT_CLAIM_RE = re.compile(r"\bvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
-# Verneinung vor der Behauptung: „nicht", „kein…" (auch „keineswegs") oder „un", mit höchstens
-# zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz"); Satzzeichen beenden sie
-REPORT_NEGATION_RE = re.compile(r"\b(?:nicht|kein\w*|un)(?:\s+\w+){0,2}\s*\Z", re.IGNORECASE)
+# G2 auf die Einordnung, je Zeile (`_claims_complete`): eines dieser Wörter (mit den deutschen
+# Adjektiv-Endungen) als ganzes Wort ist eine Vollständigkeitsbehauptung …
+REPORT_CLAIM_RE = re.compile(r"\b(?:(?:vollständig|fertig|komplett)(?:e[mnrs]?)?|complete)\b",
+                             re.IGNORECASE)
+# … außer die Zeile nennt zugleich die Lücke mit einem dieser Wörter
+REPORT_GAP_RE = re.compile(r"\b(?:unvollständig(?:e[mnrs]?)?|incomplete)\b", re.IGNORECASE)
 REPORT_EMPHASIS_RE = re.compile(r"[*_`]+")   # Markdown-Hervorhebung zählt beim Lesen nicht
-REPORT_NEGATION_CHARS = 80  # so weit vor „vollständig" wird nach der Verneinung gesucht
-# Die Zählzeile, die `_render` unter `## Gegenstellen` in `packets/<id>.md` schreibt
-BLOCK_COUNT_RE = re.compile(r"(\d+) Stelle\(n\) nach der Sammelregel\b")
-# Eine Zeile nur aus HTML-Kommentaren zählt nicht zur Längengrenze
-REPORT_COMMENT_LINE_RE = re.compile(r"[ \t]*(?:<!--.*?-->[ \t]*)+")
+# HTML-Kommentar in der Einordnung, auch über mehrere Zeilen (`_einordnung_lines`)
+REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Die Zahl der Gegenstellen als letztes Feld der Kopfzeile von `packets/<id>.md`
+# (`write_counterparts`, gelesen von `_block_count`)
+BLOCK_COUNT_FIELD = "counterparts"
 
 
 def _layout(directory) -> tuple[Path, str]:
@@ -5394,6 +5397,15 @@ def _canonical_tool(tool: str) -> str:
         return "/" + tool
     match = MSYS_TOOL_RE.fullmatch(tool.replace("\\", "/"))
     return "/" + match[1] if match else tool
+
+
+def _is_code_review(tool: str) -> bool:
+    """Ob `tool` /code-review ist: der Name nach `_canonical_tool` ist `CODE_REVIEW` oder
+    beginnt mit `CODE_REVIEW` und einem Leerzeichen (`/code-review high`). Nicht
+    „/code-reviewer", nicht „Review ohne /code-review". `record` verlangt bei jedem Werkzeug
+    außerhalb von `LEVELLESS_TOOLS` eine `stufe`, also auch hier."""
+    name = _canonical_tool(tool)
+    return name == CODE_REVIEW or name.startswith(CODE_REVIEW + " ")
 
 
 def record(run_path, packet, tool, payload_path, no_block=False):
@@ -5791,17 +5803,19 @@ def _not_reviewed_text(plan: dict) -> str:
 
 
 def _block_count(directory: Path, run_id: str, pid: str) -> str | None:
-    """Die Zahl der Gegenstellen aus `packets/<id>.md` (die Zählzeile `<n> Stelle(n) nach der
-    Sammelregel`, `BLOCK_COUNT_RE`), wenn die Datei die Kopfzeile von `counterparts` für
-    diesen Lauf und dieses Paket trägt; sonst None (fehlt, nicht lesbar, anderer Lauf oder
-    anderes Paket, keine Zählzeile)."""
+    """Die Zahl der Gegenstellen aus dem Feld `counterparts: <n>` (`BLOCK_COUNT_FIELD`) der
+    Kopfzeile von `packets/<id>.md`, die `write_counterparts` dort speichert, wenn die Zeile
+    sonst die Kopfzeile von `counterparts` für diesen Lauf und dieses Paket ist
+    (`_packet_header`). Der Fließtext des Blocks zählt nicht. Sonst None: Datei fehlt, nicht
+    lesbar, anderer Lauf oder anderes Paket, Kopfzeile ohne das Feld (ein Lauf vor diesem
+    Stand, Fokus quality)."""
     try:
         text = (directory / "packets" / f"{pid}.md").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    if not text.startswith(_packet_header(run_id, pid)):
-        return None
-    match = BLOCK_COUNT_RE.search(text)
+    stem = _packet_header(run_id, pid).removesuffix(" -->\n")
+    match = re.fullmatch(re.escape(stem) + rf" \| {BLOCK_COUNT_FIELD}: ([0-9]+) -->",
+                         text.split("\n", 1)[0])
     return None if match is None else match[1]
 
 
@@ -5841,7 +5855,8 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     `- Abdeckung: <a>/<b> — vollständig|unvollständig` (nach `_RunState.gaps`), `- Reviews:`
     (`_reviews_line`, mit den Paketen unter der Stufe) und der Hinweis `REPORT_TRUST_NOTE`,
     in derselben Zeile ergänzt um `REPORT_DISCLAIMER` (`--max-findings`), wenn die Kopfzeile
-    `/code-review` als Werkzeug nennt: ein angenommenes Ergebnis mit `/code-review` oder,
+    `/code-review` als Werkzeug nennt (`_is_code_review`, auch `/code-review high`): ein
+    angenommenes Ergebnis mit `/code-review` oder,
     ohne angenommenes Ergebnis, ein Plan, der `/code-review` vorsieht (Fokus nicht
     security). Nach `/security-review` oder einem Review im Hauptkontext steht er nicht."""
     plan = state.plan
@@ -5876,7 +5891,8 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
              f"- Ohne Block: {', '.join(state.no_block()) or REPORT_NONE}",
              f"- Abdeckung: {len(state.accepted)}/{len(plan['packets'])} — {claim}",
              f"- {_reviews_line(plan, state.below_level())}", "",
-             REPORT_TRUST_NOTE + (f" {REPORT_DISCLAIMER}" if CODE_REVIEW in tools else "")]
+             REPORT_TRUST_NOTE
+             + (f" {REPORT_DISCLAIMER}" if any(map(_is_code_review, tools)) else "")]
     return "\n".join(lines) + "\n"
 
 
@@ -5907,24 +5923,27 @@ def write_report(run_path):
     return _locked_report(run_path, write=True)[0]
 
 
-def _claims_complete(text: str) -> bool:
-    """Ob `text` „vollständig" behauptet: das ganze Wort oder eine Adjektivform („vollständige",
-    „vollständiges", „vollständigen", „vollständiger", „vollständigem"; groß oder klein, nicht
-    „unvollständig", nicht „Vollständigkeit"), nicht verneint durch „nicht", „kein…" („keine",
-    „keineswegs") oder „un" davor, mit höchstens zwei Wörtern dazwischen („nicht mehr", „noch
-    nicht ganz") und beliebigem Leerraum, auch über einen Zeilenumbruch
-    (`REPORT_NEGATION_RE`). Markdown-Hervorhebung (`*`, `_`, `` ` ``) zählt nicht:
-    „**nicht** vollständig" ist verneint. Dieselbe Regel wie in Spec 26, jetzt nur auf den
-    freien Teil ab `## Einordnung` angewandt."""
-    text = REPORT_EMPHASIS_RE.sub("", text)
-    for match in REPORT_CLAIM_RE.finditer(text):
-        lo = max(0, match.start() - REPORT_NEGATION_CHARS)
-        before = text[lo:match.start()]
-        if lo and re.match(r"\w", text[lo - 1]):
-            before = re.sub(r"\A\w+", "", before)          # kein abgeschnittenes Wort am Anfang
-        if not REPORT_NEGATION_RE.search(before):
-            return True
-    return False
+def _einordnung_lines(free: list) -> list:
+    """Die Zeilen der Einordnung (ab `## Einordnung`, ohne die Überschrift) ohne
+    HTML-Kommentare: jeder Kommentar `<!-- … -->` (`REPORT_COMMENT_RE`), auch über mehrere
+    Zeilen, wird entfernt; seine Zeilenumbrüche bleiben, sodass Text davor und danach je auf
+    seiner Zeile bleibt. Ein nicht geschlossenes `<!--` bleibt Text."""
+    text = REPORT_COMMENT_RE.sub(lambda m: "\n" * m[0].count("\n"), "\n".join(free))
+    return text.split("\n")
+
+
+def _claims_complete(line: str) -> bool:
+    """Ob eine Zeile der Einordnung Vollständigkeit behauptet (G2, eine einfache Regel ohne
+    Satzverständnis): Sie enthält eines der Wörter `vollständig`, `fertig`, `komplett` (auch
+    mit den Endungen -e, -em, -en, -er, -es) oder `complete` als ganzes Wort, Groß/Klein egal
+    (`REPORT_CLAIM_RE`), und enthält nicht zugleich `unvollständig` oder `incomplete`
+    (`REPORT_GAP_RE`). Also: „Vollständigkeit", „fertigstellen", „completed" und das Wort in
+    „unvollständig" sind keine Behauptung; „nicht vollständig" ist eine — wer die Lücke
+    nennt, schreibt „unvollständig". „un-vollständig" gilt nicht als „unvollständig" und
+    meldet (entschieden: nur die eine Schreibweise hebt auf). Markdown-Hervorhebung (`*`,
+    `_`, `` ` ``) wird vorher entfernt, HTML-Kommentare schon in `_einordnung_lines`."""
+    line = REPORT_EMPHASIS_RE.sub("", line)
+    return bool(REPORT_CLAIM_RE.search(line)) and not REPORT_GAP_RE.search(line)
 
 
 def _gap_text(state: _RunState) -> str:
@@ -5952,14 +5971,15 @@ def _report_mismatch(report: Path, shown: str, run_id: str, expected: str,
     Eintrag, der `report --run <lauf>` nennt; der Lauf selbst bleibt prüfbar, sobald das
     Skript den Bericht neu schreibt.
 
-    Im freien Teil gilt zweierlei (G2). Meldet das Audit eine Lücke (`missing`, `stale`,
-    `lost_findings`; `_RunState.gaps`), darf er nicht „vollständig" behaupten
-    (`_claims_complete`; „unvollständig" und Verneinungen zählen nicht). Und im
+    Im freien Teil gilt zweierlei (G2), beides auf seinen Zeilen ohne HTML-Kommentare
+    (`_einordnung_lines`, auch mehrzeilige Kommentare). Meldet das Audit eine Lücke
+    (`missing`, `stale`, `lost_findings`; `_RunState.gaps`), ist jede Zeile, die
+    Vollständigkeit behauptet (`_claims_complete`: „vollständig", „fertig", „komplett",
+    „complete" ohne „unvollständig"/„incomplete" in derselben Zeile), ein Eintrag. Und im
     Anti-Zeremonie-Fall (`split: false`) hat er höchstens `EINORDNUNG_MAX_LINES` Textzeilen:
-    gezählt wird nach der Überschrift `## Einordnung`, ohne sie, ohne Leerzeilen und ohne
-    Zeilen nur aus einem HTML-Kommentar. Der Teil davor ist durch den Vergleich festgelegt
-    (seine Länge hält `_report_text` kurz, `REPORT_BASE_LINES`); wachsen kann nur die
-    Einordnung, und nur sie zählt."""
+    gezählt wird nach der Überschrift `## Einordnung`, ohne sie und ohne Zeilen, die nach dem
+    Entfernen der Kommentare leer sind. Der Teil davor ist durch den Vergleich festgelegt;
+    wachsen kann nur die Einordnung, und nur sie zählt."""
     try:
         text = report.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -5989,16 +6009,18 @@ def _report_mismatch(report: Path, shown: str, run_id: str, expected: str,
             else:
                 out.append(f"{where}: erwartet {want[i]!r}, steht {have[i]!r}")
             break
-        free = lines[cut + 1:]
-        if state.gaps and _claims_complete("\n".join(free)):
-            out.append(f"`{REPORT_FREE_HEADING}` sagt „vollständig“, obwohl das Audit Lücken "
-                       f"meldet ({_gap_text(state)}) — dort „unvollständig“ mit den Lücken nennen")
-        counted = sum(bool(line.strip()) and not REPORT_COMMENT_LINE_RE.fullmatch(line)
-                      for line in free)
+        free = _einordnung_lines(lines[cut + 1:])
+        for line in free if state.gaps else ():
+            if _claims_complete(line):
+                out.append(f"`{REPORT_FREE_HEADING}` behauptet Vollständigkeit "
+                           f"({line.strip()!r}), obwohl das Audit Lücken meldet "
+                           f"({_gap_text(state)}) — dort „unvollständig“ mit den Lücken "
+                           "nennen")
+        counted = sum(bool(line.strip()) for line in free)
         if state.plan.get("split") is False and counted > EINORDNUNG_MAX_LINES:
             out.append(f"`{REPORT_FREE_HEADING}` hat {counted} Textzeilen, erlaubt sind "
-                       f"{EINORDNUNG_MAX_LINES} (Überschrift, Leerzeilen und Zeilen nur aus "
-                       "einem HTML-Kommentar nicht gezählt; ein Paket, Anti-Zeremonie-Fall)")
+                       f"{EINORDNUNG_MAX_LINES} (Überschrift, Leerzeilen und HTML-Kommentare "
+                       "nicht gezählt; ein Paket, Anti-Zeremonie-Fall)")
     return out
 
 
