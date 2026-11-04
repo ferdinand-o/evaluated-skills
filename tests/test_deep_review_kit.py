@@ -115,8 +115,8 @@ def test_seeded_fixtures(tmp_path):
 
 KIT_PATH = "skills/deep-review/scripts/review_kit.py"
 RUN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d{6})-([0-9a-f]{7})-([0-9a-z]{4})$")
-PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "root", "profile", "focus", "split",
-             "split_at", "packet_size", "changed_lines", "packets", "file_keys", "not_reviewed"]
+PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "root", "profile", "focus", "level",
+             "split", "split_at", "packet_size", "changed_lines", "packets", "file_keys", "not_reviewed"]
 PACKET_KEYS = ["id", "files", "changed_lines", "range", "reused_from"]
 
 
@@ -1292,7 +1292,8 @@ def test_k2_lock_of_a_dead_process_is_taken_over(tmp_path, monkeypatch):
     lock.write_text(f"{_dead_pid()}\n", encoding="utf-8")
     assert kit.make_packet_range(root, run, "p1", None, None)
     assert not lock.exists()
-    assert sorted(p.name for p in kit.run_dir(root, run).iterdir()) == ["plan.json"]
+    assert sorted(p.name for p in kit.run_dir(root, run).iterdir()) == [
+        kit.COLLECTED_NAME, "plan.json"]
     # Lebt der Besitzer, wird gewartet — und die Meldung rät nicht zum Löschen.
     lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
     with pytest.raises(kit.KitError, match="gesperrt") as caught:
@@ -5373,7 +5374,8 @@ def test_cp10_f2_generated_names_the_script_without_repo_path(tmp_path):
     assert kit.merge(directory)["_meta"]["generated"] == f"{cmd} merge --run {run}"
     assert kit.audit(directory, None)["_meta"]["generated"] == f"{cmd} audit --run {run}"
     metas = [json.loads(p.read_text(encoding="utf-8"))["_meta"] for p in directory.rglob("*.json")]
-    assert len(metas) == 4 and "skills/deep-review/scripts" not in json.dumps(metas)
+    assert len(metas) == 5 and "skills/deep-review/scripts" not in json.dumps(metas)
+    assert kit.load_collected(directory)["_meta"]["generated"].startswith(f"{cmd} plan")
 
 
 def test_cp10_f3_cache_folder_ignores_itself(tmp_path):
@@ -5909,3 +5911,158 @@ def test_final2_f2_shallow_hint_only_behind_a_real_boundary(tmp_path):
                          tmp_path / "f3")
     with pytest.raises(kit.KitError, match="flacher Klon: Basis fehlt"):
         kit.split_range(hidden, "origin/feature..origin/main")
+
+
+# --- Spec 28, Task 3: Gegenstellen einmal sammeln, Stufe im Plan ------------------------------
+
+def _counting_collectors(kit, monkeypatch):
+    """`collect_python` und `collect_delphi` zählen ihre Aufrufe — als Modulname und in
+    `COLLECTORS`, über die `write_counterparts` sammelt."""
+    calls = []
+
+    def counted(fn):
+        def wrapper(*args, **kwargs):
+            calls.append(fn.__name__)
+            return fn(*args, **kwargs)
+        return wrapper
+
+    for name in ("collect_python", "collect_delphi"):
+        monkeypatch.setattr(kit, name, counted(getattr(kit, name)))
+    monkeypatch.setattr(kit, "COLLECTORS", tuple(c._replace(collect=counted(c.collect))
+                                                 for c in kit.COLLECTORS))
+    return calls
+
+
+def _packet_blocks(kit, root, run):
+    """`counterparts` wie in einem neuen Prozess (ohne die Indizes von `plan`); die
+    Paketdateien als Bytes."""
+    kit._python_index.cache_clear()
+    kit._delphi_index.cache_clear()
+    kit.write_counterparts(root, run)
+    folder = kit.run_dir(root, run) / "packets"
+    return {p.name: p.read_bytes() for p in sorted(folder.iterdir())}
+
+
+def test_b_counterparts_collected_once(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    assert kit.LEVELS == ("low", "medium", "high", "xhigh", "max")
+    assert kit.PROFILE_LEVELS == {"standard": "medium", "checkpoint": "high"}
+
+    one = _unit("Main1", "procedure Run;\n", "procedure Run;\nbegin\n  Run;\nend;\n")
+    two = _unit("Main2", "procedure Run2;\n", "procedure Run2;\nbegin\n  Check(0);\nend;\n",
+                uses="Bad")
+    caller = "from lib import f\n\n\ndef run():\n    return f(1)\n"
+    before = {"a/Main1.pas": one, "b/Main2.pas": two, "c/Bad.pas": BAD_PAS, "lib.py": LIB_STRICT,
+              "app/c.py": caller, "tools/broken.py": "def kaputt(:\n"}
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", before,
+                        {"a/Main1.pas": one.replace("  Run;\n", "  Run;\n  Run;\n"),
+                         "b/Main2.pas": two.replace("Check(0)", "Check(1)"),
+                         "app/c.py": caller.replace("f(1)", "f(2)")})
+    plan, run = _split_plan(kit, root, split_at=1)
+    assert len(plan["packets"]) == 3 and plan["level"] == "medium"
+    directory = kit.run_dir(root, run)
+
+    # plan legt die Gegenstellen je Datei im Laufordner ab, mit _meta und Fingerabdruck.
+    store = kit.load_collected(directory)
+    assert store["_meta"]["skill"] == "deep-review" and store["_meta"]["run"] == run
+    assert (store["target"], store["base"], store["focus"]) == (plan["target"], plan["base"], "bugs")
+    assert sorted(store["files"]) == sorted(plan["file_keys"])
+    assert [e["line"] for e in store["files"]["app/c.py"]["entries"]] == [5]
+
+    # counterparts sammelt nicht erneut; ohne Speicher sammelt es und schreibt dieselben Bytes.
+    calls = _counting_collectors(kit, monkeypatch)
+    with_store = _packet_blocks(kit, root, run)
+    assert calls == []
+    text = b"".join(with_store.values()).decode("utf-8")
+    assert "raise ValueError at lib.py:4" in text
+    assert f"Delphi-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar ({kit.SKIP_UNBALANCED})" in text
+    assert "1 Python-Datei(en) außerhalb des Pakets am ZIEL nicht lesbar" in text
+    (directory / kit.COLLECTED_NAME).unlink()
+    assert kit.load_collected(directory) is None
+    assert _packet_blocks(kit, root, run) == with_store
+    assert set(calls) == {"collect_python", "collect_delphi"}
+
+    # Ein Speicher, dessen Fingerabdruck nicht passt, zählt nicht.
+    for change in ({"target": "0" * 40}, {"base": "0" * 40}, {"focus": "security"},
+                   {"files": {k: v for k, v in store["files"].items() if k != "app/c.py"}}):
+        kit.store_collected(directory, {**store, **change})
+        calls.clear()
+        assert _packet_blocks(kit, root, run) == with_store
+        assert calls, change
+    kit.store_collected(directory, store)
+    calls.clear()
+    assert _packet_blocks(kit, root, run) == with_store and calls == []
+
+    # --since: die Pakete tragen nur einen Teil der Dateien, der Speicher passt weiter.
+    since_root = _since_repo(tmp_path / "since")
+    run_a = kit.build_plan(since_root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, since_root, run_a, "p1", [_finding("a.py", 5, "A")])
+    plan_b = kit.build_plan(since_root, "base..t2", "standard", "bugs", None, False)
+    done = kit.plan_since(since_root, plan_b["_meta"]["run"], [run_a["_meta"]["run"]])
+    assert [p["files"] for p in done["packets"]] == [["b.py"]] and done["level"] == "medium"
+    since_dir = kit.run_dir(since_root, done["_meta"]["run"])
+    calls.clear()
+    since_blocks = _packet_blocks(kit, since_root, done["_meta"]["run"])
+    assert calls == []
+    (since_dir / kit.COLLECTED_NAME).unlink()
+    assert _packet_blocks(kit, since_root, done["_meta"]["run"]) == since_blocks and calls
+
+    # Fokus quality sammelt nichts: kein Speicher, kein Sammler.
+    quality = kit.build_plan(root, "base..HEAD", "standard", "quality", None, False)
+    assert kit.load_collected(kit.run_dir(root, quality["_meta"]["run"])) is None
+    calls.clear()
+    blocks = _packet_blocks(kit, root, quality["_meta"]["run"])
+    assert calls == [] and kit.QUALITY_INTRO.encode("utf-8") in b"".join(blocks.values())
+
+    # Stufe: Standard des Profils, --level überschreibt, max nur ausdrücklich.
+    checkpoint = kit.build_plan(root, "base..HEAD", "checkpoint", "bugs", None, False)
+    assert checkpoint["level"] == "high"
+    assert "max" not in kit.PROFILE_LEVELS.values()
+    assert kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False,
+                          "max")["level"] == "max"
+    low = kit.build_plan(root, "base..HEAD", "checkpoint", "bugs", None, False, level="low")
+    assert low["level"] == "low" and " --level low" in low["_meta"]["generated"]
+    with pytest.raises(kit.KitError, match="Stufe"):
+        kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False, level="extrem")
+
+    # Ein Plan ohne level (Spec 26) liest sich mit dem Standard seines Profils.
+    for old in (plan, checkpoint):
+        old_dir = kit.run_dir(root, old["_meta"]["run"])
+        on_disk = _plan_on_disk(kit, root, old["_meta"]["run"])
+        del on_disk["level"]
+        (old_dir / "plan.json").write_text(json.dumps(on_disk), encoding="utf-8")
+        _path, loaded = kit._load_plan(root, old["_meta"]["run"])
+        assert kit.plan_level(loaded) == kit.PROFILE_LEVELS[old["profile"]]
+    on_disk["level"] = "extrem"
+    (old_dir / "plan.json").write_text(json.dumps(on_disk), encoding="utf-8")
+    with pytest.raises(kit.KitError, match="level"):
+        kit._load_plan(root, checkpoint["_meta"]["run"])
+
+    # Die Ausgabe von plan nennt die Reviews vor dem Lauf.
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--split-at", "1") == 0
+    assert "Reviews: 3 × /code-review medium" in capsys.readouterr().out.splitlines()
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--level", "max") == 0
+    out = capsys.readouterr().out
+    assert "Reviews: 1 × /code-review max" in out.splitlines()
+    newest = sorted(_runs(root))[-1]
+    assert _plan_on_disk(kit, root, newest)["level"] == "max"
+
+
+def test_b_counterparts_store_with_non_utf8_path_outside(tmp_path, monkeypatch):
+    kit = _kit()
+    source = os.fsdecode(b"app/caf\xe9.py")
+    root = _commit_repo(tmp_path, {"app/m.py": "", "lib.py": LIB_STRICT},
+                        {"app/m.py": "from lib import f\n\n\ndef run():\n    return f(2)\n",
+                         source: "a = 1\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    store = kit.load_collected(kit.run_dir(root, run))
+    assert ["app/caf\\xe9.py", "Pfad nicht UTF-8"] in store["not_indexed"]["Python"]
+    calls = _counting_collectors(kit, monkeypatch)
+    with_store = _packet_blocks(kit, root, run)
+    assert calls == [] and b"1 Python-Datei(en)" in with_store["p1.md"]
+    (kit.run_dir(root, run) / kit.COLLECTED_NAME).unlink()
+    assert _packet_blocks(kit, root, run) == with_store and calls
