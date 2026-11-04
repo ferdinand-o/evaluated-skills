@@ -27,25 +27,37 @@ Werkzeuge von `run.sh`:
 | `cr` | `/code-review --max-findings all <bereich>` | 1800 s |
 | `crc` | `cr` plus Auftrag „Gegenstelle prüfen" | 1800 s |
 | `crx` | `cr` plus Ausgabe von `counterparts.py` | 1800 s |
-| `crb` | `/code-review <LEVEL> --max-findings all <bereich>` plus Gegenstellen-Block aus `review_kit.py` (`plan`, `counterparts`, `packets/p1.md`; Skill nicht im Workspace; Name `<repo>-crb-<stufe>-<nr>`, `LEVEL` = `low`, `medium` oder `high`, Standard `medium`) | 1800 s |
+| `crb` | `/code-review <LEVEL> --max-findings all <bereich>` plus Gegenstellen-Block aus `review_kit.py` (`plan`, `counterparts`, `packets/p1.md` ab der Dateiliste, ohne Kopfzeile, `# Paket` und `Bereich:`; Begleittext wie `crx`; Skill nicht im Workspace; Name `<repo>-crb-<stufe>-<nr>`, `LEVEL` = `low`, `medium` oder `high`, Standard `medium`) | 1800 s |
 | `eng` | `/engineering:code-review <bereich>` | 1800 s |
 | `sp` | superpowers `requesting-code-review` über `base..HEAD` | 1800 s |
 | `dr` | `Review <bereich> mit deep-review.` mit `skills/deep-review` aus diesem Repo im Workspace | 3600 s |
 | `drnc` | wie `dr`, der Gegenstellen-Block geht nicht an den Reviewer | 3600 s |
 
 Der Bereich ist `base..HEAD`, bei `py-c*` `mid..HEAD`, bei den Pfad-Szenarien die Pfadliste.
-`dr` und `drnc` laufen auch auf `py-path` und `dl-path`; der Prompt lautet dort
-`Prüf die Pfade <liste> mit deep-review.`. `crb` läuft nur auf Bereichen (`review_kit.py plan`
+`dr` und `drnc` laufen auch auf `py-path` und `dl-path`, aber nur, wenn `review_kit.py plan --help`
+die Option `--path` nennt (Pfad-Modus, Spec 28, Task 7); sonst Exit 2 vor dem ersten `mkdir`. Der
+Prompt lautet dort `Prüf die Pfade <liste> mit deep-review.`. `crb` läuft nur auf Bereichen (`review_kit.py plan`
 braucht `--range`); auf `*-path` bricht `run.sh` mit Exit 2 ab, ebenso bei `LEVEL` außerhalb von
 `low`, `medium`, `high`, jeweils vor dem ersten `mkdir`. Bei `crb` löscht `run.sh` nach dem Block
 den Laufordner `.skills` und die Refs (`review_kit.py cleanup`); der Block liegt als
-`$BENCH/out/<name>.ctx.md`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
+`$BENCH/out/<name>.ctx.md`. `crb` bricht mit Exit 1 ab, wenn `plan`, `counterparts` oder
+`cleanup` scheitern, wenn der Plan nicht genau ein Paket hat, dessen Bereich der getippte ist
+(geteilter Plan, Wurzel-Commit, Hilfsrefs), oder wenn danach noch Refs unter `refs/deep-review`
+stehen; auch dann steht eine Zeile in `status.txt`, mit `cost/turns/err=abbruch:<schritt>` und
+`probe=n/a`. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
 und `Edit` nur unter `./.skills/cache/deep-review/` für `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`
 lässt Schritt 3 laufen, weil `counterparts` die Paket-Bereiche baut; nur der Block fehlt. Den
 Laufordner (`report.md`, `findings.json`) sichert `run.sh` nach `$BENCH/out/<name>.kit/`;
 `match.py` liest ihn mit.
+
+Laufnummer nur `0-9`, `A-Z`, `a-z` (nicht leer), Repo und Werkzeug zusätzlich `-`; sonst Exit 2
+vor dem ersten `mkdir`.
+
+`DRY=1 bash run.sh …` führt alles bis unmittelbar vor `claude -p` aus, gibt Prompt, Länge des
+Systemprompts und den Anfang des Blocks auf stderr aus, löscht den Workspace und endet mit Exit 0.
+Nach `out/` schreibt es nichts: der Block liegt unter `work/`, eine Abbruchzeile geht nur auf stderr.
 
 Vorbereitung:
 

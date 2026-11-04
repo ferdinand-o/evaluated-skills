@@ -1,8 +1,18 @@
 #!/bin/bash
 # run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|crb|eng|sp|dr|drnc
+# DRY=1: alles bis unmittelbar vor claude -p, dann Prompt und Länge des Systemprompts auf stderr,
+# Workspace weg, Exit 0; nichts in out/ (Block unter work/, Abbruchzeilen nur auf stderr).
 set -uo pipefail
-[ $# -ge 3 ] || { echo "Aufruf: run.sh <repo> <tool> <nr>" >&2; exit 2; }
+[ $# -eq 3 ] || { echo "Aufruf: run.sh <repo> <tool> <nr>" >&2; exit 2; }
 REPO=$1; TOOL=$2; N=$3
+# Die drei gehen in Datei- und Ordnernamen (W, out/<name>.*, rm -rf "$W"): nur diese Zeichen,
+# ausgeschrieben, weil ein Bereich wie A-Z in einer Regex je nach Locale mehr Zeichen fasst.
+AN=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+[[ $N =~ ^[$AN]+$ ]] || { echo "Laufnummer '$N': nur 0-9, A-Z, a-z, nicht leer; nichts angelegt" >&2; exit 2; }
+[[ $REPO =~ ^[$AN-]+$ ]] || { echo "Repo '$REPO': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
+[[ $TOOL =~ ^[$AN-]+$ ]] || { echo "Werkzeug '$TOOL': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
+DRY=${DRY:-}
+START=""
 NAME=$REPO-$TOOL-$N
 HERE=$(dirname "$(readlink -f "$0")")
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
@@ -29,7 +39,17 @@ case $REPO in
   *) echo "unbekanntes Repo: $REPO" >&2; exit 2 ;;
 esac
 case $TOOL in
-  cr|crc|crx|eng|sp|dr|drnc) ;;
+  cr|crc|crx|eng|sp) ;;
+  dr|drnc)
+    # Auf *-path nur mit Pfad-Modus der Skill (plan --path); ohne ihn reicht deep-review den Pfad
+    # an /code-review weiter, ohne Plan und ohne Laufordner.
+    case $REPO in
+      *-path)
+        HELP=$(python3 -I "$ROOT/skills/deep-review/scripts/review_kit.py" plan --help 2>/dev/null)
+        if ! grep -qE -- '(^|[^[:alnum:]-])--path([^[:alnum:]-]|$)' <<<"$HELP"; then
+          echo "Pfad-Modus fehlt in review_kit.py (Spec 28, Task 7); nichts angelegt" >&2; exit 2
+        fi ;;
+    esac ;;
   crb)
     # Stufe aus LEVEL; Name <repo>-crb-<stufe>-<nr>. Geprüft vor dem ersten mkdir.
     LEVEL=${LEVEL:-medium}
@@ -50,6 +70,18 @@ exec 9> "$B/work/$GROUP.lock"
 flock 9
 rm -rf "${B:?}/work/${GROUP:?}"/*   # Reste abgebrochener Läufe derselben Gruppe
 W=$B/work/$GROUP/$NAME
+CTX=$OUT/$NAME.ctx.md
+[ "$DRY" = 1 ] && CTX=$W.ctx.md
+# Statuszeile, ohne DRY nach out/status.txt, mit DRY nur auf stderr.
+status() {
+  if [ "$DRY" = 1 ]; then echo "DRY $1" >&2; else echo "$1" >> "$OUT/status.txt"; fi
+}
+# Abbruch von crb nach dem Klonen: Statuszeile mit Fehlerkennung statt Kosten, Workspace weg.
+crb_abort() {
+  echo "$NAME: $2" >&2
+  status "$NAME exit=1 secs=$(( $(date +%s) - START )) cost/turns/err=abbruch:$1 probe=n/a"
+  rm -rf "$W" "$CTX"; exit 1
+}
 git clone -q "$B/repos/$REPO" "$W"
 git -C "$W" fetch -q --tags
 git -C "$W" remote remove origin
@@ -64,33 +96,80 @@ esac
 
 ALLOW=("Bash(git:*)" Read Grep Glob)
 TO=1800
+# Begleittext zum Gegenstellen-Block, für crx und crb derselbe.
+COMPANION="Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on."
+# crb: plan.json prüfen (genau ein Paket, dessen Bereich der getippte ist, kein Wurzel-Commit)
+# und aus packets/<id>.md den Block ohne Kopfzeile, „# Paket" und „Bereich:" ausgeben.
+# Exit 3: Plan passt nicht, 4: Block nicht lesbar.
+# shellcheck disable=SC2016  # Python-Quelltext, keine Shell-Variablen
+CRB_PY='
+import json, sys
+directory, want = sys.argv[1:]
+with open(directory + "/plan.json", encoding="utf-8") as f:
+    plan = json.load(f)
+packets = plan.get("packets") or []
+errors = []
+if len(packets) != 1:
+    errors.append(f"{len(packets)} Pakete statt 1")
+ranges = [p.get("range") for p in packets]
+if ranges != [want]:
+    errors.append(f"Paket-Bereich {ranges} ist nicht der getippte Bereich {want}")
+if plan.get("root"):
+    errors.append("Bereich ab dem Wurzel-Commit")
+if errors:
+    print("; ".join(errors), file=sys.stderr)
+    sys.exit(3)
+try:
+    pid = packets[0]["id"]
+    with open(f"{directory}/packets/{pid}.md", encoding="utf-8") as f:
+        lines = f.read().splitlines(keepends=True)
+except (OSError, KeyError) as e:
+    print(f"Block nicht lesbar: {e}", file=sys.stderr)
+    sys.exit(4)
+i = next((i for i, line in enumerate(lines) if line.startswith("Dateien (")), None)
+head = [] if i is None else [line for line in lines[:i] if line.strip() and not
+        line.startswith(("<!--", "# Paket ", "Bereich:"))]
+if i is None or head:
+    print(f"Block ohne Dateiliste oder mit unerwartetem Kopf: {head}", file=sys.stderr)
+    sys.exit(4)
+sys.stdout.write("".join(lines[i:]))
+'
 case $TOOL in
   cr)  PROMPT="/code-review --max-findings all $TARGET" ;;
   crc) PROMPT="/code-review --max-findings all $TARGET"
        EXTRA=(--append-system-prompt "In every review, for each changed line, look up the counterpart it calls or that calls it - including vendored libraries, base classes and framework code outside the diff - and check the contract the change relies on: which exceptions the callee raises, what it returns for edge cases (empty, None, zero), who owns and frees objects, and what a flag or parameter does downstream. Report a finding when the changed code violates that contract.") ;;
   crx) PROMPT="/code-review --max-findings all $TARGET"
        # shellcheck disable=SC2086  # TARGET ist absichtlich eine Liste von Pfaden
-       python3 -I "$HERE/counterparts.py" "$W" $TARGET --root src --max-bytes 60000 > "$OUT/$NAME.ctx.md"
-       EXTRA=(--append-system-prompt "Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on.
+       python3 -I "$HERE/counterparts.py" "$W" $TARGET --root src --max-bytes 60000 > "$CTX"
+       EXTRA=(--append-system-prompt "$COMPANION
 
-$(cat "$OUT/$NAME.ctx.md")") ;;
+$(cat "$CTX")") ;;
   crb) PROMPT="/code-review $LEVEL --max-findings all $TARGET"
        # Block aus review_kit.py (nicht counterparts.py): Plan und Gegenstellen im Workspace, die
-       # Skill wird nicht kopiert. Danach Laufordner und Refs weg, der Reviewer sieht beides nicht.
+       # Skill wird nicht kopiert. Die Zeit läuft ab plan, wie bei dr/drnc, wo review_kit.py im
+       # Lauf steckt. Der Block muss den ganzen getippten Bereich decken (CRB_PY), sonst Abbruch.
+       # Danach Laufordner und Refs weg, der Reviewer sieht beides nicht; bleibt ein Ref, Abbruch.
+       START=$(date +%s)
        KIT=$ROOT/skills/deep-review/scripts/review_kit.py
        RUN=$(python3 -I "$KIT" plan --repo "$W" --range "$TARGET" --split-at 100000 | sed -n '1s/^Lauf: *//p')
-       if [ -z "$RUN" ] || ! python3 -I "$KIT" counterparts --repo "$W" --run "$RUN" >&2 \
-          || [ ! -f "$W/.skills/cache/deep-review/$RUN/packets/p1.md" ]; then
-         echo "$NAME: review_kit.py plan/counterparts gescheitert" >&2
-         python3 -I "$KIT" cleanup --repo "$W" ${RUN:+--run "$RUN"} >&2 || true
-         rm -rf "$W"; exit 1
-       fi
-       cp "$W/.skills/cache/deep-review/$RUN/packets/p1.md" "$OUT/$NAME.ctx.md"
-       python3 -I "$KIT" cleanup --repo "$W" --run "$RUN" >&2
+       [ -n "$RUN" ] || crb_abort plan "review_kit.py plan gescheitert"
+       python3 -I "$KIT" counterparts --repo "$W" --run "$RUN" >&2 \
+         || crb_abort counterparts "review_kit.py counterparts gescheitert"
+       WANT=$(git -C "$W" rev-parse --verify -q "${TARGET%%..*}^{commit}")..$HEAD
+       python3 -I -c "$CRB_PY" "$W/.skills/cache/deep-review/$RUN" "$WANT" > "$CTX"
+       case $? in
+         0) ;;
+         3) crb_abort bereich "Plan deckt nicht genau den getippten Bereich $TARGET mit einem Paket" ;;
+         *) crb_abort block "Block aus dem Plan nicht lesbar" ;;
+       esac
+       python3 -I "$KIT" cleanup --repo "$W" --run "$RUN" >&2 \
+         || crb_abort cleanup "review_kit.py cleanup gescheitert"
        rm -rf "$W/.skills"
-       EXTRA=(--append-system-prompt "Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on.
+       REFS=$(git -C "$W" for-each-ref refs/deep-review)
+       [ -z "$REFS" ] || crb_abort refs "nach cleanup noch Refs unter refs/deep-review: $REFS"
+       EXTRA=(--append-system-prompt "$COMPANION
 
-$(cat "$OUT/$NAME.ctx.md")") ;;
+$(cat "$CTX")") ;;
   eng) PROMPT="/engineering:code-review $TARGET" ;;
   sp)
     mkdir -p "$W/.claude/skills"
@@ -109,7 +188,8 @@ $(cat "$OUT/$NAME.ctx.md")") ;;
       *-path) PROMPT="Prüf die Pfade $TARGET mit deep-review." ;;
       *) PROMPT="Review $TARGET mit deep-review." ;;
     esac
-    # drnc: ohne Gegenstellen-Block. Schritt 3 läuft trotzdem, er baut die Paket-Bereiche.
+    # drnc: ohne Gegenstellen-Block. Schritt 3 läuft trotzdem, er baut die Paket-Bereiche, auf
+    # *-path im Pfad-Modus (oben vorausgesetzt) ebenso wie auf Bereichen.
     [ "$TOOL" = drnc ] && PROMPT="$PROMPT Führe Schritt 3 (counterparts) nur für die Paket-Bereiche aus: gib dem Reviewer den Block aus packets/<id>.md nicht mit und lies ihn nicht."
     ;;
   *) echo "unbekanntes Werkzeug: $TOOL" >&2; exit 2 ;;
@@ -156,7 +236,15 @@ DENY+=("Bash(git -C:*)" "Bash(git --git-dir:*)" "Bash(git --work-tree:*)" "Bash(
        "Bash(git archive:*)" "Bash(git worktree:*)" "Bash(git submodule:*)")
 
 STAMP=$(mktemp)
-START=$(date +%s)
+[ -n "$START" ] || START=$(date +%s)
+if [ "$DRY" = 1 ]; then
+  SYS=${EXTRA[1]:-}
+  echo "DRY $NAME: Prompt: $PROMPT" >&2
+  echo "DRY $NAME: Systemprompt: ${#SYS} Zeichen" >&2
+  if [ -f "$CTX" ]; then echo "DRY $NAME: Block beginnt:" >&2; head -n 3 "$CTX" >&2; fi
+  rm -rf "$W" "$CTX" "$STAMP"
+  exit 0
+fi
 ( cd "$W" && timeout "$TO" claude -p "$PROMPT" "${EXTRA[@]}" --output-format json \
     --allowedTools "${ALLOW[@]}" --disallowedTools "${DENY[@]}" \
     > "$OUT/$NAME.json" 2> "$OUT/$NAME.err" 9>&- )
@@ -209,5 +297,5 @@ else
   PROBE=n/a
 fi
 rm -f "$STAMP"
-echo "$NAME exit=$EC secs=$((END-START)) cost/turns/err=$COST probe=$PROBE" >> "$OUT/status.txt"
+status "$NAME exit=$EC secs=$((END-START)) cost/turns/err=$COST probe=$PROBE"
 rm -rf "$W"
