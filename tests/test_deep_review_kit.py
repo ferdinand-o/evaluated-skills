@@ -8662,3 +8662,110 @@ def test_cp7_name_index_masks_only_files_with_the_name():
     assert [rel for rel, _d in index.defs_of("Check")] == ["lib/lib.go"]
     assert index.masked() == {"lib/lib.go", "third/mention.c"}
     assert index.defs_of("other") and index.masked() == set(index.sources)
+
+
+# --- Prüfpunkt 7, Runde 2 ----------------------------------------------------------------------
+
+CP7R2_REGEX = ("export function check(xs) {{ return xs.some(s => {rx}.test(s)); }}\n"
+               "export function boom() {{ throw new BoomError(); }}\n"
+               "export function later() {{ throw new LateError(); }}\n")
+
+
+def test_cp7r2_regex_after_arrow_in_tsx():
+    kit = _kit()
+    for rx in ("/'/", "/`/"):
+        text = CP7R2_REGEX.format(rx=rx).encode()
+        ts, tsx = kit._SrcFile(text, True), kit._SrcFile(text, True, jsx=True)
+        assert tsx.masked == ts.masked, rx
+        shape = [{name: [(d.line, d.body) for d in items] for name, items in sf_defs[0].items()}
+                 for sf_defs in (kit._js_defs(ts), kit._js_defs(tsx))]
+        assert shape[0] == shape[1] and "later" in shape[1], rx
+        check = kit._js_defs(tsx)[0]["check"][0]
+        assert kit._js_throws(tsx, kit._js_defs(tsx)[0], check, kit.RAISE_DEPTH, {}) == []
+
+
+def test_cp7r2_method_with_return_type_is_not_a_call(tmp_path):
+    kit = _kit()
+    lib = "export function parse(s) {\n  throw new ParseError();\n}\n"
+    main = ("import { parse } from './p';\n"
+            "class X {\n"
+            "  parse(s: string): number {\n"
+            "    return parse(s);\n"
+            "  }\n"
+            "  static async load(s: string): Promise<number> {\n"
+            "    return 1;\n"
+            "  }\n"
+            "}\n")
+    root = _cp7_repo(tmp_path, {"p.ts": lib, "main.ts": "import { parse } from './p';\n"},
+                     {"main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["main.ts"])
+    assert [e["line"] for e in found.entries] == [4]
+
+
+def test_cp7r2_extends_call_stays_a_call(tmp_path):
+    kit = _kit()
+    mix = "export function withLog(b) {\n  throw new MixError();\n}\n"
+    main = ("import { withLog } from './mix';\n"
+            "class Base {}\n"
+            "class Svc extends withLog(Base) {\n"
+            "}\n")
+    root = _cp7_repo(tmp_path, {"mix.ts": mix, "main.ts": "import { withLog } from './mix';\n"},
+                     {"main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["main.ts"])
+    assert [e["line"] for e in found.entries] == [3]
+    assert "    throw MixError at mix.ts:2" in found.entries[0]["lines"]
+
+
+def test_cp7r2_cpp_initializer_list_with_nested_parens():
+    kit = _kit()
+    cpp = ("Foo::Foo(std::string s, int x) : name_(std::move(s)), a(std::max(x, 0)), b{} {\n"
+           "  throw CtorError();\n"
+           "}\n"
+           "Bar::Bar(int x)\n"
+           "    : base(f(g(x)))\n"
+           "{\n"
+           "  throw BarError();\n"
+           "}\n")
+    defs = kit._name_defs(kit._SrcFile(cpp.encode(), False), "typed")
+    assert [(d.name, d.line, d.body is not None) for d in defs] == [
+        ("Foo", 1, True), ("Bar", 4, True)]
+
+
+def test_cp7r2_swift_kotlin_where_clause_continues_signature():
+    kit = _kit()
+    swift = ("func f<T>(x: T) -> T where\n    T: Equatable {\n    throw E.x\n}\n"
+             "func h<T>(x: T)\n    where T: Equatable\n{\n    throw E.y\n}\n")
+    kotlin = "fun <T> g(x: T): T where\n    T : Comparable<T> {\n    throw IllegalStateException()\n}\n"
+    got = {d.name: d.body is not None
+           for group, text in (("swift", swift), ("kotlin", kotlin))
+           for d in kit._name_defs(kit._SrcFile(text.encode(), False), group)}
+    assert got == {"f": True, "h": True, "g": True}
+
+
+def test_cp7r2_name_sites_skip_balanced_end_without_definition(monkeypatch):
+    kit = _kit()
+    lib = "class Lib {\n  static void known(int i) {\n    throw new IllegalStateException();\n  }\n}\n"
+    main = ("class Main {\n"
+            "  void run() {\n"
+            "    nodef(1,\n"
+            "      2);\n"
+            "    known(\n"
+            "      3);\n"
+            "    nodef(4);\n"
+            "  }\n"
+            "}\n")
+    index = kit._NameIndex({"Lib.java": lib.encode(), "Main.java": main.encode()})
+    sf = index.file("Main.java")
+    seen = []
+    real = kit._balanced_end
+
+    def counting(masked, pos):
+        if masked is sf.masked:
+            seen.append(pos)
+        return real(masked, pos)
+
+    monkeypatch.setattr(kit, "_balanced_end", counting)
+    found = kit._name_sites(index, "Main.java", sf, {4, 6, 7}, set())
+    assert [e["line"] for e in found] == [5]
+    nodef = [i + len("nodef") for i in range(len(main)) if main.startswith("nodef(", i)]
+    assert not set(nodef) & set(seen), seen
