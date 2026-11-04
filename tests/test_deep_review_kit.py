@@ -7679,10 +7679,9 @@ def _fresh(path):
     return path
 
 
-def test_b_span_typechange_symlink_in_first_span(tmp_path):
-    """Typwechsel Symlink → Datei einer geteilten Datei: `von` des ersten Spannen-Pakets trägt
-    den Basis-Eintrag unverändert (Modus 120000, der Link-Text), so zeigt es den Typwechsel; die
-    übrigen tragen den Modus des Ziels."""
+def test_b_span_typechange_symlink_whole_file(tmp_path):
+    """Typwechsel Symlink → Datei mit 1983 Zeilen: keine Spannen (die Basis ist kein regulärer
+    Blob) — ein Paket ohne `spans` mit der ganzen Datei, dessen Diff den Typwechsel zeigt."""
     kit = _kit()
     root = tmp_path
     git(root, "init", "--quiet", "--initial-branch=main")
@@ -7694,21 +7693,18 @@ def test_b_span_typechange_symlink_in_first_span(tmp_path):
     git(root, "commit", "--quiet", "-m", "basis")
     git(root, "tag", "base")
     (root / "big.py").unlink()
-    (root / "big.py").write_text(_span_python(1300), encoding="utf-8")
+    (root / "big.py").write_text("".join(f"x{i} = {i}\n" for i in range(1983)), encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "--quiet", "-m", "änderung")
-    link = git(root, "ls-tree", "base", "--", "big.py").split()[2]
-    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    assert kit.split_file_spans(root, "base..HEAD", "big.py", 600) == []
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", 600, False)
     run = plan["_meta"]["run"]
-    assert len(plan["packets"]) == 3
-    shown = []
-    for packet in plan["packets"]:
-        von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
-        mode, _kind, sha = git(root, "ls-tree", von, "--", "big.py").split()[:3]
-        diff = git(root, "diff", von, bis)
-        shown.append((mode, sha == link, "deleted file mode 120000" in diff
-                      and "new file mode 100644" in diff))
-    assert shown == [("120000", True, True)] + [("100644", False, False)] * 2
+    [packet] = [p for p in plan["packets"] if "big.py" in p["files"]]
+    assert "spans" not in packet and not any("spans" in p for p in plan["packets"])
+    von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
+    diff = git(root, "diff", von, bis, "--", "big.py")
+    assert "deleted file mode 120000" in diff and "new file mode 100644" in diff
+    assert "+x1982 = 1982" in diff
 
 
 def test_b_span_diff_never_empty_without_final_newline(tmp_path):
@@ -7802,6 +7798,20 @@ def test_b_render_block_checks_spans():
     files = ["a.py"]
     assert kit._spans_valid(good["spans"], files) and kit._spans_valid([], files)
     assert not kit._spans_valid(None, files)
+
+
+def test_b_render_block_checks_span_entries():
+    """Paket mit `spans`: ein Eintrag ohne `file`/`line` oder mit falschem Typ ist ein KitError
+    mit Meldung, kein KeyError oder TypeError."""
+    kit = _kit()
+    packet = {"id": "p1", "files": ["a.py"], "spans": [{"file": "a.py", "lines": [1, 5]}]}
+    for entry in ({"lines": ["x"]}, {"file": "a.py", "lines": ["x"]},
+                  {"line": 2, "lines": ["x"]}, {"file": "a.py", "line": "2", "lines": ["x"]},
+                  {"file": 3, "line": 2, "lines": ["x"]}, "a.py:2"):
+        with pytest.raises(kit.KitError, match="file.*line"):
+            kit.render_block(packet, [entry], 0, None)
+    ok = {"file": "a.py", "line": 2, "kind": "call", "lines": ["### a.py:2 x"]}
+    assert "### a.py:2 x" in kit.render_block(packet, [ok], 0, None)
 
 
 def test_b_one_diff_helper(tmp_path):

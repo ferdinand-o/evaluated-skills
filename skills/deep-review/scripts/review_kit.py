@@ -542,7 +542,6 @@ PAS_IMPLEMENTATION_RE = re.compile(r"\s*implementation\b", re.IGNORECASE)
 PAS_ROUTINE_HEAD_RE = re.compile(
     r"(?:class\s+)?(?:procedure|function|constructor|destructor|operator)\b", re.IGNORECASE)
 REGULAR_MODES = ("100644", "100755")
-SYMLINK_MODE = "120000"
 
 
 class _FileDiff(NamedTuple):
@@ -583,8 +582,10 @@ def _diff_hunks(repo: Path, span: Span, files) -> dict:
 
 def _file_diff(repo: Path, span: Span, path: str, memo=None):
     """`_FileDiff` von `path` über `span`, aus Git (nie aus dem Arbeitsbaum); None, wenn die
-    Datei am ZIEL keine reguläre Datei ist (fehlt, Symlink, Submodul). Ist sie an der Basis
-    keine reguläre Datei (neu, vorher Symlink oder Submodul), gilt jede Zeile als neu.
+    Datei am ZIEL keine reguläre Datei ist (fehlt, Symlink, Submodul) oder an der Basis da,
+    aber keine reguläre Datei (Symlink, Submodul: ein Typwechsel wird nicht in Spannen
+    geteilt, die Datei bleibt ein ganzes Paket). Fehlt sie an der Basis, gilt jede Zeile als
+    neu.
 
     `memo`: ein Dict, das der Aufrufer für einen Lauf anlegt (`write_counterparts`: je
     Spannen-Paket `von` aus demselben Diff) — kein Speicher im Modul. Basis und Ziel werden
@@ -611,7 +612,9 @@ def _file_diff_at(repo: Path, base: str, target: str, path: str):
     if path not in found or found[path][1] != "blob" or found[path][0] not in REGULAR_MODES:
         return None
     before = _tree_entries(repo, base, [path])
-    base_sha = before[path][2] if path in before and before[path][0] in REGULAR_MODES else None
+    if path in before and before[path][0] not in REGULAR_MODES:
+        return None                          # Typwechsel: keine Spannen
+    base_sha = before[path][2] if path in before else None
     blobs = _blob_contents(repo, [found[path][2]] + ([base_sha] if base_sha else []))
     lines = SPAN_LINE_RE.findall(blobs[found[path][2]])
     if base_sha is None:
@@ -750,7 +753,9 @@ def split_file_spans(repo, rng, path, packet_size):
     dass `packet_size` erreicht ist (bei einer neuen Datei: `packet_size` Zeilen). Gelöschte
     Zeilen zählen an ihrem Anker (erste Zeile des Hunks am ZIEL). Die Spannen decken die Datei
     lückenlos; unter `packet_size` ist es eine Spanne über die ganze Datei. Eine Datei, die am
-    ZIEL fehlt, leer oder keine reguläre Datei ist: `[]`."""
+    ZIEL fehlt, leer oder keine reguläre Datei ist, oder die an der Basis keine reguläre Datei
+    ist (Symlink, Submodul — ihr Typ ändert sich im Bereich): `[]`, sie bleibt ein ganzes
+    Datei-Paket, dessen Diff den Typwechsel vollständig zeigt."""
     return [list(lines) for lines, _count in _file_spans(repo, rng, path, packet_size)]
 
 
@@ -1565,14 +1570,11 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
     nicht auf dem Stand der Basis, sondern mit dem Inhalt aus `_von_content` (außerhalb der
     Spanne ZIEL, innerhalb Basis), als Blob über `git hash-object -w` geschrieben — `von..bis`
     zeigt so nur die Zeilen der Spanne. Modus: Im ersten Spannen-Paket der Datei (dem mit der
-    kleinsten Anfangszeile ihrer Spannen im Plan) trägt sie in `von` den Modus der Basis, wenn
-    sie dort eine reguläre Datei ist, so dass eine Modusänderung (`chmod +x`) genau einmal
-    erscheint; ist sie an der Basis ein Symlink (Blob mit Modus 120000, der Inhalt der
-    Link-Text), steht dort der Basis-Eintrag unverändert — das erste Paket zeigt den
-    Typwechsel vollständig (Link weg, ganze Datei neu). In den übrigen Spannen-Paketen, bei
-    einer neuen Datei und bei einem Submodul an der Basis (160000, kein Blob; sein Wechsel
-    erscheint in keinem Spannen-Paket) den Modus am ZIEL. `memo`: das Diff-Memo des Laufs
-    (`_file_diff`)."""
+    kleinsten Anfangszeile ihrer Spannen im Plan) trägt sie in `von` den Modus der Basis, so
+    dass eine Modusänderung (`chmod +x`) genau einmal erscheint; in den übrigen
+    Spannen-Paketen und bei einer neuen Datei den Modus am ZIEL. Eine Datei, die an der Basis
+    keine reguläre Datei ist (Symlink, Submodul), hat keine Spannen (`_file_diff` None).
+    `memo`: das Diff-Memo des Laufs (`_file_diff`)."""
     target = plan["target"]
     null = "0" * len(target)
     von_entries = _tree_entries(repo, plan["base"], files)
@@ -1584,12 +1586,9 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
             continue
         base = von_entries.get(path)
         first_here = base is not None and any(a == first.get(path) for a, _b in ranges)
-        if first_here and base[:2] == (SYMLINK_MODE, "blob"):
-            continue                         # Typwechsel: der Link bleibt in `von`
         sha = _git(repo, "hash-object", "-w", "--no-filters", "--stdin",
                    stdin=_von_content(diff, ranges)).strip()
-        keep = first_here and base[0] in REGULAR_MODES
-        von_entries[path] = (base[0] if keep else target_entries[path][0], "blob", sha)
+        von_entries[path] = (base[0] if first_here else target_entries[path][0], "blob", sha)
     von_info = _index_info(files, von_entries, null)
     bis_info = _index_info(files, target_entries, null)
     message = _range_message(repo, plan["log_base"], target)
@@ -4329,7 +4328,13 @@ def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
     if not isinstance(unresolved, int) or isinstance(unresolved, bool) or unresolved < 0:
         raise KitError(f"unresolved muss eine Zahl ≥ 0 sein, nicht {unresolved!r}")
     unreadable, notes, intro = _packet_extras(packet)
-    entries = _span_entries(entries, _packet_spans(packet))
+    spans = _packet_spans(packet)
+    for e in entries if spans else ():
+        if not (isinstance(e, dict) and isinstance(e.get("file"), (str, PurePath))
+                and _is_count(e.get("line"))):
+            raise KitError(f"Eintrag eines Spannen-Pakets braucht file (Text) und line (Zahl), "
+                           f"nicht {e!r}")
+    entries = _span_entries(entries, spans)
     files = [str(f) for f in packet.get("files") or []]  # einmal als Text, für Zeilen und Zahl
     rng = packet.get("range")
     shown_spans = _spans_text(packet)
@@ -4425,7 +4430,8 @@ def render_block(packet, entries, unresolved, cap):
     - `intro`: Text, der den Anfang des Abschnitts ab `## Gegenstellen` samt Zählzeilen
       ersetzt (etwa „Gegenstellen nicht gesammelt (Fokus quality).").
     - `spans`: Liste von Objekten `{"file", "lines": [von, bis]}` (`file` eine Datei des
-      Pakets, 1 ≤ von ≤ bis) — der Kopf nennt sie als `Spanne:`.
+      Pakets, 1 ≤ von ≤ bis) — der Kopf nennt sie als `Spanne:`. Jeder Eintrag braucht dann
+      `file` (Text) und `line` (Zahl), sonst KitError.
 
     Dateien und die Pfade in `unreadable` zählen als Text (`str`), auch als `Path`. Kopf,
     Hinweise und `notes` zählen gegen `cap` und werden nie gekappt.
