@@ -18,13 +18,16 @@ Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
 im Laufordner ab, `store_collected`/`load_collected`; die Stufe je Paket steht als `level`
 im Plan); dazu die Datei-Schlüssel (`file_keys`) und die Folgeläufe
 (`apply_since`, `plan_since`); `record` (Ergebnis je Paket), `merge` (`findings.json`),
-`audit` (`audit.json`) und `main` mit den Unterbefehlen
+`report` (`report.md` bis vor `## Einordnung`, `render_report`/`write_report`; Spec 28),
+`audit` (`audit.json`, vergleicht den Bericht Text gegen Text mit `render_report`) und `main`
+mit den Unterbefehlen
 
     plan --range R [--profile P] [--focus F] [--level S] [--split-at N] [--since L[,L…]]
          [--soll-file D] [--with-tests]
     counterparts --run L
     record --run L --packet ID --tool T [--no-block] DATEI|-
     merge --run L
+    report --run L
     audit --run L [--report D]
     cleanup (--run L | --stale [--run L])
 
@@ -5147,35 +5150,25 @@ REPORT_NAME = "report.md"
 RESULTS_DIR = "results"
 # `line` eines Funds als Text: `12`, `L12`, `12-14`, `12 - 14`, `L12-L14`, `12 bis 14`
 LINE_TEXT_RE = re.compile(r"\s*[Ll]?(\d+)(?:\s*(?:-|–|bis)\s*[Ll]?(\d+))?\s*")
-REPORT_HEADER_RE = re.compile(r"\s*<!--(.*?)-->\s*")
-REPORT_HEADER_FIRST = ("skill", "schema", "generated")   # wie ARTIFACT_HEADER_RE (evalkit)
-REPORT_HEADER_NEEDS = ("run", "range", "profile", "focus", "tool")   # Spec 26, Ablauf Schritt 6
-REPORT_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-REPORT_COUNT_RE = re.compile(r"^[ \t>*_#-]*Funde:[ \t*_]*(\d+)", re.MULTILINE)
-REPORT_COVERAGE_RE = re.compile(r"^[ \t>*_#-]*Abdeckung:[ \t*_]*(\d+)[ \t]*/[ \t]*(\d+)(.*)$",
-                                re.MULTILINE)
-# Pflichtzeilen „- Hinweise: …" und „- Übernommen (--since): …", ohne Inhalt mit „keine"
-REPORT_NOTES_RE = re.compile(r"^[ \t>*_#-]*Hinweise:[ \t*_]*(.*)$", re.MULTILINE)
-REPORT_REUSED_RE = re.compile(r"^[ \t>*_#-]*Übernommen[ \t]*\(--since\):[ \t*_]*(.*)$",
-                              re.MULTILINE)
-REPORT_REUSED_COUNT_RE = re.compile(r"(?<!\d)(\d+)[ \t]+Datei(?:en)?\b.*?(?<!\d)(\d+)[ \t]+"
-                                    r"Funde?\b")
-REPORT_NONE_RE = re.compile(r"[ \t*_`]*keine[ \t*_`.]*", re.IGNORECASE)
+# Bericht (Spec 28, Ablauf Schritt 7): `report --run` schreibt alles vor `## Einordnung`.
+REPORT_GENERATED = f"{SCRIPT_CMD} report"   # so beginnt `generated` in der Kopfzeile des Berichts
+REPORT_FREE_HEADING = "## Einordnung"        # ab dieser Zeile schreibt der Hauptagent frei
+REPORT_TABLE_HEAD = ("| Paket | Dateien | Zeilen | Gegenstellen | Funde |",
+                     "| --- | --- | --- | --- | --- |")
+REPORT_NONE = "keine"            # Pflichtzeile ohne Inhalt
+REPORT_NO_DATA = "—"             # Zelle ohne Wert: kein Ergebnis, kein Gegenstellen-Speicher
+NOT_COLLECTED_QUALITY = "Gegenstellen nicht gesammelt (Fokus quality)"
+# Gründe unter not_reviewed, die Quellcode betreffen: im Bericht mit ihren Dateien genannt.
+REPORT_SOURCE_REASONS = (REASON_SOURCE_NOT_UTF8,)
+REPORT_DISCLAIMER = (
+    "Dass je Paket ein Review lief, ist Auskunft des Hauptagenten, kein Beleg; belegt ist nur, "
+    "was `audit` an angenommenen Ergebnissen zählt. `--max-findings all` hebt nur die Kappung "
+    "der Funde je Review auf und belegt nicht, dass kein Fehler übrig blieb. Es bleibt danach "
+    "als Wahl des Nutzers gesetzt, und `/code-review` ohne Stufe nimmt die zuletzt getippte "
+    "Stufe; deep-review setzt nichts zurück, zurück geht es mit "
+    "`/code-review --max-findings default`.")
 # Eine Zeile nur aus HTML-Kommentaren zählt nicht zur Längengrenze
 REPORT_COMMENT_LINE_RE = re.compile(r"[ \t]*(?:<!--.*?-->[ \t]*)+")
-# „vollständig" und seine Adjektiv-Endungen als ganzes Wort, nicht „Vollständigkeit"
-REPORT_CLAIM_RE = re.compile(r"\bvollständig(?:e[mnrs]?)?\b", re.IGNORECASE)
-# Verneinung vor der Behauptung: „nicht", „kein…" (auch „keineswegs") oder „un", mit höchstens
-# zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz"); Satzzeichen beenden sie
-REPORT_NEGATION_RE = re.compile(r"\b(?:nicht|kein\w*|un)(?:\s+\w+){0,2}\s*\Z", re.IGNORECASE)
-REPORT_EMPHASIS_RE = re.compile(r"[*_`]+")   # Markdown-Hervorhebung zählt beim Lesen nicht
-REPORT_NEGATION_CHARS = 80  # so weit vor „vollständig" wird nach der Verneinung gesucht
-REPORT_DENIAL_RE = re.compile(r"\bunvollständig|\bnicht(?:\s+mehr)?\s+vollständig\b",
-                              re.IGNORECASE)
-# Fundzeile: `datei:zeile` in Backticks (Pfad darf Leerzeichen haben) oder ohne (dann ohne)
-REPORT_FINDING_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*"
-                               r"(?:`(?P<quoted>[^`\n]+)`|(?P<bare>[^`\s]+))[ \t]+—[ \t]",
-                               re.MULTILINE)
 
 
 def _layout(directory) -> tuple[Path, str]:
@@ -5673,138 +5666,246 @@ def _lost(sources: list, merged: list) -> list:
     return lost
 
 
-def _report_header(line: str):
-    """Felder der Kopfzeile `<!-- key: value | … -->` in ihrer Reihenfolge, oder None."""
-    match = REPORT_HEADER_RE.fullmatch(line)
-    if not match:
-        return None
-    fields = {}
-    for part in match[1].split("|"):
-        key, sep, value = part.partition(":")
-        if not sep:
-            return None
-        fields.setdefault(key.strip(), value.strip())
-    return fields
+class _RunState(NamedTuple):
+    """Was `audit` und der Bericht über einen Lauf wissen (`_run_state`): Plan und `file_keys`
+    (`_checked_plan`), Fingerabdruck, angenommene Ergebnisse und `stale` (`_results`), die
+    Pakete ohne angenommenes Ergebnis (`missing`), die Funde aus `findings.json` (nur wenn
+    `merge` sie für diesen Plan schrieb) und die verlorenen Funde (`_lost`)."""
+    plan: dict
+    keyed: dict
+    digest: str
+    accepted: dict
+    stale: list
+    missing: list
+    findings: list
+    lost: list
+
+    @property
+    def gaps(self) -> bool:
+        """Die Abdeckungsregel von `audit`: eine Lücke, wenn ein Paket ohne angenommenes
+        Ergebnis ist, eine Ergebnisdatei nicht angenommen ist oder ein Fund fehlt."""
+        return bool(self.missing or self.stale or self.lost)
+
+    def no_block(self) -> list:
+        """Pakete mit angenommenem Ergebnis ohne Marke des Pakets, in Plan-Reihenfolge."""
+        return [pid for pid, result in self.accepted.items() if result.no_block]
+
+    def below_level(self) -> list:
+        """`(Paket, Stufe)` je angenommenes Ergebnis, dessen gespeicherte Stufe unter der des
+        Plans (`_review_level`) liegt; bei Fokus security ohne Stufe leer."""
+        wanted = _review_level(self.plan)
+        if wanted is None:
+            return []
+        return [(pid, result.level) for pid, result in self.accepted.items()
+                if result.level is not None and _below(result.level, wanted)]
 
 
-def _header_mismatch(head, run_id: str, plan: dict, tools: set) -> list:
-    """Was an der Kopfzeile (`_report_header` von Zeile 1) nicht passt: zuerst `skill`,
-    `schema`, `generated` mit den festen Werten; dann Pflicht `run` (= Lauf), `range`,
-    `profile`, `focus` (je wie im Plan) und `tool` (nicht leer; gibt es angenommene
-    Ergebnisse, eins ihrer Werkzeuge aus `_meta.tool`). `tool` wird auf beiden Seiten nach
-    `_canonical_tool` verglichen: `code-review` gleicht `/code-review`, ebenso ein von Hand
-    oder vor dieser Regel gespeichertes `C:/Program Files/Git/code-review`."""
-    if head is None:
-        return ["Kopfzeile fehlt oder falsch in Zeile 1 (erwartet <!-- skill: deep-review | "
-                "schema: 1 | generated: … | run: <lauf> | range: … | profile: … | focus: … | "
-                "tool: … -->)"]
-    out = []
-    tools = {_canonical_tool(tool) for tool in tools}
-    if tuple(head)[:len(REPORT_HEADER_FIRST)] != REPORT_HEADER_FIRST:
-        out.append("Kopfzeile: zuerst skill, schema, generated")
-    for key, want in (("skill", SKILL_NAME), ("schema", str(SCHEMA_VERSION))):
-        if head.get(key) != want:
-            out.append(f"Kopfzeile: {key} ist {head.get(key)!r}, erwartet {want!r}")
-    for key in REPORT_HEADER_NEEDS:
-        value = head.get(key)
-        if not value:
-            out.append(f"Kopfzeile ohne {key} (Pflicht: {', '.join(REPORT_HEADER_NEEDS)})")
-        elif key == "run" and value != run_id:
-            out.append(f"Kopfzeile nennt Lauf {value!r}, nicht {run_id}")
-        elif key in ("range", "profile", "focus") and value != plan.get(key):
-            out.append(f"Kopfzeile: {key} {value!r}, der Plan sagt {plan.get(key)!r}")
-        elif key == "tool" and tools and _canonical_tool(value) not in tools:
-            out.append(f"Kopfzeile: tool {value!r}, die Ergebnisse nennen "
-                       f"{', '.join(sorted(tools))}")
-    return out
+def _run_state(directory: Path, run_id: str, repo: Path) -> _RunState:
+    """`_RunState` eines Laufs — die eine Rechnung der vorläufigen Abdeckung für `audit` und
+    `render_report`. Ruft, wer die Sperre des Plans hält."""
+    plan, keyed = _checked_plan(directory, run_id)
+    digest = _plan_digest(plan, run_id)
+    accepted, stale = _results(directory, plan, run_id, repo)
+    missing = [p["id"] for p in plan["packets"] if p["id"] not in accepted]
+    findings = _merged_findings(directory / "findings.json", run_id, digest)
+    lost = _lost(_sources(accepted, keyed), findings)
+    return _RunState(plan, keyed, digest, accepted, stale, missing, findings, lost)
 
 
-def _claims_complete(text: str) -> bool:
-    """Ob `text` „vollständig" behauptet: das ganze Wort oder eine Adjektivform („vollständige",
-    „vollständiges", „vollständigen", „vollständiger", „vollständigem"; groß oder klein, nicht
-    „Vollständigkeit"), nicht verneint durch „nicht", „kein…" („keine", „keineswegs") oder „un"
-    davor, mit höchstens zwei Wörtern dazwischen („nicht mehr", „noch nicht ganz") und
-    beliebigem Leerraum, auch über einen Zeilenumbruch (`REPORT_NEGATION_RE`). Markdown-
-    Hervorhebung (`*`, `_`, `` ` ``) zählt nicht: „**nicht** vollständig" ist verneint."""
-    text = REPORT_EMPHASIS_RE.sub("", text)
-    for match in REPORT_CLAIM_RE.finditer(text):
-        lo = max(0, match.start() - REPORT_NEGATION_CHARS)
-        before = text[lo:match.start()]
-        if lo and re.match(r"\w", text[lo - 1]):
-            before = re.sub(r"\A\w+", "", before)          # kein abgeschnittenes Wort am Anfang
-        if not REPORT_NEGATION_RE.search(before):
-            return True
-    return False
+def _reviews_line(plan: dict, below=()) -> str:
+    """`Reviews: <n> × /code-review <stufe>` (bei Fokus security `SECURITY_REVIEWS`) — dieselbe
+    Zeile in der Ausgabe von `plan` und im Bericht; dort mit `below` (`(Paket, Stufe)`) dazu
+    `; unter der Stufe: <paket> (<stufe>), …`."""
+    level = _review_level(plan)
+    tool = SECURITY_REVIEWS if level is None else f"/code-review {level}"
+    line = f"Reviews: {len(plan['packets'])} × {tool}"
+    if below:
+        line += "; unter der Stufe: " + ", ".join(f"{pid} ({lv})" for pid, lv in below)
+    return line
 
 
-def _lists_finding(where: str, path: str, line) -> bool:
-    """Ob die Stelle `where` einer Fundzeile (`datei:zeile` oder `datei`) den Fund `path`,
-    `line` nennt: `path:line`, ohne Zeile `path` oder `path:` mit etwas anderem als einer Zahl."""
-    if line is None:
-        rest = where[len(path) + 1:]
-        return where == path or (where.startswith(path + ":") and not rest[:1].isdigit())
-    return where == f"{path}:{line}"
+def _counted(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
-def _notes_reused_mismatch(body: str, plan: dict) -> list:
-    """Was an den Pflichtzeilen `- Hinweise: …` und `- Übernommen (--since): …` (je die erste,
-    ohne Inhalt `keine`) nicht zum Plan passt: eine fehlt; Hinweise nennt nicht jedes Paar
-    `<paket> <kind>` aus `notes`; Übernommen nennt nicht `<n> Dateien …, <m> Funde` mit n =
-    Dateien mit `reused_from` in `file_keys` und m = deren übernommene Funde (`findings` und
-    `outside`, gezählt wie in `_sources`) — `keine` gilt nur ohne übernommene Datei."""
-    out = []
-    notes = REPORT_NOTES_RE.search(body)
-    if notes is None:
-        out.append("Hinweise fehlen (Zeile „- Hinweise: <paket> <kind> …“ oder „keine“)")
-    else:
-        pairs = dict.fromkeys((n["packet"], n["kind"]) for n in plan.get("notes") or [])
-        for pid, kind in pairs:
-            if not re.search(rf"(?<![\w-]){re.escape(pid)}[ \t:]+{re.escape(kind)}(?![\w-])",
-                             notes[1]):
-                out.append(f"Hinweise nennen {pid} {kind} nicht (notes in plan.json)")
-    keyed = plan.get("file_keys") or {}
-    files = sum(isinstance(info.get("reused_from"), str) for info in keyed.values())
+def _one_line(text) -> str:
+    """Text als eine Zeile: Leerraum (auch Zeilenumbrüche) zu einem Leerzeichen."""
+    return " ".join(str(text).split())
+
+
+def _notes_text(plan: dict) -> str:
+    """`- Hinweise:` je Eintrag von `notes`: `<paket> <kind>`, Dateien in Klammern, mit `; `
+    getrennt, gleiche Einträge einmal; ohne Hinweis `keine`."""
+    parts = []
+    for note in plan.get("notes") or []:
+        part = f"{note['packet']} {note['kind']}"
+        if note.get("files"):
+            part += f" ({', '.join(note['files'])})"
+        if part not in parts:
+            parts.append(part)
+    return "; ".join(parts) or REPORT_NONE
+
+
+def _reused_text(keyed: dict) -> str:
+    """`- Übernommen (--since):` `<n> Dateien aus <Läufe>, <m> Funde` — n Dateien mit
+    `reused_from` in `file_keys`, m ihre übernommenen Funde (`findings` und `outside`, gezählt
+    wie in `_sources`); ohne übernommene Datei `keine`."""
+    reused = [info for info in keyed.values() if isinstance(info.get("reused_from"), str)]
+    if not reused:
+        return REPORT_NONE
+    runs = ", ".join(sorted({info["reused_from"] for info in reused}))
     found = len(_sources({}, keyed))
-    reused = REPORT_REUSED_RE.search(body)
-    if reused is None:
-        out.append("Übernommen fehlt (Zeile „- Übernommen (--since): <n> Dateien aus <Läufe>, "
-                   "<m> Funde“ oder „keine“)")
-        return out
-    count = REPORT_REUSED_COUNT_RE.search(reused[1])
-    said = (int(count[1]), int(count[2])) if count else \
-        (0, 0) if REPORT_NONE_RE.fullmatch(reused[1]) else None
-    if said != (files, found):
-        out.append(f"Übernommen (--since) nennt {reused[1].strip()!r}, der Plan hat {files} "
-                   f"übernommene Dateien und {found} übernommene Funde (findings und outside)")
-    return out
+    return f"{_counted(len(reused), 'Datei', 'Dateien')} aus {runs}, {_counted(found, 'Fund', 'Funde')}"
 
 
-def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings: list,
-                     accepted: dict, gaps: bool) -> list:
-    """Was am Bericht nicht zu den Daten passt (Spec 26, Contract „Bericht und Daten stimmen
-    überein"; `accepted` wie `_results`). Gelesen wird (ein BOM am Anfang zählt nicht): Zeile
-    1 als Kopfzeile `<!-- skill: deep-review | schema: 1 | generated: … | run: <lauf> |
-    range: … | profile: … | focus: … | tool: … -->` (`_header_mismatch`); die erste Zeile
-    `Funde: <N>` (N = Einträge in `findings.json`); die erste Zeile `Abdeckung: <a>/<b>` (a =
-    Pakete mit angenommenem Ergebnis, b = Pakete; „unvollständig" dort nur mit Lücke); je Fund
-    eine Zeile `datei:zeile — …` (ohne Zeile `datei — …`; der Pfad in Backticks darf
-    Leerzeichen haben); bei einer Lücke kein „vollständig" außerhalb von HTML-Kommentaren und
-    Fundzeilen (`_claims_complete`) — als Fundzeile zählt nur eine, deren `datei:zeile` ein
-    Fund aus `findings.json` ist (`_lists_finding`), nicht jede Zeile `Wort — …`; die
-    Pflichtzeilen `- Hinweise: …` und `- Übernommen (--since): …` (`_notes_reused_mismatch`);
-    und im Anti-Zeremonie-Fall (`split: false`, ein Paket über den Originalbereich) höchstens
-    `REPORT_BASE_LINES` Zeilen plus eine je Fund, die Kopfzeile und Zeilen nur aus einem
-    HTML-Kommentar (`REPORT_COMMENT_LINE_RE`) nicht gezählt."""
+def _not_reviewed_text(plan: dict) -> str:
+    """`- Nicht geprüft:` zuerst je Grund aus `REPORT_SOURCE_REASONS` die Dateien in Klammern,
+    dann je übrigem Grund die Zahl der Dateien, je in der Reihenfolge von `not_reviewed`;
+    ohne Eintrag `keine`."""
+    files: dict = {}
+    for item in plan.get("not_reviewed") or []:
+        if isinstance(item, dict):
+            files.setdefault(str(item.get("reason")), []).append(str(item.get("file")))
+    if not files:
+        return REPORT_NONE
+    named = [f"{r} ({', '.join(fs)})" for r, fs in files.items() if r in REPORT_SOURCE_REASONS]
+    counted = [f"{r} ({len(fs)})" for r, fs in files.items() if r not in REPORT_SOURCE_REASONS]
+    return ", ".join(named + counted) + " — Dateien in plan.json not_reviewed"
+
+
+def _counterpart_cell(plan: dict, packet: dict, stored) -> str:
+    """Spalte Gegenstellen eines Pakets: bei Fokus quality `NOT_COLLECTED_QUALITY`, ein Paket
+    nur aus Dateien ohne Sammler `NO_COLLECTOR`, sonst die Zahl der Gegenstellen seiner
+    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt); ohne
+    passenden Speicher (Lauf aus Spec 26) `REPORT_NO_DATA`."""
+    if plan.get("focus") == "quality":
+        return NOT_COLLECTED_QUALITY
+    files = [str(f) for f in packet["files"]]
+    if not any(_has_collector(f) for f in files):
+        return NO_COLLECTOR
+    if stored is None:
+        return REPORT_NO_DATA
+    return str(len(_stored_found(stored, files).entries))
+
+
+def _finding_line(finding: dict) -> str:
+    """Fundzeile ``- `datei:zeile` — Zusammenfassung`` (ohne Zeile ``- `datei` — …``)."""
+    file, line = str(finding.get("file")), finding.get("line")
+    where = file if line is None else f"{file}:{line}"
+    return f"- `{where}` — {_one_line(finding.get('summary') or '')}"
+
+
+def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
+    """Der Bericht ohne `## Einordnung` (Spec 28, Ablauf Schritt 7), deterministisch aus Plan,
+    Gegenstellen-Speicher, angenommenen Ergebnissen und `findings.json` (`_RunState`):
+    Kopfzeile `<!-- skill | schema | generated: python scripts/review_kit.py report --run
+    <lauf> | run | range | profile | focus | level | tool -->` (`level` fehlt bei Fokus
+    security; `tool` die Werkzeuge der angenommenen Ergebnisse nach `_canonical_tool`, ohne
+    Ergebnis das des Plans), Titel, `Funde: <N>` mit je Fund einer Zeile, Pakettabelle,
+    `- Hinweise:`, `- Übernommen (--since):`, `- Nicht geprüft:`, `- Ohne Block:`,
+    `- Abdeckung: <a>/<b> — vollständig|unvollständig` (nach `_RunState.gaps`), `- Reviews:`
+    (`_reviews_line`, mit den Paketen unter der Stufe) und der Hinweis `REPORT_DISCLAIMER`."""
+    plan = state.plan
+    level = _review_level(plan)
+    tools = list(dict.fromkeys(_canonical_tool(r.tool) for r in state.accepted.values()))
+    if not tools:
+        tools = ["/code-review" if level is not None else SECURITY_REVIEWS]
+    head = {"skill": SKILL_NAME, "schema": SCHEMA_VERSION,
+            "generated": f"{REPORT_GENERATED} --run {run_id}", "run": run_id,
+            "range": plan.get("range") or REPORT_NO_DATA, "profile": plan.get("profile"),
+            "focus": plan.get("focus")}
+    if level is not None:
+        head["level"] = level
+    head["tool"] = ", ".join(tools)
+    stored = load_collected(directory)
+    stored = stored if _collected_matches(plan, stored) else None
+    rows = []
+    for packet in plan["packets"]:
+        result = state.accepted.get(packet["id"])
+        cells = (packet["id"], len(packet["files"]), packet.get("changed_lines", REPORT_NO_DATA),
+                 _counterpart_cell(plan, packet, stored),
+                 REPORT_NO_DATA if result is None else len(result.findings))
+        rows.append("| " + " | ".join(map(str, cells)) + " |")
+    claim = "unvollständig" if state.gaps else "vollständig"
+    lines = ["<!-- " + " | ".join(f"{k}: {v}" for k, v in head.items()) + " -->",
+             f"# deep-review {head['range']}", "",
+             f"Funde: {len(state.findings)}", *map(_finding_line, state.findings), "",
+             *REPORT_TABLE_HEAD, *rows, "",
+             f"- Hinweise: {_notes_text(plan)}",
+             f"- Übernommen (--since): {_reused_text(state.keyed)}",
+             f"- Nicht geprüft: {_not_reviewed_text(plan)}",
+             f"- Ohne Block: {', '.join(state.no_block()) or REPORT_NONE}",
+             f"- Abdeckung: {len(state.accepted)}/{len(plan['packets'])} — {claim}",
+             f"- {_reviews_line(plan, state.below_level())}", "",
+             REPORT_DISCLAIMER]
+    return "\n".join(lines) + "\n"
+
+
+def render_report(run_path):
+    """Der Text von `report.md` für den Lauf `run_path` (`_report_text`), unter der Sperre
+    des Plans; schreibt nichts. Derselbe Text, gegen den `audit` den Bericht vergleicht."""
+    directory = Path(run_path)
+    repo, run_id = _layout(directory)
+    with _plan_lock(directory, run_id):
+        return _report_text(directory, run_id, _run_state(directory, run_id, repo))
+
+
+def write_report(run_path):
+    """`report --run <lauf>`: `report.md` im Laufordner schreiben (`render_report`; atomar,
+    ein früherer Bericht wird ersetzt, auch eine angefügte `## Einordnung`). Der Hauptagent
+    fügt danach nur einen Abschnitt `## Einordnung` an. Rückgabe: der Pfad."""
+    directory = Path(run_path)
+    repo, run_id = _layout(directory)
+    with _plan_lock(directory, run_id):
+        text = _report_text(directory, run_id, _run_state(directory, run_id, repo))
+        path = directory / REPORT_NAME
+        _write_text(path, text)
+        return path
+
+
+def _report_mismatch(report: Path, shown: str, run_id: str, expected: str, plan: dict,
+                     findings: list) -> list:
+    """Was am Bericht nicht zum neu erzeugten Text `expected` (`_report_text`) passt (Spec 28,
+    Contract; ein BOM am Anfang zählt nicht). Verglichen wird Zeile für Zeile alles vor der
+    ersten Zeile `## Einordnung` (Leerzeilen am Ende dieses Teils nicht), Text gegen Text;
+    die erste abweichende, fehlende oder überzählige Zeile ist ein Eintrag. Ab `## Einordnung`
+    ist der Bericht frei. Ein Bericht, dessen Zeile 1 nicht `generated: python
+    scripts/review_kit.py report` trägt — etwa einer aus Spec 26, den der Hauptagent nach
+    `assets/report-template.md` schrieb —, wird nicht mehr mit Mustern gelesen: Er ist ein
+    Eintrag, der `report --run <lauf>` nennt; der Lauf selbst bleibt prüfbar, sobald das
+    Skript den Bericht neu schreibt. Dazu wie in Spec 26 im Anti-Zeremonie-Fall (`split:
+    false`) höchstens `REPORT_BASE_LINES` Zeilen plus eine je Fund im ganzen Bericht (die
+    Kopfzeile und Zeilen nur aus einem HTML-Kommentar nicht gezählt): Der Teil vor
+    `## Einordnung` ist durch den Vergleich festgelegt, wachsen kann nur die Einordnung."""
     try:
         text = report.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return [f"Bericht fehlt: {shown}"]
+        return [f"Bericht fehlt: {shown} — `{REPORT_GENERATED} --run {run_id}` schreibt ihn"]
     except (OSError, UnicodeDecodeError) as exc:
         return [f"Bericht {shown} nicht lesbar: {exc}"]
-    text = text.removeprefix("﻿")
-    lines = text.splitlines()
-    tools = {result.tool for result in accepted.values()}
-    out = _header_mismatch(_report_header(lines[0] if lines else ""), run_id, plan, tools)
+    lines = text.removeprefix("﻿").splitlines()
+    out = []
+    if not lines or f"generated: {REPORT_GENERATED} " not in lines[0]:
+        out.append(f"Bericht nicht von `{REPORT_GENERATED}` (Kopfzeile ohne generated: "
+                   f"{REPORT_GENERATED} …, etwa ein Bericht aus Spec 26) — "
+                   f"`{REPORT_GENERATED} --run {run_id}` schreibt ihn neu")
+    else:
+        cut = next((i for i, line in enumerate(lines) if line.strip() == REPORT_FREE_HEADING),
+                   len(lines))
+        have, want = lines[:cut], expected.splitlines()
+        while have and not have[-1].strip():
+            have.pop()
+        for i in range(max(len(have), len(want))):
+            if i < len(have) and i < len(want) and have[i] == want[i]:
+                continue
+            where = f"Bericht weicht von `{REPORT_GENERATED} --run {run_id}` ab, Zeile {i + 1}"
+            if i >= len(have):
+                out.append(f"{where}: fehlt, erwartet {want[i]!r}")
+            elif i >= len(want):
+                out.append(f"{where}: zu viel vor `{REPORT_FREE_HEADING}`: {have[i]!r}")
+            else:
+                out.append(f"{where}: erwartet {want[i]!r}, steht {have[i]!r}")
+            break
     counted = sum(not REPORT_COMMENT_LINE_RE.fullmatch(line) for line in lines[1:])
     limit = REPORT_BASE_LINES + len(findings)
     if plan.get("split") is False and counted > limit:
@@ -5812,47 +5913,12 @@ def _report_mismatch(report: Path, shown: str, run_id: str, plan: dict, findings
         out.append(f"Bericht hat {len(lines)} Zeilen, erlaubt sind {allowed} (Kopfzeile und "
                    f"Zeilen nur aus einem HTML-Kommentar nicht gezählt, {REPORT_BASE_LINES} "
                    "Zeilen und eine je Fund; ein Paket, Anti-Zeremonie-Fall)")
-    covered = len(accepted)
-    body = REPORT_COMMENT_RE.sub("", text)
-    out += _notes_reused_mismatch(body, plan)
-    count = REPORT_COUNT_RE.search(body)
-    if count is None:
-        out.append("Zahl der Funde fehlt (Zeile „Funde: <Zahl>“)")
-    elif int(count[1]) != len(findings):
-        out.append(f"Bericht nennt {count[1]} Funde, findings.json hat {len(findings)}")
-    total = len(plan["packets"])
-    coverage = REPORT_COVERAGE_RE.search(body)
-    if coverage is None:
-        out.append("Abdeckung fehlt (Zeile „Abdeckung: <Pakete mit Ergebnis>/<Pakete>“)")
-    else:
-        if (int(coverage[1]), int(coverage[2])) != (covered, total):
-            out.append(f"Bericht nennt Abdeckung {coverage[1]}/{coverage[2]}, angenommen sind "
-                       f"{covered}/{total}")
-        if not gaps and REPORT_DENIAL_RE.search(coverage[3]):
-            out.append("Bericht sagt „unvollständig“, das Audit findet keine Lücke")
-    known = [(f["file"], f.get("line")) for f in findings if isinstance(f.get("file"), str)]
-
-    def finding_line(line: str) -> bool:
-        match = REPORT_FINDING_RE.match(line)
-        if match is None:
-            return False
-        where = (match["quoted"] or match["bare"]).strip()
-        return any(_lists_finding(where, path, at) for path, at in known)
-
-    prose = "\n".join("" if finding_line(line) else line for line in body.split("\n"))
-    if gaps and _claims_complete(prose):
-        out.append("Bericht sagt „vollständig“, obwohl das Audit Lücken meldet")
-    wheres = {(m["quoted"] or m["bare"]).strip() for m in REPORT_FINDING_RE.finditer(body)}
-    for path, line in known:
-        if not any(_lists_finding(where, path, line) for where in wheres):
-            label = path if line is None else f"{path}:{line}"
-            out.append(f"Fund fehlt im Bericht: {label} (Zeile `datei:zeile — Zusammenfassung`)")
     return out
 
 
 def audit(run_path, report_path):
     """`audit --run <lauf> [--report <datei>]`: Abdeckung, verlorene Funde und Bericht prüfen
-    (G2) und `audit.json` schreiben (Spec 26, Ablauf Schritt 6; Contract).
+    (G2) und `audit.json` schreiben (Spec 26, Ablauf Schritt 6; Spec 28, Ablauf Schritt 7).
 
     `coverage`: `{"covered": Pakete mit angenommenem Ergebnis, "total": Pakete des Plans}` —
     die Abdeckung, die Bericht und Übergabe nennen. `missing`: Pakete des Plans ohne
@@ -5864,8 +5930,11 @@ def audit(run_path, report_path):
     `file_keys` (`--since`, auch die `outside`-Elemente; `_sources`), die in `findings.json`
     fehlen (`_lost`; ein `findings.json` zu
     einem anderen Plan zählt als leer), je `{"file", "line", "summary", "packet",
-    "reused_from"}`. `report_mismatch`: was am Bericht nicht passt (`_report_mismatch`;
-    `report_path` None: `report.md` im Laufordner; ein relativer `report_path` gilt einmal ab
+    "reused_from"}`. Diese Rechnung (`_run_state`) teilt `audit` mit `render_report`.
+    `report_mismatch`: wo der Bericht vor `## Einordnung` vom neu erzeugten Text abweicht,
+    dazu die Längengrenze (`_report_mismatch`; ein Bericht aus Spec 26 ohne die Kopfzeile
+    von `report` ist ein Eintrag, kein Absturz; `report_path` None: `report.md` im
+    Laufordner; ein relativer `report_path` gilt einmal ab
     dem Arbeitsverzeichnis, gelesen wird dieser Pfad, und `_meta.report` nennt ihn repo-relativ
     oder, außerhalb des Repos, absolut). `complete` ist wahr nur, wenn die vier Listen leer
     sind. Dazu zwei Auskünfte, die `complete` nicht ändern (Spec 28, Contract): `no_block`,
@@ -5879,26 +5948,19 @@ def audit(run_path, report_path):
     report = directory / REPORT_NAME if report_path is None else Path(os.path.abspath(report_path))
     shown = _shown_path(repo, report)
     with _plan_lock(directory, run_id):
-        plan, keyed = _checked_plan(directory, run_id)
-        digest = _plan_digest(plan, run_id)
-        accepted, stale = _results(directory, plan, run_id, repo)
-        missing = [p["id"] for p in plan["packets"] if p["id"] not in accepted]
-        merged = _merged_findings(directory / "findings.json", run_id, digest)
-        lost = _lost(_sources(accepted, keyed), merged)
-        mismatch = _report_mismatch(report, shown, run_id, plan, merged, accepted,
-                                    bool(missing or stale or lost))
-        wanted = _review_level(plan)
-        no_block = [pid for pid, r in accepted.items() if r.no_block]
-        below = [] if wanted is None else [pid for pid, r in accepted.items()
-                                           if r.level is not None and _below(r.level, wanted)]
+        state = _run_state(directory, run_id, repo)
+        expected = _report_text(directory, run_id, state)
+        mismatch = _report_mismatch(report, shown, run_id, expected, state.plan, state.findings)
         command = f"{SCRIPT_CMD} audit --run {run_id}"
         if report_path is not None:
             command += f" --report {shlex.quote(shown)}"
-        meta = {"generated": command, "run": run_id, "plan": digest, "report": shown}
-        payload = {"complete": not (missing or stale or lost or mismatch),
-                   "coverage": {"covered": len(accepted), "total": len(plan["packets"])},
-                   "missing": missing, "stale": stale, "lost_findings": lost,
-                   "report_mismatch": mismatch, "no_block": no_block, "below_level": below}
+        meta = {"generated": command, "run": run_id, "plan": state.digest, "report": shown}
+        payload = {"complete": not (state.gaps or mismatch),
+                   "coverage": {"covered": len(state.accepted),
+                                "total": len(state.plan["packets"])},
+                   "missing": state.missing, "stale": state.stale, "lost_findings": state.lost,
+                   "report_mismatch": mismatch, "no_block": state.no_block(),
+                   "below_level": [pid for pid, _level in state.below_level()]}
         return write_json(directory / "audit.json", meta, payload)
 
 
@@ -5959,9 +6021,7 @@ def _cmd_plan(args) -> int:
         print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen")
     if not plan["packets"]:
         print("Pakete: keine — alle Dateien übernommen")
-    level = _review_level(plan)
-    tool = SECURITY_REVIEWS if level is None else f"/code-review {level}"
-    print(f"Reviews: {len(plan['packets'])} × {tool}")
+    print(_reviews_line(plan))
     reused = [p for p, info in plan["file_keys"].items() if info.get("reused_from")]
     if reused:
         print(f"Übernommen (--since): {len(reused)} Datei(en)")
@@ -6028,6 +6088,14 @@ def _cmd_audit(args) -> int:
     return 0 if data["complete"] else 1
 
 
+def _cmd_report(args) -> int:
+    repo = _toplevel(args.repo)
+    write_report(run_dir(repo, _check_run_id(args.run)))
+    print(f"report.md → {(CACHE_DIR / args.run / REPORT_NAME).as_posix()} — eigene Einordnung "
+          f"nur unter `{REPORT_FREE_HEADING}` am Ende anfügen")
+    return 0
+
+
 def _cmd_cleanup(args) -> int:
     deleted = cleanup(_toplevel(args.repo), args.run, args.stale)
     print(f"cleanup: {len(deleted)} Ref(s) gelöscht")
@@ -6075,6 +6143,11 @@ def _parser() -> argparse.ArgumentParser:
     mrg = sub.add_parser("merge", parents=[common], help="findings.json schreiben")
     mrg.add_argument("--run", required=True)
     mrg.set_defaults(func=_cmd_merge)
+
+    rep = sub.add_parser("report", parents=[common],
+                         help="report.md schreiben (alles vor ## Einordnung)")
+    rep.add_argument("--run", required=True)
+    rep.set_defaults(func=_cmd_report)
 
     aud = sub.add_parser("audit", parents=[common], help="Abdeckung und Bericht prüfen")
     aud.add_argument("--run", required=True)
