@@ -25,7 +25,9 @@ die Hauptschleife der beiden Abnahme-Läufe auf rund 2,17 und 1,70 USD; Task 2 m
 
 **Lesson aus dem Bau (Task 3):** Eine Konstante auf Modulebene steht in `Interfaces:` als
 `token:NAME`, nicht als nackter Bezeichner: `verify` sucht nackte Bezeichner per `ast` nur unter
-Funktionen und Klassen und meldet die Konstante sonst als `missing`.
+Funktionen und Klassen und meldet die Konstante sonst als `missing`. Dasselbe gilt für ein
+Datenartefakt (Task 11: `evals_json` → `token:typescript-throw-gets-counterpart`, eine Eval-ID
+aus `evals.json`).
 
 **Lesson aus Spec 23, 24 und 26:** Fixture-Werte nie als Beispiel in SKILL.md oder References;
 `verify` vor jedem Merge mit `rc=$?` auswerten, nie hinter `tail`.
@@ -362,7 +364,7 @@ Hauptkontext, und der Report sagt das.
 
 **Interfaces:**
 - Consumes: `token:Paket-Marke:`, `fn:write_report(run_path)`
-- Produces: `evals_json`
+- Produces: `token:typescript-throw-gets-counterpart`
 
 - [ ] **Step 1: Fixtures** — `dr-bigfile`: neues Python-Modul mit rund 1.300 Zeilen über
       mehrere Klassen; `dr-ts`: `src/` fängt einen Fehler nicht mehr, den eine Funktion unter
@@ -388,7 +390,7 @@ Hauptkontext, und der Report sagt das.
 - Modify: `.claude/skills/deep-review/SKILL.md`
 
 **Interfaces:**
-- Consumes: `evals_json`, `token:Sonde B`
+- Consumes: `token:typescript-throw-gets-counterpart`, `token:Sonde B`
 - Produces: `token:Paket-Auftrag`
 
 - [ ] **Step 1: Ablauf** — Schritt 1 nimmt Pfade (`plan --path`); Schritt 4 ruft
@@ -410,7 +412,7 @@ Hauptkontext, und der Report sagt das.
 - Modify: `docs/known-limits.md`
 
 **Interfaces:**
-- Consumes: `evals_json`
+- Consumes: `token:typescript-throw-gets-counterpart`
 - Produces: (nichts Neues)
 
 - [ ] **Step 1: Abschnitt deep-review** — behobene Grenzen streichen (zweimal gesammelt, Datei
@@ -427,7 +429,7 @@ Hauptkontext, und der Report sagt das.
 - Modify: `docs/superpowers/reports/deep-review-report.md`
 
 **Interfaces:**
-- Consumes: `evals_json`, `token:Paket-Auftrag`
+- Consumes: `token:typescript-throw-gets-counterpart`, `token:Paket-Auftrag`
 - Produces: `token:Abnahme B`
 
 - [ ] **Step 1: Freigabe** — Budget der Abnahme (rund 30 USD bei erreichtem Kostenziel, bis
