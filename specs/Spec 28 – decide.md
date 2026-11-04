@@ -289,104 +289,60 @@ weiter, statt es nachzubauen. Installiert wird er wie `migration-gate.json` (sql
 Hook `{"systemMessage": "[decide] Hook ungeprüft — .claude/hooks/decide_log.py fehlt"}` aus und hält
 nichts an. Die Skill installiert ihn nie selbst.
 
-`guard` liest das Hook-JSON von stdin (`tool_input.command`, `cwd`; Repo-Wurzel wie oben aus
-`cwd`). Es zerlegt den Befehl **mit Rücksicht auf Anführungszeichen**:
-`shlex.shlex(befehl, posix=True, punctuation_chars=";&|\n")` mit `whitespace = " \t\r"` und `whitespace_split = True`; die
-Trenner `&&`, `||`, `;`, `|`, `&` und Zeilenumbruch beenden einen Teil nur außerhalb von
-Anführungszeichen, `sqlite3 app.db "DROP TABLE users;"` bleibt also ein Teil. Löst `shlex` einen
-Fehler aus (unbalancierte Anführungszeichen) und enthält der rohe Text einen Programmnamen der
-Tabelle (`git`, `gh`, `rm`, `curl`, `wget`, `psql`, `sqlite3`, `mysql`, `npm`, `twine`, `docker`,
-`terraform`, `kubectl`), ist die Antwort `ask` mit Grund „Befehl nicht zerlegbar“ — nie still
-durchgelassen; ohne solchen Namen keine Ausgabe. Je Teil überspringt es führende Zuweisungen
-(`VAR=x`) und ein führendes `sudo`, bei `git` die globalen Optionen `-C <pfad>`, `-c <k=v>`,
-`--git-dir=…`, `--work-tree=…`, `--no-pager`; `-C <pfad>` (relativ zu `cwd`) ist dann das
-Verzeichnis für Upstream, Zweig und Ablage. Kurzoptionen dürfen gebündelt sein (`-rf`, `-fr`,
-`-Rf`, `-sSd`, `-XPOST`). Es erkennt:
+**Erkennen statt zerlegen** (Nutzer, 2026-11-04, nach zwei Fix-Runden an einem Shell-Parser,
+die jede neue Randfälle erzeugten). `guard` baut die Shell nicht nach. Es sucht im ganzen
+Befehlstext nach Mustern und fragt nach, sobald eines trifft; genau zerlegt wird nur der eine
+häufige Fall, für den es eine Freigabe über die Ablage gibt: ein schlichter `git push`. Schutzziel
+ist das Versehen, nicht der verschleierte Befehl: Was erst über Variablen, Skripte, `eval` oder
+zusammengesetzte Wörter entsteht, sieht `guard` nicht (known-limits).
 
-| Kategorie | Befehl | Freigabe über die Ablage |
-| --- | --- | --- |
-| `push` | `git push` | ja, Ziel `<remote>/<branch>`, siehe unten |
-| `push` | `gh pr merge`, `gh release create` | nein, immer Rückfrage |
-| `external` | `gh pr create`, `gh issue create`, `gh issue close`, `gh issue comment`, `npm publish`, `twine upload`, `docker push`, `terraform apply`, `terraform destroy`, `kubectl apply`, `kubectl delete`; `curl` mit Methode außer `GET`/`HEAD` (`-X`, `-X<methode>`, `--request`, `--request=<methode>`), mit `--data*`, `--form*`, `--json`, `-T`/`--upload-file` oder einem Kurzoptions-Bündel mit `d` oder `F`; `wget` mit `--post-data`, `--post-file` oder `--method` | nein, immer Rückfrage |
-| `data-delete` | `rm` mit `-r`, `-R`, `--recursive` oder einem Bündel mit `r`/`R`, außer jedes Ziel liegt unter `/tmp/` oder enthält eine Pfadkomponente aus der Ausnahmeliste; `git clean` mit `-f`/`--force` (auch gebündelt, `-fdx`); `git branch -D` oder `--delete --force`; `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` (ohne Groß-/Kleinschreibung) in einem Argument von `psql`, `sqlite3`, `mysql` | nein, immer Rückfrage |
-| `unsaved-work` | `git reset --hard`; `git checkout` mit `--`, mit `.`, mit `-f`/`--force` oder mit einem Argument, das als Pfad unter dem Arbeitsverzeichnis existiert; `git restore` außer nur mit `--staged`/`-S` ohne `--worktree`/`-W`; `git stash drop`, `git stash clear` | nein, immer Rückfrage |
+`guard` liest das Hook-JSON von stdin (`tool_input.command`, `cwd`). Ablauf:
 
-Ausnahmeliste für `rm` (*Annahme:* Inhalt dort ist regenerierbar): `.skills/cache` als Präfix,
-sonst die Komponenten `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`,
-`node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe — nur für relative Pfade ohne `..`,
-`~` und `$`; ein absoluter Pfad ist nur unter `/tmp/` ausgenommen. Bleibt nach dem Zerlegen kein
-Ziel übrig, ist die Antwort `ask`.
+1. **Vorprüfung.** Enthält der Text keinen Programmnamen der Mustertabelle (ein Regex, eine Stelle
+   im Code), endet `guard` ohne Ausgabe und ohne Subprozess.
+2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
+   (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text, kein
+   Befehl; er wird vor den folgenden Schritten durch ein leeres Wort ersetzt.
+3. **Muster.** Jedes Muster der Tabelle läuft über den ganzen übrigen Text. Trifft eines außer
+   `git push`, ist die Antwort `ask` mit „immer Rückfrage“ — auch wenn der Treffer in einer
+   Zeichenkette steht (unnötige Rückfrage statt übersehenem Befehl).
+4. **Push genau.** Trifft nur das Push-Muster, prüft `guard`, ob der Text **schlicht** ist: außerhalb
+   von Anführungszeichen kein `$`, kein Backtick, kein `(`, `)`, `<`, `>` (außer `2>&1` und
+   `>/dev/null`), kein `|`, kein Heredoc und kein `cd`, `pushd`, `popd`; innerhalb doppelter
+   Anführungszeichen kein unmaskiertes `$(` und kein unmaskierter Backtick. Die Teile zwischen
+   `&&` und `;` sind dann einfache Befehle, genau einer davon ist `git push`. Nur dann zerlegt
+   `guard` diesen einen Teil mit `shlex.split` und bestimmt das Ziel nach „Push-Ziel“ unten; sonst
+   `ask` mit „Befehl nicht schlicht“.
 
-**Was vor dem Programm steht** (Prüfpunkt nach Task 3). Übersprungen werden Zuweisungen
-(`VAR=x`) und die Wrapper `sudo`, `doas`, `env`, `timeout`, `nice`, `ionice`, `stdbuf`, `nohup`,
-`time`, `command`, `exec` samt ihren Optionen; Optionen mit Wert (`sudo -u/--user/-g/--group`,
-`env -u`, `nice -n`, `ionice -c/-n`, `timeout -s/-k`) nehmen das nächste Wort mit, `timeout`
-dazu die Dauer. Bei `git` nehmen `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`,
-`--config-env` ihren Wert mit (auch als `--opt=wert`). `cd <dir>` als eigener Teil setzt das
-Verzeichnis für die folgenden Teile; `cd` ohne Ziel, `cd -` oder ein Ziel mit `$`/`~` macht es
-unbekannt, und ein folgender Push fragt dann nach.
+| Kategorie | Muster (Wortgrenzen; SQL ohne Groß-/Kleinschreibung) |
+| --- | --- |
+| `push` | `git` (auch mit globalen Optionen davor) `push`; `gh pr merge`; `gh release create` |
+| `external` | `gh pr create`, `gh pr comment`, `gh pr close`, `gh pr review`, `gh pr edit`, `gh issue create`, `gh issue close`, `gh issue comment`, `gh repo delete`, `gh release delete`; `gh api` mit `-X`/`--method` außer `GET` oder mit `-f`, `-F`, `--field`, `--raw-field`, `--input`; `npm`, `yarn`, `pnpm`, `cargo`, `uv`, `poetry` mit `publish`; `twine upload`; `docker push`; `terraform apply`, `terraform destroy`; `kubectl … apply`, `kubectl … delete`; `curl` mit `-X`/`--request` außer `GET`/`HEAD` oder mit `-d`, `--data*`, `-F`, `--form*`, `--json`, `-T`, `--upload-file` (auch gebündelt, `-sSd`); `wget` mit `--post-data`, `--post-file`, `--method` |
+| `data-delete` | `rm` mit `-r`, `-R`, `--recursive` (auch gebündelt), außer die Ausnahmeliste trifft; `find` mit `-delete` oder mit `-exec`/`-execdir`/`-ok`/`-okdir` und `rm`; `git clean` mit `-f`/`--force` (auch gebündelt); `git branch -D` oder `--delete --force`; `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, wenn im Text auch `psql`, `sqlite3` oder `mysql` steht |
+| `unsaved-work` | `git reset --hard`, `--merge`, `--keep`; `git checkout` mit `--`, `.`, `-f`/`--force`; `git restore` außer mit nur `--staged`/`-S`; `git switch -f`, `--discard-changes`; `git stash drop`, `git stash clear` |
 
-**Heredocs.** Vor dem Zerlegen schneidet `guard` einen Heredoc-Rumpf (`<<WORT`, `<<-WORT`,
-`<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) nur aus, wenn die Zeile bis `<<` ausgeglichene
-Anführungszeichen hat und in der Zeile keine Shell vorkommt (`bash`, `sh`, `zsh`, `dash`,
-`ksh`, `ssh`, auch hinter `|`); sonst bleibt der Rumpf Befehlstext und wird wie jeder andere
-geprüft.
-Steht der Heredoc an einem SQL-Programm der Tabelle, prüft `guard` den Rumpf auf `DROP`,
-`TRUNCATE` und `DELETE FROM` ohne `WHERE` wie ein Argument; die SQL-Programme kommen aus
-derselben Liste wie die Tabelle.
+Ausnahmeliste für `rm -r` (*Annahme:* Inhalt dort ist regenerierbar): Die Wörter hinter `rm` bis
+zum nächsten `;`, `&`, `|` oder Zeilenende werden mit `shlex.split` gelesen (Fehler → keine
+Ausnahme); sind alle Ziele relative Pfade ohne `..`, `~`, `$` und Glob-Zeichen unter
+`.skills/cache/` oder mit einer Komponente `__pycache__`, `.pytest_cache`, `.mypy_cache`,
+`.ruff_cache`, `node_modules`, `build`, `dist`, `.venv`, oder absolute Pfade unter `/tmp/`, gibt es
+keine Rückfrage. Kein Ziel → Rückfrage.
 
-**Was guard nicht zerlegt, wird Rückfrage** (Prüfpunkt nach Task 3, Runde 2). Steht im Text ein
-Programmname der Tabelle und dazu `$(` oder ein Backtick außerhalb von einfachen
-Anführungszeichen, antwortet `guard` mit `ask` und „Befehl nicht zerlegbar“, statt die
-Ersetzung auszuwerten. Ausgenommen ist die Commit-Vorlage von Claude Code,
-`"$(cat <<'WORT' … WORT
-)"` mit `WORT` in Anführungszeichen: Sie wird vorher ein Wort mit dem
-Rumpf als Text. `(` und `)` trennen keine Teile; führende `(` und schließende `)` an
-einem Wort fallen weg (`(cd x && git reset --hard)` und `find . \( … \) -delete` bleiben
-lesbar), und nach einem Wort mit `(` oder `)` gilt das Verzeichnis als unbekannt. `cd` wirkt
-nur über `&&`, `||`, `;` und Zeilenumbruch, nicht über `|` oder `&`; `pushd`, `popd` und ein
-`cd`, dessen Ziel nicht feststeht, machen das Verzeichnis unbekannt. Bei `find` werden die Wörter
-nach `-exec`, `-execdir`, `-ok`, `-okdir` bis `;` oder `+` als eigener Befehl geprüft.
-Wrapper werden auch mit Pfad erkannt (`/usr/bin/env`); `sudo -r/-t/--role/--type` nehmen ihren
-Wert mit, `env -S` → `ask`. Ohne Refspec fragt ein Push auch bei `remote.<r>.mirror=true`.
+**Push-Ziel** (nur für den schlichten Teil). Optionen ohne Wirkung auf das Ziel (`-u`,
+`--set-upstream`, `-v`, `--verbose`, `-q`, `--quiet`, `--no-verify`, `--progress`, `--porcelain`)
+werden übersprungen; `-n`/`--dry-run` → keine Rückfrage. Jede andere Option, jede globale
+git-Option außer `-C <pfad>`, ein Refspec mit `+` oder leerer Quelle (`:dst`), mehr als ein
+Refspec, ein Ziel unter `refs/` außer `refs/heads/<x>`, eine Quelle, die ein Tag ist
+(`git show-ref --verify --quiet refs/tags/<src>`), ein abgelöster `HEAD`, `push.default=matching`,
+`remote.<r>.push` oder `remote.<r>.mirror=true` → `ask`. Sonst: ohne Argumente das Ziel aus
+`git rev-parse --abbrev-ref --symbolic-full-name @{push}`; nur `<remote>` dasselbe, wenn dessen
+Remote passt, sonst `ask`; `<remote> <src>[:<dst>]` → `<remote>/<dst>` mit `HEAD` als aktuellem
+Zweig und `refs/heads/<x>` als `<x>`. Alle Git-Aufrufe laufen in `cwd` oder im Pfad von `-C`.
 
-**Weitere Befehle** (Prüfpunkt nach Task 3), alle „immer Rückfrage“: `unsaved-work` —
-`git switch -f`, `git switch --discard-changes`, `git reset --merge`, `git reset --keep`;
-`data-delete` — `find` mit `-delete` oder `-exec rm`; `external` — `gh api` mit Methode außer
-`GET` (`-X`, `--method`) oder mit `-f`, `-F`, `--field`, `--raw-field`, `--input`;
-`gh pr comment`, `gh pr close`, `gh pr review`, `gh pr edit`, `gh repo delete`,
-`gh release delete`; `yarn publish`, `pnpm publish`, `cargo publish`, `uv publish`,
-`poetry publish`.
+**Kosten.** Ein Python-Start je Bash-Aufruf: Das Snippet nimmt `python3`, sonst `python`; fehlen
+beide, „[decide] Hook ungeprüft — kein Python“. Git-Prozesse nur im Push-Fall.
 
-**Kosten je Bash-Aufruf.** Enthält der Text keinen Programmnamen der Tabelle (ein Regex vor
-jedem Zerlegen, genau eine Stelle im Code), endet `guard` ohne Git-Aufruf und ohne Ausgabe; die
-Repo-Wurzel bestimmt es erst danach und nur einmal je Verzeichnis. Das Snippet nimmt `python3`,
-sonst `python`, jeweils nur, wenn es mindestens Python 3.8 ist; sonst gibt es die Meldung
-„[decide] Hook ungeprüft — kein Python 3“.
-
-**Push-Ziel.** Optionen ohne Wirkung auf das Ziel (`-u`, `--set-upstream`, `-v`, `--verbose`,
-`-q`, `--quiet`, `--no-verify`, `--progress`, `--porcelain`) werden übersprungen; `-n` und
-`--dry-run` machen den Teil unerkannt (nichts wird geschrieben). Jede andere Option — darunter
-`-f`, `--force`, `--force-with-lease`, `--force-if-includes`, `-d`, `--delete`, `--tags`,
-`--follow-tags`, `--all`, `--mirror`, `--prune`, `--repo`, `-o`, `--push-option` — macht die
-Antwort `ask` mit „immer Rückfrage“. Danach:
-
-- keine Argumente: das Push-Ziel des aktuellen Zweigs
-  (`git rev-parse --abbrev-ref --symbolic-full-name @{push}`, berücksichtigt `pushRemote` und
-  `push.default`); ohne Ziel `ask`.
-- nur `<remote>`: dasselbe `@{push}`, wenn dessen Remote `<remote>` ist; sonst `ask`.
-- `push.default=matching` oder ein gesetztes `remote.<remote>.push` → `ask` (der Push trifft
-  mehr als ein Ziel); `git -c …`, `--config-env`, `--git-dir` oder `--namespace` vor `push` →
-  `ask` (sie können das Ziel umlenken oder seine Bestimmung verfälschen).
-- `<remote> <refspec>` mit genau einem Refspec: `<src>` allein steht für `<src>:<src>`; eine
-  Quelle `HEAD` wird zum aktuellen Zweig (`git rev-parse --abbrev-ref HEAD`; abgelöster `HEAD`
-  → `ask`); eine Quelle, die ein Tag ist (`git show-ref --verify --quiet refs/tags/<src>`) →
-  `ask`; ein Ziel `refs/heads/<x>` wird `<x>`, jedes andere Ziel unter `refs/` → `ask`; ein
-  Refspec mit führendem `+` oder mit leerer Quelle (`:<dst>`, löscht den entfernten Zweig) →
-  `ask`. Ziel ist `<remote>/<dst>`.
-- mehr als ein Refspec: `ask`.
-
-Entscheidung je erkanntem Teil (mehrere Teile: die erste Rückfrage zählt):
+Entscheidung:
 
 - **Nichts erkannt:** keine Ausgabe, Exit 0 — kein Token im Kontext.
 - **`git push` mit Ziel** und einem Block mit Status `freigegeben`, dessen Schlüssel `push:<muster>`
@@ -396,7 +352,7 @@ Entscheidung je erkanntem Teil (mehrere Teile: die erste Rückfrage zählt):
 - **Sonst:** `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
   "permissionDecisionReason": "decide: <kategorie> — <befehl, höchstens 80 Zeichen>: <grund>"}}`,
   Exit 0. Grund ist „keine Freigabe mit Schlüssel push:<ziel> in docs/big-decisions.md“, „immer
-  Rückfrage“ oder „Befehl nicht zerlegbar“. Claude Code legt die Frage samt Grund dem Nutzer vor;
+  Rückfrage“ oder „Befehl nicht schlicht“. Claude Code legt die Frage samt Grund dem Nutzer vor;
   das Modell liest den Grund nur, wenn der Aufruf abgelehnt wird. Die Kürzung auf 80 Zeichen ist
   gesetzt, nicht gemessen (*Annahme*).
 - **Eigener Fehler** (kein JSON, unerwartete Ausnahme): `{"systemMessage": "[decide] Hook
@@ -407,19 +363,16 @@ Claude wiederholt den Befehl nicht, weicht nicht auf eine andere Form aus (`bash
 Skript, ein MCP-Werkzeug) und nennt den unterlassenen Schritt in der Übergabe — wie eine offene
 große Frage (G1, SKILL.md).
 
-Die Befehlsliste steht als Konstante im Skript, weil die Hook-Kopie ohne `references/` läuft;
-`reversibility.md` trägt dieselbe Liste in einer Tabelle, ein Test hält beide gleich. Der Satz
-„eine zweite Liste im Skript gibt es nicht“ in `reversibility.md` und im Kopf von
-`decide_log.py` gilt danach nur noch für Kategorien und Pfadmuster und wird so umformuliert.
-Was `guard` nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungszeichen, `bash -c`,
-`eval`, `xargs`, Aliase, Skripte, ein Heredoc ohne Anführungszeichen, Werkzeuge außer Bash
-(MCP) —, sieht es nicht; die Schlusszeile von `check` bleibt deshalb unverändert. Gegenüber
-Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis zur Antwort des
-Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1). Spec 00 §4 nennt bisher nur
-08 und 01 als Skills mit Hook-Snippet; der Bau ergänzt decide dort. Weiterhin nicht gesehen
-(known-limits): ein Ziel, das erst die Shell ausrechnet (`$VAR`, Globs), Wrapper außerhalb der
-Liste, ein Programm, das Befehle aus einer Datei oder Variable ausführt (`bash script.sh`,
-`eval "$X"`).
+Die Mustertabelle steht als Konstante im Skript, weil die Hook-Kopie ohne `references/` läuft;
+`reversibility.md` trägt dieselbe Tabelle, ein Test hält die Programmnamen beider gleich. Der Satz
+„eine zweite Liste im Skript gibt es nicht“ in `reversibility.md` und im Kopf von `decide_log.py`
+gilt nur für Kategorien und Pfadmuster. Gegenüber Spec 00 §4 heißt es: mit installiertem Hook
+blockiert ein erkannter Befehl bis zur Antwort des Nutzers (G3); ohne Hook verlangt die SKILL.md
+das Unterlassen (G1). Spec 00 §4 nennt bisher nur 08 und 01 als Skills mit Hook-Snippet; der Bau
+ergänzt decide dort. Nicht gesehen (known-limits): Befehle, die erst die Shell zusammensetzt
+(`$VAR`, `eval`, `bash -c "$X"`, Skripte, Aliase), Werkzeuge außer Bash (MCP), Python 2 als
+einziges Python. Unnötig gefragt wird, wenn ein Muster nur in einer Zeichenkette steht, und bei
+einem freigegebenen Push in einem nicht schlichten Befehl.
 
 ### Contract
 
@@ -511,9 +464,9 @@ the assumptions of a plan (use work-plan)."
 | `test_check_untracked_and_hash_key` | dito | eine unversionierte Datei unter `migrations/` wird gemeldet; `dependency:pyproject.toml#python-dateutil` gibt die Datei nur frei, wenn eine hinzugefügte Zeile diesen Text enthält, nie bei nur entfernten Zeilen; `add --key …#-x` → Exit 1; ohne Git Exit 2 |
 | `test_check_one_revision` | dito | `HEAD~1..HEAD`, `HEAD~1...HEAD`, `HEAD^!` und eine unbekannte Revision → Exit 2 mit „ungeprüft — check nimmt eine Revision“; Bare-Repo → Exit 2 mit „ungeprüft — kein Arbeitsbaum“; ein Merge-Commit als `<rev>` wird wie jede Revision gegen den Arbeitsbaum verglichen |
 | `test_check_includes_summary_and_open` | dito | mit Sitzung und kleinem Eintrag nennt `check` ihn vor der Schlusszeile, ebenso einen offenen Block; ohne Einträge und offene Blöcke nur Ergebniszeile und Schlusszeile; die Schlusszeile ist immer die letzte |
-| `test_guard_push` | `tests/test_decide_guard.py` | `git push` ohne Block → `ask` mit „keine Freigabe mit Schlüssel push:origin/x“; mit freigegebenem Block `push:origin/**` → keine Ausgabe für `git push`, `git push origin`, `git push -u origin HEAD`, `git push origin HEAD:refs/heads/x`, `git -C <repo> push origin x`; trotz Block `ask` für `--force`, `--force-with-lease`, `+x`, `origin :x`, `--delete x`, `--tags`, `-o ci.skip`, zwei Refspecs, `HEAD:refs/tags/v1`, abgelösten `HEAD`; ohne Upstream und ohne Argumente → `ask`; `--dry-run` → nichts; ein jüngerer offener Block mit gleicher Frage und gleichem Schlüssel → `ask` |
-| `test_guard_commands` | dito | je Zeile der Hook-Tabelle ein erkannter und ein ähnlicher nicht erkannter Befehl: `rm -rf data`, `rm -fr data`, `rm -R data` → `ask`; `rm -rf .skills/cache/x`, `rm -rf build dist .venv`, `rm -rf a/node_modules`, `rm a.txt` → nichts; `curl https://x` → nichts, `curl -d a https://x`, `curl -sSd a https://x`, `curl -XPOST https://x` → `ask`; `sqlite3 app.db "DROP TABLE users;"` → `ask`, `sqlite3 app.db "DELETE FROM t WHERE id=1;"` → nichts; `git restore --staged a`, `git restore -S a` → nichts, `git restore --staged --worktree a` → `ask`; `git checkout <vorhandene datei>` → `ask`, `git checkout main` → nichts; `git clean -fdx` → `ask`; `cd x && git reset --hard` → `ask`; `git commit -m "$(cat <<'EOF'` mit einer Zeile `git reset --hard` in der Nachricht → nichts; Zuweisung und `sudo` davor werden übersprungen |
-| `test_guard_errors` | dito | kein JSON, leere Eingabe, fehlendes `tool_input` → `systemMessage` mit „Hook ungeprüft“, Exit 0; unbalancierte Anführungszeichen mit `rm` im Text → `ask` mit „Befehl nicht zerlegbar“, ohne Programmnamen der Tabelle → nichts |
+| `test_guard_push` | `tests/test_decide_guard.py` | schlichter Push: `git push`, `git push origin`, `git push -u origin HEAD`, `git push origin HEAD:refs/heads/x`, `git -C <repo> push origin x`, `git add a && git commit -m "Fix (#12) und `foo`" && git push origin x` und die Commit-Vorlage von Claude Code davor → mit freigegebenem `push:origin/**` keine Ausgabe, ohne Block `ask` mit „keine Freigabe mit Schlüssel push:origin/x“; trotz Block `ask` für `--force`, `+x`, `origin :x`, `--delete x`, `--tags`, Tag als Quelle, zwei Refspecs, `refs/tags/v1`, `git -c k=v push`, `push.default=matching`, `remote.origin.mirror=true`, abgelösten `HEAD`, und „Befehl nicht schlicht“ für `cd ../o && git push origin x`, `timeout 9 git push origin x`, `git push origin $(git branch --show-current)`; `--dry-run` → nichts; ein jüngerer offener Block gleicher Frage und gleichen Schlüssels → `ask` |
+| `test_guard_commands` | dito | je Zeile der Mustertabelle ein Treffer und ein ähnlicher Nicht-Treffer, darunter: `rm -rf data`, `sudo -iu root rm -rf src`, `timeout 5 rm -rf src`, `cat <(rm -rf src)`, `case x in a) rm -rf src;; esac`, `bash <<EOF` mit `rm -rf src` im Rumpf, `find . \( -name a \) -delete`, `find . -exec rm {} +`, `git reset $(git merge-base a b) --hard`, `sqlite3 app.db "DROP TABLE users;"`, `psql <<EOF` mit `DROP TABLE x;` → `ask`; `rm -rf build dist .venv`, `rm -rf .skills/cache/x`, `rm a.txt`, `curl https://x`, `git restore --staged a`, `sqlite3 app.db "DELETE FROM t WHERE id=1;"`, `find . -exec grep x {} +`, `ls`, `pytest -q` → nichts; `rm -rf ~/build`, `rm -rf /home/u/dist` → `ask`; ohne Programmnamen startet `guard` keinen Subprozess (gemockt) |
+| `test_guard_errors` | dito | kein JSON, leere Eingabe, fehlendes `tool_input` → `systemMessage` mit „Hook ungeprüft“, Exit 0; ein Fehler von `shlex` im Push-Teil → `ask` „Befehl nicht schlicht“ |
 | `test_guard_table_matches_reference` | dito | jeder Befehl der Konstante steht in der Tabelle in `reversibility.md` und umgekehrt |
 | gelöscht | `tests/test_decide_log.py` | die Tests zu `brief` (31 laut Review) und zu Bereichen, Merge-Basen, Ablage aus einer Revision, `#-` und `#+` (rund 15); der Bau zählt sie im Report |
 | `test_hook_snippet` | dito | `assets/hooks/decide-guard.json` ist gültiges JSON, `PreToolUse` mit `matcher` `Bash`, der Befehl ruft `.claude/hooks/decide_log.py guard` über `$CLAUDE_PROJECT_DIR` auf und gibt ohne Kopie die Meldung „Hook ungeprüft“ aus |
