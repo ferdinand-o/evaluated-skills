@@ -9140,13 +9140,12 @@ def test_cp8r1_f9_verdict_goes_to_the_finding_of_its_order(tmp_path):
     order = (directory / "verify" / "1.md").read_text(encoding="utf-8")
     [b] = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
     assert f"| key: {kit._finding_key(b)} -->" in order.splitlines()[0]
-    # Inzwischen wird p1 angenommen: A steht jetzt an Position 1. Der Prüfer gibt den
-    # Schlüssel seines Auftrags zurück (Prüfpunkt 8, Runde 2), nicht die Nummer.
+    # Inzwischen wird p1 angenommen: A steht jetzt an Position 1. Der Prüfer gibt sein Urteil
+    # ohne `key` zurück (Rückfall): --number 1 meint Auftrag 1.md, also B, nicht Position 1.
     _cp8_record(kit, root, tmp_path, plan, "p1", [_finding("a/x.py", 3, "A")])
     kit.merge(directory)
-    assert _cli(kit, root, "verdict", "--run", run, _payload(
-        tmp_path, {"key": kit._finding_key(b), "urteil": "widerlegt", "beleg": "y.py:4"},
-        "urteil-b.json")) == 0
+    assert _cp8_verdicts(directory) == [("a/x.py", None), ("b/y.py", None)]
+    assert _cp8_give(kit, root, tmp_path, run, 1, {"urteil": "widerlegt", "beleg": "y.py:4"}) == 0
     kit.merge(directory)
     assert _cp8_verdicts(directory) == [("a/x.py", None), ("b/y.py", "widerlegt")]
 
@@ -9388,3 +9387,72 @@ def test_cp8r2_f3_merge_and_since_share_one_union(tmp_path, monkeypatch):
     third = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False, verify=True)
     done = kit.plan_since(root, third["_meta"]["run"], [id1])
     assert done["file_keys"]["a.py"]["findings"][0]["verdict"] == "widerlegt"
+
+
+# --- Prüfpunkt 8 nach Runde 2 ---------------------------------------------------------------
+
+def test_cp8r3_f3_chain_keeps_the_verdict_of_the_reporting_run(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _fresh_repo(tmp_path / "chain")
+    v1 = _lines(100, "v1")
+    _commit_files(root, "t0", {"x.py": _lines(100, "v0"), "README.md": "# x\n"})
+    git(root, "tag", "t0")
+    _commit_files(root, "t1", {"x.py": v1})
+    git(root, "tag", "t1")
+    _commit_files(root, "t2", {"x.py": v1.replace("v1_4 = 4\n", "v1_4 = 44\n")})
+    git(root, "tag", "t2")
+    run_a = kit.build_plan(root, "t0..t1", "standard", "bugs", None, False)
+    run_b = kit.build_plan(root, "t1..t2", "standard", "bugs", None, False)
+    id_a, id_b = run_a["_meta"]["run"], run_b["_meta"]["run"]
+    _record(kit, root, run_a, "p1", [_finding("x.py", 90, "A90")])
+    _record(kit, root, run_b, "p1", [_finding("x.py", 5, "B5")])
+    dir_a = _run_path(root, run_a)
+    kit.merge(dir_a)
+    assert _cli(kit, root, "verdict", "--run", id_a, "--number", 1,
+                _payload(tmp_path, {"urteil": "widerlegt", "beleg": "x.py:90 ok"})) == 0
+    kit.merge(dir_a)
+    kit.merge(_run_path(root, run_b))
+    plan_c = kit.build_plan(root, "t0..t2", "standard", "bugs", None, False)
+    done_c = kit.plan_since(root, plan_c["_meta"]["run"], [id_a, id_b])
+    entry = done_c["file_keys"]["x.py"]
+    assert entry["reused_from"] == id_b and entry["reused_chain"] == [id_b, id_a], entry
+    merged = kit.merge(_run_path(root, done_c))["findings"]
+    assert sorted((f["line"], f.get("verdict")) for f in merged) == [
+        (5, None), (90, "widerlegt")]
+
+
+def test_cp8r3_f5_superseded_verdict_of_the_earlier_run_does_not_count(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    git(root, "checkout", "--quiet", "-b", "fix", "t1")
+    first = kit.build_plan(root, "base..t1", "standard", "bugs", None, False, verify=True)
+    id1, dir1 = first["_meta"]["run"], _run_path(root, first)
+    _record(kit, root, first, "p1", [_finding("a.py", 5, "load wirft ungefangen")])
+    kit.merge(dir1)
+    assert _cli(kit, root, "verdict", "--run", id1, "--number", 1,
+                _payload(tmp_path, {"urteil": "widerlegt", "beleg": "a.py:5 fängt ab"})) == 0
+    assert _cli(kit, root, "verdict", "--run", id1, "--number", 1,
+                _payload(tmp_path, {"urteil": "bestätigt", "beleg": "doch nicht"}, "b.json")) == 0
+    kit.merge(dir1)
+    assert _cp8_verdicts(dir1) == [("a.py", "bestätigt")]
+    _commit_only(root, "fix c2", "c.py", SINCE_C + "# geprüft\n")
+    second = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False, verify=True)
+    id2 = second["_meta"]["run"]
+    kit.plan_since(root, id2, [id1])
+    dir2 = _run_path(root, second)
+    path = dir2 / "plan.json"
+    plan2 = json.loads(path.read_text(encoding="utf-8"))
+    assert plan2["file_keys"]["a.py"]["findings"][0]["verdict"] == "bestätigt"
+    # Von Hand das in Lauf 1 schon ersetzte Urteil: zählt nicht, der Fund ist offen.
+    plan2["file_keys"]["a.py"]["findings"][0].update(verdict="widerlegt",
+                                                     verdict_evidence="a.py:5 fängt ab")
+    path.write_text(json.dumps(plan2, ensure_ascii=False, indent=2), encoding="utf-8")
+    for packet in plan2["packets"]:
+        _record(kit, root, plan2, packet["id"], [])
+    kit.merge(dir2)
+    assert _cp8_verdicts(dir2) == [("a.py", None)]
+    kit.write_report(dir2)
+    audit = kit.audit(dir2, None)
+    assert audit["complete"] is False and audit["unverified"] == [1], audit
