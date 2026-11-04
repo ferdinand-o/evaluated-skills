@@ -5541,10 +5541,11 @@ def test_evals_and_fixtures(tmp_path, capsys):
             spans = [s for p in plan["packets"] for s in p["spans"]]
             assert all(s["file"] == path for s in spans)
             source = git(ws.root, "show", f"HEAD:{path}")
+            body = ast.parse(source).body
             tops = {min([n.lineno] + [d.lineno for d in n.decorator_list])
-                    for n in ast.parse(source).body
+                    for n in body
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-            assert len([n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)]) >= 3
+            assert len([n for n in body if isinstance(n, ast.ClassDef)]) >= 3
             assert spans[0]["lines"][0] == 1 and spans[-1]["lines"][1] == len(source.splitlines())
             for left, right in zip(spans, spans[1:]):
                 assert right["lines"][0] == left["lines"][1] + 1 and right["lines"][0] in tops
@@ -6008,11 +6009,12 @@ def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, c
     patterns = {a.pattern for a in first.must if a.type == "file_matches"
                 and a.path == ".skills/cache/deep-review/*/audit.json"}
     assert patterns == {r'"complete":\s*true', r'"report_mismatch":\s*\[\]'}
-    assert any(a.type == "file_max_lines" for a in first.must)
+    # Keine feste Zeilengrenze: der Skript-Bericht wächst je Fund, die Länge prüft audit.
+    assert not any(a.type == "file_max_lines" for a in first.must)
     ws = prepare(tmp_path / "ws", None, SEEDED)
     directory, _plan = _eval_flow(kit, ws.root, ["--range", "base..HEAD"], "/code-review", capsys)
     assert all(check(a, ws.root, ws.baseline).ok for a in first.must)
-    # Ein aufgeblähter Bericht unter 60 Zeilen: file_max_lines lässt ihn durch, audit nicht.
+    # Ein aufgeblähter Bericht: audit meldet ihn unter report_mismatch.
     report = directory / "report.md"
     text = report.read_text(encoding="utf-8")
     padding = 55 - len(text.splitlines())
@@ -6020,7 +6022,6 @@ def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, c
                       encoding="utf-8")
     kit.audit(directory, None)
     results = {(a.type, a.pattern): check(a, ws.root, ws.baseline).ok for a in first.must}
-    assert results[("file_max_lines", None)] is True
     assert results[("file_matches", r'"report_mismatch":\s*\[\]')] is False
     assert results[("file_matches", r'"complete":\s*true')] is False
 

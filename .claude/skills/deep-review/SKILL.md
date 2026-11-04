@@ -44,25 +44,25 @@ und HEAD bleiben unberührt (Cache-Lage: packets.md).
    Schreibt `packets/<id>.md` und nennt je Paket `<id>: <von>..<bis> · …`. Dieser Bereich ist
    der des Reviews; den Originalbereich setzt du nicht selbst ein. Zeilenformat und Lesehilfe:
    [counterparts.md](references/counterparts.md).
-4. **Review je Paket**, in Plan-Reihenfolge, mit der Stufe aus dem Plan:
-   ```
-   /code-review <stufe> --max-findings all <von>..<bis>
-   ```
-   Als Auftragstext gibst du dem Reviewer mit: „Lies zuerst die Datei `packets/<id>.prompt.md`
-   vollständig bis zur letzten Zeile und folge ihr; gib den Auftrag an jeden Unteragenten
-   weiter." Der Pfad steht im Auftrag, nicht im Bereich. Alternativ ein Unteragent je Paket,
-   der genau das tut. Die Hauptschleife liest weder den Paketblock noch die Ausgabe des Reviews
-   im Detail. Seine Antwort ist das Objekt `{"marke", "stufe", "findings"}` (`stufe` die
-   wirklich gelaufene), ein Paket ohne Funde mit `"findings": []`
-   ([review-brief.md](references/review-brief.md)). Du gibst es unverändert weiter:
+4. **Review je Paket**, in Plan-Reihenfolge, mit der Stufe aus dem Plan: je Paket ein Unteragent,
+   der `/code-review <stufe> --max-findings all <von>..<bis>` mit diesem Auftragstext startet:
+   „Lies zuerst die Datei `<auftrag>` vollständig bis zur letzten Zeile und folge ihr; gib den
+   Auftrag an jeden Unteragenten weiter. Das Endergebnis ist das JSON-Objekt aus dem Abschnitt
+   Rückgabeformat dieser Datei (marke aus der letzten Zeile, stufe = die wirklich gelaufene),
+   nicht eine Liste." `<auftrag>` ist der Pfad, den `counterparts` je Paket nennt
+   (`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`, nicht `packets/<id>.prompt.md`
+   allein); er steht im Auftrag, nicht im Bereich. Das Objekt ist `{"marke", "stufe", "findings"}`,
+   ein Paket ohne Funde hat `"findings": []` ([review-brief.md](references/review-brief.md)). Der
+   Unteragent nimmt es selbst an und gibt nur die Ausgabezeile von `record` zurück; die
+   Hauptschleife liest weder Block noch Fundliste:
    ```bash
-   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review <datei|->
+   python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review -
    ```
-   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann.
-   Das Werkzeug steht ohne Schrägstrich (Git Bash, packets.md); der Bericht nennt es
-   `/code-review`. Eine abgewiesene Antwort korrigierst du und rufst `record` erneut auf. Ohne
-   `/code-review` läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne /code-review" in
-   review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht nennt das wörtlich.
+   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann. Weist
+   `record` ab, korrigiert der Unteragent das Objekt; nur wo keine Unteragenten gehen, tut das die
+   Hauptschleife. Werkzeug ohne Schrägstrich (Git Bash, packets.md), im Bericht `/code-review`.
+   Ohne `/code-review` läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne /code-review"
+   in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht nennt das wörtlich.
 5. **Vereinigen:**
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" merge --run <lauf>
@@ -78,18 +78,18 @@ und HEAD bleiben unberührt (Cache-Lage: packets.md).
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" audit --run <lauf>
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" cleanup --run <lauf>
    ```
-   `audit` endet mit Exit 1 bei einer Lücke; `audit.json` ist trotzdem geschrieben. Meldet es
-   `report_mismatch`, schreibt `report --run` den Bericht neu, oder du berichtigst die
-   Einordnung; dann erneut `audit`. `cleanup --stale` ohne `--run` löscht die Refs **jedes**
-   Laufs, mit `--run <lauf>` die aller anderen; beide auch die eines Laufs, der in einem anderen
-   Worktree noch offen ist. Also `--stale` nur, wenn kein anderer Lauf offen ist (packets.md).
+   `audit` endet mit Exit 1 bei einer Lücke (`audit.json` steht trotzdem). Bei `report_mismatch`
+   berichtigst du die Einordnung, oder `report --run` ersetzt report.md samt `## Einordnung`, die
+   du danach neu anfügst; dann erneut `audit`. `cleanup --stale` ohne `--run` löscht die Refs
+   **jedes** Laufs, mit `--run <lauf>` die aller anderen; beide auch die eines Laufs, der in einem
+   anderen Worktree noch offen ist. Also `--stale` nur, wenn kein anderer Lauf offen ist (packets.md).
 
 ## Profile und Fokus
 
 | Wunsch | Aufruf | Besonderheit |
 | --- | --- | --- |
 | Standard | `--profile standard --focus bugs` (beides Standard) | Normalfall |
-| Prüfpunkt aus subagent-dev | `--profile checkpoint --soll-file <datei>` | `--soll-file` ist Pflicht, nur Fokus `bugs`; das Soll hängst du als Abschnitt „Soll" an den Auftrag |
+| Prüfpunkt aus subagent-dev | `--profile checkpoint --soll-file <datei>` | `--soll-file` ist Pflicht, nur Fokus `bugs`; das Soll schreibt `counterparts` in `packets/<id>.prompt.md`, von Hand hängst du nichts an |
 | Wartbarkeit, Qualität | `--focus quality` | keine Gegenstellen; Auftrag „Fassung 2" in review-brief.md |
 | Sicherheit | `--focus security` | ein Paket `s1` über alles, ohne Stufe: `/security-review` (`--tool security-review`) nur, wenn sein Umfang dem Plan entspricht (review-brief.md, „Fokus security"); sonst Review ohne `/security-review` im Hauptkontext, `--tool "Review ohne /security-review"` |
 | Pfad statt Bereich | `--path <pfad>[,…]` | Stand der Pfade am Ziel, jede Zeile als neu; nicht mit `--since`/`--split-at` (packets.md) |
@@ -101,8 +101,8 @@ und HEAD bleiben unberührt (Cache-Lage: packets.md).
 Die Übergabe nennt die Lauf-ID, den Pfad des Berichts (`.skills/cache/deep-review/<lauf>/report.md`),
 die Zahl der Funde und die Abdeckung `<covered>/<total>` aus `audit.json`. Lief ohne
 `/code-review` oder `/security-review`, steht das Werkzeug wörtlich dabei. Bei einer Lücke
-(`missing`, `stale`, `lost_findings`, `unverified`, `forged_verdicts`, `stale_verdicts`)
-steht „unvollständig" mit der Liste, nie „fertig".
+(`missing`, `stale`, `lost_findings`, `unverified`, `forged_verdicts`, `stale_verdicts`,
+`report_mismatch`) steht „unvollständig" mit der Liste, nie „fertig".
 
 `--max-findings all` bleibt nach dem Lauf als Wahl des Nutzers gesetzt. Zurück geht es mit
 `/code-review --max-findings default`; auch das sagt die Übergabe. deep-review behebt nichts:
