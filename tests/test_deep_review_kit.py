@@ -1549,7 +1549,7 @@ def test_counterparts_python_no_guessing(tmp_path):
 
 def test_counterparts_cap():
     kit = _kit()
-    packet = {"id": "p2", "files": ["app/x.py", "web/y.ts"], "range": "aaa..bbb"}
+    packet = {"id": "p2", "files": ["app/x.py", "web/y.rb"], "range": "aaa..bbb"}
     entries = [{"file": f"app/m{i:03}.py", "line": i + 1, "kind": "call",
                 "lines": [f"### app/m{i:03}.py:{i + 1} ruft f(...)",
                           f"- Gegenstelle f [lib/f.py:{i + 1}]: def f(x)",
@@ -1568,7 +1568,7 @@ def test_counterparts_cap():
     assert f"app/m{shown:03}.py:" not in section
     assert "Bereich: `aaa..bbb`" in text and "2 nicht aufgelöst" in section
     # Datei ohne Sammler: gesagt, nicht still.
-    assert "- `web/y.ts` — Gegenstellen nicht gesammelt (Sprache)" in text
+    assert "- `web/y.rb` — Gegenstellen nicht gesammelt (Sprache)" in text
 
     small = _section(kit.render_block(packet, entries, 0, 2000))
     assert len(small) <= 2000 and "gekappt:" in small
@@ -4864,8 +4864,8 @@ def _full_single_run(kit, tmp_path):
     Gegenstellen sucht. p1 hat ein leeres Ergebnis. Rückgabe: (Lauf, Ordner, Tabellenzeile)."""
     root = tmp_path / "repo"
     root.mkdir(parents=True)
-    _commit_repo(root, {"web/app.ts": ""},
-                 {"web/app.ts": "export const a = 1;\n" * 5, "README.md": "# r\n",
+    _commit_repo(root, {"web/app.rb": ""},
+                 {"web/app.rb": "a = 1\n" * 5, "README.md": "# r\n",
                   "img/logo.png": b"\x89PNG\r\n", "App.dproj": "<Project/>\n",
                   "test_app.py": "x = 1\n"})
     git(root, "tag", "ziel")
@@ -5060,7 +5060,7 @@ def test_cp8b_f4_skipped_source_file_named_and_no_collector_literal(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     source = os.fsdecode(b"app/caf\xe9.py")
-    _commit_repo(root, {"web/app.ts": ""}, {"web/app.ts": "export const a = 1;\n" * 5,
+    _commit_repo(root, {"web/app.rb": ""}, {"web/app.rb": "a = 1\n" * 5,
                                             source: "a = 1\n", "README.md": "# r\n"})
     plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
     assert plan["split"] is False
@@ -6097,7 +6097,7 @@ def _counting_collectors(kit, monkeypatch):
             return fn(*args, **kwargs)
         return wrapper
 
-    for name in ("collect_python", "collect_delphi"):
+    for name in ("collect_python", "collect_delphi", "collect_typescript", "collect_by_name"):
         monkeypatch.setattr(kit, name, counted(getattr(kit, name)))
     monkeypatch.setattr(kit, "COLLECTORS", tuple(c._replace(collect=counted(c.collect))
                                                  for c in kit.COLLECTORS))
@@ -6109,6 +6109,8 @@ def _packet_blocks(kit, root, run):
     Paketdateien als Bytes."""
     kit._python_index.cache_clear()
     kit._delphi_index.cache_clear()
+    kit._js_index.cache_clear()
+    kit._name_index.cache_clear()
     kit.write_counterparts(root, run)
     folder = kit.run_dir(root, run) / "packets"
     return {p.name: p.read_bytes() for p in sorted(folder.iterdir())
@@ -6154,7 +6156,8 @@ def test_b_counterparts_collected_once(tmp_path, monkeypatch, capsys):
     (directory / kit.COLLECTED_NAME).unlink()
     assert kit.load_collected(directory) is None
     assert _packet_blocks(kit, root, run) == with_store
-    assert set(calls) == {"collect_python", "collect_delphi"}
+    assert set(calls) == {"collect_python", "collect_delphi", "collect_typescript",
+                          "collect_by_name"}
 
     # Ein Speicher, dessen Fingerabdruck nicht passt, zählt nicht.
     for change in ({"target": "0" * 40}, {"base": "0" * 40}, {"focus": "security"},
@@ -8264,3 +8267,195 @@ def test_b_path_files_same_for_file_dir_and_dot(tmp_path):
     assert kit._path_files(root, head, [".", "src"]) == every
     with pytest.raises(kit.KitError, match=r"Pfad 'sr' fehlt am Ziel"):
         kit._path_files(root, head, ["src", "sr"])
+
+
+# --- Task 8: Sammler TypeScript und Namens-Rückfall ----------------------------------------
+
+TS_UTIL = (
+    "export function check(x: number): number {\n"          # 1
+    "  if (x < 0) {\n"
+    "    throw new RangeError('negativ');\n"                 # 3
+    "  }\n"
+    "  return helper(x);\n"                                  # 5
+    "}\n"
+    "function helper(x: number) {\n"                         # 7
+    "  throw new TypeError(`kaputt ${x}`);\n"                # 8
+    "}\n"
+    "export const load = async (p: string) => {\n"           # 10
+    "  if (!p) throw new Error('leer');\n"                   # 11
+    "  return p;\n"
+    "};\n"
+    "export async function fetchAll(): Promise<number> {\n"  # 14
+    "  return 1;\n"
+    "}\n"
+    "// throw new Error('im Kommentar');\n"
+    "export function quiet() { return 'throw new Error(x)'; }\n"
+)
+TS_CJS = ("exports.old = function (a) {\n  throw new Error('alt');\n};\n")
+TS_MAIN = (
+    "import { check, load, quiet, fetchAll } from './util';\n"   # 1
+    "import def from '../lib/dflt';\n"
+    "import { useState } from 'react';\n"
+    "import { alias } from '@/alias';\n"
+    "const m = require('./cjs');\n"                               # 5
+    "\n"
+    "export async function run() {\n"                             # 7
+    "  const a = check(1);\n"                                     # 8
+    "  const b = load('x');\n"                                    # 9
+    "  const c = await load('y');\n"                              # 10
+    "  const s = useState(0);\n"                                  # 11
+    "  alias();\n"                                                # 12
+    "  m.old(1);\n"                                               # 13
+    "  def();\n"                                                  # 14
+    "  quiet();\n"                                                # 15
+    "  console.log('check(2) throw');\n"                          # 16
+    "  // check(3);\n"                                            # 17
+    "  const t = `x ${check(4)} y`;\n"                            # 18
+    "  fetchAll();\n"                                             # 19
+    "  return fetchAll().then(() => 1);\n"                        # 20
+    "}\n"
+)
+TS_DFLT = "export default function dflt() {\n  throw new Error('d');\n}\n"
+
+
+def _ts_repo(tmp_path, main_after=None):
+    root = tmp_path / "repo"
+    root.mkdir()
+    before = {"src/util.ts": TS_UTIL, "src/cjs.js": TS_CJS, "lib/dflt.ts": TS_DFLT,
+              "src/main.ts": TS_MAIN.replace("check(", "chek(").replace("load(", "lod(")
+              .replace("fetchAll()", "fetchAl()").replace("def()", "dd()").replace("m.old", "m.o")
+              .replace("useState(0)", "us(0)").replace("alias()", "al()").replace("quiet()", "q()")}
+    _commit_repo(root, before, {"src/main.ts": main_after or TS_MAIN})
+    return root
+
+
+def test_b_typescript_collector(tmp_path):
+    kit = _kit()
+    root = _ts_repo(tmp_path)
+    found = kit.collect_typescript(root, "base..HEAD", ["src/main.ts", "README.md"])
+    assert found.unparsed == []
+    by_line = {}
+    for entry in found.entries:
+        by_line.setdefault(entry["line"], []).append(entry)
+    assert sorted(by_line) == [8, 9, 10, 13, 14, 18, 19]
+    # relativer Import: Definition, throw bis RAISE_DEPTH (direkt Zeile 3, über helper Zeile 8)
+    [check] = by_line[8]
+    assert check["lines"][:3] == [
+        "### src/main.ts:8 ruft check(...)",
+        "- Gegenstelle check [src/util.ts:1]: function check(x: number): number",
+        "  wirft: RangeError, TypeError"]
+    assert check["lines"][3:] == ["    throw RangeError at src/util.ts:3",
+                                  "    throw TypeError at src/util.ts:8"]
+    assert kit._entry_refs(check["lines"]) == [("src/util.ts", 1), ("src/util.ts", 3),
+                                               ("src/util.ts", 8)]
+    # async-Pfeilfunktion ohne await: Eintrag mit Hinweis; mit await (Zeile 10) kein Hinweis
+    [load] = by_line[9]
+    assert "- Gegenstelle load [src/util.ts:10]: const load = async (p: string) =>" in load["lines"]
+    assert kit.ASYNC_NOTE in load["lines"] and "    throw Error at src/util.ts:11" in load["lines"]
+    assert kit.ASYNC_NOTE not in by_line[10][0]["lines"]
+    # require + m.old(...) und Standardimport über ../
+    assert any("Gegenstelle old [src/cjs.js:1]" in x for x in by_line[13][0]["lines"])
+    assert any("[lib/dflt.ts:1]" in x for x in by_line[14][0]["lines"])
+    # async ohne throw: Hinweis allein genügt; ohne await, aber vor .then( nicht (Zeile 20)
+    [fetch] = by_line[19]
+    assert fetch["lines"][1:] == [
+        "- Gegenstelle fetchAll [src/util.ts:14]: export async function fetchAll(): Promise<number>"
+        .replace("export ", ""), kit.ASYNC_NOTE]
+    assert 20 not in by_line
+    # Template-Literal mit ${…}: der Aufruf darin ist Code; String, Kommentar und der Text
+    # des Templates sind ignoriert (Zeilen 16, 17); quiet() (Zeile 15) wirft nicht.
+    assert len(by_line[18]) == 1 and 15 not in by_line and 16 not in by_line and 17 not in by_line
+    # Paket und Pfad-Alias: nicht aufgelöst, gezählt (useState Zeile 11, alias Zeile 12)
+    assert found.unresolved == 2
+    # das Maskieren erhält Länge und Zeilen
+    text = "const a = `x ${b + `y ${c}`} z`; // c\nlet s = \"d'\"; /* e\nf */ g(/\"/)\n"
+    masked = kit._mask_c(text, True)
+    assert len(masked) == len(text) and masked.count("\n") == text.count("\n")
+    assert "b + " in masked and "c}" in masked and "// c" not in masked and "e" not in masked[40:]
+    # Spannen-Filter und Speicher ohne Sonderfall: derselbe Eintrag, über per_file abgelegt
+    per_file = {}
+    again = kit.collect_typescript(root, "base..HEAD", ["src/main.ts"], per_file=per_file)
+    assert again.entries == found.entries
+    assert per_file["src/main.ts"]["entries"] == found.entries
+    assert len(per_file["src/main.ts"]["unresolved"]) == 2
+    assert kit.COLLECTORS[-2].language == "TypeScript"
+    assert kit._has_collector("a/b.tsx") and kit._has_collector("c.cjs")
+
+
+def test_b_typescript_index_resolution_and_node_modules(tmp_path):
+    kit = _kit()
+    root = tmp_path / "repo"
+    root.mkdir()
+    main = ("import { f } from './pkg';\nimport { g } from './g.js';\n"
+            "import { h } from 'lodash';\n\nf();\ng();\nh();\n")
+    before = {"main.ts": main.replace("f();", "").replace("g();", "").replace("h();", ""),
+              "pkg/index.ts": "export function f() { throw new Error('i'); }\n",
+              "g.ts": "export function g() { throw new Error('g'); }\n",
+              "node_modules/lodash/index.js": "function h() { throw new Error('n'); }\n"}
+    _commit_repo(root, before, {"main.ts": main})
+    found = kit.collect_typescript(root, "base..HEAD", ["main.ts"])
+    assert [(e["line"], e["lines"][1].split("[")[1].split(":")[0]) for e in found.entries] == [
+        (5, "pkg/index.ts"), (6, "g.ts")]
+    assert found.unresolved == 1
+
+
+GO_LIB = ("package lib\n\nfunc Check(n int) int {\n\tif n < 0 {\n\t\tpanic(\"negativ\")\n\t}\n"
+          "\treturn n\n}\n\nfunc Dup(n int) int {\n\tpanic(\"a\")\n}\n")
+GO_OTHER = "package other\n\nfunc Dup(n int) int {\n\tpanic(\"b\")\n}\n"
+GO_MAIN = ("package main\n\nfunc main() {\n\t_ = Check(1)\n\t_ = Dup(2)\n"
+           "\t// Check(3)\n\t_ = \"Check(4)\"\n}\n")
+
+
+def test_b_name_fallback_marks_unique_names(tmp_path):
+    kit = _kit()
+    root = tmp_path / "repo"
+    root.mkdir()
+    _commit_repo(root, {"lib/lib.go": GO_LIB, "other/other.go": GO_OTHER,
+                        "main.go": "package main\n\nfunc main() {\n}\n", "tool.rb": "x = 1\n"},
+                 {"main.go": GO_MAIN, "tool.rb": "x = 2\n"})
+    found = kit.collect_by_name(root, "base..HEAD", ["main.go", "tool.rb"])
+    assert found.unparsed == []
+    [entry] = found.entries
+    assert entry["lines"] == [
+        "### main.go:4 ruft Check(...)",
+        "- Gegenstelle Check [lib/lib.go:3]: func Check(n int) int (Name eindeutig, ohne Sammler)",
+        '  wirft: "negativ"',
+        '    panic "negativ" at lib/lib.go:5']
+    assert kit._entry_refs(entry["lines"]) == [("lib/lib.go", 3), ("lib/lib.go", 5)]
+    assert kit.UNIQUE_NAME_MARK == "(Name eindeutig, ohne Sammler)"
+    assert found.unresolved == 1          # Dup: zwei gleichnamige Definitionen
+    # Sprache ohne Eintrag: weiter „nicht gesammelt"
+    assert not kit._has_collector("tool.rb")
+    assert "- `tool.rb` — Gegenstellen nicht gesammelt (Sprache)" in kit.render_block(
+        {"id": "p1", "files": ["main.go", "tool.rb"], "range": "a..b"}, found.entries, 1, None)
+    # Pfad-Modus: die einzige panic-Stelle außerhalb des Pakets hält den Eintrag im Block
+    assert kit._leaving_path([entry], {"main.go"}, {}) == [entry]
+    assert kit._leaving_path([entry], {"main.go", "lib/lib.go"}, {}) == []
+    # Rust und Java kurz
+    rs = tmp_path / "rs"
+    rs.mkdir()
+    _commit_repo(rs, {"a.rs": "fn go() {\n}\n", "b.rs": "fn boom() {\n    panic!(\"x\");\n}\n"},
+                 {"a.rs": "fn go() {\n    boom();\n}\n"})
+    [r] = kit.collect_by_name(rs, "base..HEAD", ["a.rs"]).entries
+    assert r["lines"][1] == "- Gegenstelle boom [b.rs:1]: fn boom() (Name eindeutig, ohne Sammler)"
+    jv = tmp_path / "jv"
+    jv.mkdir()
+    _commit_repo(jv, {"A.java": "class A {\n  void go() {\n  }\n}\n",
+                      "B.java": "class B {\n  public static int parse(String s) throws E {\n"
+                                "    if (s == null) {\n      throw new IllegalStateException(\"x\");\n"
+                                "    }\n    return 1;\n  }\n}\n"},
+                 {"A.java": "class A {\n  void go() {\n    B.parse(\"1\");\n  }\n}\n"})
+    [j] = kit.collect_by_name(jv, "base..HEAD", ["A.java"]).entries
+    assert j["lines"][1].startswith("- Gegenstelle parse [B.java:2]: public static int parse(")
+    assert "    throw IllegalStateException at B.java:4" in j["lines"]
+
+
+def test_b_new_collectors_flow_through_counterpart_store(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _ts_repo(tmp_path)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    [item] = kit.write_counterparts(root, plan["_meta"]["run"])
+    block = (root / item["path"]).read_text(encoding="utf-8")
+    assert "ruft check(...)" in block and "throw RangeError at src/util.ts:3" in block
+    assert "nicht aufgelöst" in block
