@@ -27,15 +27,19 @@ Werkzeuge von `run.sh`:
 | `cr` | `/code-review --max-findings all <bereich>` | 1800 s |
 | `crc` | `cr` plus Auftrag „Gegenstelle prüfen" | 1800 s |
 | `crx` | `cr` plus Ausgabe von `counterparts.py` | 1800 s |
+| `crb` | `/code-review <LEVEL> --max-findings all <bereich>` plus Gegenstellen-Block aus `review_kit.py` (`plan`, `counterparts`, `packets/p1.md`; Skill nicht im Workspace; Name `<repo>-crb-<stufe>-<nr>`, `LEVEL` = `low`, `medium` oder `high`, Standard `medium`) | 1800 s |
 | `eng` | `/engineering:code-review <bereich>` | 1800 s |
 | `sp` | superpowers `requesting-code-review` über `base..HEAD` | 1800 s |
 | `dr` | `Review <bereich> mit deep-review.` mit `skills/deep-review` aus diesem Repo im Workspace | 3600 s |
 | `drnc` | wie `dr`, der Gegenstellen-Block geht nicht an den Reviewer | 3600 s |
 
 Der Bereich ist `base..HEAD`, bei `py-c*` `mid..HEAD`, bei den Pfad-Szenarien die Pfadliste.
-`dr` und `drnc` laufen nur auf Bereichen (`py-diff`, `dl-diff`, `py-c*`): Einen Pfad gibt
-deep-review ohne Plan direkt an `/code-review` (SKILL.md, Schritt 1), gemessen wäre also nur
-`/code-review`. Auf `py-path` und `dl-path` bricht `run.sh` mit Exit 2 ab. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
+`dr` und `drnc` laufen auch auf `py-path` und `dl-path`; der Prompt lautet dort
+`Prüf die Pfade <liste> mit deep-review.`. `crb` läuft nur auf Bereichen (`review_kit.py plan`
+braucht `--range`); auf `*-path` bricht `run.sh` mit Exit 2 ab, ebenso bei `LEVEL` außerhalb von
+`low`, `medium`, `high`, jeweils vor dem ersten `mkdir`. Bei `crb` löscht `run.sh` nach dem Block
+den Laufordner `.skills` und die Refs (`review_kit.py cleanup`); der Block liegt als
+`$BENCH/out/<name>.ctx.md`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
 und `Edit` nur unter `./.skills/cache/deep-review/` für `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`

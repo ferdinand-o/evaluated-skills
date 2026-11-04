@@ -1,7 +1,8 @@
 #!/bin/bash
-# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|eng|sp|dr|drnc
+# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|crb|eng|sp|dr|drnc
 set -uo pipefail
-REPO=${1:?Repo fehlt}; TOOL=${2:?Werkzeug fehlt}; N=${3:?Lauf-Nummer fehlt}
+[ $# -ge 3 ] || { echo "Aufruf: run.sh <repo> <tool> <nr>" >&2; exit 2; }
+REPO=$1; TOOL=$2; N=$3
 NAME=$REPO-$TOOL-$N
 HERE=$(dirname "$(readlink -f "$0")")
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
@@ -10,7 +11,8 @@ if [ -z "$ROOT" ] || [ -z "$COMMON" ]; then echo "Repo von run.sh nicht gefunden
 MAIN=$(dirname "$COMMON")
 # Bis zum ersten mkdir wird nur geprüft, ohne Seiteneffekt. readlink -f gibt nichts aus, wenn mehr
 # als die letzte Komponente von BENCH fehlt; ohne diese Prüfung entstünden out/ und work/ unter /.
-BENCH_ARG=${BENCH:?BENCH auf das Arbeitsverzeichnis setzen}
+BENCH_ARG=${BENCH:-}
+[ -n "$BENCH_ARG" ] || { echo "BENCH auf das Arbeitsverzeichnis setzen; nichts angelegt" >&2; exit 2; }
 B=$(readlink -f -- "$BENCH_ARG")
 if [ -z "$B" ] || [ "$B" = / ] || [ ! -d "$(dirname "$B")" ] || { [ -e "$B" ] && [ ! -d "$B" ]; }; then
   echo "BENCH=$BENCH_ARG: Elternordner fehlt oder kein Ordner; nichts angelegt" >&2; exit 2
@@ -27,13 +29,19 @@ case $REPO in
   *) echo "unbekanntes Repo: $REPO" >&2; exit 2 ;;
 esac
 case $TOOL in
-  cr|crc|crx|eng|sp) ;;
-  dr|drnc)
-    # deep-review gibt einen Pfad ohne Plan direkt an /code-review (SKILL.md, Schritt 1); auf
-    # py-path/dl-path wäre nur /code-review gemessen.
+  cr|crc|crx|eng|sp|dr|drnc) ;;
+  crb)
+    # Stufe aus LEVEL; Name <repo>-crb-<stufe>-<nr>. Geprüft vor dem ersten mkdir.
+    LEVEL=${LEVEL:-medium}
+    case $LEVEL in
+      low|medium|high) ;;
+      *) echo "LEVEL=$LEVEL: erlaubt sind low|medium|high; nichts angelegt" >&2; exit 2 ;;
+    esac
+    # review_kit.py plan braucht einen Bereich; ein Pfad hat keinen.
     case $REPO in
-      *-path) echo "dr/drnc nur für Bereiche (py-diff, dl-diff, py-c*), nicht für $REPO: deep-review gibt einen Pfad ohne Plan an /code-review" >&2; exit 2 ;;
-    esac ;;
+      *-path) echo "crb nur für Bereiche (py-diff, dl-diff, py-c*), nicht für $REPO; nichts angelegt" >&2; exit 2 ;;
+    esac
+    NAME=$REPO-$TOOL-$LEVEL-$N ;;
   *) echo "unbekanntes Werkzeug: $TOOL" >&2; exit 2 ;;
 esac
 EXTRA=()
@@ -66,6 +74,23 @@ case $TOOL in
        EXTRA=(--append-system-prompt "Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on.
 
 $(cat "$OUT/$NAME.ctx.md")") ;;
+  crb) PROMPT="/code-review $LEVEL --max-findings all $TARGET"
+       # Block aus review_kit.py (nicht counterparts.py): Plan und Gegenstellen im Workspace, die
+       # Skill wird nicht kopiert. Danach Laufordner und Refs weg, der Reviewer sieht beides nicht.
+       KIT=$ROOT/skills/deep-review/scripts/review_kit.py
+       RUN=$(python3 -I "$KIT" plan --repo "$W" --range "$TARGET" --split-at 100000 | sed -n '1s/^Lauf: *//p')
+       if [ -z "$RUN" ] || ! python3 -I "$KIT" counterparts --repo "$W" --run "$RUN" >&2 \
+          || [ ! -f "$W/.skills/cache/deep-review/$RUN/packets/p1.md" ]; then
+         echo "$NAME: review_kit.py plan/counterparts gescheitert" >&2
+         python3 -I "$KIT" cleanup --repo "$W" ${RUN:+--run "$RUN"} >&2 || true
+         rm -rf "$W"; exit 1
+       fi
+       cp "$W/.skills/cache/deep-review/$RUN/packets/p1.md" "$OUT/$NAME.ctx.md"
+       python3 -I "$KIT" cleanup --repo "$W" --run "$RUN" >&2
+       rm -rf "$W/.skills"
+       EXTRA=(--append-system-prompt "Below is a mechanically collected list of counterparts for the changed lines of this range: for each changed call the definition it reaches (including vendored code), the exceptions that definition raises, and where changed keyword arguments flow and which conditions test them. It was produced by a script for every changed call site, not chosen by suspicion. Pass it unchanged to every reviewer subagent you start and use it to check the changed code against the contracts it relies on.
+
+$(cat "$OUT/$NAME.ctx.md")") ;;
   eng) PROMPT="/engineering:code-review $TARGET" ;;
   sp)
     mkdir -p "$W/.claude/skills"
@@ -80,7 +105,10 @@ $(cat "$OUT/$NAME.ctx.md")") ;;
     echo ".claude/" >> "$W/.git/info/exclude"
     TO=3600
     ALLOW+=("Bash(python3:*)" "Bash(python:*)" Skill "Edit(./.skills/cache/deep-review/**)")
-    PROMPT="Review $TARGET mit deep-review."
+    case $REPO in
+      *-path) PROMPT="Prüf die Pfade $TARGET mit deep-review." ;;
+      *) PROMPT="Review $TARGET mit deep-review." ;;
+    esac
     # drnc: ohne Gegenstellen-Block. Schritt 3 läuft trotzdem, er baut die Paket-Bereiche.
     [ "$TOOL" = drnc ] && PROMPT="$PROMPT Führe Schritt 3 (counterparts) nur für die Paket-Bereiche aus: gib dem Reviewer den Block aus packets/<id>.md nicht mit und lies ihn nicht."
     ;;
