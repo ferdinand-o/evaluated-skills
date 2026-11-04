@@ -4511,11 +4511,14 @@ def _mask_c(text: str, js: bool, jsx: bool = False) -> str:
     und die Anführungszeichen bleiben — gleiche Länge, gleiche Zeilen und Spalten.
 
     `jsx` (.tsx, .jsx; mit `js`): ein `/` beginnt ein Regex-Literal nur nach
-    `_JSX_BEFORE_REGEX` oder einem Wort aus `_JS_KEYWORDS_BEFORE_REGEX` und nie vor `>` —
-    `</p>` und `/>` bleiben Code; ein Anführungszeichen direkt hinter einem Wort, das nicht in
-    `_JSX_KEYWORDS_BEFORE_STRING` steht, beginnt keinen String (`Don't` im JSX-Text). Bekannte
-    Grenze: JSX-Text wird nicht als Text erkannt — ein `//` oder `/*` darin (`http://…`) und
-    ein Anführungszeichen hinter Leerzeichen oder `>` (`<p>'a</p>`) gelten weiter als Code."""
+    `_JSX_BEFORE_REGEX`, nach `=>` (nicht nach dem `>` eines Tags) oder einem Wort aus
+    `_JS_KEYWORDS_BEFORE_REGEX` und nie vor `>` — `</p>` und `/>` bleiben Code; ein
+    Anführungszeichen direkt hinter einem Wort, das nicht in `_JSX_KEYWORDS_BEFORE_STRING`
+    steht, beginnt keinen String (`Don't` im JSX-Text). Bekannte Grenzen: JSX-Text wird nicht
+    als Text erkannt — ein `//` oder `/*` darin (`http://…`) und ein Anführungszeichen hinter
+    Leerzeichen oder `>` (`<p>'a</p>`) gelten weiter als Code; und die JSX-Regeln gelten nur
+    für die Endungen .tsx und .jsx — JSX in einer .js-Datei (React-Projekte ohne .jsx) wird
+    ohne sie maskiert, ein `Don't` im JSX-Text öffnet dort einen String bis zum Zeilenende."""
     n, out = len(text), list(text)
     i, depth, tpl, frames = 0, 0, False, []
 
@@ -4525,23 +4528,26 @@ def _mask_c(text: str, js: bool, jsx: bool = False) -> str:
                 out[k] = " "
 
     def word_before(k):
-        """(Zeichen vor `k` ohne Leerraum, das Wort davor) im bisher maskierten Text."""
+        """(Zeichen vor `k` ohne Leerraum, das Wort davor, Zeichen davor) im bisher
+        maskierten Text."""
         k -= 1
         while k >= 0 and out[k] in " \t\r\n":
             k -= 1
         if k < 0:
-            return "", ""
+            return "", "", ""
         end = k + 1
         while k >= 0 and (out[k].isalnum() or out[k] in "_$"):
             k -= 1
-        return out[end - 1], "".join(out[k + 1:end])
+        return out[end - 1], "".join(out[k + 1:end]), out[end - 2] if end >= 2 else ""
 
     def regex_here(k):
         if jsx and text.startswith(">", k + 1):
             return False
-        last, word = word_before(k)
+        last, word, before = word_before(k)
         if not last or last in (_JSX_BEFORE_REGEX if jsx else "(,=:[!&|?{};+-*%<>~^"):
             return True
+        if jsx and last == ">" and before == "=":
+            return True                      # `=> /x/`, nicht das `>` eines Tags
         return word in _JS_KEYWORDS_BEFORE_REGEX
 
     def string_here(k):
@@ -4916,17 +4922,26 @@ def _js_bound_calls(sf: _SrcFile, bindings: dict, a: int, b: int):
         yield m.start(), (second or first), bound[0], member, _balanced_end(sf.masked, m.end() - 1)
 
 
+_JS_SHORT_DEF_TAIL_RE = re.compile(r"\s*(?::[^{;=\n]*)?\{")
+_JS_SHORT_DEF_HEAD_RE = re.compile(
+    r"(?:^|[{,])[ \t]*(?:(?:async|static|get|set|public|private|protected|override)[ \t]+"
+    r"|\*[ \t]*)*$")
+
+
 def _js_is_call(sf: _SrcFile, start: int, end: int) -> bool:
     """Ist der Treffer ein Aufruf? Nicht hinter `function`/`new`/`class` (geprüft auf
     `_JS_DEF_WINDOW` Zeichen davor, damit der Aufwand nicht mit der Datei wächst) und keine
-    Kurzdefinition einer Methode oder eines Objekt-Mitglieds (`check(x) {`)."""
+    Kurzdefinition einer Methode oder eines Objekt-Mitglieds (`check(x) {`, auch mit
+    Rückgabetyp `parse(s: string): number {`): der Name steht am Zeilenanfang oder hinter
+    `{`/`,`, davor höchstens Modifizierer (`async`, `static`, `get`, `*` …) — `class Y
+    extends mixin(Base) {` bleibt ein Aufruf."""
     masked = sf.masked
     if _JS_DEF_BEFORE_RE.search(masked, max(0, start - _JS_DEF_WINDOW), start):
         return False
-    k = end + 1
-    while k < len(masked) and masked[k] in " \t\r\n":
-        k += 1
-    return not masked.startswith("{", k)
+    if not _JS_SHORT_DEF_TAIL_RE.match(masked, end + 1):
+        return True
+    head = masked[masked.rfind("\n", 0, start) + 1:start]
+    return not _JS_SHORT_DEF_HEAD_RE.search(head)
 
 
 def _js_call_sites(sf: _SrcFile, bindings: dict, changed: list):
@@ -5071,10 +5086,14 @@ _NAME_HEADS = {
 _NAME_NOT_DEFS = frozenset({"if", "for", "while", "switch", "catch", "synchronized", "using",
                             "lock", "foreach", "fixed", "return", "sizeof", "else", "new",
                             "throw", "case", "typeof", "when"})
+# Nach der Parameterliste: Zusätze bis `{` oder bis zum `:` einer Initialisiererliste
+# (Gruppe 1), deren Klammern `_name_init_list` balanciert überspringt.
 _NAME_TYPED_TAIL = re.compile(
     r"\s*(?:(?:const|noexcept(?:\s*\([^()]*\))?|override|final|volatile|mutable|&&?"
     r"|throws\s+[\w.,\s<>]+|where\s+[^{;]+|->\s*[\w:<>,\s*&]+?)\s*)*"
-    r"(?::\s*[\w:<>]+\s*[({][^(){};]*[)}](?:\s*,\s*[\w:<>]+\s*[({][^(){};]*[)}])*\s*)?\{")
+    r"(?:(?<!:)(:)(?!:)|\{)")
+_NAME_INIT_RE = re.compile(r"\s*[\w:<>]+\s*[({]")
+_NAME_INIT_NEXT_RE = re.compile(r"\s*(,|\{)")
 _NAME_NEW_RE = re.compile(r"(?<![\w$])new\s+$")
 _NAME_DECL_GOES_ON = ("{", "->", ":", "where", "throws", "rethrows", "async", "=")
 _NAME_CALL_RE = re.compile(
@@ -5115,12 +5134,14 @@ def _name_body(sf: _SrcFile, group: str, pos: int):
 
 def _name_goes_on(masked: str, k: int) -> bool:
     """Geht die Signatur über das Zeilenende bei `k` weiter? Ja, wenn die Zeile mit `,`, `:`,
-    `(` oder `->` endet oder die nächste Zeile mit `_NAME_DECL_GOES_ON` beginnt (`{` auf
-    eigener Zeile, `-> T`, `where`, `throws` …)."""
+    `(`, `->` oder dem Wort `where` endet oder die nächste Zeile mit `_NAME_DECL_GOES_ON`
+    beginnt (`{` auf eigener Zeile, `-> T`, `where`, `throws` …)."""
     j = k - 1
     while j >= 0 and masked[j] in " \t\r":
         j -= 1
     if j >= 0 and (masked[j] in ",:(" or (j >= 1 and masked.startswith("->", j - 1))):
+        return True
+    if re.search(r"(?<!\w)where$", masked[max(0, j - 5):j + 1]):
         return True
     j = k + 1
     while j < len(masked) and masked[j] in " \t\r\n":
@@ -5128,6 +5149,22 @@ def _name_goes_on(masked: str, k: int) -> bool:
     return any(masked.startswith(word, j) and (
         not word[-1].isalpha() or not masked[j + len(word):j + len(word) + 1].isalnum())
         for word in _NAME_DECL_GOES_ON)
+
+
+def _name_init_list(masked: str, k: int):
+    """Position des `{` hinter einer Initialisiererliste ab `k` (hinter ihrem `:`): je
+    Initialisierer Name und eine balanciert übersprungene `(…)`/`{…}`, getrennt durch `,`;
+    None, wenn die Form nicht passt."""
+    while True:
+        init = _NAME_INIT_RE.match(masked, k)
+        if not init:
+            return None
+        nxt = _NAME_INIT_NEXT_RE.match(masked, _balanced_end(masked, init.end() - 1) + 1)
+        if not nxt:
+            return None
+        if nxt[1] == "{":
+            return nxt.end() - 1
+        k = nxt.end()
 
 
 def _name_defs(sf: _SrcFile, group: str) -> list:
@@ -5140,14 +5177,17 @@ def _name_defs(sf: _SrcFile, group: str) -> list:
             continue
         if group == "typed":
             words = re.sub(r"[*&]", " ", m[1]).split()
-            if (words[-1] in _NAME_NOT_DEFS) if words else "::" not in m[2]:
-                continue                     # Aufruf `f(…)` am Zeilenanfang, `return f(…)`
+            if (words[-1] in _NAME_NOT_DEFS or words[-1] in ":,") if words else (
+                    "::" not in m[2]):
+                continue                     # `f(…)` am Zeilenanfang, `return f(…)`, `: a(x)`
         end = _balanced_end(sf.masked, m.end() - 1)
         if group == "typed":
             tail = _NAME_TYPED_TAIL.match(sf.masked, end + 1)
-            if not tail:
+            brace = tail and (_name_init_list(sf.masked, tail.end()) if tail[1]
+                              else tail.end() - 1)
+            if brace is None:
                 continue
-            body, sig_end = (tail.end() - 1, _balanced_end(sf.masked, tail.end() - 1)), tail.end() - 1
+            body, sig_end = (brace, _balanced_end(sf.masked, brace)), brace
         else:
             body, sig_end = _name_body(sf, group, end + 1)
         start = (m.start(1) if m[1] else m.start(2)) if group == "typed" else m.start()
@@ -5238,23 +5278,45 @@ def _name_throws(index: _NameIndex, drel: str, item: _Def) -> list:
     return out
 
 
+def _closes_on_line(masked: str, pos: int) -> bool:
+    """Schließt die Klammer bei `pos` noch auf ihrer Zeile? Billig: nur bis zum Zeilenende."""
+    stop = masked.find("\n", pos)
+    depth = 0
+    for ch in masked[pos:len(masked) if stop < 0 else stop]:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                return True
+    return False
+
+
 def _name_sites(index: _NameIndex, rel: str, sf: _SrcFile, lines: set, unresolved: set) -> list:
     """Die Stellen einer Datei: je Aufruf auf einer geänderten Zeile, dessen Name im Repo
     genau eine Definition hat, ein Eintrag mit `UNIQUE_NAME_MARK`, wenn ihr Rumpf `throw` oder
-    `panic` enthält; zwei oder mehr Definitionen desselben Namens: gezählt."""
+    `panic` enthält; zwei oder mehr Definitionen desselben Namens: gezählt. Billige Filter
+    zuerst: ein Treffer hinter der letzten geänderten Zeile fällt weg, einer auf einer
+    geänderten Zeile zählt ohne Klammersuche; `_balanced_end` läuft nur für einen
+    mehrzeiligen Aufruf, dessen Name eine Definition hat."""
     sites = _Sites(rel)
-    changed, hits = sorted(lines), []
+    changed, hits, wide = sorted(lines), [], []
     for m in _NAME_CALL_RE.finditer(sf.masked):
         if m.start(1) in index.def_at[rel]:
             continue
-        end = _balanced_end(sf.masked, m.end() - 1)
         line = sf.line(m.start(1))
-        if not _touches(changed, line, sf.line(end)):
-            continue
+        if not changed or line > changed[-1]:
+            continue                         # beginnt hinter der letzten geänderten Zeile
         if _NAME_NEW_RE.search(sf.masked, max(0, m.start() - _JS_DEF_WINDOW), m.start()):
             continue                         # `new X(`: Konstruktor, Fenster vor dem Treffer
-        hits.append((m, line))
-    index.prepare(m[1] for m, _line in hits)
+        if line in lines:
+            hits.append((m, line))
+        elif not _closes_on_line(sf.masked, m.end() - 1):
+            wide.append((m, line))           # mehrzeilig: erreicht vielleicht eine Änderung
+    index.prepare(m[1] for m, _line in hits + wide)
+    hits += [(m, line) for m, line in wide if index.defs_of(m[1]) and _touches(
+        changed, line, sf.line(_balanced_end(sf.masked, m.end() - 1)))]
+    hits.sort(key=lambda hit: hit[0].start())
     for m, line in hits:
         name = m[1]
         defs = index.defs_of(name)
