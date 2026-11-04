@@ -8,15 +8,20 @@ nachsieht, nicht, was der Hauptagent schon denkt. Sonst bestätigt der Subagent 
 ## Die sechs Felder
 
 Jedes Feld ist eine Überschrift mit einer Zeile oder wenigen Zeilen darunter; der ganze Auftrag
-bleibt kurz, sonst geht der Vorteil des frischen Kontexts verloren.
+bleibt kurz, sonst geht der Vorteil des frischen Kontexts verloren. Wer kürzt, kürzt nie die
+Zeilen zu offenen großen Fragen unter Feste Vorgaben.
 
 - **Frage**: ein Satz, neutral, ohne Empfehlung und ohne bevorzugte Option.
 - **Anlass**: die laufende Aufgabe und ihr Ziel, ein bis zwei Sätze.
 - **Wo nachsehen**: Pfade und Suchmuster, keine Dateiinhalte; lesen tut der Subagent.
-- **Schon entschieden**: Einträge der Sitzung und freigegebene oder abgelehnte Fragen zum Thema
-  (`decide_log.py summary`, `docs/big-decisions.md`), je mit Quelle; `—`, wenn keine.
-- **Feste Vorgaben**: was nicht zur Wahl steht (Nutzer, Spec, Plan, Regeln aus `rules.md`, offene
-  große Fragen `D-<n>` mit „nicht entscheiden, nicht darauf aufbauen“), je mit Quelle.
+- **Schon entschieden**: Einträge zum Thema aus dem Protokoll der Sitzung
+  (`.skills/cache/decide/<session>/log.md`, alle Zeilen mit diesem Thema — `summary` zeigt nur die
+  zehn jüngsten und lässt `nie fragen` aus) und Blöcke in `docs/big-decisions.md` mit Status
+  `freigegeben` oder `abgelehnt`, je mit Quelle; `—`, wenn keine.
+- **Feste Vorgaben**: was nicht zur Wahl steht (Nutzer, Spec, Plan, Regeln aus `rules.md`), je mit
+  Quelle; dazu jede offene große Frage aus `decide_log.py open` — auch aus früheren Sitzungen und
+  ohne Thema — mit „nicht entscheiden, nicht darauf aufbauen“. Ist die Ablage nicht lesbar, steht
+  hier „Ablage nicht gelesen — bei jeder teuren Frage zurückgeben statt entscheiden“.
 - **Rückgabe**: Optionen mit Belegen `datei:zeile`, Folgen, Umkehrbarkeit, dann eine Empfehlung
   mit Grund; darunter der feste Satz:
 
