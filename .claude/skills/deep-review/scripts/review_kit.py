@@ -10,8 +10,8 @@ Arbeitsbaum läuft auf einer Kopie des Index); HEAD, Index und Arbeitsbaum des N
 bleiben unberührt (E6).
 
 Stand Task 7: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
-ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel,
-`build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
+ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel mit
+Spannen in großen Dateien (`split_file_spans`, Spec 28), `build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
 Python (`collect_python`; Zielcode nur per `ast` gelesen) und Delphi (`collect_delphi`,
 Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
 `write_counterparts` (Spec 28: die Gegenstellen sammelt `plan` einmal und legt sie je Datei
@@ -437,26 +437,35 @@ def classify(path, with_tests):
     return REASON_TEST if is_test else None
 
 
-def cut_packets(files, packet_size):
-    """Pakete nach der Schnittregel (Spec 26, Ablauf Schritt 2).
+def _check_packet_size(packet_size) -> int:
+    if not isinstance(packet_size, int) or isinstance(packet_size, bool) or packet_size < 1:
+        raise KitError(f"packet_size muss eine positive Zahl sein, nicht {packet_size!r}")
+    return packet_size
+
+
+def cut_packets(files, packet_size, repo=None, rng=None):
+    """Pakete nach der Schnittregel (Spec 26, Ablauf Schritt 2; Spannen Spec 28).
 
     `files`: Dict Pfad → geänderte Zeilen oder Paare (Pfad, Zeilen). Dateien nach Pfad
     sortiert und nach Verzeichnis gruppiert, Gruppen in der Reihenfolge ihres ersten
     Auftretens. Gruppen füllen der Reihe nach Pakete bis `packet_size`; ein Paket nimmt
-    mehrere Verzeichnisse auf. Eine Gruppe über `packet_size` wird an Dateigrenzen geteilt,
-    eine Datei nie; eine Datei über `packet_size` ist ein eigenes Paket. Vorrang: Datei ganz
+    mehrere Verzeichnisse auf. Eine Gruppe über `packet_size` wird an Dateigrenzen geteilt.
+    Eine Datei über `packet_size` ist ein eigenes Paket — mit `repo` und `rng` (der Bereich,
+    auch ein `Span`) wird sie in Spannen geteilt (`split_file_spans`), und jede Spanne ist ein
+    eigenes Paket mit `spans` = `[{"file", "lines": [von, bis]}]` und den geänderten Zeilen
+    der Spanne; ergibt das Teilen nur eine Spanne, bleibt die Datei ganz. Vorrang: Datei ganz
     vor Verzeichnis zusammen vor Paketgröße. IDs `p1`, `p2`, … in dieser Reihenfolge.
 
-    Rückgabe: Liste von {"id", "files", "changed_lines"}."""
-    if not isinstance(packet_size, int) or isinstance(packet_size, bool) or packet_size < 1:
-        raise KitError(f"packet_size muss eine positive Zahl sein, nicht {packet_size!r}")
+    Rückgabe: Liste von {"id", "files", "changed_lines"} (Spannen-Pakete dazu `spans`)."""
+    _check_packet_size(packet_size)
     items = files.items() if isinstance(files, dict) else files
     groups: dict[str, list[tuple[str, int]]] = {}
     for path, lines in sorted((str(p), int(n)) for p, n in items):
         groups.setdefault(PurePosixPath(path).parent.as_posix(), []).append((path, lines))
 
-    chunks: list[list[tuple[str, int]]] = []
-    current: list[tuple[str, int]] = []
+    # Ein Element: (Pfad, geänderte Zeilen, Spanne (von, bis) oder None für die ganze Datei).
+    chunks: list[list[tuple]] = []
+    current: list[tuple] = []
     size = 0
 
     def close() -> None:
@@ -470,42 +479,255 @@ def cut_packets(files, packet_size):
         if total <= packet_size:
             if size + total > packet_size:
                 close()
-            current.extend(group)
+            current.extend((path, lines, None) for path, lines in group)
             size += total
             continue
         close()
         for path, lines in group:
             if lines > packet_size:
                 close()
-                chunks.append([(path, lines)])
+                spans = [] if repo is None else _file_spans(repo, rng, path, packet_size)
+                if len(spans) > 1:
+                    chunks += [[(path, count, lines_range)] for lines_range, count in spans]
+                else:
+                    chunks.append([(path, lines, None)])
                 continue
             if size + lines > packet_size:
                 close()
-            current.append((path, lines))
+            current.append((path, lines, None))
             size += lines
     close()
-    return [
-        {"id": f"p{i}", "files": [p for p, _ in chunk], "changed_lines": sum(n for _, n in chunk)}
-        for i, chunk in enumerate(chunks, 1)
-    ]
+    packets = []
+    for i, chunk in enumerate(chunks, 1):
+        packet = {"id": f"p{i}", "files": list(dict.fromkeys(p for p, _n, _s in chunk)),
+                  "changed_lines": sum(n for _p, n, _s in chunk)}
+        spans = [{"file": p, "lines": list(s)} for p, _n, s in chunk if s is not None]
+        if spans:
+            packet["spans"] = spans
+        packets.append(packet)
+    return packets
 
 
-def _pack(files, focus, split_at, packet_size):
+def _pack(files, focus, split_at, packet_size, repo=None, rng=None):
     """Die Pakete eines Plans — die eine Stelle der Packregel für `build_plan` und
     `apply_since`. `files`: Dict Pfad → geänderte Zeilen der zu reviewenden Dateien, in
     Plan-Reihenfolge. Über `split_at` Zeilen und nicht Fokus `security`: die Pakete von
-    `cut_packets` mit `packet_size`, wenn es mehr als eines sind; sonst ein Paket mit allen
-    Dateien, `p1` (bei Fokus `security` `s1`). Keine Datei: keine Pakete. Rückgabe: Liste von
-    {"id", "files", "changed_lines"} ohne `range`; mehr als ein Paket heißt geteilt."""
+    `cut_packets` mit `packet_size` (mit `repo` und `rng` große Dateien in Spannen), wenn es
+    mehr als eines sind; sonst ein Paket mit allen Dateien, `p1` (bei Fokus `security` `s1`).
+    Keine Datei: keine Pakete. Rückgabe: Liste von {"id", "files", "changed_lines"} (dazu
+    `spans` bei Spannen-Paketen) ohne `range`; mehr als ein Paket heißt geteilt."""
     if not files:
         return []
     changed = sum(files.values())
     if focus != "security" and changed > split_at:
-        cut = cut_packets(files, packet_size)
+        cut = cut_packets(files, packet_size, repo, rng)
         if len(cut) > 1:
             return cut
     return [{"id": "s1" if focus == "security" else "p1", "files": list(files),
              "changed_lines": changed}]
+
+
+# --- Spannen in großen Dateien (Spec 28, Ablauf Schritt 2) ----------------------------------
+#
+# Eine Spanne ist ein Zeilenbereich der Datei am ZIEL (1-basiert, inklusiv). Gewicht einer
+# Zeile: 1, wenn sie am ZIEL hinzugefügt ist; die gelöschten Zeilen eines Hunks zählen an
+# seinem Anker (die erste Zeile des Hunks am ZIEL, bei einer reinen Löschung die Zeile danach).
+# Dieselbe Regel baut `von`: Zeilen der Spanne auf dem Stand der Basis, der Rest am ZIEL.
+
+HUNK_BOTH_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+SPAN_LINE_RE = re.compile(rb"[^\n]*\n|[^\n]+\Z")       # Zeilen wie git sie zählt, mit Zeilenende
+PAS_IMPLEMENTATION_RE = re.compile(r"\s*implementation\b", re.IGNORECASE)
+# Routine der obersten Ebene: Kopf in Spalte 0 (lokale Routinen sind eingerückt).
+PAS_ROUTINE_HEAD_RE = re.compile(
+    r"(?:class\s+)?(?:procedure|function|constructor|destructor|operator)\b", re.IGNORECASE)
+REGULAR_MODES = ("100644", "100755")
+
+
+class _FileDiff(NamedTuple):
+    """Eine Datei im Bereich: ihre Zeilen am ZIEL und an der Basis (Bytes mit Zeilenende) und
+    die Hunks `(a, b, c, d)` aus `@@ -a,b +c,d @@` von `git diff -U0`."""
+    target: list
+    base: list
+    hunks: list
+
+
+def _file_diff(repo: Path, span: Span, path: str):
+    """`_FileDiff` von `path` über `span`, aus Git (nie aus dem Arbeitsbaum); None, wenn die
+    Datei am ZIEL keine reguläre Datei ist (fehlt, Symlink, Submodul). Ist sie an der Basis
+    keine reguläre Datei (neu, vorher Symlink oder Submodul), gilt jede Zeile als neu."""
+    found = _tree_entries(repo, span.target, [path])
+    if path not in found or found[path][1] != "blob" or found[path][0] not in REGULAR_MODES:
+        return None
+    before = _tree_entries(repo, span.base, [path])
+    base_sha = before[path][2] if path in before and before[path][0] in REGULAR_MODES else None
+    blobs = _blob_contents(repo, [found[path][2]] + ([base_sha] if base_sha else []))
+    target = SPAN_LINE_RE.findall(blobs[found[path][2]])
+    if base_sha is None:
+        return _FileDiff(target, [], [(0, 0, 1, len(target))] if target else [])
+    out = _git(repo, "diff", "-U0", "--inter-hunk-context=0", "--no-renames", "--no-ext-diff",
+               "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/",
+               span.base, span.target, "--", f":(literal){path}")
+    hunks = []
+    for line in out.split("\n"):
+        match = HUNK_BOTH_RE.match(line) if line.startswith("@@") else None
+        if match:
+            hunks.append((int(match[1]), int(match[2] or 1), int(match[3]), int(match[4] or 1)))
+    return _FileDiff(target, SPAN_LINE_RE.findall(blobs[base_sha]), hunks)
+
+
+def _anchor(c: int, d: int, n: int) -> int:
+    """Zeile am ZIEL, an der die gelöschten Zeilen eines Hunks `+c,d` zählen (1…n)."""
+    return min(max(c if d else c + 1, 1), n)
+
+
+def _line_weights(diff: _FileDiff) -> list:
+    """Geänderte Zeilen je Zeile am ZIEL, Index 1…n (Index 0 bleibt 0)."""
+    n = len(diff.target)
+    weights = [0] * (n + 1)
+    for _a, b, c, d in diff.hunks:
+        for line in range(c, c + d):
+            weights[line] += 1
+        if b:
+            weights[_anchor(c, d, n)] += b
+    return weights
+
+
+def _definition_starts(path: str, data: bytes) -> list:
+    """Zeilen, an denen eine Definition der obersten Ebene beginnt, sortiert: Python über
+    `ast` (def, async def, class; mit Dekoratoren deren erste Zeile — nie importiert), Delphi
+    über einen Zeilenscan des maskierten Texts (`mask_pascal`): Kopf einer Routine in Spalte 0
+    nach `implementation`. Andere Sprachen und ein Python-Syntaxfehler: keine."""
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix in PYTHON_SUFFIXES:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")      # etwa SyntaxWarning: nichts auf stderr
+                tree = ast.parse(data, filename=path)
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            return []
+        return sorted({min([node.lineno] + [d.lineno for d in node.decorator_list])
+                       for node in tree.body if isinstance(node, (*_FUNCS, ast.ClassDef))})
+    if suffix in DELPHI_SUFFIXES:
+        starts, implementation = [], False
+        for number, line in enumerate(mask_pascal(_pas_text(data)).split("\n"), 1):
+            if not implementation:
+                implementation = PAS_IMPLEMENTATION_RE.match(line) is not None
+            elif PAS_ROUTINE_HEAD_RE.match(line):
+                starts.append(number)
+        return starts
+    return []
+
+
+def _cut_spans(weights: list, starts: list, blanks: list, packet_size: int) -> list:
+    """Spannen `[von, bis]` über die Zeilen 1…n: ab dem Anfang so viele Zeilen, wie ihr Gewicht
+    `packet_size` nicht übersteigt; geschnitten vor der letzten Definition darin (`starts`),
+    sonst nach der letzten Leerzeile darin (`blanks`), sonst genau dort. Jede Spanne trägt
+    mindestens eine geänderte Zeile: Geschnitten wird nie vor der ersten geänderten Zeile der
+    Spanne, und was nach der letzten geänderten Zeile kommt, gehört zur letzten Spanne. Eine
+    einzelne Zeile über `packet_size` ist eine Spanne für sich."""
+    n = len(weights) - 1
+    changed = [line for line in range(1, n + 1) if weights[line]]
+    spans, start = [], 1
+    while start <= n:
+        total, last = 0, start - 1
+        while last < n and total + weights[last + 1] <= packet_size:
+            last += 1
+            total += weights[last]
+        k = bisect.bisect_right(changed, last)
+        if k == len(changed):            # keine geänderte Zeile mehr dahinter
+            spans.append([start, n])
+            break
+        first = changed[bisect.bisect_left(changed, start)]   # erste geänderte Zeile ab start
+        cut = None
+        i = bisect.bisect_right(starts, last + 1)
+        if i and starts[i - 1] > first:
+            cut = starts[i - 1] - 1
+        if cut is None:
+            j = bisect.bisect_right(blanks, last)
+            if j and blanks[j - 1] >= first:
+                cut = blanks[j - 1]
+        if cut is None:
+            cut = max(last, first)
+        if bisect.bisect_right(changed, cut) == len(changed):
+            cut = n                          # der Rest trägt keine geänderte Zeile
+        spans.append([start, cut])
+        start = cut + 1
+    return spans
+
+
+def _file_spans(repo, rng, path, packet_size) -> list:
+    """`split_file_spans` mit den geänderten Zeilen je Spanne: Liste von `((von, bis), n)`."""
+    _check_packet_size(packet_size)
+    repo = _toplevel(repo)
+    span = split_range(repo, rng)
+    path = str(path)
+    diff = _file_diff(repo, span, path)
+    if diff is None or not diff.target:
+        return []
+    weights = _line_weights(diff)
+    blanks = [i for i, line in enumerate(diff.target, 1) if not line.strip()]
+    spans = _cut_spans(weights, _definition_starts(path, b"".join(diff.target)), blanks,
+                       packet_size)
+    return [((a, b), sum(weights[a:b + 1])) for a, b in spans]
+
+
+def split_file_spans(repo, rng, path, packet_size):
+    """Zeilenbereiche `[von, bis]` (1-basiert, inklusiv, am ZIEL) einer Datei, je höchstens
+    `packet_size` geänderte Zeilen (Spec 28, Ablauf Schritt 2). `rng` wie bei `numstat` (auch
+    ein `Span`); gelesen wird aus Git, die Datei wird nie importiert oder gestartet.
+
+    Geschnitten wird möglichst nahe an `packet_size` geänderten Zeilen: vor einer Definition
+    der obersten Ebene (Python: `def`/`class` über `ast`; Delphi: Routine in Spalte 0 im
+    implementation-Teil), fehlt eine, nach einer Leerzeile, sonst nach genau so vielen Zeilen,
+    dass `packet_size` erreicht ist (bei einer neuen Datei: `packet_size` Zeilen). Gelöschte
+    Zeilen zählen an ihrem Anker (erste Zeile des Hunks am ZIEL). Die Spannen decken die Datei
+    lückenlos; unter `packet_size` ist es eine Spanne über die ganze Datei. Eine Datei, die am
+    ZIEL fehlt, leer oder keine reguläre Datei ist: `[]`."""
+    return [list(lines) for lines, _count in _file_spans(repo, rng, path, packet_size)]
+
+
+def _packet_spans(packet) -> dict:
+    """Pfad → Liste `(von, bis)` aus `spans` eines Pakets; ohne `spans` leer (ganze Dateien)."""
+    out: dict[str, list] = {}
+    for item in packet.get("spans") or ():
+        out.setdefault(str(item["file"]), []).append(tuple(item["lines"]))
+    return out
+
+
+def _in_spans(spans: dict, path: str, line) -> bool:
+    """Liegt `line` von `path` in einer Spanne? Eine Datei ohne Spanne zählt ganz."""
+    ranges = spans.get(str(path))
+    return ranges is None or any(a <= line <= b for a, b in ranges)
+
+
+def _spans_text(packet) -> str | None:
+    """`datei:von-bis` je Spanne des Pakets, mit `, ` getrennt; None ohne Spanne."""
+    spans = packet.get("spans") or ()
+    return ", ".join(f"{s['file']}:{s['lines'][0]}-{s['lines'][1]}" for s in spans) or None
+
+
+def _von_content(diff: _FileDiff, ranges) -> bytes:
+    """Inhalt der Datei in `von` eines Spannen-Pakets: außerhalb der Spannen `ranges` der
+    Stand am ZIEL, innerhalb der Stand der Basis — je Hunk die hinzugefügten Zeilen in der
+    Spanne entfernt, die gelöschten zurück, wenn sein Anker in der Spanne liegt. Bei einer
+    neuen Datei fehlen so genau die Zeilen der Spanne."""
+    n = len(diff.target)
+
+    def inside(line: int) -> bool:
+        return any(a <= line <= b for a, b in ranges)
+
+    out, pos = [], 1
+    for a, b, c, d in diff.hunks:
+        start = c if d else c + 1
+        out += diff.target[pos - 1:start - 1]
+        if b and inside(_anchor(c, d, n)):
+            out += diff.base[a - 1:a - 1 + b]
+        out += [diff.target[line - 1] for line in range(start, start + d) if not inside(line)]
+        pos = start + d
+    out += diff.target[pos - 1:]
+    # Eine letzte Zeile ohne Zeilenende, die nun mitten im Text steht, bekommt eines.
+    return b"".join(line if line.endswith(b"\n") or i == len(out) - 1 else line + b"\n"
+                    for i, line in enumerate(out))
 
 
 # --- Lauf-ID und JSON -------------------------------------------------------------------
@@ -703,7 +925,9 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     `_pack` (dieselbe Regel wie in `apply_since`): Bis `split_at` (None = `SPLIT_AT`) — oder
     wenn das Schneiden nur ein Paket ergäbe — ein Paket `p1` über den Originalbereich,
     `split: false`; sonst `split: true`, Pakete nach `cut_packets` mit `packet_size` =
-    kleiner von `PACKET_SIZE` und `split_at`, deren `range` die Paket-Bereiche füllen. Fokus
+    kleiner von `PACKET_SIZE` und `split_at`, deren `range` die Paket-Bereiche füllen; eine
+    Datei über `packet_size` wird dabei in Spannen geteilt (`split_file_spans`), je Spanne ein
+    Paket mit `spans` (Spec 28; `file_keys` bleiben je Datei). Fokus
     `security`: ein Paket `s1` über den ganzen Bereich, nie geteilt. `file_keys` trägt je
     reviewter Datei `{"key", "changed_lines", "base_blob", "target_blob", "reused_from":
     null}`: den Datei-Schlüssel (`file_keys()`, über die Gegenstellen des Bereichs — bei Fokus
@@ -768,7 +992,7 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     changed = sum(reviewed.values())
     packet_size = min(PACKET_SIZE, split_at)
 
-    packed = _pack(reviewed, focus, split_at, packet_size)
+    packed = _pack(reviewed, focus, split_at, packet_size, repo, span)
     split = len(packed) > 1
     root = span.log_base is None
     # Beim Wurzel-Commit ist `resolved` nur `<ziel>`; /code-review läse das als Ref und
@@ -972,8 +1196,9 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
     Objekten mit eindeutiger `id` (Text aus Buchstaben, Ziffern, `_`, `-`), `files` (Liste
     von Text) und `range` (Text oder null), `notes` eine Liste von Objekten mit `packet`,
     `kind`, `text` (Text) und `files` (Liste von Text), `profile` ein Wert aus `PROFILES`,
-    `level` (wenn gesetzt) einer aus `LEVELS`. Alles andere ist ein KitError, kein
-    TypeError."""
+    `level` (wenn gesetzt) einer aus `LEVELS`, `spans` eines Pakets (wenn gesetzt; ohne gilt
+    die ganze Datei, E8) eine Liste von `{"file": Datei des Pakets, "lines": [von, bis]}`.
+    Alles andere ist ein KitError, kein TypeError."""
     path = run_dir(repo, run_id) / "plan.json"
     return path, _read_plan(path, run_id)
 
@@ -1027,6 +1252,14 @@ def _read_plan(path: Path, run_id: str) -> dict:
             raise bad(f"range von {pid} ist weder Text noch null")
         if packet.get("marker") is not None and not isinstance(packet["marker"], str):
             raise bad(f"marker von {pid} ist weder Text noch null")
+        spans = packet.get("spans", [])
+        if not isinstance(spans, list) or not all(
+                isinstance(item, dict) and item.get("file") in files
+                and isinstance(item.get("lines"), list) and len(item["lines"]) == 2
+                and all(_is_count(n) and n >= 1 for n in item["lines"])
+                and item["lines"][0] <= item["lines"][1] for item in spans):
+            raise bad(f"spans von {pid} ist keine Liste von Objekten mit file (Datei des "
+                      "Pakets) und lines [von, bis]")
     notes = plan.get("notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
         raise bad("notes ist keine Liste von Objekten")
@@ -1231,7 +1464,7 @@ def _index_info(files, entries: dict, null: str) -> bytes:
 
 
 def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
-                    target_entries: dict) -> tuple[str, str]:
+                    target_entries: dict, spans=None) -> tuple[str, str]:
     """`von` = ZIEL mit den Paketdateien auf dem Stand der gezählten Basis (Parent ZIEL),
     `bis` = `von` mit den Paketdateien auf dem Stand von ZIEL (Parent `von`, die Messages
     des Bereichs); beide unter `refs/deep-review/<lauf>/<id>/`. Nur temporärer Index,
@@ -1241,10 +1474,23 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
     als Datei/Ordner mit einem Pfad außerhalb des Pakets kollidiert (BASIS hat die Datei
     `a`, ZIEL den Ordner `a/` eines anderen Pakets, oder umgekehrt), kann ein Baum nicht
     beides tragen: `von` verliert den fremden Pfad, und `bis` trägt ihn dann auch nicht —
-    so zeigt `von..bis` weiter genau die Paketdateien."""
+    so zeigt `von..bis` weiter genau die Paketdateien.
+
+    `spans` (Pfad → Liste `(von, bis)`, `_packet_spans`): eine Datei mit Spanne steht in `von`
+    nicht auf dem Stand der Basis, sondern mit dem Inhalt aus `_von_content` (außerhalb der
+    Spanne ZIEL, innerhalb Basis) und dem Modus am ZIEL, als Blob über `git hash-object -w`
+    geschrieben — `von..bis` zeigt so nur die Zeilen der Spanne."""
     target = plan["target"]
     null = "0" * len(target)
-    von_info = _index_info(files, _tree_entries(repo, plan["base"], files), null)
+    von_entries = _tree_entries(repo, plan["base"], files)
+    span = Span(plan["base"], target, plan["log_base"])
+    for path, ranges in (spans or {}).items():
+        diff = _file_diff(repo, span, path) if path in target_entries else None
+        if diff is not None:
+            sha = _git(repo, "hash-object", "-w", "--no-filters", "--stdin",
+                       stdin=_von_content(diff, ranges)).strip()
+            von_entries[path] = (target_entries[path][0], "blob", sha)
+    von_info = _index_info(files, von_entries, null)
     bis_info = _index_info(files, target_entries, null)
     message = _range_message(repo, plan["log_base"], target)
     with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
@@ -1313,6 +1559,9 @@ def make_packet_range(repo, run_id, packet, base, target):
     von ZIEL (Ausnahme Datei/Ordner-Kollision, `_helper_commits`), Parent `von` und die
     Commit-Messages des Bereichs; `update-ref refs/deep-review/<lauf>/<id>/von|bis`.
     `git diff von..bis` zeigt so genau die Paketdateien, der Reviewer sieht den vollen Code.
+    Ein Paket mit `spans` (Spec 28): die Datei steht in `von` außerhalb der Spanne am ZIEL und
+    innerhalb auf dem Stand der Basis (neue Datei: die Zeilen der Spanne fehlen), `bis` bleibt
+    der Baum von ZIEL — `von..bis` zeigt nur die Zeilen der Spanne (`_helper_commits`).
     HEAD, Index und Arbeitsbaum des Nutzers bleiben unberührt.
 
     Lesen, Bauen und Schreiben von `plan.json` laufen unter der Sperre `plan.lock` des
@@ -1346,7 +1595,8 @@ def make_packet_range(repo, run_id, packet, base, target):
         if rng is not None and rng != plan.get("range") and not _refs_hold(repo, run_id, pid, rng):
             rng = None
         if rng is None:
-            von, bis = _helper_commits(repo, run_id, pid, plan, files, target_entries)
+            von, bis = _helper_commits(repo, run_id, pid, plan, files, target_entries,
+                                       _packet_spans(entry))
             rng = entry["range"] = f"{von}..{bis}"
         kinds = (NOTE_TARGET_NOT_HEAD, NOTE_WORKTREE_DIFFERS, NOTE_WORKTREE_UNKNOWN)
         kept = [n for n in plan.get("notes", []) if n.get("packet") != pid] + notes
@@ -3983,8 +4233,11 @@ def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
     unreadable, notes, intro = _packet_extras(packet)
     files = [str(f) for f in packet.get("files") or []]  # einmal als Text, für Zeilen und Zahl
     rng = packet.get("range")
+    spans, shown_spans = _packet_spans(packet), _spans_text(packet)
+    entries = [e for e in entries if _in_spans(spans, e["file"], e["line"])]
     title = (f"# Paket {packet.get('id')}\n\n"
              + (f"Bereich: `{rng}`" if rng else "Bereich: noch nicht gebaut")
+             + (f"\n\nSpanne: `{shown_spans}`" if shown_spans else "")
              + f"\n\nDateien ({len(files)}):\n")
     total = len(entries)
     if intro is None:
@@ -4052,6 +4305,10 @@ def render_block(packet, entries, unresolved, cap):
     `cap`, in den nicht einmal Überschriften und Hinweise passen, ist ein KitError. Die
     Kopfzeile des Artefakts (E3) setzt `write_counterparts` davor und zieht sie vom `cap`
     ab.
+
+    Trägt das Paket `spans` (Spec 28), nennt der Kopf die Spanne, und der Block nimmt nur die
+    Einträge, deren Aufrufstelle in der Spanne ihrer Datei liegt (`_in_spans`); `unresolved`
+    zählt der Aufrufer schon so (`_stored_found` mit Spannen).
 
     Neben `id`, `range` und `files` liest der Block optionale Schlüssel des Pakets — jeder
     Sammler (Python, Delphi) erreicht alles, was ein Block zeigen kann, über diese vier
@@ -4197,13 +4454,18 @@ def _live_collectors(plan: dict, stored: dict) -> tuple:
                  if c.on_demand and any(c.accepts(path) for path in outside))
 
 
-def _stored_found(stored: dict, files) -> Collected:
+def _stored_found(stored: dict, files, spans=None) -> Collected:
     """`Collected` der Paketdateien aus dem Speicher — dasselbe, was `_collect_all` über die
     Paketdateien sammelte: Einträge nach Datei, Zeile, Art; nicht aufgelöste Stellen als
-    Vereinigung; nicht lesbare Dateien mit Grund."""
-    records = [(str(f), stored["files"][str(f)]) for f in files]
-    entries = sorted((e for _f, r in records for e in r["entries"]), key=_entry_order)
-    unresolved = {tuple(item) for _f, r in records for item in r["unresolved"]}
+    Vereinigung; nicht lesbare Dateien mit Grund. Mit `spans` (`_packet_spans`) nur die
+    Einträge und nicht aufgelösten Stellen, deren Aufrufstelle in der Spanne ihrer Datei
+    liegt (`_in_spans`). Eine Datei ohne Eintrag im Speicher zählt wie eine ohne Sammler."""
+    spans = spans or {}
+    records = [(str(f), stored["files"].get(str(f), COLLECTED_EMPTY)) for f in files]
+    entries = sorted((e for _f, r in records for e in r["entries"]
+                      if _in_spans(spans, e["file"], e["line"])), key=_entry_order)
+    unresolved = {tuple(item) for _f, r in records for item in r["unresolved"]
+                  if _in_spans(spans, item[0], item[1])}
     unparsed = sorted((f, r["unparsed"]) for f, r in records if r["unparsed"] is not None)
     return Collected(entries, len(unresolved), unparsed)
 
@@ -4363,7 +4625,8 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     dass Rückgabeformat und Marke am Ende stehen (`PROMPT_MARKER_HINT`, ohne die Marke selbst:
     sie steht nur in der letzten Zeile), der Auftragstext aus
     `references/review-brief.md` (`_brief_text`, nach dem Fokus des Plans), der Bereich
-    `<von>..<bis>` (`packet["range"]`), die Stufe `level`, im Profil `checkpoint` das Soll
+    `<von>..<bis>` (`packet["range"]`; bei einem Paket mit `spans` dazu die Spanne als
+    `datei:von-bis`), die Stufe `level`, im Profil `checkpoint` das Soll
     (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
     `packets/<id>.md` ohne Kopfzeile, ohne Änderung), bei Delphi-Dateien im Paket (`files`) die
     Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
@@ -4387,8 +4650,13 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
         inputs = _prompt_inputs(repo, _read_plan(directory / "plan.json", run_id),
                                 _has_delphi(packet))
     task = inputs.task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
+    shown_spans = _spans_text(packet)
+    area = f"## Bereich\n\n`{rng}`"
+    if shown_spans:
+        area += (f"\n\nSpanne: `{shown_spans}` — geändert sind nur diese Zeilen; der Rest der "
+                 "Datei steht auf dem Stand des Ziels.")
     parts = [PROMPT_MARKER_HINT, task,
-             f"## Bereich\n\n`{rng}`" + (f"\n\nStufe: {level}" if level is not None else "")]
+             area + (f"\n\nStufe: {level}" if level is not None else "")]
     if inputs.soll:
         parts.append(f"## Soll\n\n{inputs.soll}")
     parts.append(f"Paketblock:\n\n{block.strip()}")
@@ -4451,7 +4719,10 @@ def write_counterparts(repo, run_id):
     Sprache wird dann über die Paketdateien live gesammelt, die übrigen kommen aus dem
     Speicher. So ist der Block mit und ohne Speicher byte-gleich. Daneben je Paket
     `packets/<id>.prompt.md` (`write_prompt`; Plan, Auftrag, Soll und Delphi-Prüfliste einmal
-    gelesen, `_prompt_inputs`). Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
+    gelesen, `_prompt_inputs`). Ein Paket mit `spans` (Spec 28) sammelt je Datei (Speicher oder
+    live mit `per_file`) und nimmt nur die Stellen, deren Aufrufstelle in der Spanne liegt
+    (`_stored_found` mit Spannen) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
+    Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
     "prompt_chars" (ihre Länge in Zeichen; die Ausgabe nennt sie über `PROMPT_WARN_CHARS`),
@@ -4470,7 +4741,14 @@ def write_counterparts(repo, run_id):
     for packet in plan["packets"]:
         rng = make_packet_range(repo, run_id, packet["id"], None, None)
         found = None
-        if stored is not None:
+        spans = _packet_spans(packet)
+        if spans and not quality:
+            # Spannen: je Datei gesammelt (Speicher, sonst live), dann nur die Stellen der Spanne.
+            records = dict(stored["files"]) if stored is not None else {}
+            for collector in (live if stored is not None else COLLECTORS):
+                collector.collect(repo, plan_range, packet["files"], per_file=records)
+            found = _stored_found({"files": records}, packet["files"], spans)
+        elif stored is not None:
             kept = [f for f in packet["files"] if not any(c.accepts(str(f)) for c in live)]
             found = _joined([_stored_found(stored, kept)]
                             + [c.collect(repo, plan_range, packet["files"]) for c in live])
@@ -4809,7 +5087,9 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     angenommenes Ergebnis hat — dieselbe Regel wie in `audit` (`_read_result` mit dem
     Fingerabdruck des Plans, einmal je Plan berechnet) — und hat dann die Funde zu ihr daraus;
     oder wenn der Lauf sie selbst übernommen hat (`reused_from` mit `findings` in seinem
-    `file_keys`; gezählt werden dort nur die Funde zu ihr selbst). `outside`: je Fund eines
+    `file_keys`; gezählt werden dort nur die Funde zu ihr selbst). Eine Datei mit Spannen
+    (Spec 28) steht in mehreren Paketen: reviewt ist sie erst, wenn jedes davon ein gezähltes
+    Ergebnis hat, und ihre Funde sind die aller dieser Pakete. `outside`: je Fund eines
     angenommenen Ergebnisses zu einer Datei außerhalb seines Pakets ein Element mit den
     Dateien des Pakets und dem Stand der Fund-Datei am ZIEL dieses Laufs (`_file_blobs`, ein
     git-Aufruf je Lauf); dazu die `outside`-Elemente seiner übernommenen Einträge, wie sie
@@ -4828,19 +5108,30 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     def reviewed(info: dict, findings: list) -> _Reviewed:
         return _Reviewed(info["key"], info.get("base_blob"), info.get("target_blob"), findings)
 
-    files, outside, below, counted = {}, [], [], 0
+    files, outside, below, taken = {}, [], [], []
     for packet, result, level in _accepted_results(directory, plan):
         if min_level is not None and _below(level, min_level):
             below.append((packet["id"], level))
             continue
-        counted += 1
+        taken.append((packet, result))
+    counted = len(taken)
+    # Eine Datei mit Spannen steht in mehreren Paketen: reviewt erst, wenn jedes ein Ergebnis hat.
+    homes: dict[str, set] = {}
+    for packet in plan["packets"]:
+        for path in packet["files"]:
+            homes.setdefault(path, set()).add(packet["id"])
+    done = {packet["id"] for packet, _result in taken}
+    found_in: dict[str, list] = {}
+    for packet, result in taken:
         own = set(packet["files"])
         found = [{**f, "run": run_id} for f in result.findings]
         for path in packet["files"]:
-            if path in keyed:
-                files[path] = reviewed(keyed[path], [f for f in found if f["file"] == path])
+            if path in keyed and homes[path] <= done:
+                found_in.setdefault(path, []).extend(f for f in found if f["file"] == path)
         outside += [{"finding": f, "packet_files": list(packet["files"]), "file_blob": None}
                     for f in found if f["file"] not in own]
+    for path, findings in found_in.items():
+        files[path] = reviewed(keyed[path], findings)
     if outside:
         blobs = _file_blobs(repo, plan["target"], {item["finding"]["file"] for item in outside})
         for item in outside:
@@ -4936,7 +5227,8 @@ def apply_since(plan, run_dirs, passed_over=None):
     ein Lauf, dessen geplante Stufe darunter liegt und von dem kein Ergebnis zählt, steht dort
     als ganzer Lauf (`Stufe <x> unter <y>`). Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
-    oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
+    (eine Datei mit Spannen: jedes ihrer Pakete, `_earlier_files`; ihre `outside`-Elemente
+    nennen sie in `packet_files` je Paket) oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
     gesehen hat, ist sein Bereich von `base_blob` (Stand der Datei an seiner gezählten Basis)
     nach `target_blob`. Deshalb die Kettenregel: Übernommen wird nur, wenn sich die
@@ -5071,7 +5363,8 @@ def apply_since(plan, run_dirs, passed_over=None):
                 seen[home].add(mark)
                 outside.setdefault(home, []).append(item)
 
-    packet_files = [f for packet in plan["packets"] for f in packet["files"]]
+    # Eine Datei mit Spannen steht in mehreren Paketen.
+    packet_files = dict.fromkeys(f for packet in plan["packets"] for f in packet["files"])
     if sorted(packet_files) != sorted(plan["file_keys"]):
         raise KitError("file_keys und die Dateien der Pakete passen nicht zusammen")
     for path, (run_id, chain, findings) in reused.items():
@@ -5082,8 +5375,11 @@ def apply_since(plan, run_dirs, passed_over=None):
             new["file_keys"][path]["outside"] = copy.deepcopy(outside[path])
     remaining = {path: info["changed_lines"] for path, info in plan["file_keys"].items()
                  if path not in reused}
+    # Große Dateien werden wieder in Spannen geteilt, über den Bereich des Plans.
+    span = (Span(plan["base"], plan["target"], plan.get("log_base"))
+            if isinstance(plan.get("base"), str) and isinstance(plan.get("target"), str) else None)
     packets = _pack(remaining, plan.get("focus"), plan.get("split_at", SPLIT_AT),
-                    plan.get("packet_size", PACKET_SIZE))
+                    plan.get("packet_size", PACKET_SIZE), repo if span else None, span)
     new["packets"] = [{**p, "range": None, "reused_from": None} for p in packets]
     new["split"] = True
     new.pop("notes", None)
@@ -5218,14 +5514,16 @@ def _shown_path(repo: Path, path) -> str:
 
 def _plan_digest(plan: dict, run_id: str) -> str:
     """Fingerabdruck eines Plans für `_meta.plan` der Ergebnisse: Lauf, Bereich, Profil, Fokus,
-    Stufe und je Paket ID und Dateien. Ohne `range` der Pakete und ohne `notes` — die schreiben
+    Stufe und je Paket ID, Dateien und — nur wenn das Paket welche trägt — `spans` (ein Plan
+    ohne Spannen behält seinen Fingerabdruck, E8). Ohne `range` der Pakete und ohne `notes` — die schreiben
     `counterparts` und `cleanup` später, ohne dass der Plan ein anderer wird. `level` zählt nur,
     wenn der Plan das Feld trägt: Ein Plan aus Spec 26 ohne `level` behält seinen
     Fingerabdruck, seine Ergebnisse bleiben angenommen (E8); eine nach `record` geänderte oder
     entfernte Stufe macht sie ungültig."""
     ident = {"run": run_id, "range": plan.get("range"), "base": plan["base"],
              "target": plan["target"], "profile": plan.get("profile"), "focus": plan.get("focus"),
-             "packets": [[p["id"], list(p["files"])] for p in plan["packets"]]}
+             "packets": [[p["id"], list(p["files"])] + ([p["spans"]] if "spans" in p else [])
+                         for p in plan["packets"]]}
     if "level" in plan:
         ident["level"] = plan["level"]
     raw = json.dumps(ident, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -5562,7 +5860,13 @@ def _line_span(line):
     return None
 
 
-def _merged(group: list, rank: dict) -> dict:
+def _span_packets(ranges: list, lines: list) -> set:
+    """Pakete, deren Spanne eine der Zeilen `lines` (Paare (erste, letzte), schon gelesen)
+    überschneidet; `ranges`: Liste `(Paket, von, bis)` der Datei aus `_plan_spans`."""
+    return {pid for pid, a, b in ranges for first, last in lines if a <= last and first <= b}
+
+
+def _merged(group: list, rank: dict, extra=()) -> dict:
     def joined(field):
         texts = [s.finding.get(field) for s in group]
         texts = list(dict.fromkeys(t for t in texts if isinstance(t, str) and t))
@@ -5576,7 +5880,8 @@ def _merged(group: list, rank: dict) -> dict:
         return out
 
     head = group[0].finding
-    packets = sorted({s.packet for s in group if s.packet is not None}, key=lambda p: rank[p])
+    packets = sorted({s.packet for s in group if s.packet is not None} | set(extra),
+                     key=lambda p: rank[p])
     merged = {"file": head["file"], "line": head.get("line"), "summary": joined("summary"),
               "failure_scenario": joined("failure_scenario"), "packets": packets,
               "reused_from": next((s.reused_from for s in group if s.reused_from), None),
@@ -5587,7 +5892,7 @@ def _merged(group: list, rank: dict) -> dict:
     return merged
 
 
-def _merge_sources(sources: list, rank: dict) -> list:
+def _merge_sources(sources: list, rank: dict, plan_spans=None) -> list:
     """Funde derselben Datei mit höchstens `MERGE_LINE_GAP` Zeilen Abstand werden ein Fund —
     nicht verkettet: In Zeilenfolge (Anfang, Ende, Herkunft) eröffnet ein Fund eine Gruppe, und
     ein späterer kommt nur hinein, wenn sein Anfang höchstens `MERGE_LINE_GAP` nach dem Ende
@@ -5598,7 +5903,9 @@ def _merge_sources(sources: list, rank: dict) -> list:
     42 zwei. So liegt kein Glied weiter als `MERGE_LINE_GAP` von der Zeile, die der Fund nennt,
     außer es liegt in der Spanne eines anderen Glieds. Ohne Zeile bleibt jeder für sich. Je Fund
     wird die Zeile einmal gelesen (`_line_span`). Sortiert nach Datei, Zeile (ohne Zeile
-    zuletzt) und Herkunft."""
+    zuletzt) und Herkunft. `plan_spans` (Datei → Liste `(Paket, von, bis)`, `_plan_spans`): ein Fund
+    in einer Datei mit Spannen gehört dazu dem Paket, dessen Spanne seine Zeile enthält
+    (`_span_packets`); ein Fund außerhalb aller Spannen behält nur seine Pakete."""
     by_file: dict[str, list] = {}
     for order, source in enumerate(sources):
         by_file.setdefault(source.finding["file"], []).append((order, source))
@@ -5613,15 +5920,30 @@ def _merge_sources(sources: list, rank: dict) -> list:
                 spans.append((span, order, source))
         spans.sort(key=lambda t: (t[0], t[1]))
         groups, anchor, reach = [], None, None   # reach: das späteste Ende eines Glieds
+        member_lines: list[list] = []            # je Gruppe die Zeilen ihrer Glieder
         for span, _order, source in spans:
             # Nach Anfang sortiert: Überschneidung mit einem Glied, wenn sie bis `reach` beginnt.
             if groups and (span[0] - anchor <= MERGE_LINE_GAP or span[0] <= reach):
                 groups[-1].append(source)
+                member_lines[-1].append(span)
                 reach = max(reach, span[1])
             else:
                 groups.append([source])
+                member_lines.append([span])
                 anchor = reach = span[1]
-        out += [_merged(group, rank) for group in groups + loose]
+        ranges = (plan_spans or {}).get(path, ())
+        out += [_merged(group, rank, _span_packets(ranges, lines))
+                for group, lines in zip(groups, member_lines)]
+        out += [_merged(group, rank) for group in loose]
+    return out
+
+
+def _plan_spans(plan: dict) -> dict:
+    """Datei → Liste `(Paket, von, bis)` aller Spannen des Plans, in Plan-Reihenfolge."""
+    out: dict[str, list] = {}
+    for packet in plan["packets"]:
+        for path, ranges in _packet_spans(packet).items():
+            out.setdefault(path, []).extend((packet["id"], a, b) for a, b in ranges)
     return out
 
 
@@ -5632,7 +5954,8 @@ def merge(run_path):
     `MERGE_LINE_GAP` Zeilen Abstand zum ersten Fund ihrer Gruppe oder in der Spanne eines ihrer
     Glieder werden einer (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die
     des ersten), `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
-    `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (der Lauf der
+    `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen; in einer Datei mit Spannen dazu das
+    Paket, dessen Spanne die Zeile enthält — Spec 28), `reused_from` (der Lauf der
     ersten übernommenen Quelle oder null), `evidence` (nur wenn eine Quelle eines trägt: die
     verschiedenen Belege der Quellen wie `summary` mit `MERGE_JOIN` verbunden, in der
     Reihenfolge der Quellen) und `sources` (jeder ursprüngliche Fund mit `packet` oder
@@ -5648,7 +5971,7 @@ def merge(run_path):
         plan, keyed = _checked_plan(directory, run_id)
         accepted, _stale = _results(directory, plan, run_id, repo)
         rank = {p["id"]: i for i, p in enumerate(plan["packets"])}
-        merged = _merge_sources(_sources(accepted, keyed), rank)
+        merged = _merge_sources(_sources(accepted, keyed), rank, _plan_spans(plan))
         meta = {"generated": f"{SCRIPT_CMD} merge --run {run_id}", "run": run_id,
                 "plan": _plan_digest(plan, run_id)}
         return write_json(directory / "findings.json", meta, {"findings": merged})
@@ -5842,7 +6165,7 @@ def _counterpart_cell(plan: dict, packet: dict, stored, directory: Path, run_id:
         return NO_COLLECTOR
     if stored is None:
         return _block_count(directory, run_id, packet["id"]) or REPORT_NO_DATA
-    return str(len(_stored_found(stored, files).entries))
+    return str(len(_stored_found(stored, files, _packet_spans(packet)).entries))
 
 
 def _finding_line(finding: dict) -> str:
@@ -5858,7 +6181,8 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     Kopfzeile `<!-- skill | schema | generated: python scripts/review_kit.py report --run
     <lauf> | run | range | profile | focus | level | tool -->` (`level` fehlt bei Fokus
     security; `tool` die Werkzeuge der angenommenen Ergebnisse nach `_canonical_tool`, ohne
-    Ergebnis das des Plans), Titel, `Funde: <N>` mit je Fund einer Zeile, Pakettabelle,
+    Ergebnis das des Plans), Titel, `Funde: <N>` mit je Fund einer Zeile, Pakettabelle (bei
+    einem Paket mit `spans` in der Spalte Dateien `<n> (<datei>:<von>-<bis>)`),
     `- Hinweise:`, `- Übernommen (--since):`, `- Nicht geprüft:`, `- Ohne Block:`,
     `- Abdeckung: <a>/<b> — vollständig|unvollständig` (nach `_RunState.gaps`), `- Reviews:`
     (`_reviews_line`, mit den Paketen unter der Stufe) und der Hinweis `REPORT_TRUST_NOTE`,
@@ -5884,7 +6208,10 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     rows = []
     for packet in plan["packets"]:
         result = state.accepted.get(packet["id"])
-        cells = (packet["id"], len(packet["files"]), packet.get("changed_lines", REPORT_NO_DATA),
+        shown_spans = _spans_text(packet)
+        count = len(packet["files"])
+        cells = (packet["id"], f"{count} ({shown_spans})" if shown_spans else count,
+                 packet.get("changed_lines", REPORT_NO_DATA),
                  _counterpart_cell(plan, packet, stored, directory, run_id),
                  REPORT_NO_DATA if result is None else len(result.findings))
         rows.append("| " + " | ".join(map(str, cells)) + " |")
@@ -6142,7 +6469,9 @@ def _cmd_plan(args) -> int:
     print(f"Bereich: {plan['range']} · Profil {plan['profile']} · Fokus {plan['focus']} · "
           f"split: {'true' if plan['split'] else 'false'} · {plan['changed_lines']} Zeilen")
     for packet in plan["packets"]:
-        print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen")
+        shown_spans = _spans_text(packet)
+        print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen"
+              + (f", Spanne {shown_spans}" if shown_spans else ""))
     if not plan["packets"]:
         print("Pakete: keine — alle Dateien übernommen")
     print(_reviews_line(plan))
