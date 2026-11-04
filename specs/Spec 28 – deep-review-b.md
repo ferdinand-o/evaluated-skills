@@ -342,6 +342,16 @@ ohne Schreibgrenze legte damals `/out` und `/work` im Container an; die Grenze
 *Annahme:* Die Kostenzerlegung aus dem Spec-Review ist eine Schätzung; die Sonde misst sie
 nach. Ob das Kostenziel mit Stufe und schlanker Hauptschleife erreichbar ist, ist offen.
 
+**Ergebnis der Sonde B** (2026-11-04, Report Abschnitt „Sonde B", 7,56 USD): Stufe `standard` =
+`medium`, `checkpoint` = `high` (`crb` auf `py-c1`: `low` P5, `medium` und `high` P2, P4, P5).
+Der Block bleibt: `drnc` fand P2, nicht P4; ein zweiter `drnc` lief nicht. Schritt 4 startet je
+Paket einen Unteragenten: Ein Unteragent kann `/code-review` starten, und dessen Reviewer las
+in der Sonde die Paketdatei, deren Pfad im Aufruf stand. `total_cost_usd` von `cr` enthält die
+Unteragenten; die Hauptschleife der Abnahme-Läufe lag bei rund 1,4–2,0 USD. `/code-review`
+allein fand die Einbauten von `dr-contract` und `dr-delphi` in je zwei Läufen für im Mittel
+0,23 bzw. 0,21 USD; die Kosten-Schwelle für kleine Eingaben (≤ 0,35 bzw. 0,32 USD) verlangt,
+dass der Rahmen um ein Paket fast nichts kostet.
+
 Ob die Description mit „kleinen Diff" gegen `/code-review` gewinnt, ist stochastisch wie
 Eval 6 aus Spec 26.
 

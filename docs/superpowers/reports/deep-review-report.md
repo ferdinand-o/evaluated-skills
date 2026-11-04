@@ -881,6 +881,59 @@ Welche Stufe rausfliegt, lässt sich ohne die Abschaltungen nicht entscheiden. D
 Entscheidungsexperiment bleibt der einzige Beleg für den Block: Pakete ohne Gegenstellen
 fanden P2 und P4 dort nicht.
 
+## Sonde B (Spec 28, 2026-11-04)
+
+Messung vor dem Bau von Spec 28 (Plan `2026-11-04-deep-review-b.md`, Task 2), vom Nutzer mit
+rund 9 USD freigegeben. Claude Code 2.1.318, headless, `run.sh` mit Lesesperre; die
+Übergabe-Sonden liefen ohne Sperre in eigenen Klonen von `py-c1`. Treffer am Text geprüft.
+Die Fixtures `dr-contract` und `dr-delphi` liegen als Bench-Repos `py-drcontract` und
+`dl-drdelphi` unter `$BENCH/repos` (gebaut mit `evalkit.workspace.prepare`, Bereich `base..HEAD`).
+
+| Lauf | Bereich | Treffer | Kosten |
+| --- | --- | --- | --- |
+| `py-diff-drnc-1` (deep-review ohne Block) | `py-diff`, 4 Pakete | 6/8: P1 P2 P3 P5 P6 R1; P4 und R2 nicht | 3,58 USD |
+| `py-c1-crb-low-1` | Paket mit P2, P4, P5 | P5 | 0,33 USD |
+| `py-c1-crb-medium-1` | dito | **P2, P4, P5** | 0,46 USD |
+| `py-c1-crb-high-1` | dito | P2, P4, P5 | 1,28 USD |
+| `py-drcontract-cr-1`, `-2` | `dr-contract` | Einbau in beiden (`app/groups.py:14`) | 0,30 / 0,16 USD |
+| `dl-drdelphi-cr-1`, `-2` | `dr-delphi` | Einbau in beiden (`Query.pas:22`) | 0,27 / 0,15 USD |
+| Übergabe a: `/code-review medium` mit Marke im Aufruf und Pfad einer Paketdatei | `py-c1` | P2, P4, P5 | 0,58 USD |
+| Übergabe b: Unteragent startet `/code-review low` | `py-c1` | P5 | 0,45 USD |
+
+Summe 7,56 USD. Der bedingte zweite `drnc` lief nicht (Regel unten).
+
+**Kosten zerlegt** (kostenlos, aus `$BENCH/out/*.json`): Bei `cr` ist `usage` der Hauptschleife
+null, `modelUsage` trägt alles; `total_cost_usd` schließt die Unteragenten von `/code-review`
+also ein, und die Faktoren 5,5× und 3,2× der Abnahme gelten. Für die beiden deep-review-Läufe
+der Abnahme gewichtet nach Tokens (Ausgabe 5×, Cache-Schreiben 2×, Cache-Lesen 0,1× der
+Eingabe): Hauptschleife rund 33 % auf `py-diff` (≈ 1,96 USD) und 19 % auf `dl-diff`
+(≈ 1,44 USD). Das Spec-Review schätzte 2,17 und 1,70 USD; beide Rechnungen sind Schätzungen.
+
+**Übergabe:** In Sonde a startete `/code-review medium` genau einen Reviewer-Unteragenten. Sein
+Transkript enthält die Marke aus dem Aufruf und die Marke, die nur in der Paketdatei stand;
+er hat die Datei also gelesen. Die Hauptschleife las die Datei nicht. In Sonde b rief ein
+Unteragent (Tiefe 1) `/code-review` über das Skill-Werkzeug auf, und `/code-review` startete
+darin seinen eigenen Reviewer (Tiefe 2, `spawnDepth: 2` im Meta der Transkripte). Ein
+Unteragent je Paket ist damit möglich.
+
+**Entscheidungen für den Bau:**
+- **Stufe:** `standard` = `medium` (billigste Stufe mit P5 und einem von P2/P4, hier beiden),
+  `checkpoint` = `high`. Ein Lauf je Stufe; dass `medium` P2 und P4 zusammen findet, ist in zwei
+  Läufen gesehen (`crb-medium`, Sonde a), nicht als Mittel belegt.
+- **Block bleibt:** `drnc` fand P2 auch ohne Block, P4 nicht; die Regel (beide → zweiter `drnc`,
+  dann fliegt der Block) greift nicht. Dass Pakete ohne Block P2 finden können, ist neu: Im
+  Entscheidungsexperiment fanden Pakete ohne Block weder P2 noch P4, mit Block je einen in zwei
+  Läufen. Ein Lauf je Seite trennt die Wirkung nur grob.
+- **Schritt 4:** je Paket ein Unteragent, der `/code-review <stufe>` mit dem Pfad von
+  `packets/<id>.prompt.md` im Aufruf startet, das Ergebnis selbst mit `record` annimmt und nur
+  eine Zeile zurückgibt. So liest die Hauptschleife weder Block noch Fundliste.
+
+**Was das für die kleinen Eingaben heißt:** `/code-review` findet die Einbauten von
+`dr-contract` und `dr-delphi` allein, im Mittel für 0,23 bzw. 0,21 USD. deep-review kostete dort
+in der Abnahme 0,67 und 0,54 USD, also rund das 2,5- bis 3-Fache. Die Kosten-Schwelle von 1,5×
+für kleine Eingaben ist damit nur erreichbar, wenn der Rahmen um ein einzelnes Paket auf wenige
+Cent fällt; sonst bleiben kleine Diffs nach der Regel aus Spec 28 bei `/code-review`.
+
 ## Was nicht gemessen wurde
 
 **deep-review: nur reduziert abgenommen (Task 16)** — je ein Lauf auf `py-diff` und `dl-diff` und
