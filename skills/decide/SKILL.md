@@ -55,13 +55,13 @@ Sitzung: `--session`, sonst `CLAUDE_CODE_SESSION_ID`, sonst Exit 1. Fehlt `.skil
 5. **Subagenten tragen nichts ein.** Jeder Auftrag an einen Subagenten (auch einen, der diese
    Datei selbst liest) endet wörtlich mit diesem Satz (G1):
    > Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein.
-6. **Auftrag schreiben.** Ohne Skript-Aufruf: nach `references/brief.md` direkt in den Prompt,
-   Frage neutral, ohne Empfehlung (G1).
+6. **Auftrag schreiben.** Ohne Skript-Aufruf: nach `references/brief.md` direkt in den Prompt, Frage neutral, ohne Empfehlung (G1).
 7. **Übergabe.** Hat die Aufgabe Dateien geändert, ist `check` mit genau einer Revision der letzte
    Aufruf vor der Antwort, auch nach einer Freigabe: Diff seit dem Commit vor der Aufgabe (`<rev>`;
    ohne eigenen Commit `HEAD`), mit Zusammenfassung und offenen Fragen. Die Antwort nennt jede
-   gemeldete Stelle mit Grund und zitiert die Schlusszeile („ungeprüft: data-delete, …“) wörtlich.
-   Ohne Aufruf kein Satz über das Ergebnis von `check`:
+   gemeldete Stelle mit Grund und zitiert die Schlusszeile wörtlich: „ungeprüft: data-delete,
+   unsaved-work, push, external, cost; teilweise: api, migration, dependency, permissions“. Ohne
+   Aufruf kein Satz über das Ergebnis von `check`:
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py" check --range "<rev>"
    ```
@@ -86,7 +86,7 @@ Kopie, meldet er „Hook ungeprüft“ und hält nichts an. Ein beauftragter Pus
 - **Groß nie ohne Freigabe.** Ohne Block `freigegeben` unterbleibt der teure Schritt (G1);
   steht er im Diff dennoch, meldet `check` es (G2); ob die Fundstelle eines Belegs stimmt: G1.
 - **Seltenes an den Nutzer.** Was `check` oder `guard` nicht einordnen kann (Bereich statt
-  Revision: „ungeprüft — check nimmt eine Revision“; Bare-Repo; nicht zerlegbarer Befehl), wird
+  Revision: „ungeprüft — check nimmt eine Revision“; Bare-Repo; nicht schlichter Push), wird
   nicht nachgebaut, sondern als „ungeprüft — …“ oder Rückfrage weitergegeben, nie als sauber.
 - **Kein Ausweichen.** Nach einer abgelehnten Rückfrage wiederholt Claude den Befehl nicht und
   sucht keinen anderen Weg zum selben Schritt; die Übergabe nennt ihn (G1).
