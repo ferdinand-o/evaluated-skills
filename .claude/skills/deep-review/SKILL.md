@@ -21,10 +21,11 @@ Lücken und einen Bericht, der nicht zu den Daten passt, meldet `audit` (G2).
 
 ## Ablauf
 
-Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner). Die Skill legt
-`.skills/cache/deep-review/` (Läufe) und `refs/deep-review/` (Hilfscommits) an; in den
-Cache-Ordner schreibt `plan` eine `.gitignore` mit `*`, wenn sie fehlt. Arbeitsbaum, Index
-und HEAD bleiben unberührt (Cache-Lage: packets.md).
+Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner); lief `plan` mit `--repo`, brauchen
+alle folgenden Befehle dasselbe `--repo`. Die Skill legt `.skills/cache/deep-review/` (Läufe)
+und `refs/deep-review/` (Hilfscommits) an; in den Cache-Ordner schreibt `plan` eine
+`.gitignore` mit `*`, wenn sie fehlt. Arbeitsbaum, Index und HEAD bleiben unberührt
+(Cache-Lage: packets.md).
 
 1. **Bereich oder Pfade, Profil, Fokus.** Bereich `BASIS..ZIEL` (Standard `HEAD`) oder Pfade
    `--path <pfad>[,…]` (Einzelheiten: packets.md); Profil und Fokus aus der Tabelle unten.
@@ -48,16 +49,18 @@ und HEAD bleiben unberührt (Cache-Lage: packets.md).
    Unteragent, dessen Auftrag du aus der Vorlage „Auftrag an den Unteragenten je Paket“ in
    [review-brief.md](references/review-brief.md) ausfüllst (absoluter Repo-Pfad, Skriptpfad
    aufgelöst wie im Block unten, Lauf, Paket, Aufruf mit Auftragstext, `record`, zurück nur
-   die `record`-Zeile). Der Auftrag ist `packets/<id>.prompt.md` unter dem Pfad aus
-   `counterparts`; das Ergebnis ist `{"marke", "stufe", "findings"}`, ohne Funde
-   `"findings": []`; Block und Fundliste liest du dann nicht. Ohne Agent-Werkzeug startest du
+   die `record`-Zeile, nach zwei Abweisungen oder einer am Objekt nicht behebbaren die Meldung
+   von `record`: dann entscheidest du, das Paket bleibt bis dahin `missing`). Der Auftrag ist
+   `packets/<id>.prompt.md` unter dem Pfad aus `counterparts`; das Ergebnis ist
+   `{"marke", "stufe", "findings"}`, ohne Funde `"findings": []`; Block und Fundliste liest du
+   dann nicht. Ohne Agent-Werkzeug startest du
    `/code-review` je Paket selbst mit demselben Auftragstext und rufst `record` selbst auf
-   (abgewiesen: Objekt korrigieren, erneut):
+   (abgewiesen: Objekt korrigieren, erneut; Ausgang wie beim Unteragenten):
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review -
    ```
-   `--no-block` nur, wenn der Reviewer die Datei nicht bekam; `audit` nennt das Paket dann.
-   Werkzeug ohne Schrägstrich (Git Bash, packets.md), im Bericht `/code-review`.
+   `--no-block` nur, wenn der Reviewer die Datei nicht bekam, und nur du, nie der Unteragent;
+   `audit` nennt das Paket dann. Werkzeug ohne Schrägstrich (Git Bash, packets.md), im Bericht `/code-review`.
    Ohne `/code-review` läuft dieselbe Paketfolge im Hauptkontext nach „Review ohne /code-review"
    in review-brief.md, mit `--tool "Review ohne /code-review"`; der Bericht nennt das wörtlich.
 5. **Vereinigen:**

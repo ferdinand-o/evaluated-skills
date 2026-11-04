@@ -33,8 +33,9 @@ von `plan` nennt sie; Standard `medium`, im Profil `checkpoint` `high`):
 
 Der Auftrag ist die Datei `packets/<id>.prompt.md` des Laufs. Ihren Pfad nennt `counterparts`
 je Paket, relativ zum Repo (`.skills/cache/deep-review/<lauf>/packets/<id>.prompt.md`); er
-steht nicht im Aufruf, sondern absolut im Auftragstext an den Reviewer. Aufruf, Auftragstext
-und `record` schickt die Hauptschleife je Paket einem Unteragenten, wörtlich nach der Vorlage
+steht nicht im Bereich, sondern absolut im Auftragstext, und der steht in den Argumenten des
+`/code-review`-Aufrufs hinter dem Bereich. Aufruf, Auftragstext und `record` schickt die
+Hauptschleife je Paket einem Unteragenten, wörtlich nach der Vorlage
 unter [Auftrag an den Unteragenten je Paket](#auftrag-an-den-unteragenten-je-paket).
 
 - `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
@@ -45,16 +46,18 @@ unter [Auftrag an den Unteragenten je Paket](#auftrag-an-den-unteragenten-je-pak
   Hilfscommits, und dann ist es deren `<von>..<bis>`. Ein `--since`, das nichts übernommen
   hat, lässt den Plan, wie er war.
 - Die Datei `packets/<id>.prompt.md` (Auftrag, Block, Rückgabeformat und Marke) gibst du
-  **jedem Unteragenten unverändert** mit, als Pfad oder als ganzen Text: nicht gekürzt, nicht
-  umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht aufgelösten Stellen
-  und eine Kappung bleiben stehen. Im Pfad-Modus (`mode: path`) steht dort unter dem
-  Bereich `<von>..<bis>` zusätzlich der Pfad mit dem Ziel; die Dateien stehen als neu, der
+  **jedem Unteragenten unverändert** mit, als den absoluten Pfad aus der Vorlage: nicht
+  gekürzt, nicht umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht
+  aufgelösten Stellen und eine Kappung bleiben stehen. Im Pfad-Modus (`mode: path`) steht
+  dort unter dem Bereich `<von>..<bis>` zusätzlich der Pfad mit dem Ziel; die Dateien stehen als neu, der
   Aufruf bleibt `/code-review <stufe> --max-findings all <von>..<bis>`.
 - Hat das Paket eine Spanne, nennt die Datei sie (`datei:von-bis`): Nur diese Zeilen sind
   geändert, der Rest der Datei steht auf dem Stand des Ziels.
 - Bei Delphi-Dateien im Paket steht [delphi.md](delphi.md) schon darin.
 - Im Profil `checkpoint` steht das Soll aus `--soll-file` schon darin, als eigener Abschnitt
   „Soll“ unter dem Auftrag.
+- Hat der Plan Hinweise zum Paket (`target_not_head`, `worktree_differs`, `worktree_unknown`),
+  stehen sie darin unter „Hinweise“ vor dem Rückgabeformat.
 
 Auftrag an den Reviewer (Platzhalter in `<…>` ersetzt du):
 
@@ -104,7 +107,8 @@ Fundliste, nur die Zeile, die der Unteragent zurückgibt (Spec 28, Ergebnis der 
 Arbeite im Repository <repo>: führe zuerst `cd "<repo>"` aus, alle Befehle laufen dort.
 Lauf <lauf>, Paket <id>.
 
-1. Starte `/code-review <stufe> --max-findings all <von>..<bis>` mit diesem Auftragstext:
+1. Starte `/code-review <stufe> --max-findings all <von>..<bis>`, in den Argumenten hinter dem
+   Bereich dieser Auftragstext:
    „Lies zuerst die Datei `<repo>/<auftrag>` vollständig bis zur letzten Zeile und folge ihr;
    gib den Auftrag an jeden Unteragenten weiter. Das Endergebnis ist das JSON-Objekt aus dem
    Abschnitt Rückgabeformat dieser Datei (marke aus der letzten Zeile, stufe = die wirklich
@@ -115,7 +119,10 @@ Lauf <lauf>, Paket <id>.
    <das JSON-Objekt>
    EOF
 3. Weist record ab, korrigiere das Objekt nach der Meldung, ohne einen Fund wegzulassen, und
-   rufe record erneut auf, bis es angenommen ist.
+   rufe record erneut auf. Nach zwei abgewiesenen Versuchen, oder wenn die Meldung sich am
+   Objekt nicht beheben lässt (etwa „hat keine Marke im Plan“, „gehört nicht zu Paket“),
+   antworte statt einer Erfolgszeile nur mit der Meldung von record; die Hauptschleife
+   entscheidet, das Paket bleibt bis dahin `missing`. `--no-block` setzt du nie.
 4. Antworte nur mit der Ausgabezeile von record („<id>: <n> Fund(e) angenommen → …“), ohne
    Objekt und ohne Fundliste.
 ```

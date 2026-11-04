@@ -6028,6 +6028,32 @@ def test_final_f9_eval_one_checks_audit_and_catches_a_bloated_report(tmp_path, c
     assert results[("file_matches", r'"complete":\s*true')] is False
 
 
+def test_cp10r3_prompt_carries_plan_notes(tmp_path):
+    """Prüfpunkt 10 nach Runde 2 (B), Fund 3: Die Hinweise des Plans zum Paket stehen in
+    `packets/<id>.prompt.md` unter „## Hinweise“ vor dem Rückgabeformat; ohne Hinweis kein
+    Abschnitt."""
+    kit = _kit()
+    (tmp_path / "repo").mkdir()
+    root = _commit_repo(tmp_path / "repo", {"a/x.py": ""}, {"a/x.py": _lines(3)})
+    same = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    kit.write_counterparts(root, same["_meta"]["run"])
+    prompt = (_run_path(root, same) / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
+    assert "## Hinweise" not in prompt
+    # ZIEL ist nicht HEAD: der Hinweis erreicht den Reviewer.
+    (root / "a" / "y.py").write_text(_lines(2), encoding="utf-8")
+    git(root, "add", "a/y.py")
+    tree = git(root, "write-tree").strip()
+    git(root, "rm", "--quiet", "--cached", "a/y.py")
+    (root / "a" / "y.py").unlink()
+    side = git(root, "commit-tree", "-p", "HEAD", "-m", "seite", tree).strip()
+    git(root, "update-ref", "refs/heads/side", side)
+    off = kit.build_plan(root, "base..side", "standard", "bugs", None, False)
+    kit.write_counterparts(root, off["_meta"]["run"])
+    prompt = (_run_path(root, off) / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
+    assert "## Hinweise" in prompt and "target_not_head" in prompt, prompt
+    assert prompt.index("## Hinweise") < prompt.index("## Rückgabeformat")
+
+
 def test_cp10r2_step4_subagent_template_is_executable():
     """Prüfpunkt 10, Runde 2 (B): Schritt 4 ist für Hauptschleife und Unteragent wörtlich
     ausführbar — feste Vorlage mit absolutem Repo- und Skriptpfad, Lauf, Paket, record."""

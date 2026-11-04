@@ -5913,12 +5913,14 @@ def _has_delphi(packet: dict) -> bool:
 class _PromptInputs(NamedTuple):
     """Was für alle Pakete eines Plans gleich ist: der Auftragstext (`_brief_text`), das Soll
     (`_soll_text`, None ohne), die Delphi-Prüfliste (`_delphi_text`; None, wenn kein Paket
-    sie braucht) und im Pfad-Modus Pfade und Ziel (`paths`, `target`; sonst None)."""
+    sie braucht), im Pfad-Modus Pfade und Ziel (`paths`, `target`; sonst None) und die
+    Hinweise des Plans (`notes`, alle Pakete)."""
     task: str
     soll: str | None
     delphi: str | None
     paths: tuple | None = None
     target: str | None = None
+    notes: tuple = ()
 
 
 def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
@@ -5927,7 +5929,8 @@ def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
     return _PromptInputs(_brief_text(plan.get("focus")), _soll_text(repo, plan),
                          _delphi_text() if delphi else None,
                          tuple(plan["paths"]) if path_mode else None,
-                         plan["target"] if path_mode else None)
+                         plan["target"] if path_mode else None,
+                         tuple(plan.get("notes") or ()))
 
 
 def write_prompt(run_path, packet, block, level, *, inputs=None):
@@ -5940,7 +5943,9 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     `datei:von-bis`; im Pfad-Modus dazu der Pfad und das Ziel), die Stufe `level`, im Profil `checkpoint` das Soll
     (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
     `packets/<id>.md` ohne Kopfzeile, ohne Änderung), bei Delphi-Dateien im Paket (`files`) die
-    Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
+    Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, die Hinweise des Plans zu diesem
+    Paket (`notes` mit `packet` = `id`) unter „## Hinweise“ (ohne Hinweis kein Abschnitt), das
+    Rückgabeformat (`level` als
     Vorgabe für den Aufruf, `marke` und `stufe` im Beispiel als Platzhalter: einzusetzen sind
     die Marke aus der letzten Zeile und die Stufe, mit der `/code-review` wirklich lief) und als
     letzte Zeile `Paket-Marke: <marke>` — die einzige Stelle der Datei mit der Marke. `level` None (Fokus security, `_review_level`): kein
@@ -5976,6 +5981,11 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     parts.append(f"Paketblock:\n\n{block.strip()}")
     if _has_delphi(packet):
         parts.append(inputs.delphi if inputs.delphi is not None else _delphi_text())
+    own = [n for n in inputs.notes if n.get("packet") == pid]
+    if own:
+        parts.append("## Hinweise\n\n" + "\n".join(
+            f"- `{n['kind']}`: {n['text']}" + (f" ({', '.join(n['files'])})" if n.get("files")
+                                               else "") for n in own))
     if level is None:
         ask, stufe, rule = ("Antworte nur mit einem JSON-Objekt in dieser Form; für `<marke>` "
                             "die Marke aus der letzten Zeile dieser Datei:", "", "")
