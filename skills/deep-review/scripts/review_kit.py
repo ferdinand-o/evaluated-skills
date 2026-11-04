@@ -4207,15 +4207,32 @@ def _stored_found(stored: dict, files) -> Collected:
 
 BRIEF_HEADINGS = {"bugs": "## Fassung 1", "quality": "## Fassung 2",
                   "security": "## Fokus `security`"}
+# Bei Fokus security nur dieser Unterabschnitt: der Auftrag an den Reviewer, ohne die
+# Entscheidungshilfe für den Hauptagenten (origin/HEAD, Fall-Tabelle, --tool) davor.
+BRIEF_SECURITY_TASK = "### Auftrag an den Reviewer"
 BRIEF_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")     # Verweis auf einen Anker der Referenz
+REFERENCES_DIR = Path(__file__).parent.parent / "references"
+HTML_HEAD_RE = re.compile(r"\A\s*(?:<!--.*?-->\s*)+", re.DOTALL)   # Kopfzeile(n) einer Referenz
+
+
+def _check_packet_id(packet_id) -> str:
+    """`packet_id`, wenn sie eine Paket-ID ist (Text nach `PACKET_ID_RE`), sonst ein KitError."""
+    if not isinstance(packet_id, str) or not PACKET_ID_RE.fullmatch(packet_id):
+        raise KitError(f"keine Paket-ID: {packet_id!r}")
+    return packet_id
+
+
+def _packet_header(run_id: str, pid: str) -> str:
+    """Die Kopfzeile von `packets/<id>.md` und `packets/<id>.prompt.md`, mit Zeilenende."""
+    return (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
+            f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
 
 
 def packet_marker(packet_id) -> str:
     """Neue Marke eines Pakets: `dr-<paket>-<MARKER_HEX Hexzeichen>` (`secrets.token_hex`).
     Eine Auskunft, kein Beleg: Sie zeigt nur, dass der Schreiber des Ergebnisses
     `packets/<id>.prompt.md` kennt."""
-    if not isinstance(packet_id, str) or not PACKET_ID_RE.fullmatch(packet_id):
-        raise KitError(f"keine Paket-ID: {packet_id!r}")
+    _check_packet_id(packet_id)
     return f"dr-{packet_id}-{secrets.token_hex(MARKER_HEX // 2)}"
 
 
@@ -4230,13 +4247,23 @@ def _ensure_markers(repo: Path, run_id: str) -> dict:
         return _write_plan(path, plan) if fresh else plan
 
 
+def _reference_text(name: str) -> str:
+    """Inhalt von `references/<name>` neben dem Skript; fehlt die Datei, ein KitError."""
+    path = REFERENCES_DIR / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise KitError(f"Referenz fehlt: {path} nicht lesbar ({exc})") from None
+
+
 def _brief_text(focus: str) -> str:
     """Der Auftragstext für `focus` aus `references/review-brief.md` (neben dem Skript, nicht
-    hier dupliziert): bei `bugs` Fassung 1, bei `quality` Fassung 2 (jeweils der zitierte
-    Auftrag ohne den Platzhalter für den Block), bei `security` der Abschnitt „Fokus security".
-    Verweise auf Anker der Referenz fallen auf ihren Text. Fehlt die Datei oder der Abschnitt,
-    ein KitError."""
-    path = Path(__file__).parent.parent / "references" / "review-brief.md"
+    hier dupliziert): bei `bugs` Fassung 1, bei `quality` Fassung 2, bei `security` der
+    Unterabschnitt `BRIEF_SECURITY_TASK` des Abschnitts „Fokus security" — jeweils der
+    zitierte Auftrag ohne den Platzhalter für den Block; die Entscheidungshilfe für den
+    Hauptagenten bleibt draußen. Verweise auf Anker der Referenz fallen auf ihren Text. Fehlt
+    die Datei oder der Abschnitt, ein KitError."""
+    path = REFERENCES_DIR / "review-brief.md"
     heading = BRIEF_HEADINGS.get(focus, BRIEF_HEADINGS["bugs"])
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -4250,66 +4277,114 @@ def _brief_text(focus: str) -> str:
         if line.startswith("## "):
             break
         body.append(line)
-    if focus != "security":
-        quoted = [line[2:] if line.startswith("> ") else line[1:]
-                  for line in body if line.startswith(">")]
-        if "Paketblock:" in quoted:
-            quoted = quoted[:quoted.index("Paketblock:")]
-        body = quoted
-    text = BRIEF_LINK_RE.sub(r"\1", "\n".join(body)).strip()
+    if focus == "security":
+        sub = next((i for i, line in enumerate(body) if line.startswith(BRIEF_SECURITY_TASK)),
+                   None)
+        if sub is None:
+            raise KitError(f"Auftragstext fehlt: {BRIEF_SECURITY_TASK!r} nicht unter {heading!r} "
+                           f"in {path}")
+        rest = body[sub + 1:]
+        end = next((i for i, line in enumerate(rest) if line.startswith("#")), len(rest))
+        body = rest[:end]
+    quoted = [line[2:] if line.startswith("> ") else line[1:]
+              for line in body if line.startswith(">")]
+    if "Paketblock:" in quoted:
+        quoted = quoted[:quoted.index("Paketblock:")]
+    text = BRIEF_LINK_RE.sub(r"\1", "\n".join(quoted)).strip()
     if not text:
         raise KitError(f"Auftragstext fehlt: Abschnitt {heading!r} in {path} ist leer")
     return text
 
 
-def write_prompt(run_path, packet, block, level):
+def _soll_text(repo: Path, plan: dict):
+    """Das Soll eines Plans im Profil `checkpoint` (Inhalt der Datei aus `--soll-file`,
+    `_meta.soll_file`, relativ zum Repo oder absolut), sonst None. Nicht lesbar: KitError."""
+    soll_file = plan["_meta"].get("soll_file") if plan.get("profile") == "checkpoint" else None
+    if not soll_file:
+        return None
+    soll_path = Path(soll_file)
+    soll_path = soll_path if soll_path.is_absolute() else repo / soll_path
+    try:
+        return soll_path.read_text(encoding="utf-8-sig").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise KitError(f"Soll {soll_file} nicht lesbar ({exc})") from None
+
+
+def _delphi_text() -> str:
+    """Die Delphi-Prüfliste `references/delphi.md` ohne ihren HTML-Kopf."""
+    return HTML_HEAD_RE.sub("", _reference_text("delphi.md")).strip()
+
+
+def _has_delphi(packet: dict) -> bool:
+    """Trägt das Paket eine Delphi-Datei (Endungen des Delphi-Sammlers)?"""
+    return any(PurePosixPath(str(f)).suffix.lower() in DELPHI_SUFFIXES
+               for f in packet.get("files") or ())
+
+
+class _PromptInputs(NamedTuple):
+    """Was für alle Pakete eines Plans gleich ist: der Auftragstext (`_brief_text`), das Soll
+    (`_soll_text`, None ohne) und die Delphi-Prüfliste (`_delphi_text`; None, wenn kein Paket
+    sie braucht)."""
+    task: str
+    soll: str | None
+    delphi: str | None
+
+
+def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
+    """`_PromptInputs` eines Plans, je Datei einmal gelesen; die Prüfliste nur mit `delphi`."""
+    return _PromptInputs(_brief_text(plan.get("focus")), _soll_text(repo, plan),
+                         _delphi_text() if delphi else None)
+
+
+def write_prompt(run_path, packet, block, level, *, inputs=None):
     """`packets/<id>.prompt.md` im Laufordner `run_path` schreiben (Spec 28, Ablauf Schritt 3):
-    die Kopfzeile wie bei `packets/<id>.md`, der Auftragstext aus `references/review-brief.md`
-    (`_brief_text`, nach dem Fokus des Plans), der Bereich `<von>..<bis>` (`packet["range"]`),
-    die Stufe `level`, im Profil `checkpoint` das Soll (Inhalt der Datei aus `--soll-file`)
-    unter „## Soll“, der Paketblock `block` (Text von `packets/<id>.md` ohne Kopfzeile, ohne
-    Änderung), das Rückgabeformat mit der Marke und als letzte Zeile `Paket-Marke: <marke>`.
-    `packet` trägt `id`, `range` und `marker`. Atomar, überschreibt eine frühere Datei.
-    Rückgabe: der Pfad."""
+    die Kopfzeile wie bei `packets/<id>.md` (`_packet_header`), der Auftragstext aus
+    `references/review-brief.md` (`_brief_text`, nach dem Fokus des Plans), der Bereich
+    `<von>..<bis>` (`packet["range"]`), die Stufe `level`, im Profil `checkpoint` das Soll
+    (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
+    `packets/<id>.md` ohne Kopfzeile, ohne Änderung), bei Delphi-Dateien im Paket (`files`) die
+    Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
+    Vorgabe für den Aufruf, im Beispiel die Marke vorausgefüllt, `stufe` als Platzhalter:
+    einzusetzen ist die Stufe, mit der `/code-review` wirklich lief) und als letzte Zeile
+    `Paket-Marke: <marke>`. `packet` trägt `id`, `range`, `marker` und `files`. `inputs`
+    (`_PromptInputs`) reicht `write_counterparts` für alle Pakete einmal herein; ohne liest
+    `write_prompt` Plan, Auftrag, Soll und Prüfliste selbst. Atomar, überschreibt eine frühere
+    Datei. Rückgabe: der Pfad."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
     pid, marker, rng = packet.get("id"), packet.get("marker"), packet.get("range")
-    if not isinstance(pid, str) or not PACKET_ID_RE.fullmatch(pid):
-        raise KitError(f"keine Paket-ID: {pid!r}")
+    _check_packet_id(pid)
     if not isinstance(marker, str) or not marker or "\n" in marker:
         raise KitError(f"Paket {pid} hat keine Marke")
     if level not in LEVELS:
         raise KitError(f"Stufe {level!r} ist keine Stufe aus {', '.join(LEVELS)}")
-    plan = _read_plan(directory / "plan.json", run_id)
-    task = _brief_text(plan.get("focus"))
-    task = task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
+    if inputs is None:
+        inputs = _prompt_inputs(repo, _read_plan(directory / "plan.json", run_id),
+                                _has_delphi(packet))
+    task = inputs.task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
     parts = [task, f"## Bereich\n\n`{rng}`\n\nStufe: {level}"]
-    soll_file = plan["_meta"].get("soll_file") if plan.get("profile") == "checkpoint" else None
-    if soll_file:
-        soll_path = Path(soll_file)
-        soll_path = soll_path if soll_path.is_absolute() else repo / soll_path
-        try:
-            soll = soll_path.read_text(encoding="utf-8-sig").strip()
-        except (OSError, UnicodeDecodeError) as exc:
-            raise KitError(f"Soll {soll_file} nicht lesbar ({exc})") from None
-        parts.append(f"## Soll\n\n{soll}")
+    if inputs.soll:
+        parts.append(f"## Soll\n\n{inputs.soll}")
     parts.append(f"Paketblock:\n\n{block.strip()}")
+    if _has_delphi(packet):
+        parts.append(inputs.delphi if inputs.delphi is not None else _delphi_text())
     parts.append(
         "## Rückgabeformat\n\n"
-        "Antworte nur mit einem JSON-Objekt (statt einer bloßen Liste); `marke` und `stufe` "
-        "setzt du genau so ein:\n\n"
-        f'```json\n{{"marke": "{marker}", "stufe": "{level}", "findings": [\n'
+        f"Vorgabe für den Aufruf: `/code-review {level}`. Antworte nur mit einem JSON-Objekt "
+        "in dieser Form; `marke` setzt du genau so ein, für `<stufe>` die Stufe, mit der "
+        "`/code-review` wirklich lief:\n\n"
+        f'```json\n{{"marke": "{marker}", "stufe": "<stufe>", "findings": [\n'
         '  {"file": "...", "line": 12, "summary": "...", "failure_scenario": "...", '
         '"evidence": "..."}\n]}\n```\n\n'
         "- `findings` sind die Funde im Format oben (`file`, `line`, `summary`, "
-        "`failure_scenario`), bei keinem Fund `[]`.\n"
+        "`failure_scenario`); bei keinem Fund `\"findings\": []`.\n"
         "- `evidence` ist je Fund optional: der Befehl und seine Ausgabe oder zitierte Zeilen "
         "mit `Datei:Zeile`.\n"
-        "- `stufe` ist die Stufe, mit der `/code-review` lief.")
-    header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
-              f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+        f"- `stufe` ist die Stufe, mit der `/code-review` wirklich lief (`{'`, `'.join(LEVELS)}`), "
+        f"nicht abgeschrieben: Lief es unter `{level}`, steht hier die niedrigere.")
     path = directory / "packets" / f"{pid}.prompt.md"
-    _write_text(path, header + "\n\n".join(parts) + f"\n\nPaket-Marke: {marker}\n")
+    _write_text(path, _packet_header(run_id, pid) + "\n\n".join(parts)
+                + f"\n\nPaket-Marke: {marker}\n")
     return path
 
 
@@ -4341,9 +4416,12 @@ def write_counterparts(repo, run_id):
     Speicher Dateien eines Sammlers mit `on_demand` (Delphi), die in keinem Paket stehen
     (`--since`), hält sein `not_indexed` auch Units, die nur diese Dateien erreicht haben; diese
     Sprache wird dann über die Paketdateien live gesammelt, die übrigen kommen aus dem
-    Speicher. So ist der Block mit und ohne Speicher byte-gleich. Rückgabe: je Paket in
-    Plan-Reihenfolge `{"packet", "range" (der Bereich von `make_packet_range`, wie er im Plan
-    steht), "path" (repo-relativ), "counterparts", "shown", "unresolved"}`."""
+    Speicher. So ist der Block mit und ohne Speicher byte-gleich. Daneben je Paket
+    `packets/<id>.prompt.md` (`write_prompt`; Plan, Auftrag, Soll und Delphi-Prüfliste einmal
+    gelesen, `_prompt_inputs`). Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
+    (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
+    "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
+    "counterparts", "shown", "unresolved"}`."""
     repo = _toplevel(repo)
     run_id = _check_run_id(run_id)
     _path, plan = _load_plan(repo, run_id)
@@ -4372,11 +4450,12 @@ def write_counterparts(repo, run_id):
     plan = _ensure_markers(repo, run_id)
     markers = {p["id"]: p["marker"] for p in plan["packets"]}
     level = plan_level(plan)
+    # Auftrag, Soll und Prüfliste sind für alle Pakete gleich: einmal gelesen.
+    inputs = _prompt_inputs(repo, plan, any(_has_delphi(p) for p, _r, _f in collected))
     for packet, rng, found in collected:
         pid = packet["id"]
         shown_packet = {**packet, "range": rng, "marker": markers[pid]}
-        header = (f"<!-- skill: {SKILL_NAME} | schema: {SCHEMA_VERSION} | generated: "
-                  f"{SCRIPT_CMD} counterparts --run {run_id} | packet: {pid} -->\n")
+        header = _packet_header(run_id, pid)
         cap = BLOCK_MAX_CHARS - len(header)
         if found is None:
             shown_packet["intro"] = QUALITY_INTRO
@@ -4405,8 +4484,9 @@ def write_counterparts(repo, run_id):
             total, unresolved = len(found.entries), found.unresolved
         rel = CACHE_DIR / run_id / "packets" / f"{pid}.md"
         _write_text(repo / rel, header + body)
-        write_prompt(run_dir(repo, run_id), shown_packet, body, level)
+        prompt = write_prompt(run_dir(repo, run_id), shown_packet, body, level, inputs=inputs)
         written.append({"packet": pid, "range": rng, "path": rel.as_posix(),
+                        "prompt": prompt.relative_to(repo).as_posix(),
                         "counterparts": total, "shown": shown, "unresolved": unresolved})
     return written
 
@@ -4658,6 +4738,25 @@ class _Earlier(NamedTuple):
     outside: list
 
 
+def _accepted_results(directory: Path, plan: dict):
+    """Je Paket eines früheren Laufs mit angenommenem Ergebnis `(Paket, _Result, Stufe)`, in
+    Plan-Reihenfolge — dieselbe Regel wie in `audit` (`_read_result` mit dem Fingerabdruck des
+    Plans, einmal berechnet). Die Stufe ist die gespeicherte, ohne Feld `plan_level(plan)`."""
+    run_id = directory.name
+    repo = _layout(directory)[0]
+    digest = _plan_digest(plan, run_id)
+    for packet in plan["packets"]:
+        result, _why = _read_result(directory / RESULTS_DIR / f"{packet['id']}.json",
+                                    packet["id"], run_id, digest, repo)
+        if result is not None:
+            yield packet, result, result.level or plan_level(plan)
+
+
+def _below(level: str, min_level: str) -> bool:
+    """Liegt `level` in `LEVELS` unter `min_level`?"""
+    return LEVELS.index(level) < LEVELS.index(min_level)
+
+
 def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     """`_Earlier` eines früheren Laufs. Eine Datei gilt als reviewt, wenn ihr Paket ein
     angenommenes Ergebnis hat — dieselbe Regel wie in `audit` (`_read_result` mit dem
@@ -4670,24 +4769,19 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     sind. Jeder Fund trägt `run`: bei einem Ergebnis dieser Lauf, bei einem übernommenen sein
     `run`, wie es ist (fehlt es, der `reused_from` des Eintrags). `plan` ist geprüft
     (`_earlier_plan`). Mit `min_level` zählt ein Ergebnis nur, wenn seine gespeicherte Stufe
-    (ohne Feld: `plan_level(plan)`) in `LEVELS` mindestens so hoch ist."""
+    (ohne Feld: `plan_level(plan)`) in `LEVELS` mindestens so hoch ist (`_accepted_results`);
+    die übrigen nennt die Ausgabe von `plan` (`_since_passed_over`)."""
     directory = Path(directory)
     keyed = plan.get("file_keys") or {}
     run_id = directory.name
     repo = _layout(directory)[0]
-    digest = _plan_digest(plan, run_id)
 
     def reviewed(info: dict, findings: list) -> _Reviewed:
         return _Reviewed(info["key"], info.get("base_blob"), info.get("target_blob"), findings)
 
     files, outside = {}, []
-    for packet in plan["packets"]:
-        result, _why = _read_result(directory / RESULTS_DIR / f"{packet['id']}.json",
-                                    packet["id"], run_id, digest, repo)
-        if result is None:
-            continue
-        if min_level is not None and LEVELS.index(result.level or plan_level(plan)) \
-                < LEVELS.index(min_level):
+    for packet, result, level in _accepted_results(directory, plan):
+        if min_level is not None and _below(level, min_level):
             continue
         own = set(packet["files"])
         found = [{**f, "run": run_id} for f in result.findings]
@@ -4766,15 +4860,22 @@ def _since_skip(plan: dict, eplan: dict) -> str | None:
 
 
 def _since_passed_over(plan, run_dirs) -> list[tuple[str, str]]:
-    """Die Läufe aus `run_dirs`, die `apply_since` für `plan` übergeht, je `(Lauf-ID, Grund)`
-    nach `_since_skip`, in der Reihenfolge von `run_dirs` — für die Zeilen
-    `Übergangen: <lauf> (<grund>)` der Ausgabe von `plan`."""
+    """Was `apply_since` für `plan` übergeht, je `(was, Grund)` in der Reihenfolge von
+    `run_dirs` — für die Zeilen `Übergangen: <was> (<grund>)` der Ausgabe von `plan`: ein
+    ganzer Lauf nach `_since_skip` (`was` = Lauf-ID), sonst je angenommenes Ergebnis, dessen
+    gespeicherte Stufe unter der des Plans liegt (`was` = `<lauf> <paket>`, Grund `Stufe <x>
+    unter <y>`; `_earlier_files` übergeht es)."""
     out = []
+    need = plan_level(plan)
     for directory in run_dirs:
         run_id, eplan = _earlier_plan(directory)
         why = _since_skip(plan, eplan)
         if why is not None:
             out.append((run_id, why))
+            continue
+        out += [(f"{run_id} {packet['id']}", f"Stufe {level} unter {need}")
+                for packet, _result, level in _accepted_results(Path(directory), eplan)
+                if _below(level, need)]
     return out
 
 
@@ -5264,8 +5365,7 @@ def record(run_path, packet, tool, payload_path, no_block=False):
     `/code-review`). Rückgabe: das geschriebene Objekt."""
     directory = Path(run_path)
     repo, run_id = _layout(directory)
-    if not isinstance(packet, str) or not PACKET_ID_RE.fullmatch(packet):
-        raise KitError(f"keine Paket-ID: {packet!r}")
+    _check_packet_id(packet)
     if not isinstance(tool, str) or not tool.strip() or any(c in tool for c in "\r\n"):
         raise KitError(f"--tool braucht das Werkzeug des Reviews (eine Zeile), nicht {tool!r}")
     tool = _canonical_tool(tool.strip())
@@ -5385,13 +5485,23 @@ def _merged(group: list, rank: dict) -> dict:
         texts = list(dict.fromkeys(t for t in texts if isinstance(t, str) and t))
         return MERGE_JOIN.join(texts) if texts else None
 
+    def source(s) -> dict:
+        out = {"packet": s.packet, "reused_from": s.reused_from,
+               **{k: s.finding.get(k) for k in SOURCE_FIELDS[2:]}}
+        if isinstance(s.finding.get("evidence"), str) and s.finding["evidence"]:
+            out["evidence"] = s.finding["evidence"]
+        return out
+
     head = group[0].finding
     packets = sorted({s.packet for s in group if s.packet is not None}, key=lambda p: rank[p])
-    return {"file": head["file"], "line": head.get("line"), "summary": joined("summary"),
-            "failure_scenario": joined("failure_scenario"), "packets": packets,
-            "reused_from": next((s.reused_from for s in group if s.reused_from), None),
-            "sources": [{"packet": s.packet, "reused_from": s.reused_from,
-                         **{k: s.finding.get(k) for k in SOURCE_FIELDS[2:]}} for s in group]}
+    merged = {"file": head["file"], "line": head.get("line"), "summary": joined("summary"),
+              "failure_scenario": joined("failure_scenario"), "packets": packets,
+              "reused_from": next((s.reused_from for s in group if s.reused_from), None),
+              "sources": [source(s) for s in group]}
+    evidence = joined("evidence")
+    if evidence is not None:
+        merged["evidence"] = evidence
+    return merged
 
 
 def _merge_sources(sources: list, rank: dict) -> list:
@@ -5440,9 +5550,12 @@ def merge(run_path):
     Glieder werden einer (`_merge_sources`), alle Pakete bleiben. Je Fund `file`, `line` (die
     des ersten), `summary` und `failure_scenario` (verschiedene Texte mit `MERGE_JOIN` verbunden),
     `packets` (Plan-Reihenfolge; `[]` bei nur übernommenen), `reused_from` (der Lauf der
-    ersten übernommenen Quelle oder null) und `sources` (jeder ursprüngliche Fund mit `packet`
-    oder `reused_from` — bei einem übernommenen der Lauf, der ihn gemeldet hat, aus `run` des
-    Funds, nicht der `reused_from` des Eintrags in `file_keys`; `_sources`). Pakete ohne
+    ersten übernommenen Quelle oder null), `evidence` (nur wenn eine Quelle eines trägt: die
+    verschiedenen Belege der Quellen wie `summary` mit `MERGE_JOIN` verbunden, in der
+    Reihenfolge der Quellen) und `sources` (jeder ursprüngliche Fund mit `packet` oder
+    `reused_from` — bei einem übernommenen der Lauf, der ihn gemeldet hat, aus `run` des
+    Funds, nicht der `reused_from` des Eintrags in `file_keys`; `_sources` — und seinem
+    `evidence`, wenn er eines hat). Pakete ohne
     angenommenes Ergebnis fehlen — das meldet `audit`. `_meta` trägt `run` und `plan`
     (`_plan_digest`). Ein Plan, den `_checked_plan` nicht annimmt (auch ein ungültiger
     übernommener Fund), ist ein KitError. Rückgabe: das geschriebene Objekt."""
@@ -5806,7 +5919,7 @@ def _cmd_plan(args) -> int:
 def _cmd_counterparts(args) -> int:
     repo = _toplevel(args.repo)
     for item in write_counterparts(repo, args.run):
-        print(f"{item['packet']}: {item['range']} · {item['path']} · "
+        print(f"{item['packet']}: {item['range']} · {item['prompt']} · "
               f"{item['counterparts']} Gegenstellen, {item['shown']} gezeigt, "
               f"{item['unresolved']} nicht aufgelöst")
     return 0

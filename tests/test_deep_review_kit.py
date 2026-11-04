@@ -6527,3 +6527,202 @@ def test_b_cp2r2_f4_profile_is_checked_before_its_level(tmp_path, monkeypatch):
             kit._load_plan(root, old["_meta"]["run"])
         with pytest.raises(kit.KitError, match="profile"):
             kit.apply_since(high_plan, [_run_path(root, old)])
+
+
+# --- Spec 28, Prüfpunkt 3, Runde 1 ------------------------------------------------------------
+
+def _prompt(directory, pid):
+    return (directory / "packets" / f"{pid}.prompt.md").read_text(encoding="utf-8")
+
+
+def _task_part(prompt):
+    """Der Auftrag aus review-brief.md: nach der Kopfzeile bis „## Bereich“."""
+    return prompt.split("\n", 1)[1].split("## Bereich", 1)[0]
+
+
+def _asks_for_the_object(prompt):
+    """Kein Satz verlangt eine bloße Liste: jeder Satz mit „Antworte“ verlangt das Objekt."""
+    assert "JSON-Liste" not in prompt
+    assert not re.search(r"bei keinem Fund (?:mit )?`\[\]`", prompt)
+    sentences = [s for s in re.split(r"(?<=[.:;])\s+", _flat(prompt)) if "Antworte" in s]
+    assert sentences
+    for sentence in sentences:
+        assert "Objekt" in sentence and "Liste" not in sentence.replace("keine bloße Liste", ""), \
+            sentence
+
+
+def test_b_cp3_f1_prompt_asks_for_the_object_not_a_list(tmp_path):
+    kit = _kit()
+    for focus in ("bugs", "quality"):
+        (tmp_path / focus).mkdir()
+        root = _two_packet_repo(tmp_path / focus)
+        plan = kit.build_plan(root, "base..HEAD", "standard", focus, 10, False)
+        kit.write_counterparts(root, plan["_meta"]["run"])
+        prompt = _prompt(_run_path(root, plan), "p1")
+        _asks_for_the_object(prompt)
+        task = _task_part(prompt)
+        assert "`marke`" in task and "`stufe`" in task and "`findings`" in task, focus
+    # Die Referenz selbst: die bloße Liste nur noch bei --no-block.
+    brief = _doc("skills/deep-review/references/review-brief.md")
+    back = _flat(_doc_section(brief, "## Rückgabeformat"))
+    assert "Die Antwort ist ein JSON-Objekt" in back and "--no-block" in back
+    assert "die reine Liste ist der Normalfall" not in back
+
+
+def test_b_cp3_f2_stufe_is_a_placeholder_not_prefilled(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    marker = plan["packets"][0]["marker"]
+    prompt = _prompt(directory, "p1")
+    assert f'"marke": "{marker}"' in prompt                       # Marke vorausgefüllt
+    assert '"stufe": "<stufe>"' in prompt                         # Stufe nicht
+    assert '"stufe": "medium"' not in prompt
+    assert "`/code-review medium`" in prompt                      # die geplante Stufe als Vorgabe
+    assert "wirklich lief" in _flat(prompt)
+
+
+def test_b_cp3_f3_security_prompt_is_a_review_task(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "security", None, False)
+    kit.write_counterparts(root, plan["_meta"]["run"])
+    prompt = _prompt(_run_path(root, plan), "s1")
+    task = _flat(_task_part(prompt))
+    for topic in ("Eingaben von außen", "Rechte", "Geheimnisse", "Injection"):
+        assert topic in task, topic
+    # Die Entscheidungshilfe für den Hauptagenten bleibt draußen.
+    for helper in ("origin/HEAD", "--tool", "Umfang deckt sich", "merge-base", "| Fall |"):
+        assert helper not in prompt, helper
+    assert "<von>" not in prompt and "<id>" not in prompt and "s1" in task
+    _asks_for_the_object(prompt)
+    # Die Entscheidungshilfe steht weiter in der Referenz.
+    security = _flat(_doc_section(_doc("skills/deep-review/references/review-brief.md"),
+                                  "## Fokus `security`"))
+    assert "alle vier Bedingungen" in security and "Umfang deckt sich nicht" in security
+
+
+def test_b_cp3_f4_delphi_packet_prompt_carries_the_checklist(tmp_path):
+    kit = _kit()
+    unit = _unit("A", "procedure RunA;\n", "procedure RunA;\nbegin\n  RunA;\nend;\n")
+    root = tmp_path / "repo"
+    root.mkdir()
+    _commit_repo(root, {"a/A.pas": "", "b/y.py": ""}, {"a/A.pas": unit, "b/y.py": _lines(8, "y")})
+    plan, run = _split_plan(kit, root, split_at=1)
+    kit.write_counterparts(root, run)
+    directory = _run_path(root, plan)
+    on_disk = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    by_file = {p["files"][0]: p["id"] for p in on_disk["packets"]}
+    delphi = _doc("skills/deep-review/references/delphi.md")
+    delphi_body = re.sub(r"\A\s*<!--.*?-->\s*", "", delphi, flags=re.S).strip()
+    with_list = _prompt(directory, by_file["a/A.pas"])
+    assert delphi_body in with_list
+    assert with_list.count("<!--") == 1                           # nur die eigene Kopfzeile
+    assert with_list.rstrip("\n").splitlines()[-1].startswith("Paket-Marke: ")
+    assert "Besitz und Freigabe" not in _prompt(directory, by_file["b/y.py"])
+
+
+def test_b_cp3_f5_merge_keeps_evidence(tmp_path):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    first = {**_finding("a/x.py", 3, "eins"), "evidence": "a/x.py:3 `x_2 = 2`"}
+    second = {**_finding("a/x.py", 4, "zwei"), "evidence": "git show HEAD:a/x.py → x_3 = 3"}
+    plain = _finding("b/y.py", 2, "ohne")
+    _rec(kit, directory, "p1", "/code-review",
+         _payload(tmp_path, _object(plan, "p1", [first, second]), "p1.json"))
+    _rec(kit, directory, "p2", "/code-review", _payload(tmp_path, _object(plan, "p2", [plain]),
+                                                       "p2.json"))
+    kit.merge(directory)
+    merged = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    joined, alone = merged
+    assert [s["evidence"] for s in joined["sources"]] == [first["evidence"], second["evidence"]]
+    assert joined["evidence"] == first["evidence"] + kit.MERGE_JOIN + second["evidence"]
+    assert "evidence" not in alone and "evidence" not in alone["sources"][0]
+    assert kit.audit(directory, None)["lost_findings"] == []
+
+
+def test_b_cp3_f6_counterparts_names_the_prompt_file(tmp_path, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run = _split_plan(kit, root)
+    capsys.readouterr()
+    assert _cli(kit, root, "counterparts", "--run", run) == 0
+    out = capsys.readouterr().out.splitlines()
+    written = kit.write_counterparts(root, run)
+    for line, item in zip(out, written):
+        prompt = f".skills/cache/deep-review/{run}/packets/{item['packet']}.prompt.md"
+        assert item["prompt"] == prompt
+        assert line.startswith(f"{item['packet']}: {item['range']} · {prompt} · "), line
+
+
+def test_b_cp3_f7_plan_names_results_below_the_level(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    plan_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False, "high")
+    run_a = plan_a["_meta"]["run"]
+    kit.write_counterparts(root, run_a)
+    directory = _run_path(root, plan_a)
+    marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    obj = _object(marked, "p1", [_finding("a.py", 5, "A")], stufe="medium")
+    assert _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, obj))["level"] == "medium"
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--level", "high", "--since", run_a) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"Übergangen: {run_a} p1 (Stufe medium unter high)" in lines
+    assert not any(line.startswith(f"Übergangen: {run_a} (") for line in lines)
+    assert not any(line.startswith("Übernommen") for line in lines)
+
+
+def test_b_cp3_f8_counterparts_reads_plan_brief_and_soll_once(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    soll = tmp_path / "soll.md"
+    soll.write_text("# Soll\n\nDas Soll des Bereichs.\n", encoding="utf-8")
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint",
+                "--soll-file", soll, "--split-at", "10") == 0
+    run = capsys.readouterr().out.splitlines()[0].removeprefix("Lauf: ")
+    assert list(inspect.signature(kit.write_prompt).parameters)[:4] == [
+        "run_path", "packet", "block", "level"]
+    calls = {"_read_plan": [], "_brief_text": [], "_soll_text": []}
+    for name in calls:
+        real = getattr(kit, name)
+
+        def spy(*args, _real=real, _name=name, **kwargs):
+            calls[_name].append(sys._getframe(1).f_code.co_name)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(kit, name, spy)
+    written = kit.write_counterparts(root, run)
+    assert len(written) == 2
+    assert "write_prompt" not in calls["_read_plan"]
+    assert len(calls["_brief_text"]) == 1 and len(calls["_soll_text"]) == 1
+    for item in written:
+        prompt = (root / item["prompt"]).read_text(encoding="utf-8")
+        assert "## Soll\n\n# Soll\n\nDas Soll des Bereichs." in prompt
+
+
+def test_b_cp3_f9_one_header_helper_and_one_id_check(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    header = kit._packet_header(run, "p1")
+    for name in ("p1.md", "p1.prompt.md"):
+        assert (directory / "packets" / name).read_text(encoding="utf-8").startswith(header)
+    monkeypatch.setattr(kit, "_packet_header", lambda run_id, pid: f"<!-- Kopf {pid} -->\n")
+    kit.write_counterparts(root, run)
+    for name in ("p1.md", "p1.prompt.md"):
+        text = (directory / "packets" / name).read_text(encoding="utf-8")
+        assert text.startswith("<!-- Kopf p1 -->\n"), name
+
+    def check(pid):
+        raise kit.KitError(f"geprüft: {pid}")
+
+    monkeypatch.setattr(kit, "_check_packet_id", check)
+    with pytest.raises(kit.KitError, match="geprüft: p1"):
+        kit.packet_marker("p1")
+    with pytest.raises(kit.KitError, match="geprüft: p1"):
+        kit.write_prompt(directory, {**plan["packets"][0], "range": "a..b"}, "Block", "medium")
+    with pytest.raises(kit.KitError, match="geprüft: p1"):
+        kit.record(directory, "p1", "/code-review", "-")
