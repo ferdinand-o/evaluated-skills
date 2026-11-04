@@ -38,6 +38,7 @@ import functools
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -1098,8 +1099,11 @@ def _resolve(root, did, number, answer, status, lock):
 def open_questions(root):
     """(exit, text): die Blöcke mit Status `offen` mit Datum, Thema, Frage, Schlüssel, Optionen
     und Empfehlung. Exit 1 nur, wenn die Konsumenten-Regel die Ablage überspringt."""
-    root = Path(root)
-    blocks, problem, exists = _read_ledger(root)
+    return _open_questions(*_read_ledger(Path(root)))
+
+
+def _open_questions(blocks, problem, exists):
+    """`open_questions` aus einem schon gelesenen `_read_ledger` (check liest die Ablage nur einmal)."""
     if problem:
         return 1, problem
     if not exists:
@@ -1300,7 +1304,7 @@ class Changes(list):
         self.top, self.untracked, self.commit = top, set(untracked), commit
 
 
-_RANGE_RE = re.compile(r"\.\.|\^[!@-]")          # Bereichsschreibweisen; check nimmt eine Revision
+_RANGE_RE = re.compile(r"^\^|\.\.|\^[!@-]")      # Bereichsschreibweisen; check nimmt eine Revision
 UNREADABLE = "unlesbar — selbst prüfen"
 
 
@@ -1332,28 +1336,31 @@ def changed_files(root, rev):
     Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked` und `commit`. Die eine Quelle für check.
     `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; `top` ist die Wurzel, die
     Git in einem eigenen `rev-parse --show-toplevel` nennt (`_work_tree`) — fiel `repo_root` auf ein
-    Unterverzeichnis zurück, liest check trotzdem an der Wurzel.
+    Unterverzeichnis zurück, liest check trotzdem an der Wurzel. `top` steht auch bei einem Problem,
+    sobald Git die Wurzel genannt hat — check liest die Übergabe dort.
     `rev` ist genau eine Revision: Eine Angabe mit `..`, `^!`, `^@` oder `^-`, eine leere, eine mit
-    Leerraum oder führendem `-` und eine, die `git rev-parse --verify --end-of-options <rev>^{commit}`
-    nicht auflöst, ist ein Problem (`one_revision_problem`). Dann `git diff <commit>` (Commits seit
-    `<rev>` und Arbeitsbaum, mit dem aufgelösten Commit, nie der rohen Angabe) plus
+    Leerraum, führendem `-` oder führendem `^` ist keine (`one_revision_problem`); Git bekommt sie nie.
+    Eine, die `git rev-parse --verify <rev>^{commit}` nicht auflöst, ist „Revision „<rev>“ nicht
+    gefunden (<erste Zeile der git-Meldung>)“. Dann `git diff <commit>` (Commits seit `<rev>` und
+    Arbeitsbaum, mit dem aufgelösten Commit, nie der rohen Angabe) plus
     `git ls-files --others --exclude-standard`.
     Problem: None, „kein Git“ (kein `git` oder kein Repo), „kein Arbeitsbaum“ (Bare-Repo, `.git`),
-    „git antwortet nicht in <n> s“, keine einzelne Revision oder der Grund, mit dem Git abbricht; dann
-    sind die Dateien leer."""
+    „git antwortet nicht in <n> s“, keine einzelne Revision, eine nicht gefundene oder der Grund, mit
+    dem Git abbricht; dann sind die Dateien leer."""
     rev = (rev or "").strip()
-    if not rev or rev.startswith("-") or re.search(r"\s", rev) or _RANGE_RE.search(rev):
-        return Changes(), one_revision_problem(rev)
+    single = bool(rev) and not rev.startswith("-") and not re.search(r"\s", rev) and not _RANGE_RE.search(rev)
     try:
         top, problem = _work_tree(Path(root))
+        if not single:
+            return Changes(top=top), one_revision_problem(rev)
         if problem:
             return Changes(), problem
         if top is None:
             return Changes(), "kein Arbeitsbaum"
-        resolved = _git(top, "rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}")
+        resolved = _git(top, "rev-parse", "--verify", f"{rev}^{{commit}}")
         commit = resolved.stdout.strip()
         if resolved.returncode != 0 or not commit:
-            return Changes(top=top), one_revision_problem(rev)
+            return Changes(top=top), f"Revision „{rev}“ nicht gefunden ({_git_error(resolved)})"
         diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", commit, "--")
         if diff.returncode != 0:
             return Changes(top=top), f"git diff {rev} fehlgeschlagen: {_git_error(diff)}"
@@ -1363,9 +1370,9 @@ def changed_files(root, rev):
             return Changes(top=top), f"git ls-files --others fehlgeschlagen: {_git_error(others)}"
         untracked = {name for name in others.stdout.split("\0") if name} - files
     except GitTimeout:
-        return Changes(), timeout_problem()
+        return Changes(), timeout_problem() if single else one_revision_problem(rev)
     except NoGit:
-        return Changes(), "kein Git"
+        return Changes(), "kein Git" if single else one_revision_problem(rev)
     return Changes(sorted(files | untracked), top, untracked, commit), None
 
 
@@ -1382,6 +1389,23 @@ def _git_quoted(name):
 
 
 DIFF_CHUNK = 200
+UNTRACKED_LIMIT = 1 << 20                           # Bytes, die check aus einer unversionierten Datei liest
+
+
+def _read_untracked(path):
+    """Bytes der unversionierten Datei `path`; None — unlesbar — für einen Symlink (Git sieht nur den
+    Linktext), alles außer einer regulären Datei, mehr als `UNTRACKED_LIMIT` Bytes oder einen Lesefehler.
+    Das Seltene geht so als Stelle an den Nutzer, statt einem Link nach `/dev/zero` zu folgen."""
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > UNTRACKED_LIMIT:
+            return None
+        handle = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        with os.fdopen(handle, "rb") as file:
+            data = file.read(UNTRACKED_LIMIT + 1)
+    except OSError:
+        return None
+    return None if len(data) > UNTRACKED_LIMIT else data
 
 
 class DiffFailed(Exception):
@@ -1401,17 +1425,16 @@ def changed_lines(top, commit, paths, untracked):
     `paths` seit `commit` (aus `changed_files`) — für `#<text>`. Eine unversionierte Datei ist ganz
     hinzugefügt. Die anderen kommen aus `git diff -U0 <commit>`, je höchstens `DIFF_CHUNK` Pfade ein
     Aufruf, aufgeteilt an den Köpfen `diff --git a/<p> b/<p>`, die das Skript je Pfad selbst so bildet,
-    wie Git sie schreibt (`_git_quoted`). Unlesbar ist eine Datei, die sich nicht lesen lässt, deren
+    wie Git sie schreibt (`_git_quoted`). Unlesbar ist eine Datei, die sich nicht lesen lässt (eine
+    unversionierte auch als Symlink oder über `UNTRACKED_LIMIT` Bytes, `_read_untracked`), deren
     Zeilen kein gültiges UTF-8 sind, deren Diff binär ist oder für die Git keinen Block liefert — eine
     Stelle „unlesbar — selbst prüfen“ statt eines eigenen Falls je Ursache. Scheitert `git diff`,
     `DiffFailed`; antwortet es nicht in `GIT_TIMEOUT` Sekunden, `GitTimeout` (check endet dann mit 2)."""
     found = {}
     for path in paths:
         if path in untracked:
-            try:
-                found[path] = _utf8_lines(Path(top, path).read_bytes().removeprefix(b"\xef\xbb\xbf").splitlines())
-            except OSError:
-                found[path] = None
+            data = _read_untracked(Path(top, path))
+            found[path] = None if data is None else _utf8_lines(data.removeprefix(b"\xef\xbb\xbf").splitlines())
     tracked = [path for path in paths if path not in untracked]
     for start in range(0, len(tracked), DIFF_CHUNK):
         chunk = tracked[start:start + DIFF_CHUNK]
@@ -1444,19 +1467,19 @@ def changed_lines(top, commit, paths, untracked):
             for path, lines in found.items()}
 
 
-def _handover(root, session, home):
+def _handover(root, session, home, ledger):
     """Die Abschnitte, die check vor der Schlusszeile anhängt — auf jedem Weg, auch mit Exit 2: die
     Einträge der Sitzung wie `summary` (nur mit gültiger Sitzung und mit Einträgen oder einem Grund,
     warum das Protokoll nicht gelesen wurde; ohne Sitzung entfällt der Teil still) und die offenen
-    großen Fragen wie `open` (nur wenn es welche gibt)."""
+    großen Fragen wie `open` (nur wenn es welche gibt). `ledger` ist das schon gelesene `_read_ledger`
+    — check liest Ablage und Protokoll je einmal."""
     lines = []
     if session and valid_session(session):
         entries, problem = log_entries(root, session)
         if entries or problem:
-            lines += summary(root, session, home)[1].splitlines()
-    blocks, _ = read_ledger(root)
-    if any(block["status"] == "offen" for block in blocks):
-        lines += open_questions(root)[1].splitlines()
+            lines += _summary(root, session, home, entries, problem)[1].splitlines()
+    if any(block["status"] == "offen" for block in ledger[0]):
+        lines += _open_questions(*ledger)[1].splitlines()
     return lines
 
 
@@ -1469,31 +1492,36 @@ def check(root, rev, session, home):
     Exit 1 bei mindestens einer Stelle, sonst 0; Exit 2 bei fehlender oder kaputter Reference
     („ungeprüft — references/reversibility.md fehlt“), ohne Git („ungeprüft — kein Git“), ohne
     Arbeitsbaum („ungeprüft — kein Arbeitsbaum“), bei allem, was keine einzelne Revision ist
-    („ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den Bereich selbst prüfen“) und wenn Git
-    nicht in `GIT_TIMEOUT` Sekunden antwortet („ungeprüft — git antwortet nicht in <n> s“)."""
+    („ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den Bereich selbst prüfen“), bei einer
+    Revision, die Git nicht auflöst („ungeprüft — Revision „<rev>“ nicht gefunden (<git-Meldung>)“) und
+    wenn Git nicht in `GIT_TIMEOUT` Sekunden antwortet („ungeprüft — git antwortet nicht in <n> s“).
+    Die Wurzel bestimmt `changed_files` einmal; Prüfung und Übergabe lesen dort auf jedem Weg, die
+    Ablage einmal."""
     root = Path(root)
-    categories, problem = load_categories(REFERENCE)
-    if problem:
-        return 2, "\n".join([f"ungeprüft — {problem}"] + _handover(root, session, home))
     changes, problem = changed_files(root, rev)
+    top = changes.top or root
+    ledger = _read_ledger(top)
+    categories, missing = load_categories(REFERENCE)
+    if missing:
+        return 2, "\n".join([f"ungeprüft — {missing}"] + _handover(top, session, home, ledger))
     code, body = 2, [f"ungeprüft — {problem}"]
     if not problem:
         try:
-            code, body = _check(changes, rev.strip(), categories)
+            code, body = _check(changes, rev.strip(), categories, ledger)
         except GitTimeout:
             body = [f"ungeprüft — {timeout_problem()}"]
         except DiffFailed as error:
             body = [f"ungeprüft — git diff für #<text>-Freigaben gescheitert ({error})"]
         except NoGit:
             body = ["ungeprüft — kein Git"]
-    return code, "\n".join(body + _handover(changes.top or root, session, home) + [tail_line(categories)])
+    return code, "\n".join(body + _handover(top, session, home, ledger) + [tail_line(categories)])
 
 
-def _check(changes, rev, categories):
+def _check(changes, rev, categories, ledger):
     """Der Vergleich zu `check`, nachdem die Stellen feststehen; (exit, Zeilen) ohne Übergabe und
-    Schlusszeile. Wirft `GitTimeout`, `DiffFailed` und `NoGit`."""
+    Schlusszeile. `ledger` ist `_read_ledger` an der Wurzel. Wirft `GitTimeout`, `DiffFailed` und `NoGit`."""
     top = changes.top
-    blocks, ledger_note, exists = _read_ledger(top)
+    blocks, ledger_note, exists = ledger
     notes = [ledger_note] if ledger_note else []
     unread = None                                       # Grund, warum keine Freigabe gelesen wurde
     if ledger_note:
@@ -2065,7 +2093,11 @@ def summary(root, session, home):
     """(exit, text): Einträge der Sitzung ohne kleine Einträge mit Thema einer Regel
     `nie fragen`; bei mehr als zehn die zehn jüngsten und der Pfad des Protokolls."""
     root = Path(root)
-    entries, problem = log_entries(root, session)
+    return _summary(root, session, home, *log_entries(root, session))
+
+
+def _summary(root, session, home, entries, problem):
+    """`summary` aus schon gelesenen `log_entries` (check liest das Protokoll nur einmal)."""
     if problem:
         return 1, problem
     path_shown = shown(log_path(root, session), root)

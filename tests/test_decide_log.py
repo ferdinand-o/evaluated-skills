@@ -1456,8 +1456,9 @@ def test_check_untracked_and_hash_key(decide_repo, monkeypatch, tmp_path, capsys
 
 
 def test_check_one_revision(decide_repo, monkeypatch, tmp_path, capsys):
-    """Spec 28, check: `--range` nimmt genau eine Revision. Ein Bereich (`..`, `...`, `^!`, `^@`, `^-`), eine
-    Angabe, die wie eine Option aussieht, und eine Revision, die nicht auflöst, enden mit Exit 2; ein
+    """Spec 28, check: `--range` nimmt genau eine Revision. Ein Bereich (`..`, `...`, `^!`, `^@`, `^-`, führendes
+    `^`) und eine Angabe, die wie eine Option aussieht, enden mit Exit 2 (eine Revision, die nicht auflöst,
+    auch, mit eigener Meldung: test_check_unresolved_revision_names_git_reason); ein
     Bare-Repo und `.git` ebenso („kein Arbeitsbaum“). Ein Merge-Commit wird wie jede Revision gegen den
     Arbeitsbaum verglichen, `git diff` bekommt den aufgelösten Commit."""
     root, _ = decide_repo
@@ -1467,7 +1468,7 @@ def test_check_one_revision(decide_repo, monkeypatch, tmp_path, capsys):
     git(root, "branch", "-M", "main")
     (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     commit(root, "Abhängigkeit")
-    for rev in ("HEAD~1..HEAD", "HEAD~1...HEAD", "HEAD^!", "HEAD^@", "HEAD^-", "gibtsnicht", "--output=x", ""):
+    for rev in ("HEAD~1..HEAD", "HEAD~1...HEAD", "HEAD^!", "HEAD^@", "HEAD^-", "^HEAD~1", "--output=x", ""):
         code, out, err = check_out(capsys, rev)
         assert code == 2 and out == "", (rev, out, err)
         assert f"ungeprüft — check nimmt eine Revision, nicht „{rev}“; den Bereich selbst prüfen" in err, (rev, err)
@@ -2588,8 +2589,8 @@ def test_check_one_diff_for_all_hash_keys(decide_repo, monkeypatch, capsys):
 def test_check_asks_git_for_root_once(decide_repo, monkeypatch, capsys):
     """Final-F9, seit Zyklus 2: changed_files fragt zuerst in einem Aufruf, ob es einen Arbeitsbaum gibt,
     dann die Wurzel allein (`--show-toplevel`), dann den Commit der Revision
-    (`rev-parse --verify --end-of-options <rev>^{commit}`) — Wurzel und Revision kommen nie aus derselben
-    Ausgabe."""
+    (`rev-parse --verify <rev>^{commit}`, ohne `--end-of-options`: Z2-CP1-F3) — Wurzel und Revision kommen
+    nie aus derselben Ausgabe."""
     root, _ = decide_repo
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
     (root / "README.md").write_text("x\n", encoding="utf-8")
@@ -2601,7 +2602,7 @@ def test_check_asks_git_for_root_once(decide_repo, monkeypatch, capsys):
     assert len(calls) == 4, calls                                           # repo_root, dann changed_files
     assert calls[1][-3:] == ["--is-bare-repository", "--is-inside-work-tree", "--git-dir"], calls
     assert calls[2][-2:] == ["rev-parse", "--show-toplevel"], calls
-    assert calls[3][-4:] == ["rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"], calls
+    assert calls[3][-3:] == ["rev-parse", "--verify", f"{base}^{{commit}}"], calls
 
 
 def test_brief_header_command_stays_copyable(decide_repo):
@@ -2765,3 +2766,146 @@ def test_only_newest_block_per_question_and_key_counts(decide_repo, capsys):
         "- D-2 offen: Datumsangaben parsen? — nicht entscheiden, nicht darauf aufbauen"], sections
 
 
+
+
+# --- Funde des Prüfpunkts Zyklus 2, CP1 (F1–F6) ------------------------------------------
+
+def test_check_unresolved_revision_names_git_reason(decide_repo, monkeypatch, capsys):
+    """Z2-CP1-F1: Eine einzelne Revision, die nicht auflöst (Tippfehler, Repo ohne Commit), endet mit Exit 2
+    und „ungeprüft — Revision „X“ nicht gefunden (<erste Zeile der git-Meldung>)“ — nicht mit der
+    Bereichsmeldung. Bereichs-Syntax behält den bisherigen Text."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    found = re.compile(r"ungeprüft — Revision „(?P<rev>[^“]+)“ nicht gefunden \((?P<why>.+)\)")
+    code, out, err = check_out(capsys, "HEAD")                                 # Repo ohne Commit
+    match = found.fullmatch(err.splitlines()[0])
+    assert code == 2 and out == "" and match and match["rev"] == "HEAD", (out, err)
+    assert "Bereich" not in err and err.splitlines()[-1] == TAIL, err
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    commit(root, "Basis")
+    code, out, err = check_out(capsys, "mian")                                 # Tippfehler
+    match = found.fullmatch(err.splitlines()[0])
+    assert code == 2 and out == "" and match and match["rev"] == "mian", (out, err)
+    assert match["why"] == git_first_error(root, "rev-parse", "--verify", "mian^{commit}"), err
+    code, _, err = check_out(capsys, "HEAD~1..HEAD")                           # Bereich: wie bisher
+    assert code == 2 and err.splitlines()[0] == (
+        "ungeprüft — check nimmt eine Revision, nicht „HEAD~1..HEAD“; den Bereich selbst prüfen"), err
+
+
+def git_first_error(root, *args):
+    """Die erste nicht leere Zeile, die Git für `args` auf stderr schreibt."""
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return next(line.strip() for line in result.stderr.splitlines() if line.strip())
+
+
+def test_check_rejects_leading_caret(decide_repo, monkeypatch, capsys):
+    """Z2-CP1-F2: Eine Angabe mit führendem `^` (negative Revision, Bereichsnotation) ist keine einzelne
+    Revision — Exit 2 mit der Bereichsmeldung, kein `git diff`."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    commit(root, "Basis")
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    commit(root, "Abhängigkeit")
+    calls = git_calls(monkeypatch, lambda argv: "diff" in argv)
+    for rev in ("^HEAD~1", "^HEAD"):
+        code, out, err = check_out(capsys, rev)
+        assert code == 2 and out == "", (rev, out, err)
+        assert err.splitlines()[0] == f"ungeprüft — check nimmt eine Revision, nicht „{rev}“; den Bereich selbst prüfen"
+    assert calls == [], calls
+
+
+def test_check_rev_parse_without_end_of_options(decide_repo, monkeypatch, capsys):
+    """Z2-CP1-F3: `git rev-parse --verify` läuft ohne `--end-of-options` (braucht git ≥ 2.24; ein führendes `-`
+    weist changed_files schon vorher ab)."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    calls = git_calls(monkeypatch, lambda argv: True)
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert calls and not any("--end-of-options" in argv for argv in calls), calls
+
+
+def test_check_handover_reads_the_same_root(decide_repo, monkeypatch, tmp_path, capsys):
+    """Z2-CP1-F4: Fällt `repo_root` auf einen Unterordner zurück, liest die Übergabe auf jedem Weg — auch
+    ohne Reference und bei einem Bereich — an der Wurzel, die Git nennt, wie die Prüfung selbst."""
+    root, _ = decide_repo
+    assert add_small("CLI", "Kurzoption?", "v", "gesucht: app/cli.py — Treffer: app/cli.py:3") == 0
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    (root / "src").mkdir()
+    (root / "src" / "a.py").write_text("x\n", encoding="utf-8")
+    write_ledger(root, ledger_block(1, "offen", "dependency:pyproject.toml"))
+    base = commit(root, "Basis")
+    capsys.readouterr()
+    monkeypatch.chdir(root / "src")
+    monkeypatch.setattr(dl, "repo_root", lambda cwd: Path(cwd))
+    reference = dl.REFERENCE
+    monkeypatch.setattr(dl, "REFERENCE", tmp_path / "references" / "reversibility.md")
+    for rev in (base, f"{base}..HEAD"):
+        code, out, err = check_out(capsys, rev, "--session", SESSION)
+        assert code == 2 and out == "", (rev, out, err)
+        assert err.startswith("ungeprüft — references/reversibility.md fehlt"), err
+        assert f"Einträge der Sitzung {SESSION}: 1" in err, (rev, err)
+        assert "Offene große Fragen in docs/big-decisions.md: 1" in err, (rev, err)
+    monkeypatch.setattr(dl, "REFERENCE", reference)
+    code, out, err = check_out(capsys, f"{base}..HEAD", "--session", SESSION)
+    assert code == 2 and err.startswith("ungeprüft — check nimmt eine Revision"), err
+    assert f"Einträge der Sitzung {SESSION}: 1" in err, err
+    assert "Offene große Fragen in docs/big-decisions.md: 1" in err and err.splitlines()[-1] == TAIL, err
+
+
+def test_check_reads_ledger_and_log_once(decide_repo, monkeypatch, capsys):
+    """Z2-CP1-F5: check liest die Ablage und das Protokoll der Sitzung je einmal — Prüfung und Übergabe
+    bekommen dasselbe Ergebnis; die Abschnitte bleiben wörtlich die von `summary` und `open`."""
+    root, home = decide_repo
+    (root / "README.md").write_text("x\n", encoding="utf-8")
+    write_ledger(root)
+    base = commit(root, "Basis")
+    assert add_small("CLI", "Kurzoption?", "v", "gesucht: app/cli.py — Treffer: app/cli.py:3") == 0
+    assert big(*TWO) == 0                                                       # D-1 offen
+    capsys.readouterr()
+    (root / "pyproject.toml").write_text("x\n", encoding="utf-8")
+    reads, real = [], dl.read_file
+
+    def spy(path):
+        reads.append(Path(path))
+        return real(path)
+
+    monkeypatch.setattr(dl, "read_file", spy)
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == ["pyproject.toml"], out
+    assert reads.count(root / "docs" / "big-decisions.md") == 1, reads
+    assert reads.count(dl.log_path(root, SESSION)) == 1, reads
+    monkeypatch.setattr(dl, "read_file", real)
+    assert dl.summary(root, SESSION, home)[1] in out and dl.open_questions(root)[1] in out, out
+
+
+def test_check_does_not_read_untracked_symlink_or_large_file(decide_repo, monkeypatch, tmp_path, capsys):
+    """Z2-CP1-F6: Eine unversionierte Datei, die ein Symlink ist oder größer als 1 MiB, liest check für
+    `#<text>` nicht, sondern meldet sie als Stelle „unlesbar — selbst prüfen“."""
+    root, _ = decide_repo
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    write_ledger(root, ledger_block(1, "freigegeben", "migration:migrations/#add_index"))
+    (root / "migrations").mkdir()
+    (root / "migrations" / "0001.py").write_text("x = 1\n", encoding="utf-8")
+    base = commit(root, "Basis")
+    outside = tmp_path / "draussen.py"
+    outside.write_text("add_index('t', 'c')\n", encoding="utf-8")
+    try:
+        (root / "migrations" / "link.py").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("keine Symlinks auf diesem System")
+    (root / "migrations" / "0002.py").write_bytes(b"add_index('u', 'd')\n" + b"#" * (1 << 20) + b"\n")
+    (root / "migrations" / "0003.py").write_text("add_index('v', 'e')\n", encoding="utf-8")   # lesbar: frei
+    expected = ["migrations/0002.py", "migrations/link.py"]
+    if Path("/dev/zero").exists():                                              # der Fall aus dem Fund
+        (root / "migrations" / "big").symlink_to("/dev/zero")
+        expected.insert(1, "migrations/big")
+    code, out, _ = check_out(capsys, base)
+    assert code == 1 and reported(out) == expected, out
+    for line in out.splitlines():
+        if line.startswith("- "):
+            assert line.endswith("— unlesbar — selbst prüfen"), line
