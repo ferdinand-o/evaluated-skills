@@ -6454,7 +6454,7 @@ def test_b_cp2r2_f1_level_is_part_of_the_plan_digest(tmp_path, monkeypatch):
     # Ein Plan ohne level und mode (Spec 26) behält seinen Fingerabdruck: sein Ergebnis bleibt
     # angenommen.
     old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
-    _rewrite_plan(root, old, lambda data: (data.pop("level"), data.pop("mode")))
+    _rewrite_plan(root, old, lambda data: (data.pop("level"), data.pop("mode"), data.pop("verify")))
     _record(kit, root, old, "p1", [_finding("a.py", 5, "alt")])
     run = old["_meta"]["run"]
     _path, loaded = kit._load_plan(root, run)
@@ -8832,3 +8832,119 @@ def test_cp7r3_cpp_initializer_list_template_args_and_pack():
     defs = kit._name_defs(kit._SrcFile(cpp.encode(), False), "typed")
     assert [(d.name, d.line, d.body is not None) for d in defs] == [
         ("Foo", 1, True), ("Mix", 3, True)]
+
+
+def _verify_run(kit, root, tmp_path, **options):
+    """Lauf über zwei Pakete mit `verify`, p1 mit drei Funden (einer mit `evidence`), p2 mit
+    einem; `counterparts` gelaufen, beide Ergebnisse angenommen, `merge` gelaufen."""
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False, **options)
+    run = plan["_meta"]["run"]
+    kit.write_counterparts(root, run)
+    directory = _run_path(root, plan)
+    plan = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    p1 = [{**_finding("a/x.py", 3, "Grenze falsch"), "failure_scenario": "x = 8 → IndexError"},
+          {**_finding("a/x.py", 20, "Zweiter"), "evidence": "x.py:20 `return x`"},
+          _finding("a/x.py", 40, "Dritter")]
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p1", "--tool", "/code-review",
+                _payload(tmp_path, _object(plan, "p1", p1), "v1.json")) == 0
+    assert _cli(kit, root, "record", "--run", run, "--packet", "p2", "--tool", "/code-review",
+                _payload(tmp_path, _object(plan, "p2", [_finding("b/y.py", 4, "B")]),
+                         "v2.json")) == 0
+    kit.merge(directory)
+    return plan, run, directory
+
+
+def test_b_verdict_needs_evidence(tmp_path, capsys):
+    kit = _kit()
+    root = _two_packet_repo(tmp_path)
+
+    # plan --verify und das Profil checkpoint setzen verify: true; ohne Feld gilt false (E8).
+    assert "verify" not in kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False)
+    assert kit.build_plan(root, "base..HEAD", "standard", "bugs", 10, False,
+                          verify=True)["verify"] is True
+    soll = tmp_path / "soll.md"
+    soll.write_text("Soll\n", encoding="utf-8")
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--profile", "checkpoint",
+                "--soll-file", soll) == 0
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--verify") == 0
+    runs = [json.loads((root / ".skills/cache/deep-review" / name / "plan.json")
+                       .read_text(encoding="utf-8")) for name in _runs(root)]
+    by_cmd = {("--verify" in p["_meta"]["generated"], p["profile"]): p for p in runs
+              if p.get("verify")}
+    assert set(by_cmd) == {(False, "checkpoint"), (True, "standard")}, by_cmd.keys()
+
+    plan, run, directory = _verify_run(kit, root, tmp_path, verify=True)
+    findings = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    assert [(f["file"], f["line"]) for f in findings] == [
+        ("a/x.py", 3), ("a/x.py", 20), ("a/x.py", 40), ("b/y.py", 4)]
+    capsys.readouterr()
+
+    # verify: je Fund ohne evidence ein Prüfauftrag, n = Nummer in findings.json, ohne summary.
+    assert _cli(kit, root, "verify", "--run", run) == 0
+    assert sorted(p.name for p in (directory / "verify").iterdir()) == ["1.md", "3.md", "4.md"]
+    order = (directory / "verify" / "1.md").read_text(encoding="utf-8")
+    assert order.startswith("<!-- skill: deep-review | schema: 1 | generated: python "
+                            f"scripts/review_kit.py verify --run {run} | finding: 1 -->")
+    bis = plan["packets"][0]["range"].rpartition("..")[2]       # Commit: `bis` des Pakets p1
+    for needle in ("a/x.py", "Zeile: 3", "x = 8", bis, "verify/1/work/", "-I", "bestätigt",
+                   "widerlegt", "unklar", '"urteil"', '"beleg"', "konkreten Ablauf"):
+        assert needle in order, needle
+    assert "Grenze falsch" not in order                      # die Behauptung steht nicht drin
+    assert "Zweiter" not in (directory / "verify" / "3.md").read_text(encoding="utf-8")
+
+    # verdict: nur bestätigt/widerlegt/unklar; widerlegt ohne Beleg → Exit 1, nichts geschrieben.
+    verdicts = directory / "verdicts"
+
+    def give(number, data, name="u.json"):
+        return _cli(kit, root, "verdict", "--run", run, "--number", number,
+                    _payload(tmp_path, data, name))
+
+    for bad in ({"urteil": "falsch", "beleg": "x"}, {"urteil": "widerlegt"},
+                {"urteil": "widerlegt", "beleg": "  "}, {"beleg": "x"}, "[1]"):
+        assert give(1, bad) == 1, bad
+    assert give(9, {"urteil": "unklar"}) == 1                # unbekannte Nummer
+    assert give(0, {"urteil": "unklar"}) == 1
+    assert not verdicts.exists()
+    assert "widerlegt" in capsys.readouterr().err
+    assert give(1, {"urteil": "widerlegt", "beleg": "x.py:3 `x = 8` ist gültig"}) == 0
+    assert give(3, {"urteil": "bestätigt"}) == 0
+    data = json.loads((verdicts / "1.json").read_text(encoding="utf-8"))
+    assert data["_meta"]["skill"] == "deep-review" and data["_meta"]["run"] == run
+    assert data["verdict"] == "widerlegt" and data["verdict_evidence"].startswith("x.py:3")
+
+    # audit: bei verify: true ist jeder Prüfauftrag ohne Urteil eine Lücke (hier Fund 4).
+    kit.merge(directory)
+    merged = json.loads((directory / "findings.json").read_text(encoding="utf-8"))["findings"]
+    assert [f.get("verdict") for f in merged] == ["widerlegt", None, "bestätigt", None]
+    assert merged[0]["verdict_evidence"].startswith("x.py:3")
+    kit.write_report(directory)
+    audit = kit.audit(directory, None)
+    assert audit["unverified"] == [4] and audit["complete"] is False, audit
+    lines = kit.render_report(directory).splitlines()
+    assert "- Urteile: 1 bestätigt, 1 widerlegt, 0 unklar, 1 offen" in lines
+    assert "- `a/x.py:3` — Grenze falsch [widerlegt]" in lines
+    assert "- `a/x.py:40` — Dritter [bestätigt]" in lines
+    assert "- `a/x.py:20` — Zweiter" in lines                # mit Beleg, ohne Urteil
+    # Die Einordnungs-Regel zählt die Lücke: „vollständig" ist ein Eintrag.
+    report = directory / "report.md"
+    report.write_text(kit.render_report(directory) + "\n## Einordnung\n\nAlles vollständig.\n",
+                      encoding="utf-8")
+    assert any("Vollständigkeit" in m for m in kit.audit(directory, None)["report_mismatch"])
+
+    # Ein erneutes merge verliert die Urteile nicht; das letzte Urteil schließt die Lücke.
+    kit.merge(directory)
+    assert [f.get("verdict") for f in json.loads((directory / "findings.json").read_text(
+        encoding="utf-8"))["findings"]] == ["widerlegt", None, "bestätigt", None]
+    assert give(4, {"urteil": "unklar", "beleg": "kein Ablauf gefunden"}) == 0
+    kit.merge(directory)
+    kit.write_report(directory)
+    audit = kit.audit(directory, None)
+    assert audit["unverified"] == [] and audit["complete"] is True, audit
+    assert "- Urteile: 1 bestätigt, 1 widerlegt, 1 unklar, 0 offen" in kit.render_report(
+        directory).splitlines()
+
+    # Ohne verify: kein Urteile-Zeile, keine Lücke, Bericht wie bisher.
+    plain, run2, directory2 = _verify_run(kit, root, tmp_path)
+    text = kit.render_report(directory2)
+    assert "Urteile" not in text and "unverified" not in kit.audit(directory2, None)
+    assert "verify" not in plain

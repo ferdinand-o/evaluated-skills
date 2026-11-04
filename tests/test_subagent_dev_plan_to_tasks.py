@@ -2953,3 +2953,36 @@ def test_final2_b_f2_meta_only_object_of_other_skill_is_verdicts_without_finding
     code, err = _fix_main(dr, tmp_path / "t2", capsys)
     assert code == 1 and "findings.json ohne Funde" in err, err
     assert not (tmp_path / "t1").exists() and not (tmp_path / "t2").exists()
+
+
+def test_b_fix_task_skips_refuted(tmp_path):
+    """Spec 28 Schritt 6: `widerlegt` fällt weg; `bestätigt`, `unklar` und Funde ohne Urteil
+    bleiben (mit ihrer Nummer in findings.json); die Task-Datei nennt die Zahl der weggelassenen."""
+    def finding(line, summary, verdict=None):
+        item = {"file": "src/a.py", "line": line, "summary": summary, "failure_scenario": "s",
+                "packets": ["p1"], "reused_from": None, "sources": []}
+        if verdict:
+            item["verdict"] = verdict
+        return item
+    findings = _dr_write(tmp_path / "findings.json", [
+        finding(1, "eins", "widerlegt"), finding(2, "zwei", "bestätigt"),
+        finding(3, "drei", "unklar"), finding(4, "vier"), finding(5, "fünf", "widerlegt")])
+    text = ptt.fix_task_from_verdicts(findings, tmp_path / "tasks").read_text(encoding="utf-8")
+    criteria = _criteria(text)
+    assert "Fund F2 (src/a.py:2)" in criteria and "Fund F3 (src/a.py:3)" in criteria
+    assert "Fund F4 (src/a.py:4)" in criteria
+    assert "eins" not in criteria and "fünf" not in criteria and "F1" not in criteria
+    assert "Weggelassen: 2 widerlegte Funde" in text
+    assert ptt.FIX_STATUSES == ("bestätigt", "plausibel")
+    # Ohne widerlegte Funde keine Zeile; sind alle widerlegt, gibt es nichts zu beheben.
+    clean = _dr_write(tmp_path / "clean.json", [finding(1, "eins")])
+    assert "Weggelassen" not in ptt.fix_task_from_verdicts(
+        clean, tmp_path / "t2").read_text(encoding="utf-8")
+    refuted = _dr_write(tmp_path / "refuted.json", [finding(1, "eins", "widerlegt")])
+    try:
+        ptt.fix_task_from_verdicts(refuted, tmp_path / "t3")
+    except ptt.PlanParseError as exc:
+        assert "widerlegt" in str(exc)
+    else:
+        raise AssertionError("alle Funde widerlegt: keine Task-Datei erwartet")
+    assert not (tmp_path / "t3").exists()
