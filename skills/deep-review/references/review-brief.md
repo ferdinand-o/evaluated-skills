@@ -210,7 +210,8 @@ Die Antwort ist ein JSON-Objekt `{"marke", "stufe", "findings"}`:
   Aufruf `/code-review <stufe>`, kein Wert zum Abschreiben: Lief es niedriger, steht hier die
   niedrigere, und `audit` nennt das Paket unter `below_level`. Nach `/security-review` und
   bei einem Review im Hauptkontext gibt es keine Stufe; das Feld fehlt dann (der Auftrag von
-  `s1` verlangt keines), und es gilt die Stufe des Plans.
+  `s1` verlangt keines), und es gilt die Stufe des Plans. Steht es doch da, speichert `record`
+  es bei diesen Werkzeugen nicht und sagt das.
 - `findings`: die Liste der Funde, leer bei keinem Fund.
 
 Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py record` annimmt:
@@ -239,7 +240,7 @@ Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py recor
 - Eine bloße Liste der Funde nimmt `record` nur mit `--no-block` an, also ohne
   Gegenstellen-Block; `audit` nennt das Paket dann unter `no_block`. `--no-block` vermerkt
   das immer, auch bei einem Objekt mit passender Marke; eine genannte `stufe` wird auch dann
-  geprüft und gespeichert.
+  geprüft und gespeichert, außer bei den Werkzeugen ohne Stufe.
 - Weitere Felder fallen weg.
 
 `record` prüft jeden Fund so, und **ein** ungültiger Fund macht die ganze Liste ungültig; es
@@ -247,7 +248,7 @@ wird nichts geschrieben:
 
 | Prüfung | angenommen | abgewiesen |
 | --- | --- | --- |
-| Antwort | Objekt mit der Marke des Pakets unter `marke`, der Liste unter `findings` und bei `--tool code-review` einer Stufe unter `stufe` (sonst optional); mit `--no-block` auch eine bloße Liste oder ein Objekt ohne passende Marke; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, ohne `--no-block` eine bloße Liste, keine oder eine fremde Marke, bei `--tool code-review` ohne `--no-block` keine Stufe, eine unbekannte Stufe; stdin kein UTF-8, Datei kein UTF-8 |
+| Antwort | Objekt mit der Marke des Pakets unter `marke`, der Liste unter `findings` und einer Stufe unter `stufe` — außer bei `security-review`, „Review ohne /security-review" und „Review ohne /code-review": dort keine, eine genannte wird ignoriert; mit `--no-block` auch eine bloße Liste oder ein Objekt ohne passende Marke; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, ohne `--no-block` eine bloße Liste, keine oder eine fremde Marke, ohne `--no-block` keine Stufe bei einem anderen Werkzeug als diesen dreien, eine unbekannte Stufe; stdin kein UTF-8, Datei kein UTF-8 |
 | Fund | ein Objekt | alles andere, etwa ein Text oder eine Liste |
 | `file` | nicht leerer Text; `\` wird `/`, `./` fällt weg, ein absoluter Pfad im Repo wird relativ | fehlt, leer oder kein Text; ein Glied `..`; ein absoluter Pfad außerhalb des Repos |
 | `line` | ganze Zahl ≥ 0; Text `12`, `L12`, `12-14`, `12 - 14`, `12–14`, `L12-L14`, `12 bis 14` (vertauschte Enden werden sortiert, `12-12` wird 12); `null`, fehlt oder leerer Text wird `null` | negative Zahl, Kommazahl, `true`/`false`, Objekt, Liste; Text ohne diese Form, etwa `"near 40"`, `"ca. 12"` oder `"12, 15"` |

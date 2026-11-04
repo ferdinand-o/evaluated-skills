@@ -6575,7 +6575,8 @@ def test_b_cp3_f2_stufe_is_a_placeholder_not_prefilled(tmp_path):
     plan, run, directory = _marked_run(kit, root)
     marker = plan["packets"][0]["marker"]
     prompt = _prompt(directory, "p1")
-    assert f'"marke": "{marker}"' in prompt                       # Marke vorausgefüllt
+    assert '"marke": "<marke>"' in prompt                         # Marke nur in der letzten Zeile
+    assert prompt.count(marker) == 1
     assert '"stufe": "<stufe>"' in prompt                         # Stufe nicht
     assert '"stufe": "medium"' not in prompt
     assert "`/code-review medium`" in prompt                      # die geplante Stufe als Vorgabe
@@ -6791,11 +6792,12 @@ def test_b_cp3r2_f2_stufe_only_with_code_review(tmp_path, monkeypatch, capsys):
     data = kit.record(directory, "p1", "Review ohne /code-review",
                       _payload(tmp_path, bare, "main.json"))
     assert "level" not in data
+    # Eine mitgelieferte Stufe zählt bei einem Werkzeug ohne Stufe nicht (Prüfpunkt 3, Runde 3).
     low = _object(plan, "p2", [], stufe="low")
-    assert kit.record(directory, "p2", "Review ohne /code-review",
-                      _payload(tmp_path, low, "low.json"))["level"] == "low"
+    assert "level" not in kit.record(directory, "p2", "Review ohne /code-review",
+                                     _payload(tmp_path, low, "low.json"))
     audit = kit.audit(directory, None)
-    assert audit["below_level"] == ["p2"] and audit["no_block"] == []
+    assert audit["below_level"] == [] and audit["no_block"] == []
 
     # --since: ein security-Ergebnis ohne Stufe zählt mit der Stufe seines Plans.
     since_root = _since_repo(tmp_path / "since")
@@ -6833,18 +6835,22 @@ def test_b_cp3r2_f8_no_block_flag_always_marks_the_result(tmp_path):
     assert audit["no_block"] == ["p1", "p2"] and audit["below_level"] == ["p2"]
 
 
-def test_b_cp3r2_f3_marker_up_front_and_size_hint(tmp_path, monkeypatch, capsys):
+def test_b_cp3r3_f1_marker_only_in_last_line_hint_up_front(tmp_path, monkeypatch, capsys):
     kit = _kit()
     root = _two_packet_repo(tmp_path)
     plan, run, directory = _marked_run(kit, root)
     for packet in plan["packets"]:
         marker = packet["marker"]
-        lines = _prompt(directory, packet["id"]).rstrip("\n").splitlines()
+        text = _prompt(directory, packet["id"])
+        lines = text.rstrip("\n").splitlines()
         assert lines[0].startswith("<!-- skill: deep-review")
-        assert lines[1].startswith(f"Paket-Marke: {marker} — ")
+        # Die erste Inhaltszeile weist auf das Ende hin, nennt die Marke aber nicht: Wer nur
+        # den Kopf liest, hat keine gültige Marke.
         assert "letzten Zeile" in lines[1] and "Rückgabeformat" in lines[1]
+        assert "Paket-Marke" in lines[1] and marker not in lines[1]
+        # Die Marke steht genau einmal in der Datei, in der letzten Zeile.
+        assert text.count(marker) == 1
         assert lines[-1] == f"Paket-Marke: {marker}"
-        assert [line for line in lines if line == f"Paket-Marke: {marker}"] == [lines[-1]]
     # Das Objekt mit der Marke wird angenommen wie bisher.
     assert _rec(kit, directory, "p1", "/code-review",
                 _payload(tmp_path, _object(plan, "p1", []), "p1.json"))["marke"] == \
@@ -6919,3 +6925,68 @@ def test_b_cp3r2_f5_plan_reads_earlier_results_once(tmp_path, monkeypatch, capsy
     assert f"Übergangen: {run_a} p1 (Stufe medium unter high)" in lines
     assert [p for p in reads if p.parent.parent.name == run_a] == [directory / "results" / "p1.json"]
     assert digests.count(run_a) == 1
+
+
+def test_b_cp3r3_f2_levelless_tools_are_a_fixed_set(tmp_path, capsys):
+    kit = _kit()
+    assert set(kit.LEVELLESS_TOOLS) == {"/security-review", "Review ohne /security-review",
+                                        "Review ohne /code-review"}
+    root = _two_packet_repo(tmp_path)
+    plan, run, directory = _marked_run(kit, root)
+    # Werkzeug ohne Stufe: eine mitgelieferte stufe wird nicht gespeichert, record sagt es.
+    low = _object(plan, "p1", [], stufe="low")
+    capsys.readouterr()
+    assert _cli_record(kit, root, run, "p1", _payload(tmp_path, low, "p1.json"),
+                       tool="Review ohne /code-review") == 0
+    out = capsys.readouterr().out
+    assert "stufe" in out and "ignoriert" in out, out
+    stored = json.loads((directory / "results" / "p1.json").read_text(encoding="utf-8"))
+    assert "level" not in stored
+    # Jedes andere Werkzeug braucht stufe ohne --no-block, auch eine andere Schreibweise.
+    bare = _object(plan, "p2", [])
+    del bare["stufe"]
+    for tool in ("/code-review low", "Code-Review", "Hauptkontext"):
+        with pytest.raises(kit.KitError, match="stufe"):
+            kit.record(directory, "p2", tool, _payload(tmp_path, bare, "p2.json"))
+    assert not (directory / "results" / "p2.json").exists()
+    # Mit --no-block bleibt sie optional.
+    data = kit.record(directory, "p2", "Code-Review", _payload(tmp_path, bare, "p2.json"),
+                      no_block=True)
+    assert data["no_block"] is True and "level" not in data
+    # Fokus security: /security-review und das Review im Hauptkontext speichern keine Stufe.
+    for tool in ("security-review", "Review ohne /security-review"):
+        folder = tmp_path / tool.replace(" ", "_").replace("/", "")
+        folder.mkdir()
+        sec_root = _two_packet_repo(folder)
+        sec = kit.build_plan(sec_root, "base..HEAD", "standard", "security", None, False)
+        kit.write_counterparts(sec_root, sec["_meta"]["run"])
+        sec_dir = _run_path(sec_root, sec)
+        marked = json.loads((sec_dir / "plan.json").read_text(encoding="utf-8"))
+        obj = {"marke": marked["packets"][0]["marker"], "stufe": "low", "findings": []}
+        assert "level" not in kit.record(sec_dir, "s1", tool, _payload(tmp_path, obj, "s1.json"))
+        assert kit.audit(sec_dir, None)["below_level"] == []
+
+
+def test_b_cp3r3_f3_security_since_has_no_level(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t1", "--focus", "security") == 0
+    run_a = next(line.split(": ", 1)[1] for line in capsys.readouterr().out.splitlines()
+                 if line.startswith("Lauf: "))
+    kit.write_counterparts(root, run_a)
+    directory = kit.run_dir(root, run_a)
+    marked = json.loads((directory / "plan.json").read_text(encoding="utf-8"))
+    obj = {"marke": marked["packets"][0]["marker"], "findings": [_finding("a.py", 5, "S")]}
+    assert "level" not in kit.record(directory, "s1", "security-review", _payload(tmp_path, obj))
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--focus", "security", "--level",
+                "xhigh", "--since", run_a) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert not any(line.startswith("Übergangen") for line in lines), lines
+    assert "Übernommen (--since): 1 Datei(en)" in lines, lines
+    run_b = next(line.split(": ", 1)[1] for line in lines if line.startswith("Lauf: "))
+    plan_b = json.loads((kit.run_dir(root, run_b) / "plan.json").read_text(encoding="utf-8"))
+    assert plan_b["file_keys"]["a.py"]["reused_from"] == run_a
+    assert [f["summary"] for f in plan_b["file_keys"]["a.py"]["findings"]] == ["S"]
