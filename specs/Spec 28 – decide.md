@@ -1,6 +1,6 @@
 # Spec 28: decide — eigene Fragen nach Umkehrbarkeit einordnen, belegt statt still
 
-Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Überarbeitet nach unabhängigem Review und nach dem Bau (2026-11-03: `#-<text>` für entfernte Zeilen, finaler Prüfpunkt) (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
+Skill-Spezifikation · Zyklus 28 · Entscheidung: Claudes eigene Fragen während der Arbeit werden nach Umkehrbarkeit eingeteilt; kleine fällt Claude selbst mit Belegzeile im Sitzungsprotokoll, große legt es mit Optionen und Schlüssel in einer committeten Ablage ab und führt sie ohne Freigabe nicht aus, und ein Tier-1-Skript meldet teure Änderungen im Diff, für die keine Freigabe abgelegt ist · Abgeglichen mit Spec 00, Spec 03, Spec 09, Spec 23, Spec 24 und Spec 27 · Zyklus 2 (2026-11-04, nach Bewertung durch den Nutzer): verschlankt nach der Regel „das Häufige genau abdecken, das Seltene an den Nutzer“ — `check` nur noch mit einer Revision, Schlüsseltext nur für hinzugefügte Zeilen, `brief` als Skript-Befehl entfällt, `check` schließt Zusammenfassung und offene Fragen ein; dazu ein optionaler Hook `guard` (G3) für Push, Löschen, Verwerfen und externe Wirkungen · Überarbeitet nach unabhängigem Review und nach dem Bau (2026-11-03: `#-<text>` für entfernte Zeilen, finaler Prüfpunkt) (2026-11-02, Opus: Vorrang von Regel und Auftrag, Pflichtfelder eines großen Blocks, Untergrenze trennt Eval 1 von Eval 2, Belegzeile vom Skript geprüft, Glob-Semantik und `#<text>` festgelegt, `migration` nur teilweise geprüft, G3-Begründung nach Spec 00 §4; Nachreview der Eval-Tabelle: absolute Pfade in der Belegzeile, zweite Lesart in `dc-logging`, ganze Antwort auf eine große Frage unterbleibt, Description nennt beauftragte teure Schritte und Regeln, ein Befehl für Regel-Fragen, Schreibweise der Regel, Nummerierung der Migrationen)
 
 ## Problem
 
@@ -14,8 +14,18 @@ entschieden statt belegt oder abgelegt); die erste (unnötig gefragt) misst kein
 `claude -p` ohne Permission-Host kein `AskUserQuestion` anbietet.
 
 Grundlage ist der Entwurf `docs/specs/wip/decide.md` (feature-spec, zwei Reviews; die Annahmen
-hat der Nutzer am 2026-11-02 im Gespräch bestätigt, vermerkt in der letzten Annahme des Entwurfs); seine 19 Akzeptanzkriterien liegen als Stubs
-`tests/test_decide_*.py` vor. Wo Spec und Entwurf abweichen, gilt diese Spec.
+hat der Nutzer am 2026-11-02 im Gespräch bestätigt, vermerkt in der letzten Annahme des Entwurfs); seine 19 Akzeptanzkriterien liegen als
+`tests/test_decide_*.py` vor. Wo Spec und Entwurf abweichen, gilt diese Spec. Zyklus 2 streicht
+die zwei Kriterien zum Auftrag aus `brief` („Auftrag übernimmt passende Einträge und Regeln“,
+„Zu langer oder wertender Auftrag wird gemeldet“); es bleiben 17.
+
+**Zyklus 2.** Der Nutzer hat die gebaute Skill am 2026-11-04 bewertet: zu schwer
+(`decide_log.py` 2245 Zeilen, 42 Punkte in known-limits, SKILL.md 143 Zeilen, drei Aufrufe bei der
+Übergabe), und ausgerechnet die irreversiblen Kategorien `data-delete`, `unsaved-work`, `push`,
+`external` sieht `check` nicht. Seine Regel: das meiste genau abdecken, seltene Fälle nur an den
+Nutzer weitergeben — die Skill soll keine Tokens verbrennen. Ein großer Teil des Skripts behandelt
+seltene Fälle (Bereiche mit `..`, `...`, `^!`, Merge-Basen, Bare-Repo, Ablage aus einer Revision,
+Richtung des Schlüsseltexts mit `#-` und `#+`) und das Prüfen eines Auftrags an Subagenten.
 
 ## Constraints
 
@@ -30,19 +40,17 @@ Gate-Grade:
 - G1, die SKILL.md verlangt: die Untergrenze (nur Fragen mit zwei Lesarten, die zu
   verschiedener Arbeit führen), die Einordnung als klein oder groß, die Wahl des Themas, die
   Beleg-Suche vor einer kleinen Entscheidung, keine Ausführung einer großen ohne Freigabe,
-  keine Neigung im Auftrag an einen Subagenten jenseits der Wortliste, die Schätzung „mehr
+  keine Neigung und keine Empfehlung im Auftrag an einen Subagenten, die Schätzung „mehr
   als zwei Dateien", dass Subagenten nichts eintragen. Letzteres wird jedem Subagenten wörtlich
-  mitgeteilt (Ablauf 5), aber bewusst nicht geprüft: kein Skript erkennt einen Subagenten, und
-  `brief --check` prüft den Satz nicht.
+  mitgeteilt (Ablauf 5), aber bewusst nicht geprüft: kein Skript erkennt einen Subagenten.
 - G2, das Skript meldet: kleine Entscheidung ohne Belegzeile, ohne Treffer als Annahme,
-  Regel-Anwendung und -Widerspruch, zwei bis vier Optionen je großer Frage, Länge und
-  unzulässige Felder oder Wörter im Auftrag, teure Änderung im Diff ohne freigegebenen
-  Eintrag (`check`).
-- Kein Hook in diesem Zyklus. Spec 00 §4: „Lohnend ist G3 nur dort, wo der Schaden
-  irreversibel ist" — das trifft gerade die Kategorien, die `check` nicht sieht (`data-delete`,
-  `push`, `external`). Ein Hook dort müsste Bash-Befehle je Kategorie erkennen und die Ablage
-  lesen; erst misst `check`, wie oft eine teure Änderung ohne Freigabe vorkommt (Alternatives
-  considered). `migration_gate.py` (sql-schema-architect) hält per Hook-Snippet nur
+  Regel-Anwendung und -Widerspruch, zwei bis vier Optionen je großer Frage, teure Änderung im
+  Diff ohne freigegebenen Eintrag (`check`).
+- G3 nur mit installiertem Hook, opt-in (Abschnitt „Hook“). Spec 00 §4: „Lohnend ist G3 nur dort,
+  wo der Schaden irreversibel ist" — das trifft gerade die Kategorien, die `check` nicht sieht.
+  Die Skill liefert das Snippet `assets/hooks/decide-guard.json` und installiert es nie selbst
+  (Spec 00, Constraints). Ohne Hook bleiben diese Kategorien G1 und die Schlusszeile von `check`
+  nennt sie ungeprüft. `migration_gate.py` (sql-schema-architect) hält per Hook-Snippet nur
   `alembic upgrade` mit `--versions-dir alembic/versions` an, nicht die Frage, ob migriert wird.
 
 Ablage nach Spec 00 §1:
@@ -50,7 +58,6 @@ Ablage nach Spec 00 §1:
 | Klasse | Pfad | Inhalt |
 | --- | --- | --- |
 | Ephemera | `.skills/cache/decide/<session>/log.md` | Protokoll der Sitzung, Kopfzeile, eine Tabellenzeile je Eintrag |
-| Ephemera | `.skills/cache/decide/<session>/brief-<n>.md` | Entscheidungsauftrag an einen Subagenten |
 | Wissen | `docs/big-decisions.md` | jede große Frage als Block mit Status, committet |
 | Konfiguration | `.skills/decide/rules.md`, `~/.skills/decide/rules.md` | Regeln des Nutzers, `immer fragen:`/`nie fragen:` |
 
@@ -59,7 +66,7 @@ schreibende Aufruf mit Exit 1 und nennt `--session`. Die Repo-Wurzel ist
 `git rev-parse --show-toplevel`, sonst das Arbeitsverzeichnis; `~` ist `HOME`. Steht
 `.skills/cache/` nicht in der `.gitignore`, sagt die Antwort beim ersten Protokoll, dass ein
 unversionierter Ordner entstanden ist; die erste Anlage von `docs/big-decisions.md` meldet das
-Skript mit „angelegt: docs/big-decisions.md" (Bootstrap-Regel). SKILL.md ≤ 150 Zeilen, Deutsch
+Skript mit „angelegt: docs/big-decisions.md" (Bootstrap-Regel). SKILL.md ≤ 110 Zeilen (Zyklus 2), Deutsch
 mit englischen Bezeichnern, kein Import fremder Skill-Skripte. Assertions nur aus
 `evalkit/schema.py`.
 
@@ -73,11 +80,12 @@ kleine fällt es nie ohne Belegzeile — gesucht wo, gefunden was.*
 ```
 skills/decide/
 ├── SKILL.md                         Untergrenze, Einordnung, Ablauf klein und groß, Übergabe, Contract, Anti-Rationalisierung, Abgrenzung
-├── references/reversibility.md      Kategorien „teuer umkehrbar" mit Beispielen, Schlüssel-Form, je Kategorie geprüft/teilweise/ungeprüft und die Pfadmuster für check
+├── references/reversibility.md      Kategorien „teuer umkehrbar" mit Beispielen, Schlüssel-Form, je Kategorie geprüft/teilweise/ungeprüft, die Pfadmuster für check und die Befehle, die guard erkennt
 ├── references/option-memo.md        Form der Vorlage an den Nutzer und des Blocks in docs/big-decisions.md
-├── references/brief.md              Felder des Entscheidungsauftrags, was nicht hinein gehört, die Wortliste
+├── references/brief.md              Vorlage des Auftrags an einen Subagenten: sechs Felder, der feste Satz, was nicht hinein gehört
 ├── assets/big-decisions.md          Gerüst der Ablage mit Kopfzeile (schema: 1)
-└── scripts/decide_log.py            Tier 1 — add/resolve/summary/open/brief/check; Protokoll, Ablage, Regeln, Diff-Prüfung
+├── assets/hooks/decide-guard.json   Hook-Snippet (G3, opt-in, nie automatisch installiert)
+└── scripts/decide_log.py            Tier 1 — rules/add/resolve/summary/open/check/guard; Protokoll, Ablage, Regeln, Diff-Prüfung, Hook
 
 skills/feature-spec/SKILL.md         Abgrenzung: eigene Fragen außerhalb eines Spec-Entwurfs → decide; Projekt-Kopie über sync_skills.py
 skills/work-plan/SKILL.md            Abgrenzung: eigene Fragen außerhalb eines Plans → decide
@@ -90,7 +98,7 @@ docs/known-limits.md                 Abschnitt decide
 docs/superpowers/reports/decide-report.md       Report mit „Was nicht gemessen wurde"
 evals/decide/evals.json              fünf Evals, siehe unten
 evals/fixtures/dc-loaders/, dc-logging/, dc-models/, dc-rules/   je fixture.json mit "git": true
-tests/test_decide_*.py               die 19 Stubs aus dem Entwurf werden Tests, dazu tests/test_decide_log.py
+tests/test_decide_*.py               17 Akzeptanztests aus dem Entwurf, dazu tests/test_decide_log.py und tests/test_decide_guard.py
 ```
 
 ### Ablauf
@@ -120,8 +128,8 @@ tests/test_decide_*.py               die 19 Stubs aus dem Entwurf werden Tests, 
    die nur wegen einer Regel groß ist, gibt es genau einen Befehl:
    `add --class gross --topic <regelthema> --key rule:<regelthema> --option … --recommendation …`.
 3. **Klein.** Beleg suchen in Repo, Spec, Tests, Doku; müsste die Suche voraussichtlich mehr
-   als zwei Dateien lesen, erarbeitet sie ein Sonnet-Subagent mit einem Auftrag aus
-   `brief` (Schritt 6). Dann
+   als zwei Dateien lesen, erarbeitet sie ein Sonnet-Subagent mit einem Auftrag nach
+   `references/brief.md` (Schritt 6). Dann
    `add --class klein --topic <thema> --question <frage> --decision <wahl> --evidence "gesucht: … — Treffer: <datei:zeile>"`
    und weiterarbeiten. Ohne Treffer schreibt das Skript den Eintrag als Annahme.
 4. **Groß.** Vorlage nach `references/option-memo.md`: zwei bis vier Optionen, je Folgen und
@@ -137,7 +145,7 @@ tests/test_decide_*.py               die 19 Stubs aus dem Entwurf werden Tests, 
      offen, der teure Schritt unterbleibt, die Übergabe nennt `D-<n>`.
 5. **Subagenten** tragen nichts ein, und jeder erfährt es wörtlich, nicht sinngemäß. Auf drei
    Wegen, ohne mechanische Prüfung:
-   - **Auftrag aus decide** (`brief`): Das Skript schreibt unter Rückgabe den festen Satz
+   - **Auftrag nach `references/brief.md`**: Unter Rückgabe steht der feste Satz
      „Du arbeitest als Subagent. Trag keine Entscheidung und keine Frage mit decide_log.py ein und schreib nicht nach docs/big-decisions.md. Stößt du auf eine Frage mit zwei Lesarten oder auf einen teuer umkehrbaren Schritt, der nicht ausdrücklich in deinem Auftrag steht, entscheide und handle nicht, sondern nenn ihn in deiner Rückgabe: Frage, Optionen mit Belegen datei:zeile, Folgen, Umkehrbarkeit, Empfehlung. Der Hauptagent ordnet ihn ein."
    - **Jeder andere Subagent**, den der Hauptagent losschickt, während decide geladen ist: Der
      Auftrag endet mit demselben Satz, wörtlich (SKILL.md, Ablauf 5).
@@ -145,16 +153,18 @@ tests/test_decide_*.py               die 19 Stubs aus dem Entwurf werden Tests, 
      Task-Datei „Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in dieser Task stehen, entscheidest und trägst du nicht selbst ein; nenn sie in deinem Bericht mit Frage, Optionen, Folgen und Empfehlung. Der Hauptagent ordnet sie ein." Der Satz nennt decide nicht, weil subagent-dev auch ohne decide läuft.
    Liest ein Subagent selbst die SKILL.md von decide, gilt dort derselbe Satz: ohne
    `AskUserQuestion` in der Werkzeugliste trägt er nichts ein und gibt zurück.
-6. **Auftrag an einen Subagenten.** `brief --topic <thema>` schreibt
-   `.skills/cache/decide/<session>/brief-<n>.md` mit den sechs Feldern aus
-   `references/brief.md`; Schon entschieden, Feste Vorgaben und Rückgabe (mit dem Satz aus
-   Ablauf 5) füllt das Skript,
-   Frage, Anlass und Wo nachsehen der Hauptagent. Vor dem Dispatch `brief --check <datei>`.
-7. **Übergabe.** Hat die Aufgabe Dateien geändert, `check --range <commit vor der Aufgabe>`;
-   jede gemeldete Stelle nennt die Antwort mit ihrem Grund, die Zeile „ungeprüft: …" wörtlich.
-   Dann `summary` — nur wenn es
-   Einträge gibt — und `open`. Fehlt das Skript, sagt die Übergabe „ungeprüft — decide_log.py
-   nicht verfügbar" und nennt die Entscheidungen aus dem Gedächtnis als solche.
+6. **Auftrag an einen Subagenten.** Der Hauptagent schreibt den Auftrag direkt in den Prompt des
+   Subagenten, nach der Vorlage in `references/brief.md`: sechs Felder (Frage, Anlass, Wo
+   nachsehen, Schon entschieden, Feste Vorgaben, Rückgabe mit dem Satz aus Ablauf 5), die Frage
+   neutral, ohne Empfehlung. Kein Skript-Aufruf, keine Datei (Zyklus 2: `brief` und
+   `brief --check` entfallen; was sie meldeten, ist G1).
+7. **Übergabe.** Hat die Aufgabe Dateien geändert, läuft `check --range <commit vor der Aufgabe>`
+   als letzter Aufruf vor der Antwort; ohne eigenen Commit `HEAD`. Ein Aufruf genügt: Die Ausgabe
+   schließt mit den kleinen Entscheidungen der Sitzung (wie `summary`) und den offenen großen
+   Fragen (wie `open`). Jede gemeldete Stelle nennt die Antwort mit ihrem Grund, die Zeile
+   „ungeprüft: …" wörtlich. Ohne Aufruf kein Satz über das Ergebnis von `check`. Fehlt das
+   Skript, sagt die Übergabe „ungeprüft — decide_log.py nicht verfügbar" und nennt die
+   Entscheidungen aus dem Gedächtnis als solche.
 
 ### Formate
 
@@ -187,8 +197,7 @@ Status ist `offen`, `freigegeben` oder `abgelehnt`; Quelle der Antwort ist `Nutz
 | `add --class gross --approved-by-request` | `--topic`, `--question`, `--key`, Zitat | keine; der Block nennt „Optionen: — (Auftrag)" | Kategorie aus `reversibility.md`, oder `rule:<thema>`, wenn eine Regel `immer fragen` das Thema trifft (konkreter Auftrag vor Regel, Ablauf 2) |
 | `add --class klein`, von `immer fragen` hochgestuft | `--topic`, `--question`, `--decision`, `--evidence` | zwei bis vier `--option`, sonst Exit 1 mit „Regel immer fragen: <thema> trifft — zwei bis vier --option nötig"; `--decision` wird die Empfehlung | `rule:<thema>`, von `check` nie verglichen |
 
-Der Kopf von `brief-<n>.md` und der Ablage zählt nicht zu den Feldern und nicht zu den 25 Zeilen
-eines Auftrags. Blöcke bleiben nach der Antwort stehen. Als Konsument
+Blöcke bleiben nach der Antwort stehen. Als Konsument
 liest das Skript erst die Kopfzeile; fehlt sie oder ist `schema` höher als 1, überspringt es
 die Datei sichtbar („docs/big-decisions.md schema 1 erwartet, 2 gefunden — Freigaben
 übersprungen") und `check` meldet dann jede Stelle.
@@ -199,14 +208,17 @@ die Datei sichtbar („docs/big-decisions.md schema 1 erwartet, 2 gefunden — F
 es auf `/`, ist es ein Präfix; sonst ein Glob, den das Skript selbst in eine Regex übersetzt —
 `*` ohne `/`, `**/` null oder mehr Ordner — statt `fnmatch` (trifft `/` mit `*`) oder
 `PurePath.full_match` (erst ab Python 3.13). Eine Stelle ist eine Datei im Diff. Mit `#<text>`
-gibt ein Eintrag eine Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten; mit
-`#-<text>` nur, wenn ihre entfernten Zeilen `<text>` enthalten (Entfernen einer Abhängigkeit,
-Löschen einer Migration) — eine Freigabe zum Hinzufügen gibt nie das Entfernen frei. `#+<text>`
-ist die ausdrückliche Form für hinzugefügte Zeilen und nötig, wenn der Text selbst mit `-` oder
-`+` beginnt (`#+--extra-index-url`); `#<text>` ist ihre Kurzform. Eine geänderte Zeile erscheint
-im Diff als entfernte und hinzugefügte Zeile und trifft deshalb beide Formen. Weitere
-Änderungen in derselben Datei gibt ein passender Eintrag mit frei. Ein führendes `./` im
-Pfadmuster entfällt, ein absoluter Pfad oder `..` wird abgewiesen.
+gibt ein Eintrag eine Datei nur frei, wenn ihre hinzugefügten Zeilen `<text>` enthalten; eine
+Datei, deren Diff nur entfernte Zeilen hat (Entfernen einer Abhängigkeit, Löschen einer
+Migration), gibt nur ein Schlüssel ohne `#<text>` frei. Weitere Änderungen in derselben Datei
+gibt ein passender Eintrag mit frei. Ein führendes `./` im Pfadmuster entfällt, ein absoluter
+Pfad oder `..` wird abgewiesen. Ein Text, der mit `-` oder `+` beginnt, wird abgewiesen
+(`add`: Exit 1; ein solcher Schlüssel in der Ablage gibt nichts frei, `check` nennt ihn als
+Hinweis) — Zyklus 2 streicht `#-<text>` und `#+<text>`: Für die seltenen Fälle nimmt man den
+Schlüssel ohne Text.
+
+Für `push` ist das Pfadmuster kein Dateipfad, sondern `<remote>/<branch>` mit denselben
+Glob-Regeln (`push:origin/claude/**`); nur `guard` liest es (Abschnitt „Hook“), `check` nie.
 
 **Belegzeile** `--evidence`: `gesucht: <ort oder muster> — Treffer: <datei:zeile>` oder
 `gesucht: <…> — nichts gefunden`. Das Skript normalisiert ` - ` und ` -- ` zu ` — `, ein
@@ -224,11 +236,15 @@ Skript das Thema in der Schreibweise der Regel in Protokoll und Ablage.
 ### check
 
 `check --range <rev>` liest `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die
-unversionierten Dateien aus `git ls-files --others --exclude-standard`; `<a>..<b>` ist ebenfalls
-erlaubt und lässt den Arbeitsbaum aus, ebenso `<a>...<b>` (wie `git diff <a>...<b>`: Basis ist
-die Merge-Base, Ende ist `<b>`) — die übliche Form für einen PR-Diff. Bei einem Bereich liest
-`check` die Ablage aus dem Ende, bei einer Einzelrevision aus der Arbeitskopie; Meldungen nennen
-die Revision so, wie sie angegeben wurde. Je geänderte Datei sucht es die Kategorie über die
+unversionierten Dateien aus `git ls-files --others --exclude-standard`, die Ablage aus der
+Arbeitskopie. `<rev>` ist genau eine Revision, die `git rev-parse --verify <rev>^{commit}`
+auflöst. Alles andere — `<a>..<b>`, `<a>...<b>`, `^!`, `^@`, `^-`, eine Revision, die nicht
+auflöst — endet mit Exit 2 und „ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den
+Bereich selbst prüfen“; ein Repo ohne Arbeitsbaum (Bare-Repo) mit Exit 2 und „ungeprüft — kein
+Arbeitsbaum“. Zyklus 2 streicht die Bereiche: Die Übergabe braucht nur „seit dem Commit vor der
+Aufgabe“, ein PR-Diff ist der seltene Fall und geht an den Nutzer. Eine Datei im Diff, die das
+Skript nicht lesen kann (Kodierung, Rechte), meldet es als Stelle „unlesbar — selbst prüfen“
+statt eines eigenen Falls je Ursache. Je geänderte Datei sucht es die Kategorie über die
 Pfadmuster in `reversibility.md`:
 
 | Kategorie | Grad | Pfadmuster |
@@ -244,7 +260,12 @@ Frage neu gestellt (andere Optionen oder Empfehlung), gibt der ältere freigegeb
 mehr frei, bis der neue beantwortet ist. Ein wiederholter Aufruf auf eine per Auftrag
 freigegebene Frage legt keinen neuen Block an.
 Gemeldet wird jede Stelle ohne Eintrag mit passendem Schlüssel und Status `freigegeben`, mit
-Datei, Kategorie und Grund; Exit 1 bei mindestens einer Stelle, sonst 0. Jede Ausgabe endet mit
+Datei, Kategorie und Grund; Exit 1 bei mindestens einer Stelle, sonst 0. Danach, vor der
+Schlusszeile, die kleinen Entscheidungen der Sitzung wie `summary` (nur mit Sitzung und
+Einträgen; ohne Sitzung entfällt der Teil still, `check` schreibt nichts) und die offenen großen
+Fragen wie `open` (nur wenn es welche gibt). Ist nichts zu melden, bleibt die Ausgabe bei der
+Zeile „Keine Stelle ohne Freigabe (…)“ und der Schlusszeile. `summary` und `open` bleiben als
+eigene Befehle für „was hast du entschieden“ und „offene Entscheidungen“. Jede Ausgabe endet mit
 „ungeprüft: data-delete, unsaved-work, push, external, cost; teilweise: api, migration,
 dependency, permissions" — die Zeile entsteht aus der Spalte Grad von `reversibility.md`.
 Keine Kategorie heißt „geprüft": Jedes Pfadmuster kennt nur die Orte, die es nennt
@@ -252,6 +273,49 @@ Keine Kategorie heißt „geprüft": Jedes Pfadmuster kennt nur die Orte, die es
 In diesem Repo meldet `check` auch Fixtures unter `evals/fixtures/*/migrations/`; eine
 Freigabe mit Schlüssel `migration:evals/fixtures/` deckt sie. Eine Freigabe gilt
 für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will, nimmt `#<text>`.
+
+### Hook (G3, optional)
+
+`decide_log.py guard` ist ein `PreToolUse`-Hook auf das Werkzeug Bash. Er deckt die häufigen
+Befehle der Kategorien, die `check` nicht sieht, genau ab und gibt alles Übrige an den Nutzer
+weiter, statt es nachzubauen. Installiert wird er wie `migration-gate.json` (sql-schema-architect):
+`decide_log.py` nach `.claude/hooks/` kopieren, dann `assets/hooks/decide-guard.json` in
+`.claude/settings.json` oder `.claude/settings.local.json` mischen. Fehlt die Kopie, gibt der
+Hook `{"systemMessage": "[decide] Hook ungeprüft — .claude/hooks/decide_log.py fehlt"}` aus und hält
+nichts an. Die Skill installiert ihn nie selbst.
+
+`guard` liest das Hook-JSON von stdin (`tool_input.command`, `cwd`; Repo-Wurzel wie oben aus
+`cwd`), zerlegt den Befehl an `&&`, `||`, `;`, `|` und Zeilenumbrüchen und jeden Teil mit
+`shlex.split`; führende Zuweisungen (`VAR=x`) und ein führendes `sudo` überspringt es. Es erkennt:
+
+| Kategorie | Befehl | Freigabe über die Ablage |
+| --- | --- | --- |
+| `push` | `git push` | ja, Ziel `<remote>/<branch>`: ohne Argumente der Upstream des aktuellen Zweigs (`git rev-parse --abbrev-ref --symbolic-full-name @{u}`), `git push [-u] <remote> <ref>` → `<remote>/<ref>`, `<src>:<dst>` → `<remote>/<dst>`. Mit `-f`, `--force`, `--force-with-lease`, `--delete`, `-d`, `--tags`, `--all`, `--mirror`, einem Refspec mit `+`, mehr als einem Refspec oder ohne bestimmbares Ziel immer Rückfrage |
+| `push` | `gh pr merge`, `gh release create` | nein, immer Rückfrage |
+| `external` | `gh pr create`, `gh issue create`, `gh issue close`, `gh issue comment`, `npm publish`, `twine upload`, `docker push`, `terraform apply`, `terraform destroy`, `kubectl apply`, `kubectl delete`; `curl` mit `-X`/`--request` `POST`/`PUT`/`PATCH`/`DELETE` oder mit `-d`, `--data*`, `-F`, `--form`, `--json`; `wget` mit `--post-data` oder `--method` | nein, immer Rückfrage |
+| `data-delete` | `rm` mit `-r`, `-R` oder `--recursive` (außer alle Ziele liegen unter `.skills/cache/`, `__pycache__/`, `.pytest_cache/`, `node_modules/` oder `/tmp/`), `git clean` mit `-f`, `git branch -D`; `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` in einem Argument von `psql`, `sqlite3`, `mysql` | nein, immer Rückfrage |
+| `unsaved-work` | `git reset --hard`, `git checkout -- <pfad>`, `git checkout .`, `git restore` ohne `--staged`, `git stash drop`, `git stash clear` | nein, immer Rückfrage |
+
+Entscheidung je erkanntem Teil:
+
+- **Nichts erkannt:** keine Ausgabe, Exit 0 — kein Token im Kontext.
+- **`git push` mit Ziel** und einem Block mit Status `freigegeben`, dessen Schlüssel `push:<muster>`
+  das Ziel trifft (jüngster Block je Frage und Schlüssel gilt, wie bei `check`): keine Ausgabe,
+  Exit 0. Ein Auftrag wie „push auf claude/x“ wird also einmal mit `--approved-by-request` und
+  `--key push:origin/claude/x` abgelegt und gilt für jeden weiteren Push dorthin.
+- **Sonst:** `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+  "permissionDecisionReason": "decide: <kategorie> — <befehl, höchstens 80 Zeichen>: <grund>"}}`,
+  Exit 0. Grund ist „keine Freigabe mit Schlüssel push:<ziel> in docs/big-decisions.md“ oder
+  „immer Rückfrage“. Claude Code legt die Frage dem Nutzer vor; das Modell sieht nur die eine Zeile.
+- **Eigener Fehler** (kein JSON, unerwartete Ausnahme): `{"systemMessage": "[decide] Hook
+  ungeprüft — <grund>"}`, Exit 0. `guard` hält nie wegen eines eigenen Fehlers an.
+
+Die Befehlsliste steht als Konstante im Skript, weil die Hook-Kopie ohne `references/` läuft;
+`reversibility.md` trägt dieselbe Liste in einer Tabelle, ein Test hält beide gleich. Was `guard`
+nicht zerlegt — `$(…)`, Backticks, `bash -c`, `eval`, `xargs`, Aliase, Skripte, Werkzeuge außer
+Bash (MCP) —, sieht es nicht; die Schlusszeile von `check` bleibt deshalb unverändert. Gegenüber
+Spec 00 §4 heißt es: mit installiertem Hook blockiert ein erkannter Befehl bis zur Antwort des
+Nutzers (G3); ohne Hook verlangt die SKILL.md das Unterlassen (G1).
 
 ### Contract
 
@@ -267,12 +331,16 @@ für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will
   gestellt oder nicht; `check` liest nur diese Datei, nie das Sitzungsprotokoll.
 - **Regeln wirken nur in eine Richtung.** `immer fragen` stuft hoch; `nie fragen` nimmt kleine
   Entscheidungen aus der Zusammenfassung und stuft eine große nie herab.
-- **Subagenten wörtlich unterrichtet.** Auftrag aus `brief`, jeder andere Auftrag unter decide
-  und jede Task-Datei von subagent-dev tragen den festen Satz aus Ablauf 5; ob der Subagent sich
-  daran hält, bleibt G1 und wird nicht geprüft.
-- **Kein wertender Auftrag.** `brief --check` meldet mehr als 25 Zeilen, Felder außer den
-  sechs festen und die Wörter `sollte`, `besser`, `lieber`, `empfehle`, `ich würde`,
-  `offensichtlich` in der Frage; andere Wertungen bleiben G1.
+- **Subagenten wörtlich unterrichtet.** Jeder Auftrag an einen Subagenten unter decide und jede
+  Task-Datei von subagent-dev tragen den festen Satz aus Ablauf 5; ob der Subagent sich daran
+  hält, bleibt G1 und wird nicht geprüft.
+- **Kein wertender Auftrag.** Die Frage im Auftrag ist neutral, ohne Empfehlung; die Wortliste in
+  `references/brief.md` nennt typische Wertwörter. G1, kein Skript prüft es (Zyklus 2).
+- **Seltenes an den Nutzer.** Was `check` oder `guard` nicht sicher einordnen kann (Bereich statt
+  Revision, Bare-Repo, unlesbare Datei, Push ohne bestimmbares Ziel), wird nicht nachgebaut,
+  sondern als „ungeprüft — …“ oder als Rückfrage an den Nutzer weitergegeben, nie als sauber.
+- **Hook optional.** Mit `assets/hooks/decide-guard.json` blockiert ein erkannter Befehl bis zur
+  Antwort des Nutzers (G3); ohne Hook bleibt es G1. Die Skill installiert ihn nie selbst.
 - **Sichtbar ungeprüft.** `check` nennt in jeder Ausgabe die Kategorien, die es nicht oder nur
   teilweise sehen kann; die Übergabe gibt diese Zeile wörtlich weiter.
 - **Anti-Zeremonie-Fall:** Eine Wahl unter der Untergrenze (Reihenfolge in einer Datei,
@@ -290,6 +358,8 @@ für ihren Schlüssel, nicht für eine einzelne Änderung — wer sie enger will
 | „Im -p-Lauf kann ich nicht fragen, also entscheide ich" | Unbeaufsichtigt bleibt die große Frage offen; der teure Schritt unterbleibt, die Übergabe nennt `D-<n>`. |
 | „Der Nutzer hat es doch verlangt, trotzdem frage ich" | Ein ausdrücklicher Auftrag ist die Freigabe. Zitat ablegen, ausführen. |
 | „Der Subagent soll wissen, was ich denke" | Dann bestätigt er es nur. Frage neutral, keine Empfehlung im Auftrag. |
+| „check würde hier nichts melden, das spare ich mir" | Ein Satz über ein Prüfergebnis ohne Aufruf ist erfunden. Aufrufen, Schlusszeile zitieren. |
+| „Der Hook fragt ja sowieso, den Push lege ich nicht ab" | Ohne Hook fragt niemand. Ein beauftragter Push wird einmal abgelegt; dann lässt auch der Hook ihn durch. |
 
 ### Abgrenzung
 
@@ -319,17 +389,24 @@ the assumptions of a plan (use work-plan)."
 
 | Test | Datei | prüft |
 | --- | --- | --- |
-| 19 Akzeptanzkriterien | `tests/test_decide_*.py` | je Stub das Given/When/Then aus `docs/specs/wip/decide.md`; der Bau ersetzt `@pytest.mark.skip` durch den Test |
+| 17 Akzeptanzkriterien | `tests/test_decide_*.py` | je Datei das Given/When/Then aus `docs/specs/wip/decide.md`; Zyklus 2 löscht `test_decide_auftrag_uebernimmt_passende_eintraege_und_regeln.py` und `test_decide_zu_langer_oder_wertender_auftrag_wird_gemeldet.py` |
 | `test_option_count` | `tests/test_decide_log.py` | `add --class gross` mit einer oder fünf Optionen → Exit 1, keine Zeile; Hochstufung per Regel ohne `--option` → Exit 1 mit Grund; `--approved-by-request` ohne Optionen schreibt den Block |
 | `test_evidence_form` | dito | `gesucht: x - Treffer: ./a.py:3` und `… Treffer: <wurzel>/a.py:3` werden zu `gesucht: x — Treffer: a.py:3`; ein absoluter Pfad außerhalb der Wurzel bleibt; `gesucht: x` ohne Ergebnis → Exit 1 |
-| `test_brief_return_sentence` | dito | `brief --topic X` schreibt den Satz aus Ablauf 5 wörtlich unter Rückgabe; `brief --check` meldet sein Fehlen nicht |
+| `test_brief_reference_sentence` | dito | `references/brief.md` und `SKILL.md` zitieren den Satz aus Ablauf 5 wörtlich; der Unterbefehl `brief` existiert nicht mehr (argparse-Fehler, Exit 2) |
 | `test_task_file_subagent_sentence` | `tests/test_subagent_dev_plan_to_tasks.py` | `generate` schreibt den Satz für Tasks wörtlich unter Nicht-Ziele jeder Task-Datei; `verify` liest die Datei unverändert |
 | `test_reject_and_rules` | dito | `resolve D-1 --reject` setzt `abgelehnt`; `rules` listet Regeln beider Dateien mit Pfad, `#`-Kommentare ausgelassen; `--topic ui-texte` bei Regel `UI-Texte` schreibt `UI-Texte`; `--class gross --key rule:X` ohne Regel zu X → Exit 1 |
 | `test_glob_matcher` | dito | `db/**/*.sql` trifft `db/schema.sql` und `db/a/b.sql`; `**/migrations/` trifft `migrations/0002.py` und `evals/fixtures/x/migrations/0001.py`; `*` trifft kein `/` |
 | `test_pipe_and_unicode` | dito | `\x7c` in Werten wird `¦`; Umlaute in Frage und Thema; Dateien als UTF-8 |
 | `test_ids_count_up` | dito | zweiter großer Eintrag wird `D-2`, auch nach `resolve` von `D-1` |
 | `test_consumer_rule` | dito | `docs/big-decisions.md` ohne Kopfzeile oder mit `schema: 2` → sichtbar übersprungen, `check` meldet jede Stelle |
-| `test_check_untracked_and_hash_key` | dito | eine unversionierte Datei unter `migrations/` wird gemeldet; `dependency:pyproject.toml#python-dateutil` gibt die Datei nur frei, wenn eine hinzugefügte Zeile diesen Text enthält; ohne Git Exit 2 |
+| `test_check_untracked_and_hash_key` | dito | eine unversionierte Datei unter `migrations/` wird gemeldet; `dependency:pyproject.toml#python-dateutil` gibt die Datei nur frei, wenn eine hinzugefügte Zeile diesen Text enthält, nie bei nur entfernten Zeilen; `add --key …#-x` → Exit 1; ohne Git Exit 2 |
+| `test_check_one_revision` | dito | `HEAD~1..HEAD`, `HEAD~1...HEAD`, `HEAD^!` und eine unbekannte Revision → Exit 2 mit „ungeprüft — check nimmt eine Revision“; Bare-Repo → Exit 2 mit „ungeprüft — kein Arbeitsbaum“; ein Merge-Commit als `<rev>` wird wie jede Revision gegen den Arbeitsbaum verglichen |
+| `test_check_includes_summary_and_open` | dito | mit Sitzung und kleinem Eintrag nennt `check` ihn vor der Schlusszeile, ebenso einen offenen Block; ohne Einträge und offene Blöcke nur Ergebniszeile und Schlusszeile; die Schlusszeile ist immer die letzte |
+| `test_guard_push` | `tests/test_decide_guard.py` | `git push` ohne Block → `ask` mit „keine Freigabe mit Schlüssel push:origin/x“; mit freigegebenem Block `push:origin/**` → keine Ausgabe; `git push --force` und `git push origin +x` trotz Block → `ask`; ohne Upstream und ohne Argumente → `ask`; ein jüngerer offener Block mit gleicher Frage und gleichem Schlüssel → `ask` |
+| `test_guard_commands` | dito | je Zeile der Hook-Tabelle ein erkannter und ein ähnlicher nicht erkannter Befehl (`rm -rf data` → `ask`, `rm -rf .skills/cache/x` und `rm a.txt` → nichts; `curl https://x` → nichts, `curl -d a https://x` → `ask`; `git restore --staged a` → nichts); `cd x && git reset --hard` → `ask`; Zuweisung und `sudo` davor werden übersprungen |
+| `test_guard_errors` | dito | kein JSON, leere Eingabe, fehlendes `tool_input` → `systemMessage` mit „Hook ungeprüft“, Exit 0; unbalancierte Anführungszeichen → Teil gilt als nicht erkannt |
+| `test_guard_table_matches_reference` | dito | jeder Befehl der Konstante steht in der Tabelle in `reversibility.md` und umgekehrt |
+| `test_hook_snippet` | dito | `assets/hooks/decide-guard.json` ist gültiges JSON, `PreToolUse` mit `matcher` `Bash`, der Befehl ruft `.claude/hooks/decide_log.py guard` über `$CLAUDE_PROJECT_DIR` auf und gibt ohne Kopie die Meldung „Hook ungeprüft“ aus |
 | `test_eval_patterns` | `tests/test_decide_fixtures.py` | die Muster aus `evals.json` treffen einen vom Skript geschriebenen Block und eine Protokollzeile, nicht dieselben Wörter in Prosa |
 
 ### Evals
@@ -372,6 +449,16 @@ Skill rot. Das Beispiel in `option-memo.md` nutzt deshalb dieses Szenario, nicht
 `check` selbst messen die Unit-Tests; ob die Übergabe es aufruft, misst Eval 4 über die Zeile
 „ungeprüft".
 
+Zyklus 2 ändert keine Eval: Prompts, Fixtures und Assertions bleiben, die Schlusszeile von
+`check` auch. Weil SKILL.md und `check` sich ändern, laufen die fünf Evals nach dem Bau erneut
+mit Skill; Abnahme bei mindestens 4 von 5 grün, Eval 2 bleibt die bekannte Routing-Lücke. Ohne
+Skill laufen sie nicht erneut — Evals und Basismodell sind unverändert, das Ergebnis 0 von 5
+gilt weiter. `guard` bekommt keinen Eval: Ein Hook wirkt mit und ohne Skill gleich, ein Lauf
+ohne Skill wäre also ebenso grün und unterschiede nichts (Spec 00 §2). Ihn messen die
+Unit-Tests über stdin; ob Claude Code ein `ask` in `claude -p` ohne Permission-Host ablehnt,
+prüft eine einmalige Stichprobe beim Bau mit einem lokalen Bare-Repo als Remote, der Report
+nennt das Ergebnis.
+
 ## Alternatives considered
 
 **Ein Hook auf `AskUserQuestion`.** Verworfen: Eine Frage ist die ungefährliche Handlung; ein
@@ -379,9 +466,33 @@ Hook dort hielte das Falsche an, und was er bewachen sollte (die Einordnung), w�
 Selbstauskunft hinter einem Hook. Gewinnt nie in dieser Form.
 
 **Ein Hook am teuren Schritt** (`git push --force`, `git clean`, Schreiben in `pyproject.toml`).
-Verworfen für diesen Zyklus: Er müsste Bash-Befehle und Pfade je Kategorie erkennen und hielte
-auch beauftragte Schritte an. Gewinnt, wenn `check` im Einsatz zeigt, dass teure Änderungen
-ohne Freigabe regelmäßig vorkommen; er deckte auch die ungeprüften Kategorien ab.
+Im ersten Zyklus verworfen, in Zyklus 2 als `guard` gewählt (Nutzer, 2026-11-04: die
+irreversiblen Kategorien sollen nicht nur G1 sein). Der Einwand „hielte auch beauftragte Schritte
+an“ trifft nur noch die seltenen Befehle; den häufigen, `git push`, gibt ein abgelegter Auftrag
+frei. Schreiben in `pyproject.toml` bleibt bei `check`, weil es im Diff steht.
+
+**`guard` mit `deny` statt `ask`.** Verworfen: `deny` zwänge Claude, erst einen Block anzulegen
+und den Nutzer im Chat zu fragen — dieselbe Frage, mehr Tokens. `ask` legt sie dem Nutzer direkt
+vor. *Annahme:* unbeaufsichtigt lehnt Claude Code ein `ask` ab (Open questions).
+
+**Freigabe über die Ablage für jeden erkannten Befehl** (Schlüssel `data-delete:<pfad>`,
+`external:<programm>`). Verworfen: Diese Befehle sind selten, ihr Ziel aus der Kommandozeile zu
+lesen, wäre der Nachbau, den Zyklus 2 streicht; eine Rückfrage kostet einen Klick. Nur `git push`
+ist häufig genug für eine abgelegte Freigabe.
+
+**Push nachträglich in `check` erkennen** (Commits im Bereich, die schon auf einem
+Remote-Tracking-Zweig liegen). Verworfen: Der Hook fragt vorher; nachträglich ist der Schaden
+geschehen, und `push` bekäme in `reversibility.md` ein Pfadmuster, das kein Pfad ist.
+
+**`brief` als Skript behalten.** Verworfen in Zyklus 2: rund 420 Zeilen und zwei Aufrufe je
+Subagent, um Länge, Felder und sechs Wertwörter zu prüfen — Dinge, die der Hauptagent beim
+Schreiben des Auftrags sieht. Den festen Satz für Subagenten hat der Nutzer schon am 2026-11-02
+bewusst nicht mechanisch prüfen lassen; dieselbe Linie gilt nun für den ganzen Auftrag.
+
+**Bereiche in `check` behalten** (`<a>..<b>`, `<a>...<b>`, `^!`). Verworfen in Zyklus 2: Die
+Übergabe braucht sie nicht, und ihre Randfälle (Merge-Basen, Root-Commit, Ablage aus einer
+Revision, Bare-Repo) waren der größte Treiber der Fix-Runden im ersten Bau. Gewinnt, wenn der
+Nutzer `check` regelmäßig für PR-Diffs braucht.
 
 **Jede kleine Entscheidung fällt ein Sonnet-Subagent** (der ursprüngliche Wunsch des Nutzers).
 Verworfen als Standard: Ein Subagent je Frage kostet mehr als die meisten Fragen wert sind, und
@@ -408,7 +519,9 @@ Ein Generator für Architektur-Entscheidungsdokumente; Schreiben in `docs/decisi
 `tool_use` und ein Permission-Host in evalkit (eigene Spec); Änderungen an Prüfpunkten von
 subagent-dev und an der Task-Datei über den einen Satz unter Nicht-Ziele hinaus; eine
 mechanische Prüfung, ob ein Subagent etwas eingetragen hat; die Prüfung, wie eine Migration geschrieben ist
-(sql-schema-architect); Erkennung öffentlicher Python- oder JS-Schnittstellen im Diff.
+(sql-schema-architect); Erkennung öffentlicher Python- oder JS-Schnittstellen im Diff; in `guard`
+ein Shell-Parser über `shlex` und die fünf Trenner hinaus, Werkzeuge außer Bash (MCP-Server, die
+pushen oder Issues schreiben), eine Installation des Hooks durch die Skill.
 
 ## Open questions
 
@@ -420,8 +533,17 @@ mechanische Prüfung, ob ein Subagent etwas eingetragen hat; die Prüfung, wie e
   umkehrbar (Mail, Deploy, gelöschte Daten) und per Revert umkehrbar, aber andere betreffend
   (API, Abhängigkeit). Ob auch billig umkehrbare, folgenreiche Fragen (Architekturrichtung)
   groß sind und woran das prüfbar wäre, ist offen. — Entscheider: Nutzer.
-- *Annahme:* Die Grenzen zehn Einträge in der Zusammenfassung und 25 Zeilen je Auftrag sind
-  gesetzt, nicht gemessen. — widersprich, falls nein.
+- *Annahme:* Die Grenze zehn Einträge in der Zusammenfassung ist gesetzt, nicht gemessen. —
+  widersprich, falls nein.
+- *Annahme (Zyklus 2):* `brief` und `brief --check` entfallen als Skript-Befehle; der Auftrag an
+  einen Subagenten folgt der Vorlage in `references/brief.md` (G1). Vorgeschlagen am 2026-11-04,
+  vom Nutzer nicht ausdrücklich beantwortet, mit dem Aufruf von impl-plan übernommen. —
+  widersprich, falls nein.
+- *Annahme (Zyklus 2):* `guard` antwortet bei fehlender Freigabe mit `ask`, nicht mit `deny`.
+  Vorgeschlagen am 2026-11-04, wie oben übernommen. — widersprich, falls nein.
+- *Annahme (Zyklus 2):* In `claude -p` ohne Permission-Host lehnt Claude Code ein `ask` eines
+  Hooks ab, statt den Befehl auszuführen. Ungeprüft bis zur Stichprobe beim Bau (Evals); trifft
+  es nicht zu, ist `guard` unbeaufsichtigt wirkungslos und das steht in known-limits.
 - Ob `docs/big-decisions.md` nach einiger Zeit ein Archiv für alte Blöcke braucht, entscheidet
   der Nutzer nach dem ersten Monat Nutzung.
 - **Ungemessen bleibt:** der beaufsichtigte Weg mit `AskUserQuestion` (alle Evals laufen ohne
@@ -446,6 +568,11 @@ Skill 0 von 5; Eval 2 (`small-decision-cites-repo-source`) bleibt rot, weil deci
 der Aufgabe nicht auslöst — vom Nutzer als Routing-Lücke dokumentiert statt die Description zu
 ändern. Fünf Prüfpunkte mit je zwei Fix-Runden und einer Mini-Runde; was offen blieb, steht in
 `docs/known-limits.md`, Abschnitt decide (`docs/superpowers/reports/decide-report.md`).
+
+**Zyklus 2 (2026-11-04):** Plan `docs/superpowers/plans/2026-11-04-decide-slim.md`; Bau nach
+`skill-forge` (17) Schritt 3 bis 7. Gemessen wird danach: Zeilen von `decide_log.py` und
+SKILL.md vorher und nachher, Punkte in known-limits, Aufrufe bei der Übergabe (3 → 1), Evals mit
+Skill.
 
 Plan mit `impl-plan` (16) unter `docs/superpowers/plans/`; Bau nach `skill-forge` (17) Schritt 3
 bis 7.
