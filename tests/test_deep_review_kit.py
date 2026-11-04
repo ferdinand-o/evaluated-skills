@@ -7673,17 +7673,57 @@ def test_b_span_mode_change_in_first_span(tmp_path):
     assert shown == [(1, "100644", True)] + [(start, "100755", False) for start, _m, _s in shown[1:]]
 
 
+def _fresh(path):
+    """Leerer Ordner `path` (angelegt) für ein weiteres Repo im selben Test."""
+    path.mkdir()
+    return path
+
+
+def test_b_span_typechange_symlink_in_first_span(tmp_path):
+    """Typwechsel Symlink → Datei einer geteilten Datei: `von` des ersten Spannen-Pakets trägt
+    den Basis-Eintrag unverändert (Modus 120000, der Link-Text), so zeigt es den Typwechsel; die
+    übrigen tragen den Modus des Ziels."""
+    kit = _kit()
+    root = tmp_path
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    (root / "lib.py").write_text(SPAN_LIB, encoding="utf-8")
+    os.symlink("lib.py", root / "big.py")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "basis")
+    git(root, "tag", "base")
+    (root / "big.py").unlink()
+    (root / "big.py").write_text(_span_python(1300), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "--quiet", "-m", "änderung")
+    link = git(root, "ls-tree", "base", "--", "big.py").split()[2]
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    assert len(plan["packets"]) == 3
+    shown = []
+    for packet in plan["packets"]:
+        von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
+        mode, _kind, sha = git(root, "ls-tree", von, "--", "big.py").split()[:3]
+        diff = git(root, "diff", von, bis)
+        shown.append((mode, sha == link, "deleted file mode 120000" in diff
+                      and "new file mode 100644" in diff))
+    assert shown == [("120000", True, True)] + [("100644", False, False)] * 2
+
+
 def test_b_span_diff_never_empty_without_final_newline(tmp_path):
     """Basis ohne Zeilenende am Schluss, Ziel hängt Zeilen an: git zählt die letzte Basis-Zeile
-    als geändert. Trotzdem ist `git diff von..bis` für jede Spanne nicht leer."""
+    als geändert. Die reine Newline-Ergänzung wiegt nichts — `git diff von..bis` ist für jede
+    Spanne nicht leer, und keine Spanne trägt mehr als packet_size geänderte Zeilen."""
     kit = _kit()
     root = _commit_repo(tmp_path, {"m.txt": b"a\nb\nc\nd\ne\nx"},
                         {"m.txt": b"a\nb\nc\nd\ne\nx\nn1\nn2\nn3\n"})
     span = kit.split_range(root, "base..HEAD")
     diff = kit._file_diff(root, span, "m.txt")
     target = b"".join(diff.target)
+    assert kit._line_weights(diff)[6] == 0
     spans = kit._file_spans(root, "base..HEAD", "m.txt", 2)
-    assert len(spans) > 1 and sum(n for _s, n in spans) == 5
+    assert len(spans) > 1 and sum(n for _s, n in spans) == 3
     assert spans[0][0][0] == 1 and spans[-1][0][1] == 9
     assert all(a[0][1] + 1 == b[0][0] for a, b in zip(spans, spans[1:]))
     assert all(kit._von_content(diff, [s]) != target for s, _n in spans)
@@ -7694,6 +7734,22 @@ def test_b_span_diff_never_empty_without_final_newline(tmp_path):
     for packet in plan["packets"]:
         von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
         assert git(root, "diff", von, bis).strip()
+    # Spanne A trägt genau packet_size, die Zeile mit der Newline-Ergänzung folgt: nie darüber.
+    base = b"a\nb\nc\nd\ne\nx"
+    other = _commit_repo(_fresh(tmp_path / "zwei"), {"m.txt": base},
+                         {"m.txt": b"a\nN1\nN2\nb\nc\nd\ne\nx\nm1\nm2\n"})
+    odiff = kit._file_diff(other, kit.split_range(other, "base..HEAD"), "m.txt")
+    for size in (1, 2, 3):
+        cut = kit._file_spans(other, "base..HEAD", "m.txt", size)
+        assert len(cut) > 1 and all(0 < n <= size for _s, n in cut)
+        assert all(kit._von_content(odiff, [s]) != b"".join(odiff.target) for s, _n in cut)
+    # Nur das Zeilenende kommt hinzu: die Spanne mit der letzten Basis-Zeile zeigt es.
+    third = _commit_repo(_fresh(tmp_path / "drei"), {"m.txt": base},
+                         {"m.txt": b"N1\nN2\nN3\nN4\na\nb\nc\nd\ne\nx\n"})
+    tdiff = kit._file_diff(third, kit.split_range(third, "base..HEAD"), "m.txt")
+    cut = kit._file_spans(third, "base..HEAD", "m.txt", 2)
+    assert len(cut) > 1 and cut[-1][0][1] == 10
+    assert kit._von_content(tdiff, [cut[-1][0]]).endswith(b"\nx")
 
 
 def test_b_no_tiny_span_before_definition(tmp_path):
@@ -7739,9 +7795,13 @@ def test_b_render_block_checks_spans():
     for spans in ("a.py", [{"file": "a.py"}], [{"file": "a.py", "lines": 5}],
                   [{"file": "a.py", "lines": [4, 1]}], [{"file": "a.py", "lines": [1, True]}],
                   [{"file": "a.py", "lines": [0, 2]}], [{"file": "b.py", "lines": [1, 2]}],
-                  [{"file": 3, "lines": [1, 2]}], ["a.py"]):
+                  [{"file": 3, "lines": [1, 2]}], ["a.py"], None):
         with pytest.raises(kit.KitError, match="spans"):
             kit.render_block({**good, "spans": spans}, [], 0, None)
+    # Eine Prüfung für Plan und Block: dieselben Formen gelten, dieselben fallen durch.
+    files = ["a.py"]
+    assert kit._spans_valid(good["spans"], files) and kit._spans_valid([], files)
+    assert not kit._spans_valid(None, files)
 
 
 def test_b_one_diff_helper(tmp_path):
@@ -7771,14 +7831,31 @@ def _three_span_run(kit, tmp_path):
 
 
 def test_b_span_diff_once_per_file(tmp_path, monkeypatch):
-    """`_file_diff` je (Basis, Ziel, Pfad) einmal je Prozess: counterparts für eine Datei in
+    """`_file_diff` je (Basis, Ziel, Pfad) einmal je Lauf: counterparts für eine Datei in
     drei Spannen ruft `git diff -U0` einmal."""
     kit = _kit()
     root, _plan, run = _three_span_run(kit, tmp_path)
-    kit._file_diff_cached.cache_clear()
     calls = _spy_git(kit, monkeypatch)
     kit.write_counterparts(root, run)
     assert len([c for c in calls if c[0] == "diff" and "-U0" in c]) == 1
+
+
+def test_b_span_diff_memo_per_run(tmp_path):
+    """Kein Diff-Speicher im Modul: das Memo gehört dem Aufrufer (ein Lauf), seine Schlüssel
+    sind aufgelöste SHAs — ein Ref-Name meint in einem neuen Lauf den neuen Commit."""
+    kit = _kit()
+    assert not hasattr(kit, "FILE_DIFF_CACHE") and not hasattr(kit, "_file_diff_cached")
+    root = _commit_repo(tmp_path, {"m.txt": "a\n"}, {"m.txt": "a\nb\n"})
+    span = kit.Span("base", "HEAD", "base")
+    memo = {}
+    assert kit._file_diff(root, span, "m.txt", memo).target == [b"a\n", b"b\n"]
+    head = git(root, "rev-parse", "HEAD").strip()
+    assert any(isinstance(key, tuple) and head in key and "m.txt" in key for key in memo)
+    (root / "m.txt").write_text("a\nb\nc\n", encoding="utf-8")
+    git(root, "commit", "--quiet", "-am", "weiter")
+    assert kit._file_diff(root, span, "m.txt", memo).target == [b"a\n", b"b\n"]
+    assert kit._file_diff(root, span, "m.txt", {}).target == [b"a\n", b"b\n", b"c\n"]
+    assert kit._file_diff(root, span, "m.txt").target == [b"a\n", b"b\n", b"c\n"]
 
 
 def test_b_span_collect_once_and_filter_once(tmp_path, monkeypatch):
@@ -7809,7 +7886,22 @@ def test_b_span_collect_once_and_filter_once(tmp_path, monkeypatch):
     assert [(w["counterparts"], w["unresolved"]) for w in written] == [(1, 1), (2, 2), (1, 1)]
     block = (_run_path(root, plan) / "packets" / "p2.md").read_text(encoding="utf-8")
     assert "2 Stelle(n) nach der Sammelregel" in block and "2 nicht aufgelöst" in block
-    # render_block filtert nicht selbst: es zeigt die Stellen, die der Aufrufer übergibt.
+    # render_block filtert selbst nach den Spannen des Pakets (idempotent zum Vorfiltern).
     outside = {"file": "big.py", "line": spans[0][0], "kind": "call", "lines": ["### big.py:1 y"]}
     shown = kit.render_block({**plan["packets"][1]}, [outside], 0, None)
-    assert "### big.py:1 y" in shown and "1 Stelle(n)" in shown
+    assert "### big.py:1 y" not in shown and "0 Stelle(n)" in shown
+
+
+def test_b_render_block_filters_spans():
+    """Spannen-Paket mit den Einträgen der ganzen Datei: render_block nennt und zählt nur die
+    Stellen in der Spanne; eine Datei ohne Spanne zählt ganz."""
+    kit = _kit()
+    packet = {"id": "p1", "files": ["big.py", "lib.py"],
+              "spans": [{"file": "big.py", "lines": [1, 400]}]}
+    entries = [{"file": f, "line": n, "kind": "call", "lines": [f"### {f}:{n} x"]}
+               for f, n in (("big.py", 5), ("big.py", 900), ("lib.py", 2000))]
+    text = kit.render_block(packet, entries, 0, None)
+    assert "Spanne: `big.py:1-400`" in text
+    assert "### big.py:5 x" in text and "### lib.py:2000 x" in text
+    assert "### big.py:900 x" not in text and "2 Stelle(n) nach der Sammelregel" in text
+    assert kit._render(packet, entries, 0, None)[1] == 2
