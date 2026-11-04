@@ -7,13 +7,14 @@
     decide_log.py resolve D-<n> --answer "…" | --reject   Antwort auf eine offene große Frage eintragen
     decide_log.py open                          offene große Fragen
     decide_log.py summary                       Einträge der laufenden Sitzung
-    decide_log.py check --range <rev>           teure Änderungen im Diff ohne Freigabe
+    decide_log.py check --range <rev>           teure Änderungen seit <rev> ohne Freigabe, dann Übergabe
     decide_log.py brief --topic T               Auftrag an einen Subagenten schreiben (brief-<n>.md)
     decide_log.py brief --check <datei>         Auftrag vor dem Dispatch prüfen
 
 Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py"`. Repo-Wurzel ist einmal
 `git rev-parse --show-toplevel` (`repo_root`), sonst das Arbeitsverzeichnis. Die Sitzung ist
-`--session`, sonst `CLAUDE_CODE_SESSION_ID`; nur `add`, `summary` und `brief --topic` brauchen sie.
+`--session`, sonst `CLAUDE_CODE_SESSION_ID`; nur `add`, `summary` und `brief --topic` brauchen sie,
+`check` nennt mit ihr die Einträge der Sitzung.
 
 Ablageorte:
 - `.skills/cache/decide/<session>/log.md` — Protokoll der Sitzung, `brief-<n>.md` daneben
@@ -88,7 +89,7 @@ GRADES = ("geprüft", "teilweise", "ungeprüft")
 TAIL_GRADES = ("ungeprüft", "teilweise")       # die Schlusszeile von check nennt diese
 RULE_CATEGORY = "rule"
 GIT_TIMEOUT = 60
-KEY_FORM = "<kategorie>:<pfadmuster>[#[+|-]<text>]"
+KEY_FORM = "<kategorie>:<pfadmuster>[#<text>]"
 STATUSES = ("offen", "freigegeben", "abgelehnt")
 SOURCE_USER = "Nutzer in Sitzung"
 OPTIONS_BY_REQUEST = "— (Auftrag)"
@@ -364,7 +365,7 @@ class Unreadable(Exception):
 
 def decode_text(data):
     """Text aus Bytes wie beim Lesen einer Datei: `utf-8-sig` (ein BOM fällt weg), Zeilenenden als
-    `\n` — für `read_file` und für die Ablage aus einer Revision (`_ledger_at`)."""
+    `\n` — für `read_file`."""
     return data.decode("utf-8-sig", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
 
@@ -603,10 +604,9 @@ def read_ledger_text(root):
     return _blank_is_missing(read_file(ledger_path(root)))
 
 
-def ledger_problem(text, tail="Freigaben übersprungen", shown_as=LEDGER_SHOWN):
-    """Konsumenten-Regel für die Ablage: None, wenn die Kopfzeile passt, sonst der Grund; `shown_as`
-    nennt die Ablage („docs/big-decisions.md in <rev>“, wenn aus einer Revision gelesen)."""
-    return header_problem(text, shown_as, tail)
+def ledger_problem(text, tail="Freigaben übersprungen"):
+    """Konsumenten-Regel für die Ablage: None, wenn die Kopfzeile passt, sonst der Grund."""
+    return header_problem(text, LEDGER_SHOWN, tail)
 
 
 _FIELD_RE = re.compile(r"^\s*(?P<label>[^:]+?)\s*:(?P<value>.*)$")
@@ -674,15 +674,9 @@ def _read_ledger(root):
         text = read_file(ledger_path(root))
     except Unreadable as error:
         return [], unreadable_problem(error, LEDGER_SHOWN, SKIPPED), True
-    return _ledger_from_text(text)
-
-
-def _ledger_from_text(text, shown_as=LEDGER_SHOWN):
-    """(Blöcke, Problem, existiert) aus dem Rohtext der Ablage (None: fehlt) — für die Arbeitskopie
-    (`_read_ledger`) und für eine Revision (`_ledger_at`, dann nennt `shown_as` sie)."""
     if _blank_is_missing(text) is None:
         return [], None, text is not None
-    problem = ledger_problem(text, shown_as=shown_as)
+    problem = ledger_problem(text)
     return ([], problem, True) if problem else (parse_blocks(text), None, True)
 
 
@@ -899,22 +893,20 @@ def store_big(root, session, status, fields, row):
 
 
 def parse_key(key):
-    """((Kategorie, Muster, Richtung, Text), None) eines Schlüssels `<kategorie>:<pfadmuster>[#[+|-]<text>]`,
-    oder (None, Grund), wenn er die Form nicht hat — die eine Prüfung der Form für `add` (`check_key`) und
-    check. Richtung `"+"` (hinzugefügte Zeilen: `#+<text>`, Kurzform `#<text>`) oder `"-"` (entfernte:
-    `#-<text>`), getrennt vom Text; nur das erste Zeichen nach `#` ist ein Vorzeichen
-    (`#+--extra-index-url` → `"+"`, `"--extra-index-url"`). Leerraum um Kategorie, Pfadmuster und Text
-    fällt weg, Leerraum im Text wird zusammengezogen; Leerzeichen im Pfadmuster bleiben, Tab und
-    Zeilenumbruch darin sind ein Fehler, ebenso ein `#`, `#+` oder `#-` ohne Text (der gäbe sonst die
-    ganze Datei frei). Das Pfadmuster ist relativ zur Repo-Wurzel wie die
-    Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil `..` träfe nie eine
-    Datei und ist ein Fehler („Pfadmuster muss relativ zur Repo-Wurzel sein“). Bei `rule:<thema>` ist
-    alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`), der Text leer; ohne Text ist die
-    Richtung `"+"`."""
+    """((Kategorie, Muster, Text), None) eines Schlüssels `<kategorie>:<pfadmuster>[#<text>]`, oder
+    (None, Grund), wenn er die Form nicht hat — die eine Prüfung der Form für `add` (`check_key`) und
+    check. `#<text>` gilt nur für hinzugefügte Zeilen; ein Text, der mit `-` oder `+` beginnt, ist ein
+    Fehler (Zyklus 2 streicht `#-<text>` und `#+<text>`: nur entfernte Zeilen gibt nur ein Schlüssel
+    ohne Text frei). Leerraum um Kategorie, Pfadmuster und Text fällt weg, Leerraum im Text wird
+    zusammengezogen; Leerzeichen im Pfadmuster bleiben, Tab und Zeilenumbruch darin sind ein Fehler,
+    ebenso ein `#` ohne Text (der gäbe sonst die ganze Datei frei). Das Pfadmuster ist relativ zur
+    Repo-Wurzel wie die Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil
+    `..` träfe nie eine Datei und ist ein Fehler („Pfadmuster muss relativ zur Repo-Wurzel sein“). Bei
+    `rule:<thema>` ist alles nach `rule:` das Thema (auch mit `#`, etwa `rule:C#`), der Text leer."""
     category, sep, rest = (key or "").strip().partition(":")
     category = category.strip()
     if category == RULE_CATEGORY and sep and rest.strip():
-        return (category, rest.strip(), "+", ""), None
+        return (category, rest.strip(), ""), None
     pattern, hash_, text = rest.partition("#")
     pattern = pattern.strip()
     while pattern.startswith("./"):
@@ -925,12 +917,13 @@ def parse_key(key):
         return None, f"hat Tab oder Zeilenumbruch im Pfadmuster „{line_value(pattern)}“"
     if re.match(r"[/\\]|[A-Za-z]:[/\\]", pattern) or ".." in re.split(r"[/\\]", pattern):
         return None, "hat ein Pfadmuster außerhalb der Repo-Wurzel — Pfadmuster muss relativ zur Repo-Wurzel sein"
-    text = text.strip()
-    sign = text[:1] if text[:1] in ("+", "-") else ""
-    words = " ".join(text[len(sign):].split())
-    if hash_ and not words:
-        return None, f"hat leeren Text nach #{sign}"
-    return (category, pattern, sign or "+", words), None
+    text = " ".join(text.split())
+    if hash_ and not text:
+        return None, "hat leeren Text nach #"
+    if text[:1] in ("-", "+"):
+        return None, (f"hat „#{text[:1]}“ — #<text> gilt nur für hinzugefügte Zeilen; nur entfernte Zeilen gibt "
+                      "nur ein Schlüssel ohne Text frei")
+    return (category, pattern, text), None
 
 
 def check_key(key, topic, rules):
@@ -942,7 +935,7 @@ def check_key(key, topic, rules):
     parts, why_not = parse_key(key)
     if parts is None:
         return None, f"Schlüssel „{shown_key}“ {why_not}; nichts geschrieben."
-    category, pattern, sign, text = parts
+    category, pattern, text = parts
     if category == RULE_CATEGORY:
         hits = [r for r in match_rules(rules, pattern)[0] if r.kind == "immer fragen"]
         if not hits:
@@ -959,9 +952,7 @@ def check_key(key, topic, rules):
         return None, (f"Schlüssel „{shown_key}“: Kategorie „{category}“ unbekannt — erlaubt: "
                       f"{', '.join(categories)}, oder rule:<thema> bei einer Regel immer fragen; "
                       "nichts geschrieben.")
-    if sign == "+" and not text.startswith(("+", "-")):
-        sign = ""                                       # Kurzform `#<text>`, wo sie eindeutig ist
-    return f"{category}:{pattern}{'#' + sign + text if text else ''}", None
+    return f"{category}:{pattern}{'#' + text if text else ''}", None
 
 
 def _options(args):
@@ -1279,8 +1270,8 @@ def timeout_problem():
 
 def _git(cwd, *args, raw=False):
     """Git mit Argumentliste in `cwd`, nie über eine Shell; `GitTimeout` nach `GIT_TIMEOUT`
-    Sekunden, `NoGit`, wenn es nicht startet. `raw`: stdout als Bytes (zum Dekodieren mit
-    `decode_text`), stderr als Text."""
+    Sekunden, `NoGit`, wenn es nicht startet. `raw`: stdout als Bytes (`changed_lines`
+    dekodiert die Zeilen selbst streng als UTF-8), stderr als Text."""
     command = ["git", "-C", str(cwd), "--literal-pathspecs", *args]
     try:
         if not raw:
@@ -1300,31 +1291,29 @@ def _git_error(result):
 
 
 class Changes(list):
-    """Die Stellen eines Bereichs: sortierte Pfade relativ zur Repo-Wurzel mit `/`. Dazu `top`
-    (Wurzel des Repos), `untracked` (die unversionierten unter ihnen), `end` (Revision, aus der check
-    die Ablage liest; None: die Arbeitskopie), `revs` (Basis und Ende für `git diff`, bei einer
-    Einzelrevision nur sie) und `notes` (Hinweise für die Ausgabe, etwa zum Merge)."""
+    """Die Stellen seit einer Revision: sortierte Pfade relativ zur Repo-Wurzel mit `/`. Dazu `top`
+    (Wurzel des Repos), `untracked` (die unversionierten unter ihnen) und `commit` (der aufgelöste
+    Commit, gegen den `git diff` den Arbeitsbaum vergleicht)."""
 
-    def __init__(self, files=(), top=None, untracked=(), end=None, revs=(), notes=()):
+    def __init__(self, files=(), top=None, untracked=(), commit=None):
         super().__init__(files)
-        self.top, self.untracked, self.end = top, set(untracked), end
-        self.revs, self.notes = tuple(revs), tuple(notes)
+        self.top, self.untracked, self.commit = top, set(untracked), commit
 
 
-MERGE_NOTE = "Merge: verglichen mit erstem Elternteil"
+_RANGE_RE = re.compile(r"\.\.|\^[!@-]")          # Bereichsschreibweisen; check nimmt eine Revision
+UNREADABLE = "unlesbar — selbst prüfen"
 
 
-def _top_level(rev):
-    """`rev`, der Inhalt von `{…}` (`@{…}`, `^{…}`) gleich lang durch `_` ersetzt: `^!` und `^-` zählen
-    nur außerhalb."""
-    return re.sub(r"\{[^{}]*\}", lambda match: "{" + "_" * (len(match.group()) - 2) + "}", rev)
+def one_revision_problem(rev):
+    """Der Grund für alles, was keine einzelne Revision ist („ungeprüft — …“ setzt check davor)."""
+    return f"check nimmt eine Revision, nicht „{' '.join(rev.split())}“; den Bereich selbst prüfen"
 
 
 def _work_tree(top):
     """(Wurzel, Problem): `git rev-parse --is-bare-repository --is-inside-work-tree --git-dir` in einem
     Aufruf — scheitert er, ist es kein Repo („kein Git“). Nur in einem Arbeitsbaum folgt
     `git rev-parse --show-toplevel` in einem eigenen Aufruf, die Wurzel ist dann dessen Ausgabe; im
-    Bare-Repo oder in `.git` ist sie None (kein Arbeitsbaum), Git läuft weiter in `top`."""
+    Bare-Repo oder in `.git` ist sie None (kein Arbeitsbaum)."""
     probe = _git(top, "rev-parse", "--is-bare-repository", "--is-inside-work-tree", "--git-dir")
     flags = probe.stdout.split("\n")
     if probe.returncode != 0 or len(flags) < 3:
@@ -1338,93 +1327,46 @@ def _work_tree(top):
     return Path(path), None
 
 
-def _revision_ends(top, rev):
-    """(einzeln, Ende, Revisionen für `git diff`, Hinweise, Problem, Wurzel): zuerst `_work_tree`, dann
-    `git rev-parse --symbolic <rev> --` in einem eigenen Aufruf — Wurzel und Revisionen kommen nie aus
-    derselben Ausgabe. Basis und Ende stehen ausdrücklich in dessen Ausgabe, `git diff` bekommt nie die
-    rohe Angabe; die Wurzel (im Arbeitsbaum `--show-toplevel`, sonst `top`) nimmt `changed_files` statt
-    `top`. Ohne Arbeitsbaum (Bare-Repo, CI-Hook, `.git`) nur Bereiche; eine Einzelrevision ist ein
-    Problem („Einzelrevision braucht einen Arbeitsbaum“).
-    Eine positive und eine negative Revision (`<a>..<b>`, `<rev>^-<n>`, `<rev>^!` mit einem Elternteil):
-    Basis die negative, Ende die positive. Eine positive und mehrere negative (`<merge>^!`): Basis der
-    erste Elternteil, wie `<merge>^1..<merge>`, mit Hinweis `MERGE_NOTE`. Zwei positive mit negativen
-    (`<a>...<b>`; rev-parse nennt `<b>`, `<a>`, `^<merge-base>`): Basis die Merge-Base, Ende `<b>`;
-    ohne Merge-Base (keine gemeinsame Historie) fehlen die negativen: Problem „keine gemeinsame Basis“.
-    Eine positive ohne negative: Einzelrevision (Diff gegen den Arbeitsbaum, Ende None) — außer die
-    Angabe enthält `^!` oder `^-` außerhalb von `{…}`: der Root-Commit, Basis der leere Baum. Mehrere
-    positive ohne negative (`HEAD^@` bei einem Merge) oder keine: Problem. Das Ende heißt, wie rev-parse
-    `--symbolic` es nennt — wie angegeben (`v2`, nicht der Hash des Tag-Objekts)."""
-    tree, problem = _work_tree(top)
-    if problem:
-        return False, None, (), (), problem, top
-    top = tree or top
-    result = _git(top, "rev-parse", "--symbolic", rev, "--")
-    if result.returncode != 0:
-        return False, None, (), (), f"git rev-parse {rev} fehlgeschlagen: {_git_error(result)}", top
-    names = [line.strip() for line in result.stdout.splitlines() if line.strip() and line.strip() != "--"]
-    positive = [name for name in names if not name.startswith("^")]
-    negative = [name[1:] for name in names if name.startswith("^")]
-    if len(positive) == 1 and len(negative) == 1:
-        return False, positive[0], (negative[0], positive[0]), (), None, top
-    if len(positive) == 1 and negative:
-        return False, positive[0], (negative[0], positive[0]), (f"{MERGE_NOTE} ({negative[0]}).",), None, top
-    if len(positive) == 2 and negative:
-        notes = (f"Mehrere Merge-Basen: verglichen mit {negative[0]}.",) if len(negative) > 1 else ()
-        return False, positive[0], (negative[0], positive[0]), notes, None, top
-    if len(positive) == 2 and "..." in _top_level(rev):
-        return False, None, (), (), f"keine gemeinsame Basis ({rev})", top
-    if len(positive) > 1:
-        return False, None, (), (), f"Bereich mit mehreren Enden ({rev})", top
-    if not positive:
-        return False, None, (), (), f"Bereich „{rev}“ ohne End-Revision", top
-    if re.search(r"\^[!-]", _top_level(rev)):                     # R^! auf dem ersten Commit
-        empty = _git(top, "hash-object", "-t", "tree", "--stdin")
-        if empty.returncode != 0:
-            return False, None, (), (), f"git hash-object fehlgeschlagen: {_git_error(empty)}", top
-        return False, positive[0], (empty.stdout.strip(), positive[0]), (), None, top
-    if tree is None:
-        return False, None, (), (), (f"Einzelrevision braucht einen Arbeitsbaum ({rev}; ohne Arbeitsbaum "
-                                     "nur <a>..<b>)"), top
-    return True, None, (positive[0],), (), None, top
-
-
 def changed_files(root, rev):
-    """(Dateien, Problem): die Stellen des Bereichs als `Changes` — eine Liste der Pfade relativ
-    zur Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked`, `end`, `revs` und `notes`. Die eine
-    Quelle für check. `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; `top`
-    ist die Wurzel, die Git vor Basis und Ende in einem eigenen `rev-parse` nennt (`_revision_ends`) —
-    fiel `repo_root` auf ein Unterverzeichnis zurück, liest check trotzdem an der Wurzel; ohne
-    Arbeitsbaum (Bare-Repo) bleibt es `root`, und nur ein Bereich ist erlaubt.
-    Basis und Ende sagt `_revision_ends`. Eine einzelne Revision: `git diff <rev>` (Commits seit `<rev>`
-    und Arbeitsbaum) plus `git ls-files --others --exclude-standard`, Ablage aus der Arbeitskopie (`end`
-    None). Ein Bereich: nur `git diff <basis> <ende>`, `end` ist das Ende, wie angegeben.
-    Problem: None, „kein Git“ (kein `git` oder kein Repo), „git antwortet nicht in <n> s“, ein
-    ungültiger Bereich (leer, mit Leerraum oder führendem `-`), einer mit mehreren Enden, einer ohne
-    gemeinsame Basis, eine Einzelrevision ohne Arbeitsbaum oder der Grund, mit dem Git abbricht; dann
+    """(Dateien, Problem): die Stellen seit `rev` als `Changes` — eine Liste der Pfade relativ zur
+    Repo-Wurzel mit `/`, sortiert, dazu `top`, `untracked` und `commit`. Die eine Quelle für check.
+    `root` ist die Repo-Wurzel, wie `main` sie mit `repo_root` bestimmt hat; `top` ist die Wurzel, die
+    Git in einem eigenen `rev-parse --show-toplevel` nennt (`_work_tree`) — fiel `repo_root` auf ein
+    Unterverzeichnis zurück, liest check trotzdem an der Wurzel.
+    `rev` ist genau eine Revision: Eine Angabe mit `..`, `^!`, `^@` oder `^-`, eine leere, eine mit
+    Leerraum oder führendem `-` und eine, die `git rev-parse --verify --end-of-options <rev>^{commit}`
+    nicht auflöst, ist ein Problem (`one_revision_problem`). Dann `git diff <commit>` (Commits seit
+    `<rev>` und Arbeitsbaum, mit dem aufgelösten Commit, nie der rohen Angabe) plus
+    `git ls-files --others --exclude-standard`.
+    Problem: None, „kein Git“ (kein `git` oder kein Repo), „kein Arbeitsbaum“ (Bare-Repo, `.git`),
+    „git antwortet nicht in <n> s“, keine einzelne Revision oder der Grund, mit dem Git abbricht; dann
     sind die Dateien leer."""
     rev = (rev or "").strip()
-    if not rev or rev.startswith("-") or re.search(r"\s", rev):
-        return Changes(), f"Bereich „{rev}“ ungültig — erwartet <rev> oder <a>..<b>"
-    top = Path(root)
+    if not rev or rev.startswith("-") or re.search(r"\s", rev) or _RANGE_RE.search(rev):
+        return Changes(), one_revision_problem(rev)
     try:
-        single, end, revs, notes, problem, top = _revision_ends(top, rev)
+        top, problem = _work_tree(Path(root))
         if problem:
-            return Changes(top=top), problem
-        diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", *revs, "--")
+            return Changes(), problem
+        if top is None:
+            return Changes(), "kein Arbeitsbaum"
+        resolved = _git(top, "rev-parse", "--verify", "--end-of-options", f"{rev}^{{commit}}")
+        commit = resolved.stdout.strip()
+        if resolved.returncode != 0 or not commit:
+            return Changes(top=top), one_revision_problem(rev)
+        diff = _git(top, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", commit, "--")
         if diff.returncode != 0:
-            return Changes(top=top), f"git diff {' '.join(revs)} fehlgeschlagen: {_git_error(diff)}"
+            return Changes(top=top), f"git diff {rev} fehlgeschlagen: {_git_error(diff)}"
         files = {name for name in diff.stdout.split("\0") if name}
-        untracked = set()
-        if single:
-            others = _git(top, "ls-files", "--others", "--exclude-standard", "--full-name", "-z")
-            if others.returncode != 0:
-                return Changes(top=top), f"git ls-files --others fehlgeschlagen: {_git_error(others)}"
-            untracked = {name for name in others.stdout.split("\0") if name} - files
+        others = _git(top, "ls-files", "--others", "--exclude-standard", "--full-name", "-z")
+        if others.returncode != 0:
+            return Changes(top=top), f"git ls-files --others fehlgeschlagen: {_git_error(others)}"
+        untracked = {name for name in others.stdout.split("\0") if name} - files
     except GitTimeout:
         return Changes(), timeout_problem()
     except NoGit:
         return Changes(), "kein Git"
-    return Changes(sorted(files | untracked), top, untracked, end, revs, notes), None
+    return Changes(sorted(files | untracked), top, untracked, commit), None
 
 
 _C_QUOTE = {"\a": "a", "\b": "b", "\t": "t", "\n": "n", "\v": "v", "\f": "f", "\r": "r", '"': '"', "\\": "\\"}
@@ -1443,107 +1385,121 @@ DIFF_CHUNK = 200
 
 
 class DiffFailed(Exception):
-    """`git diff` für die Zeilen der `#<text>`-Freigaben (beide Richtungen) lieferte keinen Diff; die Ursache
-    als Text."""
+    """`git diff` für die Zeilen der `#<text>`-Freigaben lieferte keinen Diff; die Ursache als Text."""
 
 
-def changed_lines(top, revs, paths, untracked):
-    """{Pfad: {"+": hinzugefügte Zeilen, "-": entfernte}} jeder Datei aus `paths` im Bereich (`revs` aus
-    `changed_files`), Leerraum zusammengezogen — für `#[+]<text>` und `#-<text>`. Eine unversionierte Datei
-    ist ganz hinzugefügt. Die anderen kommen aus `git diff -U0`, je höchstens `DIFF_CHUNK` Pfade ein
+def _utf8_lines(chunks):
+    """Die Zeilen (Bytes) streng als UTF-8 dekodiert; None bei ungültigem UTF-8."""
+    try:
+        return [chunk.decode("utf-8") for chunk in chunks]
+    except UnicodeDecodeError:
+        return None
+
+
+def changed_lines(top, commit, paths, untracked):
+    """{Pfad: hinzugefügte Zeilen, Leerraum zusammengezogen — oder None: unlesbar} jeder Datei aus
+    `paths` seit `commit` (aus `changed_files`) — für `#<text>`. Eine unversionierte Datei ist ganz
+    hinzugefügt. Die anderen kommen aus `git diff -U0 <commit>`, je höchstens `DIFF_CHUNK` Pfade ein
     Aufruf, aufgeteilt an den Köpfen `diff --git a/<p> b/<p>`, die das Skript je Pfad selbst so bildet,
-    wie Git sie schreibt (`_git_quoted`). Liefert Git einen Block nicht, `DiffFailed`; antwortet es
-    nicht in `GIT_TIMEOUT` Sekunden, `GitTimeout` (check endet dann mit 2)."""
-    found = {path: {"+": [], "-": []} for path in paths}
+    wie Git sie schreibt (`_git_quoted`). Unlesbar ist eine Datei, die sich nicht lesen lässt, deren
+    Zeilen kein gültiges UTF-8 sind, deren Diff binär ist oder für die Git keinen Block liefert — eine
+    Stelle „unlesbar — selbst prüfen“ statt eines eigenen Falls je Ursache. Scheitert `git diff`,
+    `DiffFailed`; antwortet es nicht in `GIT_TIMEOUT` Sekunden, `GitTimeout` (check endet dann mit 2)."""
+    found = {}
     for path in paths:
         if path in untracked:
             try:
-                found[path]["+"] = (read_file(Path(top) / path) or "").splitlines()
-            except Unreadable:
-                pass
+                found[path] = _utf8_lines(Path(top, path).read_bytes().removeprefix(b"\xef\xbb\xbf").splitlines())
+            except OSError:
+                found[path] = None
     tracked = [path for path in paths if path not in untracked]
     for start in range(0, len(tracked), DIFF_CHUNK):
         chunk = tracked[start:start + DIFF_CHUNK]
         heads = {f"diff --git {_git_quoted('a/' + p)} {_git_quoted('b/' + p)}": p for p in chunk}
         try:
             result = _git(top, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-                          "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U0", *revs, "--", *chunk)
+                          "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U0", commit, "--", *chunk,
+                          raw=True)
         except NoGit as error:
             raise DiffFailed(str(error)) from error
         if result.returncode != 0:
             raise DiffFailed(_git_error(result))
-        current, in_hunk = None, False
-        for line in result.stdout.split("\n"):
-            if line.startswith("diff --git "):
-                current, in_hunk = heads.get(line), False
-            elif line.startswith("@@"):
+        added, current, in_hunk = {}, None, False
+        for line in result.stdout.split(b"\n"):
+            if line.startswith(b"diff --git "):
+                current, in_hunk = heads.get(line.decode("utf-8", errors="replace")), False
+                if current:
+                    added[current] = []
+            elif current is None or added[current] is None:
+                continue
+            elif line.startswith(b"@@"):
                 in_hunk = True
-            elif in_hunk and current and line[:1] in ("+", "-"):
-                found[current][line[0]].append(line[1:])
-    return {path: {sign: [" ".join(line.split()) for line in lines] for sign, lines in signs.items()}
-            for path, signs in found.items()}
+            elif not in_hunk and line.startswith(b"Binary files "):
+                added[current] = None
+            elif in_hunk and line.startswith(b"+"):
+                added[current].append(line[1:])
+        for path in chunk:
+            found[path] = None if added.get(path) is None else _utf8_lines(added[path])
+    return {path: None if lines is None else [" ".join(line.split()) for line in lines]
+            for path, lines in found.items()}
 
 
-def _ledger_at(top, rev):
-    """Wie `_read_ledger`, aber aus `<rev>^{commit}:docs/big-decisions.md` (für einen Bereich ohne
-    Arbeitsbaum; ein annotiertes Tag zählt als sein Commit). Ob sie dort steht, sagt der Exit-Code
-    von `git cat-file -e` — nicht der Wortlaut von Git; fehlt sie in `rev`, ist das ([], None, False).
-    Dann liest `git cat-file blob` sie, dekodiert mit `decode_text`; scheitert das, ist sie nicht
-    lesbar. Meldungen nennen „docs/big-decisions.md in <rev>“, `rev` wie angegeben."""
-    shown_as = f"{LEDGER_SHOWN} in {rev}"
-    spec = f"{rev}^{{commit}}:{LEDGER_SHOWN}"
-    if _git(top, "cat-file", "-e", spec).returncode != 0:
-        return [], None, False
-    blob = _git(top, "cat-file", "blob", spec, raw=True)
-    if blob.returncode != 0:
-        return [], f"{shown_as} nicht lesbar ({_git_error(blob)}){SKIPPED}", True
-    return _ledger_from_text(decode_text(blob.stdout), shown_as)
+def _handover(root, session, home):
+    """Die Abschnitte, die check vor der Schlusszeile anhängt — auf jedem Weg, auch mit Exit 2: die
+    Einträge der Sitzung wie `summary` (nur mit gültiger Sitzung und mit Einträgen oder einem Grund,
+    warum das Protokoll nicht gelesen wurde; ohne Sitzung entfällt der Teil still) und die offenen
+    großen Fragen wie `open` (nur wenn es welche gibt)."""
+    lines = []
+    if session and valid_session(session):
+        entries, problem = log_entries(root, session)
+        if entries or problem:
+            lines += summary(root, session, home)[1].splitlines()
+    blocks, _ = read_ledger(root)
+    if any(block["status"] == "offen" for block in blocks):
+        lines += open_questions(root)[1].splitlines()
+    return lines
 
 
-def check(root, rev):
-    """Teure Änderungen im Bereich `rev` ohne freigegebenen Eintrag in `docs/big-decisions.md`;
-    (exit, text). Braucht keine Sitzung. Die Stellen kommen aus `changed_files`; die Freigaben bei
-    einer einzelnen Revision aus der Arbeitskopie, bei einem Bereich ohne Arbeitsbaum aus der Ablage
-    in dessen End-Revision. Exit 1 bei mindestens einer Stelle, sonst 0; Exit 2 bei fehlender oder
-    kaputter Reference („ungeprüft — references/reversibility.md fehlt“), ohne Git („ungeprüft —
-    kein Git“), wenn Git nicht in `GIT_TIMEOUT` Sekunden antwortet („ungeprüft — git antwortet
-    nicht in <n> s“), bei einem Bereich, den Git nicht kennt, oder bei einer Einzelrevision ohne
-    Arbeitsbaum („ungeprüft — Einzelrevision braucht einen Arbeitsbaum“). Jede Ausgabe außer der ohne
-    Reference endet mit `tail_line` („ungeprüft: data-delete, …; teilweise: api, migration,
-    dependency, permissions“)."""
+def check(root, rev, session, home):
+    """Teure Änderungen seit der Revision `rev` (Commits und Arbeitsbaum) ohne freigegebenen Eintrag in
+    `docs/big-decisions.md` (Arbeitskopie); (exit, text). Die Stellen kommen aus `changed_files`. Nach
+    den Stellen die Übergabe (`_handover`: Einträge der Sitzung `session`, wenn es sie gibt, und offene
+    große Fragen), dann die Schlusszeile `tail_line` („ungeprüft: data-delete, …; teilweise: api,
+    migration, dependency, permissions“) — sie ist immer die letzte Zeile, außer ohne Reference.
+    Exit 1 bei mindestens einer Stelle, sonst 0; Exit 2 bei fehlender oder kaputter Reference
+    („ungeprüft — references/reversibility.md fehlt“), ohne Git („ungeprüft — kein Git“), ohne
+    Arbeitsbaum („ungeprüft — kein Arbeitsbaum“), bei allem, was keine einzelne Revision ist
+    („ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den Bereich selbst prüfen“) und wenn Git
+    nicht in `GIT_TIMEOUT` Sekunden antwortet („ungeprüft — git antwortet nicht in <n> s“)."""
+    root = Path(root)
     categories, problem = load_categories(REFERENCE)
     if problem:
-        return 2, f"ungeprüft — {problem}"
-    tail = tail_line(categories)
-    changes, problem = changed_files(Path(root), rev)
-    if problem:
-        return 2, f"ungeprüft — {problem}\n{tail}"
-    try:
-        return _check(changes, rev.strip(), categories, tail)
-    except GitTimeout:
-        return 2, f"ungeprüft — {timeout_problem()}\n{tail}"
-    except DiffFailed as error:
-        return 2, f"ungeprüft — git diff für #<text>-Freigaben gescheitert ({error})\n{tail}"
-    except NoGit:
-        return 2, f"ungeprüft — kein Git\n{tail}"
+        return 2, "\n".join([f"ungeprüft — {problem}"] + _handover(root, session, home))
+    changes, problem = changed_files(root, rev)
+    code, body = 2, [f"ungeprüft — {problem}"]
+    if not problem:
+        try:
+            code, body = _check(changes, rev.strip(), categories)
+        except GitTimeout:
+            body = [f"ungeprüft — {timeout_problem()}"]
+        except DiffFailed as error:
+            body = [f"ungeprüft — git diff für #<text>-Freigaben gescheitert ({error})"]
+        except NoGit:
+            body = ["ungeprüft — kein Git"]
+    return code, "\n".join(body + _handover(changes.top or root, session, home) + [tail_line(categories)])
 
 
-def _check(changes, rev, categories, tail):
-    """Der Vergleich zu `check`, nachdem die Stellen feststehen; wirft `GitTimeout` und `NoGit`."""
-    top, end = changes.top, changes.end
-    if end is None:
-        blocks, ledger_note, exists = _read_ledger(top)
-        where = LEDGER_SHOWN
-    else:
-        blocks, ledger_note, exists = _ledger_at(top, end)
-        where = f"{LEDGER_SHOWN} in {end}"
-    notes = list(changes.notes) + ([ledger_note] if ledger_note else [])
+def _check(changes, rev, categories):
+    """Der Vergleich zu `check`, nachdem die Stellen feststehen; (exit, Zeilen) ohne Übergabe und
+    Schlusszeile. Wirft `GitTimeout`, `DiffFailed` und `NoGit`."""
+    top = changes.top
+    blocks, ledger_note, exists = _read_ledger(top)
+    notes = [ledger_note] if ledger_note else []
     unread = None                                       # Grund, warum keine Freigabe gelesen wurde
     if ledger_note:
         unread = ledger_note[:-len(SKIPPED)] if ledger_note.endswith(SKIPPED) else ledger_note
     elif not exists:
-        unread = f"{LEDGER_SHOWN} fehlt" + (f" in {end}" if end is not None else "")
-        notes.append(f"{unread} — keine Freigaben.")
+        unread = f"{LEDGER_SHOWN} fehlt"
     valid, older = _latest(blocks)                      # je Frage und Schlüssel gilt nur der jüngste Block
     entries = []
     for block in valid:
@@ -1571,32 +1527,35 @@ def _check(changes, rev, categories, tail):
         return bool(free) and all(text for *_, text in free)
 
     wanted = [path for path, hit in candidates.items() if any(needs_lines(matching) for _, matching in hit)]
-    lines = changed_lines(top, changes.revs, wanted, changes.untracked) if wanted else {}
+    lines = changed_lines(top, changes.commit, wanted, changes.untracked) if wanted else {}
     found, with_category = [], 0
     for path in changes:
         hit = candidates[path]
         with_category += bool(hit)
         for category, matching in hit:
             why = []
-            for block, _, pattern, sign, text in matching:
+            for block, _, pattern, text in matching:
                 label = f"{block['id']} {block['key']}"
                 if block["status"] != "freigegeben":
                     gone = older.get(id(block))
                     why.append(f"{label} steht {block['status']}" + (f", {', '.join(gone)} überholt" if gone else ""))
                     continue
-                if not text or any(text in line for line in lines.get(path, {}).get(sign, ())):
+                added = lines.get(path, ())
+                if not text or (added is not None and any(text in line for line in added)):
                     break
-                where_lines = "entfernten" if sign == "-" else "hinzugefügten"
-                why.append(f"{label} freigegeben, aber „{text}“ in keiner {where_lines} Zeile")
+                if added is None:
+                    if UNREADABLE not in why:
+                        why.append(UNREADABLE)
+                    continue
+                why.append(f"{label} freigegeben, aber „{text}“ in keiner hinzugefügten Zeile")
             else:
                 reason = "; ".join(why) or (f"Freigaben nicht gelesen ({unread})" if unread else
-                                            f"kein Eintrag mit passendem Schlüssel in {where}")
+                                            f"kein Eintrag mit passendem Schlüssel in {LEDGER_SHOWN}")
                 found.append(f"- {path} — {category.name} ({category.grade}): {category.meaning} — {reason}")
 
-    source = f"Freigaben aus {end}; " if end is not None else ""
     summary_line = (f"Stellen ohne Freigabe: {len(found)}" if found else "Keine Stelle ohne Freigabe") + (
-        f" (Bereich {rev}; {source}{len(changes)} Dateien im Diff, {with_category} mit Kategorie)")
-    return (1 if found else 0), "\n".join(notes + [summary_line] + found + [tail])
+        f" (Revision {rev}; {len(changes)} Dateien im Diff, {with_category} mit Kategorie)")
+    return (1 if found else 0), notes + [summary_line] + found
 
 
 # --- add --class klein ------------------------------------------------------------------
@@ -2176,8 +2135,9 @@ def build_parser():
     res.add_argument("--answer")
     res.add_argument("--reject", action="store_true")
     sub.add_parser("open", help="offene große Fragen")
-    chk = sub.add_parser("check", help="teure Änderungen im Diff ohne Freigabe")
-    chk.add_argument("--range", dest="rev", required=True, metavar="<rev>|<a>..<b>")
+    chk = sub.add_parser("check", parents=[common],
+                         help="teure Änderungen seit einer Revision ohne Freigabe, dann Übergabe")
+    chk.add_argument("--range", dest="rev", required=True, metavar="<rev>")
     brf = sub.add_parser("brief", parents=[common], help="Auftrag an einen Subagenten schreiben oder prüfen")
     what = brf.add_mutually_exclusive_group(required=True)
     what.add_argument("--topic", help="Auftrag zu diesem Thema schreiben (braucht eine Sitzung)")
@@ -2200,7 +2160,7 @@ def main(argv):
     elif args.action == "open":
         code, message = open_questions(root)
     elif args.action == "check":
-        code, message = check(root, args.rev)
+        code, message = check(root, args.rev, session_id(args.session), home)
     elif args.action == "brief" and args.check is not None:
         code, message = _check_brief(Path(args.check), root)
     else:
