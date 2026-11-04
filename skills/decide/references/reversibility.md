@@ -54,51 +54,44 @@ Eine **Stelle** ist eine Datei im Diff: geändert, neu, gelöscht oder unversion
 ## Schlüssel
 
 Jede große Frage in `docs/big-decisions.md` trägt einen Schlüssel
-`<kategorie>:<pfadmuster>[#[+|-]<text>]`, zum Beispiel:
+`<kategorie>:<pfadmuster>[#<text>]`, zum Beispiel:
 
-- `dependency:pyproject.toml` — jede Änderung an `pyproject.toml` an der Wurzel
+- `dependency:pyproject.toml` — jede Änderung an `pyproject.toml` an der Wurzel, auch das Entfernen
+  einer Abhängigkeit
 - `dependency:pyproject.toml#python-dateutil` — `pyproject.toml` nur, wenn eine hinzugefügte
   Zeile `python-dateutil` enthält (Aufnehmen); weitere Änderungen in derselben Datei gibt der
   Eintrag dann mit frei
-- `dependency:pyproject.toml#-python-dateutil` — `pyproject.toml` nur, wenn eine entfernte Zeile
-  `python-dateutil` enthält (Entfernen); eine Freigabe zum Hinzufügen gibt nie das Entfernen frei,
-  auch nicht das Löschen einer Migration, die `migration:migrations/#add_index` angelegt hat
-- `dependency:requirements.txt#+--extra-index-url` — `#+<text>` ist die ausdrückliche Form für
-  hinzugefügte Zeilen, `#<text>` ihre Kurzform; nötig, wenn der Text selbst mit `-` oder `+`
-  beginnt (`#--extra-index-url` hieße: eine entfernte Zeile mit `-extra-index-url`)
 - `migration:migrations/` — jede Datei unter `migrations/` (ebenso `migration:migrations/**/`)
 - `migration:evals/fixtures/` — die Fixtures unter `evals/fixtures/*/migrations/` in diesem Repo
 
 check gibt eine Stelle frei, wenn ein Block mit Status `freigegeben` einen Schlüssel derselben
-Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer
-hinzugefügten, dessen `#-<text>` in einer entfernten Zeile steht; eine unversionierte Datei ist ganz
-hinzugefügt; eine geänderte Zeile steht als entfernte und hinzugefügte im Diff und trifft beide
-Formen). Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Für Frage plus Schlüssel gilt nur
+Kategorie trägt, dessen Pfadmuster die Datei trifft (und dessen `#<text>` in einer hinzugefügten
+Zeile steht; eine unversionierte Datei ist ganz hinzugefügt). Nur entfernte Zeilen gibt nur ein
+Schlüssel ohne Text frei: Eine Datei, deren Diff nur entfernte Zeilen hat (Entfernen einer
+Abhängigkeit, Löschen einer Migration), braucht einen Schlüssel ohne `#<text>`. Ein Text, der mit `-`
+oder `+` beginnt, ist kein Schlüssel: `add` weist ihn ab, und einer, der von Hand so in der Ablage
+steht, gibt nichts frei (Hinweis in der Ausgabe von check). Kann check die Zeilen einer Datei für
+`#<text>` nicht lesen (Kodierung, Rechte, binär), meldet es sie als Stelle „unlesbar — selbst
+prüfen“. Ein Block mit `offen` oder `abgelehnt` gibt nichts frei. Für Frage plus Schlüssel gilt nur
 der jüngste Block: Ist eine freigegebene Frage neu gestellt und offen, gibt der ältere Block nichts
 mehr frei („D-<neu> … steht offen, D-<alt> überholt“). Eine Freigabe gilt für ihren Schlüssel,
-nicht für eine einzelne Änderung — wer sie enger will, nimmt `#<text>`. Ein `#`, `#+` oder `#-`
-ohne Text oder ein Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab
-(„hat leeren Text nach #“), und einer, der von Hand so in der Ablage steht, gibt nichts frei —
-`add` und check prüfen die Form mit derselben Funktion. Das Pfadmuster ist relativ zur
-Repo-Wurzel wie die Pfade im Diff: ein führendes `./` fällt weg; ein absoluter Pfad oder ein Teil
-`..` träfe nie eine Datei — `add` weist ihn ab („Pfadmuster muss relativ zur Repo-Wurzel sein“),
-und von Hand in der Ablage gibt er nichts frei (Hinweis in der Ausgabe von check).
+nicht für eine einzelne Änderung — wer sie enger will, nimmt `#<text>`. Ein `#` ohne Text oder ein
+Tab im Pfadmuster ist kein Schlüssel: `add` weist ihn ab („hat leeren Text nach #“), und einer, der
+von Hand so in der Ablage steht, gibt nichts frei — `add` und check prüfen die Form mit derselben
+Funktion. Das Pfadmuster ist relativ zur Repo-Wurzel wie die Pfade im Diff: ein führendes `./`
+fällt weg; ein absoluter Pfad oder ein Teil `..` träfe nie eine Datei — `add` weist ihn ab
+(„Pfadmuster muss relativ zur Repo-Wurzel sein“), und von Hand in der Ablage gibt er nichts frei
+(Hinweis in der Ausgabe von check).
 
-Basis und Ende eines Bereichs bestimmt check aus der Ausgabe von `git rev-parse` und vergleicht
-immer `git diff <basis> <ende>`, nie die rohe Angabe: `<a>..<b>` und `<rev>^-<n>` mit der negativen
-Revision als Basis; `<rev>^!` mit dem Elternteil als Basis — bei einem Merge-Commit mit dem ersten
-Elternteil (wie `<rev>^1..<rev>`, Hinweis „Merge: verglichen mit erstem Elternteil“), auf dem ersten
-Commit mit dem leeren Baum; `<a>...<b>` wie `git diff <a>...<b>` mit der Merge-Base als Basis und
-`<b>` als Ende, die übliche Form für einen PR-Diff. Eine einzelne Revision (`--range <rev>`) wird
-mit dem Arbeitsbaum verglichen, unversionierte Dateien zählen dazu; ohne Arbeitsbaum (Bare-Repo
-eines CI-Hooks, aus `.git` heraus) geht nur ein Bereich, eine Einzelrevision endet mit Exit 2
-(„ungeprüft — Einzelrevision braucht einen Arbeitsbaum“).
-
-Woher die Freigaben kommen: bei einer einzelnen Revision aus der Arbeitskopie von
-`docs/big-decisions.md`; bei einem Bereich ohne Arbeitsbaum aus der Ablage im Ende, aufgelöst auf
-seinen Commit (`<b>^{commit}:docs/big-decisions.md`). Fehlt sie dort, ist sie wie eine fehlende Ablage. Meldungen
-nennen das Ende so, wie es angegeben wurde (`v2`, nicht ein Hash). Fehlt die Ablage, ist sie unlesbar oder wird
-sie übersprungen, sagt jede Stelle „Freigaben nicht gelesen (<Grund>)“.
+check nimmt genau eine Revision (`--range <rev>`) und vergleicht sie mit dem Arbeitsbaum:
+`git diff <commit>` mit dem Commit, den `git rev-parse --verify <rev>^{commit}` nennt, dazu die
+unversionierten Dateien; ein Merge-Commit wird wie jede Revision verglichen. Die Freigaben kommen
+immer aus der Arbeitskopie von `docs/big-decisions.md`. Ein Bereich (`<a>..<b>`, `<a>...<b>`,
+`^!`, `^@`, `^-`) und eine Revision, die nicht auflöst, enden mit Exit 2 („ungeprüft — check nimmt
+eine Revision, nicht „<angabe>“; den Bereich selbst prüfen“) — einen PR-Diff prüft der Nutzer
+selbst; ein Repo ohne Arbeitsbaum (Bare-Repo, aus `.git` heraus) endet mit Exit 2 („ungeprüft —
+kein Arbeitsbaum“). Fehlt die Ablage, ist sie unlesbar oder wird sie übersprungen, sagt jede Stelle
+„Freigaben nicht gelesen (<Grund>)“.
 
 ### rule
 

@@ -42,5 +42,6 @@ def test_decide_freigegebene_teure_aenderung_wird_nicht_gemeldet(decide_repo, mo
     # Assert
     assert code == 0, out
     assert not [line for line in out.splitlines() if line.startswith("- ")], out
-    assert "Keine Stelle ohne Freigabe" in out
-    assert out.splitlines()[-1] == TAIL
+    # nichts offen, keine Sitzung: nur Ergebniszeile und Schlusszeile
+    lines = out.splitlines()
+    assert len(lines) == 2 and lines[0].startswith("Keine Stelle ohne Freigabe") and lines[-1] == TAIL, out

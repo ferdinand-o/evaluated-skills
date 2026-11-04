@@ -11,7 +11,7 @@ import subprocess
 import sys
 import types
 
-from conftest import REPO_ROOT, decide_add_small, decide_log_file, decide_script, git
+from conftest import DECIDE_SESSION, REPO_ROOT, decide_add_small, decide_log_file, decide_script, git
 from evalkit.assertions import ARTIFACT_HEADER_RE, GIT_HEAD_KEY, check
 from evalkit.schema import load_evals
 from evalkit.workspace import prepare
@@ -113,6 +113,11 @@ def test_eval_patterns(decide_repo, tmp_path, monkeypatch, capsys):
         assert not _hits(pattern, "D-1 ist freigegeben, Quelle der Antwort war der Auftrag."), pattern
     (tail,) = _patterns(approval, "output_matches")
     assert _hits(tail, out.splitlines()[-1])
+    # die Übergabe in einem Aufruf: die Protokollzeile zu D-1 vor der Schlusszeile, keine offene Frage
+    lines = out.splitlines()
+    entry = next(i for i, line in enumerate(lines) if line.startswith("- [groß] Migrationen: ") and "D-1" in line)
+    assert lines.index(f"Einträge der Sitzung {DECIDE_SESSION}: 1") < entry < len(lines) - 1, out
+    assert "Offene große Fragen" not in out, out
     assert not _hits(tail, "Die Kategorie data-delete bleibt ungeprüft.")
     (still_open,) = [p for p in _patterns(side, "file_matches", LEDGER) if "offen" in p]
     assert not _hits(still_open, approved_ledger)           # und der freigegebene nicht für offen

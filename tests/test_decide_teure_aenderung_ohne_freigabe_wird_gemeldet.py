@@ -45,4 +45,9 @@ def test_decide_teure_aenderung_ohne_freigabe_wird_gemeldet(decide_repo, monkeyp
     assert "dependency" in dep and categories["dependency"].meaning in dep and "D-1" in dep and "offen" in dep
     assert "migration" in mig and categories["migration"].meaning in mig and "kein Eintrag" in mig
     assert "0001_initial.py" not in out                      # unverändert: keine Stelle
+    # die offene Frage D-1 steht nach den Stellen und vor der Schlusszeile (wie `open`); ohne Sitzung
+    # keine Zusammenfassung
+    pending = lines.index("Offene große Fragen in docs/big-decisions.md: 1")
+    assert max(lines.index(dep), lines.index(mig)) < pending < len(lines) - 1, out
+    assert "Einträge der Sitzung" not in out
     assert lines[-1] == TAIL
