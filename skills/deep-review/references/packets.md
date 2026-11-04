@@ -127,8 +127,8 @@ Beispiel mit `packet_size` 600 (1.760 Zeilen, also geteilt):
 | `tools/gen_tables.py` | 650 | `p4`, `p5` | Datei über 600, geteilt in Spannen (siehe unten) |
 
 Je Paket stehen im Plan `id`, `files`, `changed_lines`, `range`, `reused_from` (immer
-`null`, übernommen wird je Datei, siehe Folgeläufe), `marker` (die Paket-Marke) und bei
-Spannen `spans`.
+`null`, übernommen wird je Datei, siehe Folgeläufe) und bei Spannen `spans`. Die Paket-Marke
+`marker` trägt erst `counterparts` ein, nicht `plan`.
 
 ## Spannen in großen Dateien
 
@@ -145,7 +145,9 @@ Paket ist eine Liste `{file, lines: [von, bis]}`. Eine neue Datei mit 1.300 Zeil
   an Leerzeilen. Ein Schnitt vor einer Definition oder nach einer Leerzeile gilt nur, wenn die
   Spanne danach `SPAN_MIN_SHARE` × `packet_size` geänderte Zeilen trägt, damit die Importe vor
   der ersten Klasse kein eigenes Paket werden. Gelöschte Zeilen zählen an ihrem Anker, der
-  ersten Zeile des Hunks am Ziel. Jede Spanne trägt mindestens eine geänderte Zeile.
+  ersten Zeile des Hunks am Ziel. Jede Spanne trägt mindestens eine geänderte Zeile. Ausnahme
+  von der Grenze: Eine Zeile, deren Gewicht allein `packet_size` übersteigt (etwa viele
+  gelöschte Zeilen an einem Anker), ist eine Spanne für sich und trägt mehr.
 - **Nicht geteilt** wird eine Datei, die am Ziel fehlt, leer ist oder keine reguläre Datei ist,
   oder die an der Basis keine reguläre Datei war (Symlink, Submodul). Ein Typwechsel bleibt ein
   ganzes Datei-Paket, dessen Diff ihn vollständig zeigt. Ergibt das Teilen nur eine Spanne,
@@ -163,8 +165,10 @@ Paket ist eine Liste `{file, lines: [von, bis]}`. Eine neue Datei mit 1.300 Zeil
 ihn als `range` ins Paket ein. Danach schreibt es `packets/<id>.md` (der Paketblock) und
 `packets/<id>.prompt.md` (der Auftrag, siehe unten). Die Ausgabe nennt je Paket den Bereich und
 den Pfad der `prompt.md`. Den Bereich gibst du an `/code-review`. Die Gegenstellen sammelt
-schon `plan`, einmal, und legt sie im Laufordner ab; `counterparts` liest sie von dort, nur
-nach `--since` sammelt es eine Sprache mit eigenen Dateien neu.
+schon `plan`, einmal, und legt sie im Laufordner ab; `counterparts` liest sie von dort. Live
+sammelt es alle Sprachen nur, wenn der Speicher fehlt oder nicht zum Plan passt; sonst nur
+Delphi (Sammler mit `on_demand`), wenn der Speicher nach `--since` Delphi-Dateien trägt, die in
+keinem Paket stehen.
 
 | Fall | `range` des Pakets | Hilfscommits |
 | --- | --- | --- |
@@ -202,7 +206,8 @@ Der Reviewer liest den Arbeitsbaum, nicht ZIEL. Deshalb schreibt jeder Bau Hinwe
 | `worktree_unknown` | Index fehlt, der Arbeitsbaum ist nicht geprüft |
 
 Bei `split: false` mit HEAD als ZIEL und sauberem Arbeitsbaum gibt es keine Refs und keine
-`notes`. Das ist der Anti-Zeremonie-Fall: ein `/code-review` über den Originalbereich, ein
+`notes`, außer in den Fällen der Tabelle mit Hilfscommits auch bei einem Paket (Pfad-Modus,
+Wurzel-Commit, Übernahme nach `--since`). Das ist der Anti-Zeremonie-Fall: ein `/code-review` über den Originalbereich, ein
 Bericht, dessen Einordnung höchstens `EINORDNUNG_MAX_LINES` Textzeilen hat. Den Teil vor
 `## Einordnung` schreibt `report`, `audit` vergleicht ihn Zeile für Zeile; eine eigene Grenze
 hat nur die Einordnung.
@@ -213,7 +218,7 @@ Fokus, Bereich (bei Spanne mit `datei:von-bis`), Stufe, im Profil `checkpoint` d
 Paketblock, bei Delphi-Dateien `delphi.md`, das Rückgabeformat und als **letzte Zeile**
 `Paket-Marke: <marke>`. Auftrag und Block sind so eine Datei: Wer den Auftrag weitergibt, gibt
 den Block mit. Die Marke steht auch in `plan.json` beim Paket und ist eine Auskunft, kein
-Beleg ([review-brief.md](review-brief.md#rückgabeformat)). Ab 40.000 Zeichen nennt `counterparts`
+Beleg ([review-brief.md](review-brief.md#rückgabeformat)). Über 40.000 Zeichen nennt `counterparts`
 die Größe, abgebrochen wird nicht.
 
 Die Kopfzeile von `packets/<id>.md` endet auf `| counterparts: <n> -->`: die Zahl der
@@ -224,7 +229,8 @@ Sammelregel`; ohne beides (Fokus `quality`) ergibt sich „—“.
 
 ## Pfad-Modus
 
-`review_kit.py plan --path <pfad>[,<pfad>…] [--target <ziel>] [--profile …] [--focus …] [--level …] [--verify] [--with-tests]`
+`review_kit.py plan --path <pfad>[,<pfad>…] [--target <ziel>] [--profile …] [--soll-file <datei>] [--focus …] [--level …] [--verify] [--with-tests]`
+(`--soll-file` ist bei `--profile checkpoint` Pflicht)
 prüft Dateien, die keinen Diff haben. Ein Pfad (Ordner rekursiv oder Datei, relativ zum Repo)
 wird wie ein Bereich vom leeren Stand bis zum Ziel behandelt, analog zum Wurzel-Commit: Die
 Dateien des Pfads am Ziel gelten als neu, jede ihrer Zeilen zählt.
@@ -372,7 +378,8 @@ Aufträge auch ohne dieses Feld; nur `audit` und der Bericht verlangen die Urtei
 - `audit` meldet bei `verify: true` die Nummern ohne Urteil unter `unverified`, ein Urteil in
   `findings.json`, das nicht zu `verdicts/` passt (etwa von Hand geschrieben), unter
   `forged_verdicts` und ein Urteil, das `verdicts/` inzwischen überholt hat, unter
-  `stale_verdicts` (`merge` fehlt). Alle drei machen `complete` zu `false`.
+  `stale_verdicts` (`merge` fehlt). Alle drei machen `complete` zu `false`; nur `unverified`
+  hängt an `verify: true`, `forged_verdicts` und `stale_verdicts` prüft `audit` immer.
 
 ## Bericht prüfen: die Einordnung
 
@@ -385,8 +392,9 @@ entfernt, auch über mehrere Zeilen; Text davor und danach bleibt je auf seiner 
 `<!--` und `-->` zählen nur außerhalb von Inline-Code: in einer Backtick-Spanne derselben
 Zeile (`` `<!--` ``) sind sie Text.
 
-- **Keine Vollständigkeit bei Lücken.** Meldet das Audit `missing`, `stale` oder
-  `lost_findings`, ist jede Zeile ein Eintrag in `report_mismatch`, die eines der Wörter
+- **Keine Vollständigkeit bei Lücken.** Meldet das Audit `missing`, `stale`,
+  `lost_findings`, `unverified` (nur bei `verify: true`), `forged_verdicts` oder
+  `stale_verdicts`, ist jede Zeile ein Eintrag in `report_mismatch`, die eines der Wörter
   `vollständig`, `fertig`, `komplett` (auch mit -e, -em, -en, -er, -es) als ganzes Wort
   enthält, Groß/Klein egal, und nicht zugleich `unvollständig`. Englische Wörter zählen
   nicht: ``audit meldet `complete: false` `` zitiert das Audit-Feld und meldet nicht.

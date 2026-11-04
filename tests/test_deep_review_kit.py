@@ -9456,3 +9456,32 @@ def test_cp8r3_f5_superseded_verdict_of_the_earlier_run_does_not_count(tmp_path,
     kit.write_report(dir2)
     audit = kit.audit(dir2, None)
     assert audit["complete"] is False and audit["unverified"] == [1], audit
+
+
+def test_cp9_f1_path_mode_report_counts_like_the_block_header(tmp_path):
+    """Pfad-Modus: `a.py` ruft `load()` aus `b.py`, beide im Paket — `counterparts` verwirft
+    den Eintrag (`_leaving_path`), der Kopf von `packets/p1.md` sagt `counterparts: 0`; die
+    Spalte Gegenstellen im Bericht zeigt dieselbe Zahl, nicht die ungefilterte des Speichers."""
+    kit = _kit()
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    _commit_files(root, "basis", {
+        "src/__init__.py": "",
+        "src/b.py": 'def load(x):\n    if x:\n        raise KeyError("intern")\n    return x\n',
+        "src/a.py": "from src.b import load\n\n\ndef run(x):\n    return load(x)\n"})
+    plan = kit.build_path_plan(root, ["src"], "standard", "bugs", False)
+    run = plan["_meta"]["run"]
+    directory = kit.run_dir(root, run)
+    [item] = kit.write_counterparts(root, run)
+    stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
+    assert stored["files"]["src/a.py"]["entries"]            # ungefiltert im Speicher
+    header = (directory / "packets" / "p1.md").read_text(encoding="utf-8").split("\n", 1)[0]
+    assert header.endswith(f"| {kit.BLOCK_COUNT_FIELD}: 0 -->") and item["counterparts"] == 0
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, [], "p1.json"))
+    kit.merge(directory)
+    report = kit.write_report(directory).read_text(encoding="utf-8").splitlines()
+    [row] = [ln for ln in report if ln.startswith("| p1 |")]
+    assert row.split(" | ")[3] == "0", row

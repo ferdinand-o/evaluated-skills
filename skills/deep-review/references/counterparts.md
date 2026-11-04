@@ -98,8 +98,9 @@ Namenssuche:
   **„(Name eindeutig, ohne Sammler)“**. Zwei oder mehr gleichnamige Definitionen: nicht aufgelöst,
   gezählt. Mehrfache Namen werden nicht geraten, auch nicht mit Importen: Importe, Überladungen
   und Besitz kennt dieser Rückfall nicht.
-- **Eintrag:** nur, wenn der Rumpf der Definition eine direkte `throw`- oder `panic`-Zeile hat;
-  sie steht unter `wirft:` und als `throw … at <datei>:<zeile>` bzw. `panic … at …`. Würfe in
+- **Eintrag:** nur, wenn der Rumpf der Definition eine direkte `throw`- oder `panic`-Zeile hat
+  (Swift: auch `fatalError(`); sie steht unter `wirft:` und als `throw … at <datei>:<zeile>`
+  bzw. `panic … at …` (Swift-`fatalError(` als `throw … at …`). Würfe in
   Funktionen, die der Rumpf aufruft, folgt der Rückfall nicht. Eine Deklaration ohne Rumpf
   (Protokoll, Interface, `abstract`) hat keine Zeile.
 - **C und C++:** auch `int Parser::parse(…) {`, Zeiger- und Referenz-Rückgaben und
@@ -133,6 +134,7 @@ Namenssuche:
 | --- | --- |
 | Sprachen ohne Sammler und ohne Namens-Rückfall (SQL, Shell, …) | Dateizeile `` - `<datei>` — Gegenstellen nicht gesammelt (Sprache) `` |
 | Aufrufe ohne Importbezug mit mehr als 3 gleichnamigen Definitionen (Python, Delphi); mehrfach definierte Namen im Namens-Rückfall | fehlen, gezählt als „nicht aufgelöst“ |
+| Dateien unter `node_modules` | Dateiliste: `` - `<datei>` — unter node_modules, Gegenstellen nicht gesammelt ``, ohne das Präfix „nicht lesbar“ und nicht unter den nicht lesbaren gezählt |
 | TypeScript/JavaScript: Pakete, `node_modules`, Pfad-Aliase, Klassenmethoden, Re-Exports, Typinferenz | fehlen; nicht aufgelöste Importe sind gezählt |
 | Aufrufe, deren Definition nichts wirft (Delphi: auch ohne Default) und ohne geändertes Argument | fehlen, nicht gezählt |
 | `raise` in anderen Modulen bzw. Units als der Definition | fehlen in `wirft:` |
@@ -142,7 +144,7 @@ Namenssuche:
 
 Gründe für nicht lesbare Dateien: `Syntaxfehler`, `Symlink`, `Pfad nicht UTF-8`,
 `Submodul (gitlink), keine Datei`, `Blöcke gehen nicht auf (Delphi-Scanner)`,
-`unter node_modules, Gegenstellen nicht gesammelt`, `nicht als Datei im Baum des ZIELS`. Nicht lesbare Dateien derselben Sprache außerhalb des
+`nicht als Datei im Baum des ZIELS`. Nicht lesbare Dateien derselben Sprache außerhalb des
 Pakets stehen als eine Zahl am Ende des Blocks, denn dort wurde nicht gesucht.
 
 ## Zeilenformat des Paketblocks
@@ -180,7 +182,8 @@ Dateien (<n>):
 | `### <datei>:<zeile> inherited Create auf Self: <Klasse>` | Konstruktor einer besitzenden Klasse (Delphi) |
 
 - `| counterparts: <n>` in der Kopfzeile ist die Zahl der Gegenstellen des Pakets, maschinenlesbar
-  (Bericht und `packets.md`); bei Fokus `quality` fehlt das Feld.
+  (Bericht und `packets.md`); bei Fokus `quality` fehlt das Feld. Im Pfad-Modus zählen nur
+  Einträge, die das Paket verlassen; die Spalte Gegenstellen im Bericht zeigt dieselbe Zahl.
 - Hat eine Zeile mehrere Einträge für denselben Namen, trägt die Überschrift die Spalte:
   `### <datei>:<zeile>:<spalte> …`.
 - Zeilen unter einer Gegenstelle bei TypeScript/JavaScript und Namens-Rückfall: `wirft: <Typ>`
