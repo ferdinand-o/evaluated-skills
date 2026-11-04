@@ -465,7 +465,8 @@ def test_f11_meta_cannot_override_fixed_fields(tmp_path):
 
 def test_f12_one_packet_is_not_split(tmp_path):
     kit = _kit()
-    root = _commit_repo(tmp_path, {"app/big.py": ""}, {"app/big.py": _lines(900)})
+    # Eine gelöschte Datei hat am ZIEL keine Zeilen, also keine Spannen: ein Paket bleibt eins.
+    root = _commit_repo(tmp_path, {"app/big.py": _lines(900)}, {"app/big.py": None})
     plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
     assert plan["split"] is False and plan["changed_lines"] == 900
     assert [(p["id"], p["range"]) for p in plan["packets"]] == [("p1", plan["range"])]
@@ -3427,14 +3428,17 @@ def test_f6_apply_since_packs_like_build_plan(tmp_path, monkeypatch):
 
     monkeypatch.setattr(kit, "_pack", spy)
     run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
-    assert calls == [({"a.py": 5, "b.py": 6}, "bugs", kit.SPLIT_AT, kit.PACKET_SIZE)]
+    # Dazu Repo und Bereich: große Dateien teilt `_pack` in Spannen (Spec 28).
+    span = kit.Span(run_a["base"], run_a["target"], run_a["log_base"])
+    assert calls == [({"a.py": 5, "b.py": 6}, "bugs", kit.SPLIT_AT, kit.PACKET_SIZE, root, span)]
     _record(kit, root, run_a, "p1", [_finding("a.py", 5, "A")])
     plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
     kit.apply_since(plan_b, [_run_path(root, run_a)])
-    assert calls[-1] == ({"b.py": 7}, "bugs", kit.SPLIT_AT, kit.PACKET_SIZE)
+    span_b = kit.Span(plan_b["base"], plan_b["target"], plan_b["log_base"])
+    assert calls[-1] == ({"b.py": 7}, "bugs", kit.SPLIT_AT, kit.PACKET_SIZE, root, span_b)
 
     # Eine andere Schnittregel gilt für beide.
-    def other(files, focus, split_at, packet_size):
+    def other(files, focus, split_at, packet_size, repo=None, rng=None):
         return [{"id": f"q{i}", "files": [p], "changed_lines": n}
                 for i, (p, n) in enumerate(sorted(files.items()), 1)]
 
@@ -6283,7 +6287,8 @@ def test_b_cp2_f2_since_packets_name_no_unit_only_a_reused_file_reaches(tmp_path
     kit = _kit()
     _tick(kit, monkeypatch)
     root = tmp_path / "repo"
-    run = _delphi_since(kit, root, split_at=1)
+    # split_at 20: geteilt, aber jede Unit (höchstens 17 Zeilen) bleibt ganz (keine Spannen).
+    run = _delphi_since(kit, root, split_at=20)
     store = kit.load_collected(kit.run_dir(root, run))
     assert store is not None and ["c/Bad.pas", kit.SKIP_UNBALANCED] in store["not_indexed"]["Delphi"]
     blocks = _packet_blocks(kit, root, run)
@@ -7424,3 +7429,210 @@ def test_b_cp4r3_f4_block_count_from_old_count_line(tmp_path):
     block.write_text(old.replace("packet: p1 -->", "packet: p2 -->", 1), encoding="utf-8")
     assert rows() == [row(lines, "—")]
     assert "Sammelregel" in kit.OLD_BLOCK_COUNT_RE.pattern
+
+
+# --- review_kit.py: Spannen in großen Dateien (Spec 28, Task 6) ---------------------------
+
+SPAN_LIB = 'def helper(x):\n    if x < 0:\n        raise ValueError("negativ")\n    return x\n'
+SPAN_PAS_ROUTINE = re.compile(r"(?:class )?(?:procedure|function|constructor|destructor) ", re.I)
+
+
+def _span_python(total, tag="f"):
+    """Python-Modul mit genau `total` Zeilen, ohne Leerzeile: Funktionen und Klassen der
+    obersten Ebene in wechselnder Länge, je eine Zeile ruft `helper` (wirft); am Ende
+    Zuweisungen auf Modulebene, bis die Zahl stimmt."""
+    lines, sizes, i = ["from lib import helper\n"], (37, 52, 45, 61, 29), 0
+    while len(lines) + sizes[i % len(sizes)] <= total - 3:
+        size = sizes[i % len(sizes)]
+        if i % 7 == 3:
+            lines += [f"class K{tag}{i}:\n", f"    a = helper({i})\n"]
+            lines += [f"    b{j} = {j}\n" for j in range(size - 2)]
+        else:
+            lines += [f"def {tag}{i}():\n", f"    v = helper({i})\n"]
+            lines += [f"    v{j} = {j}\n" for j in range(size - 3)] + ["    return v\n"]
+        i += 1
+    lines += [f"tail_{j} = {j}\n" for j in range(total - len(lines))]
+    return "".join(lines)
+
+
+def _span_pascal():
+    """Delphi-Unit: Deklarationen im interface-Teil (Spalte 0), im implementation-Teil
+    Routinen mit eingerückter lokaler Prozedur, ohne Leerzeile."""
+    head = ["unit Big;\n", "interface\n"] + [f"procedure P{k};\n" for k in range(40)]
+    body = ["implementation\n"]
+    for k in range(40):
+        body += [f"procedure P{k};\n", "var\n", "  i: Integer;\n", "  procedure Local;\n",
+                 "  begin\n", "  end;\n", "begin\n"]
+        body += [f"  i := {j};\n" for j in range(8 + (k * 7) % 23)] + ["end;\n"]
+    return "".join(head + body + ["end.\n"])
+
+
+def _diff_lines(root, a, b, path=None):
+    """Die `+`/`-`-Zeilen von `git diff -U0 a b` in ihrer Reihenfolge."""
+    out = git(root, "diff", "-U0", "--no-color", a, b, *(["--", path] if path else []))
+    return [ln for ln in out.splitlines()
+            if ln[:1] in "+-" and not ln.startswith(("+++ ", "--- "))]
+
+
+def _span_of(packet):
+    [item] = packet["spans"]
+    return item["file"], item["lines"]
+
+
+def test_b_big_file_split_at_definitions(tmp_path, monkeypatch):
+    kit = _kit()
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    big2_base = _span_python(2000, "g")
+    _commit_files(root, "basis", {"lib.py": SPAN_LIB, "big2.py": big2_base, "README.md": "# r\n"})
+    git(root, "tag", "base")
+    big = _span_python(1300)
+    _commit_files(root, "neues Modul", {"big.py": big})
+    git(root, "tag", "t1")
+    base_lines = big2_base.splitlines(keepends=True)
+    changed = (base_lines[:100] + [f"    w_{j} = {j}\n" for j in range(450)] + base_lines[100:1500]
+               + [f"    z_{j} = {j}\n" for j in range(460)] + base_lines[1510:])
+    _commit_files(root, "zwei Stellen", {"big2.py": "".join(changed)})
+    git(root, "tag", "t2")
+    flat = "".join(f"zeile {i}\n" for i in range(1, 1301))
+    blank = "".join("\n" if i % 70 == 0 else f"wert {i}\n" for i in range(1, 1301))
+    _commit_files(root, "ohne Scanner", {"Big.pas": _span_pascal(), "flat.cfg": flat,
+                                         "blank.cfg": blank})
+    git(root, "tag", "t3")
+    assert kit.PACKET_SIZE == 600
+
+    # Neue Python-Datei mit 1.300 Zeilen: drei Pakete mit Spannen an def/class-Grenzen.
+    plan = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    run, directory = plan["_meta"]["run"], _run_path(root, plan)
+    _read_plan(root, plan)
+    assert plan["split"] is True
+    assert [p["id"] for p in plan["packets"]] == ["p1", "p2", "p3"]
+    assert all(p["files"] == ["big.py"] for p in plan["packets"])
+    spans = [_span_of(p)[1] for p in plan["packets"]]
+    assert spans[0][0] == 1 and spans[-1][1] == 1300
+    assert all(a[1] + 1 == b[0] for a, b in zip(spans, spans[1:]))
+    text = big.splitlines()
+    assert all(re.match(r"(def|class) ", text[start - 1]) for start, _end in spans[1:])
+    assert all(p["changed_lines"] <= 600 for p in plan["packets"])
+    assert sum(p["changed_lines"] for p in plan["packets"]) == 1300 == plan["changed_lines"]
+    assert kit.split_file_spans(root, "base..t1", "big.py", 600) == spans
+    assert '"spans": [\n' in (directory / "plan.json").read_text(encoding="utf-8")
+
+    # von..bis je Paket: nur die Zeilen seiner Spanne; bis^{tree} = Baum des Ziels; der
+    # Arbeitsbaum des Nutzers bleibt.
+    before = _user_state(root)
+    written = kit.write_counterparts(root, run)
+    assert _user_state(root) == before
+    on_disk = _plan_on_disk(kit, root, run)
+    stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
+    all_sites = {e["line"] for e in stored["files"]["big.py"]["entries"]}
+    assert all_sites
+    shown_sites = set()
+    for packet, item, (start, end) in zip(on_disk["packets"], written, spans):
+        von, bis = packet["range"].split("..")
+        assert _rev(root, f"{bis}^{{tree}}") == _rev(root, "t1^{tree}")
+        added = _diff_lines(root, von, bis)
+        assert added == ["+" + line for line in text[start - 1:end]]
+        assert git(root, "show", f"{von}:big.py").splitlines() == text[:start - 1] + text[end:]
+        # Gegenstellen nur der Spanne; der Auftrag nennt die Spanne im Bereich.
+        block = (directory / "packets" / f"{packet['id']}.md").read_text(encoding="utf-8")
+        sites = {int(n) for n in re.findall(r"^### big\.py:(\d+)", block, re.M)}
+        assert sites and all(start <= n <= end for n in sites)
+        shown_sites |= sites
+        assert item["counterparts"] == len(sites)
+        prompt = (directory / "packets" / f"{packet['id']}.prompt.md").read_text(encoding="utf-8")
+        area = prompt.split("## Bereich", 1)[1].split("\n## ", 1)[0]
+        assert f"big.py:{start}-{end}" in area
+    assert shown_sites == all_sites
+
+    # merge ordnet Funde der Datei dem Paket zu, dessen Spanne die Zeile enthält; ein Fund
+    # außerhalb aller Spannen bleibt.
+    inside_p2 = spans[1][0] + 3
+    _rec(kit, directory, "p1", "/code-review",
+         _payload(tmp_path, [_finding("big.py", inside_p2, "quer"),
+                             _finding("big.py", 5000, "draußen")], "p1.json"))
+    _rec(kit, directory, "p2", "/code-review",
+         _payload(tmp_path, [_finding("lib.py", 3, "Gegenstelle")], "p2.json"))
+    merged = {f["summary"]: f["packets"] for f in kit.merge(directory)["findings"]}
+    assert merged == {"quer": ["p1", "p2"], "draußen": ["p1"], "Gegenstelle": ["p2"]}
+    report = kit.render_report(directory)
+    for pid, (start, end) in zip(("p1", "p2", "p3"), spans):
+        assert f"| {pid} | 1 (big.py:{start}-{end}) |" in report
+
+    # --since: übernommen nur, wenn jede Spanne ein Ergebnis hat.
+    later = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    kept = kit.apply_since(later, [directory])
+    assert kept["file_keys"]["big.py"].get("reused_from") is None
+    assert [_span_of(p)[1] for p in kept["packets"]] == spans
+    _rec(kit, directory, "p3", "/code-review", _payload(tmp_path, [], "p3.json"))
+    taken = kit.apply_since(later, [directory])
+    info = taken["file_keys"]["big.py"]
+    assert info["reused_from"] == run and taken["packets"] == []
+    assert sorted(f["summary"] for f in info["findings"]) == ["draußen", "quer"]
+    assert [(o["finding"]["summary"], o["packet_files"]) for o in info["outside"]] == [
+        ("Gegenstelle", ["big.py"])]
+
+    # Geänderte Datei mit Hunks in zwei Spannen: jede Spanne zeigt ihren Hunk, zusammen den
+    # ganzen Diff; Grenze auf einer def/class-Zeile.
+    mod = kit.build_plan(root, "t1..t2", "standard", "bugs", None, False)
+    assert [p["id"] for p in mod["packets"]] == ["p1", "p2"]
+    mspans = [_span_of(p)[1] for p in mod["packets"]]
+    target = "".join(changed).splitlines()
+    assert re.match(r"(def|class) ", target[mspans[1][0] - 1])
+    # Hunk 1 am Ziel 101–550, Hunk 2 (10 Zeilen ersetzt durch 460) ab 1951.
+    assert mspans[0][0] == 1 and 550 < mspans[1][0] <= 1951 and mspans[1][1] == len(target)
+    mrun = mod["_meta"]["run"]
+    before = _user_state(root)
+    kit.write_counterparts(root, mrun)
+    assert _user_state(root) == before
+    parts = []
+    for packet in _plan_on_disk(kit, root, mrun)["packets"]:
+        von, bis = packet["range"].split("..")
+        assert _rev(root, f"{bis}^{{tree}}") == _rev(root, "t2^{tree}")
+        lines = _diff_lines(root, von, bis)
+        assert lines
+        parts.append(lines)
+    assert parts[0] == ["+" + ln for ln in target[100:550]]
+    assert sorted(parts[1]) == sorted(["-" + ln.rstrip("\n") for ln in base_lines[1500:1510]]
+                                      + ["+" + ln for ln in target[1950:2410]])
+    assert parts[0] + parts[1] == _diff_lines(root, "t1", "t2")
+
+    # Delphi: Grenze an einer Routine der obersten Ebene im implementation-Teil.
+    pas = _span_pascal().splitlines()
+    impl = pas.index("implementation") + 1
+    pspans = kit.split_file_spans(root, "t2..t3", "Big.pas", 600)
+    assert len(pspans) >= 2 and pspans[0][0] == 1 and pspans[-1][1] == len(pas)
+    assert all(start > impl and SPAN_PAS_ROUTINE.match(pas[start - 1])
+               for start, _end in pspans[1:])
+
+    # Ohne Scanner: an einer Leerzeile, ohne Leerzeile nach genau PACKET_SIZE Zeilen.
+    assert kit.split_file_spans(root, "t2..t3", "flat.cfg", 600) == [
+        [1, 600], [601, 1200], [1201, 1300]]
+    bspans = kit.split_file_spans(root, "t2..t3", "blank.cfg", 600)
+    blank_lines = blank.split("\n")
+    assert len(bspans) == 3 and bspans[-1][1] == 1300
+    assert all(blank_lines[end - 1] == "" for _start, end in bspans[:-1])
+    # Unter packet_size: eine Spanne über die ganze Datei; eine Datei, die ZIEL nicht hat: keine.
+    assert kit.split_file_spans(root, "t2..t3", "flat.cfg", 2000) == [[1, 1300]]
+    assert kit.split_file_spans(root, "t2..t3", "fehlt.py", 600) == []
+
+
+def test_b_every_span_carries_a_changed_line(tmp_path):
+    """Keine Spanne ohne geänderte Zeile: nicht vor der ersten geänderten Zeile geschnitten,
+    der Rest nach der letzten gehört zur letzten Spanne; die Spannen decken die Datei."""
+    kit = _kit()
+    base = _lines(60)
+    lines = base.splitlines(keepends=True)
+    after = "".join(lines[:2] + ["neu_a = 1\n"] + lines[3:39] + ["neu_b = 1\n", "neu_c = 2\n"]
+                    + lines[39:])
+    root = _commit_repo(tmp_path, {"m.py": base}, {"m.py": after})
+    for size in (1, 2, 3, 4):
+        spans = kit._file_spans(root, "base..HEAD", "m.py", size)
+        assert [list(s) for s, _n in spans] == kit.split_file_spans(root, "base..HEAD", "m.py", size)
+        assert all(n > 0 for _s, n in spans) and sum(n for _s, n in spans) == 4
+        assert spans[0][0][0] == 1 and spans[-1][0][1] == 62
+        assert all(a[0][1] + 1 == b[0][0] for a, b in zip(spans, spans[1:]))
+    assert [s for s, _n in kit._file_spans(root, "base..HEAD", "m.py", 2)] == [(1, 39), (40, 62)]
