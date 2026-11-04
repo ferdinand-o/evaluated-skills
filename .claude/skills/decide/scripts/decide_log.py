@@ -1722,7 +1722,8 @@ _SQL_PROGRAMS = ("psql", "sqlite3", "mysql")
 _W, _E = r"(?<![\w.-])", r"(?![\w.-])"                # Wortgrenzen: `/bin/rm` trifft, `format` nicht
 _SEG = r"(?:\\[;&|]|[^;&|\n])*"                       # Rest des einfachen Befehls bis `;`, `&`, `|`, Zeilenende
 _GIT_GLOBAL = r"(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s-]\S*)|--(?:git-dir|work-tree|namespace|config-env)\s+[^\s-]\S*|-\S+))*\s+"
-_SQL = r"(?:\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA|COLUMN)|TRUNCATE)\b|\bDELETE\s+FROM\b(?!(?:[^;'\"&]|&(?!&))*\bWHERE\b))"
+_SQL = (r"(?:\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA|COLUMN)|TRUNCATE)\b|\bALTER\s+TABLE\b[^;]*?\bDROP\b"
+        r"|\bDELETE\s+FROM\b(?!(?:[^;'\"&|]|&(?!&))*\bWHERE\b))")
 
 
 def _start(command):
@@ -1769,8 +1770,9 @@ _PROGRAM_RE = re.compile(_W + "(?:" + "|".join(dict.fromkeys(c.split()[0] for _,
 _REST_RE = re.compile(_SEG)
 # Rumpf der Commit-Vorlage von Claude Code: `"$(cat <<'WORT'` … `WORT` `)"` ist Text, kein Befehl — nur direkt
 # hinter einer Nachrichtenoption, nicht hinter `bash -c` oder `eval`.
-_TEMPLATE_RE = re.compile(r"((?<!\S)(?:-[mF]|--(?:message|body|title|notes))(?:=|\s+))"
-                          r"\"\$\(cat <<-? ?(['\"])([A-Za-z_][\w.-]*)\2[ \t]*\n.*?^\s*\3[ \t]*\n\s*\)\"", re.S | re.M)
+_TEMPLATE_RE = re.compile(r"((?<!\S)(?:-[a-zA-Z]*[mF]|--(?:message|body|title|notes))(?:=|\s+))"
+                          r"\"\$\(cat <<-? ?(['\"])([A-Za-z_][\w.-]*)\2[ \t]*\n"
+                          r"(?:(?!^[ \t]*\3[ \t]*$).)*^[ \t]*\3[ \t]*\n\s*\)\"", re.S | re.M)  # bis zum ersten Endwort
 _QUOTED_RE = re.compile(r"\\.|'[^']*'?|\"(?:\\.|[^\"\\])*\"?", re.S)
 _REDIRECT_OK_RE = re.compile(r"2>&1|[12]?>[ \t]*/dev/null")
 _NOT_PLAIN_RE = re.compile(r"[$`()<>|]|(?<!&)&(?!&)|" + _W + r"(?:cd|pushd|popd)" + _E)

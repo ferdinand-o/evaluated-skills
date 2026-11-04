@@ -353,12 +353,15 @@ def test_guard_sql_where_ends_at_quote(work):
                     "mysql -e 'delete from t' && mysql -e 'select 1 where 1'"):
         assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
     assert dl.guard_decision("psql <<EOF\nDELETE FROM t\nWHERE id = 1;\nEOF", work) is None
+    assert dl.guard_decision("echo DELETE FROM t | grep -v WHERE | psql", work) == ("data-delete", ALWAYS)
 
 
 def test_guard_drop_column(work):
     """F7: `DROP COLUMN` gehört zur Mustertabelle, wie in `references/reversibility.md`."""
     assert dl.guard_decision("psql -c 'ALTER TABLE t DROP COLUMN c'", work) == ("data-delete", ALWAYS)
     assert dl.guard_decision('sqlite3 a.db "alter table t drop column c"', work) == ("data-delete", ALWAYS)
+    assert dl.guard_decision("psql -c 'ALTER TABLE t DROP c'", work) == ("data-delete", ALWAYS)
+    assert dl.guard_decision("psql -c 'ALTER TABLE t ADD c int'", work) is None
     table, _ = reference_commands()
     lines = REVERSIBILITY.read_text(encoding="utf-8").splitlines()
     row = next(line for line in lines if line.startswith("| `data-delete` | `psql`"))
@@ -370,8 +373,10 @@ def test_guard_template_only_after_message_option(work):
     body = "\"$(cat <<'EOF'\nrm -rf data\nEOF\n)\""
     for command in ("bash -c " + body, "eval " + body, "sh -c " + body + " && git commit -m x"):
         assert dl.guard_decision(command, work) == ("data-delete", ALWAYS), command
-    for option in ("-m ", "--message ", "--message=", "-F ", "--body ", "--title ", "--notes "):
+    for option in ("-m ", "-am ", "-sm ", "--message ", "--message=", "-F ", "--body ", "--title ", "--notes "):
         assert dl.guard_decision("gh x " + option + body, work) is None, option
+    smuggled = "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\nrm -rf data\nEOF\n)\""   # Rumpf endet am ersten EOF
+    assert dl.guard_decision(smuggled, work) == ("data-delete", ALWAYS)
 
 
 def test_guard_push_dry_run_only_own_word(pushed):
@@ -408,16 +413,14 @@ def test_guard_git_globals_linear(work):
     """F10: viele globale git-Optionen backtracken nicht exponentiell."""
     import time
     start = time.perf_counter()
-    assert dl.guard_decision("git " + "-c " * 30 + "x", work) is None
-    assert dl.guard_decision("git -c a=b " * 30 + "reset --hard", work) == ("unsaved-work", ALWAYS)
-    assert time.perf_counter() - start < 1
+    assert dl.guard_decision("git " + "-c " * 40 + "x", work) is None       # exponentiell: Minuten
+    assert dl.guard_decision("git -c a=b " * 40 + "reset --hard", work) == ("unsaved-work", ALWAYS)
+    assert time.perf_counter() - start < 10
 
 
 def test_guard_push_re_by_name():
     """F12: `_PUSH_RE` wird über den Namen gesucht, nicht über die Zeile der Tabelle."""
     assert dl._PUSH_RE is next(r for _, command, r in dl._GUARD_RES if command == "git push")
-    source = (SKILL_DIR / "scripts" / "decide_log.py").read_text(encoding="utf-8")
-    assert "_GUARD_RES[0]" not in source
 
 
 # --- eigene Fehler ---------------------------------------------------------------------

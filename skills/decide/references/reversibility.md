@@ -115,8 +115,8 @@ das Versehen, nicht der verschleierte Befehl.
    ohne Subprozess.
 2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
    (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text und wird
-   durch ein leeres Wort ersetzt, wenn direkt davor `-m`, `--message`, `-F`, `--body`, `--title`
-   oder `--notes` steht (hinter `bash -c` oder `eval` bleibt er Befehl). Ein `\` am Zeilenende
+   durch ein leeres Wort ersetzt, wenn direkt davor `-m` (auch gebündelt, `-am`), `--message`, `-F`, `--body`,
+   `--title` oder `--notes` steht; er endet am ersten Endwort (hinter `bash -c` oder `eval` bleibt er Befehl). Ein `\` am Zeilenende
    verbindet zwei Zeilen zu einer; `;`, `&` und `|` innerhalb von Anführungszeichen trennen keine
    Befehle (die SQL-Muster sehen den Text unverändert).
 3. **Muster.** Jedes Muster läuft über den ganzen übrigen Text, mit Wortgrenzen (`/bin/rm` trifft,
@@ -170,7 +170,7 @@ Diese Tabelle ist dieselbe wie `GUARD_PATTERNS` im Skript. Kurzoptionen zählen 
 | `data-delete` | `find` | `-delete`, oder `-exec`/`-execdir`/`-ok`/`-okdir` mit `rm` | nein, immer Rückfrage |
 | `data-delete` | `git clean` | `-f`/`--force` (auch gebündelt, `-fdx`) | nein, immer Rückfrage |
 | `data-delete` | `git branch` | `-D`, oder `--delete`/`-d` mit `--force`/`-f` | nein, immer Rückfrage |
-| `data-delete` | `psql` | `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `DROP COLUMN`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, Anführungszeichen oder `&&`, irgendwo im Text (auch im Heredoc), wenn `psql` im Text steht | nein, immer Rückfrage |
+| `data-delete` | `psql` | `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `DROP COLUMN`, `ALTER TABLE … DROP`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, `|`, Anführungszeichen oder `&&`, irgendwo im Text (auch im Heredoc), wenn `psql` im Text steht | nein, immer Rückfrage |
 | `data-delete` | `sqlite3` | wie `psql` | nein, immer Rückfrage |
 | `data-delete` | `mysql` | wie `psql` | nein, immer Rückfrage |
 | `unsaved-work` | `git reset` | `--hard`, `--merge` oder `--keep` | nein, immer Rückfrage |
