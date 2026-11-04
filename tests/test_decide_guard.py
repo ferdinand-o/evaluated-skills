@@ -334,7 +334,7 @@ def test_guard_wrappers(work):
 
 
 def test_guard_cd_sets_directory(pushed, tmp_path):
-    """F5: `cd` setzt das Verzeichnis für folgende Teile; unbekanntes Ziel → Push fragt; `(`/`)` trennen."""
+    """F5: `cd` setzt das Verzeichnis für folgende Teile; unbekanntes Ziel → Push fragt; nach `(`/`)` ist es unbekannt (R2-F6)."""
     repo = pushed
     write_ledger(repo, block(1, "freigegeben", "push:origin/**"))
     other = tmp_path / "other"
@@ -348,7 +348,7 @@ def test_guard_cd_sets_directory(pushed, tmp_path):
                     "cd ~/repo && git push origin x"):
         assert "immer Rückfrage" in reason(run(command, repo)), command
     assert run("cd . && git push origin x", repo) == ""
-    assert run("(cd ../other) && git push origin x", repo) == ""            # Subshell endet
+    assert "Verzeichnis unbekannt" in reason(run("(cd ../other) && git push origin x", repo))
     assert dl.guard_decision("(cd sub && git reset --hard)", repo) == ("unsaved-work", "immer Rückfrage")
     assert dl.guard_decision("(git reset --hard)", repo) == ("unsaved-work", "immer Rückfrage")
 
@@ -425,7 +425,7 @@ def test_guard_without_program_starts_no_subprocess(work, monkeypatch):
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="Hooks laufen über bash")
 def test_hook_snippet_python_fallback(work, tmp_path):
-    """F11: python3, sonst python, sonst Meldung „kein Python“."""
+    """F11: python3, sonst python, sonst Meldung „kein Python 3“ (R2-F8)."""
     command = snippet_command()
     (work / ".claude" / "hooks").mkdir(parents=True)
     shutil.copy(SKILL_DIR / "scripts" / "decide_log.py", work / ".claude" / "hooks" / "decide_log.py")
@@ -444,7 +444,7 @@ def test_hook_snippet_python_fallback(work, tmp_path):
     assert reason(done.stdout.strip()).startswith("decide: data-delete")
     done = hook(empty)
     assert done.returncode == 0, done
-    assert json.loads(done.stdout) == {"systemMessage": "[decide] Hook ungeprüft — kein Python"}
+    assert json.loads(done.stdout) == {"systemMessage": "[decide] Hook ungeprüft — kein Python 3"}
 
 
 def test_guard_noclobber_redirect(work):
@@ -452,6 +452,153 @@ def test_guard_noclobber_redirect(work):
     assert dl.guard_decision("rm -rf build >| log src", work) == ("data-delete", "immer Rückfrage")
     assert dl.guard_decision("rm -rf build >| log", work) is None
     assert ">\\|" not in dl._REDIRECT_OP_RE.pattern and ">\\|" not in dl._REDIRECT_RE.pattern
+
+
+# --- Prüfpunkt nach Task 3, Runde 2 (F1–F11) -------------------------------------------
+
+UNPARSED = "Befehl nicht zerlegbar"
+
+
+def test_guard_command_substitution_asks(work):
+    """R2-F1: `$(` oder Backtick außerhalb einfacher Anführungszeichen plus Programmname → ask."""
+    for command in ("git reset $(git merge-base a b) --hard", "rm $(echo x) -rf src", "rm `echo x` -rf src",
+                    'echo "$(rm -rf src)"', "cat <<EOF\ndon't $(rm -rf src) won't\nEOF",
+                    "git commit -m \"$(cat <<EOF\nx\nEOF\n)\" && rm $(echo x) -rf src"):
+        assert reason(run(command, work)).endswith(": " + UNPARSED), command
+        assert dl.guard_decision(command, work)[1] == UNPARSED, command
+    for command in ("echo '$(rm -rf src)'", "ls $(pwd)", "cat <<'EOF' > f.sh\ngit log $(x)\nEOF",
+                    "git commit -m \"$(cat <<'EOF'\nfix (x)\n\ngit reset --hard\nEOF\n)\""):
+        assert dl.guard_decision(command, work) is None, command
+    # die Nachricht aus der Commit-Vorlage ist ein Wort: was danach steht, wird weiter geprüft
+    assert dl.guard_decision("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\" && git reset --hard", work) == (
+        "unsaved-work", "immer Rückfrage")
+    assert dl.guard_decision("rm \"$(cat <<'EOF'\n-rf\nEOF\n)\" src", work) == ("data-delete", "immer Rückfrage")
+
+
+def test_guard_parentheses_are_no_separators(work):
+    """R2-F2: `\\(` und `\\)` bei find zerschneiden den Befehl nicht."""
+    for command in ("find . \\( -name '*.pyc' -o -name '*.pyo' \\) -delete", "(git reset --hard)",
+                    "( rm -rf src )"):
+        assert dl.guard_decision(command, work) in (("data-delete", "immer Rückfrage"),
+                                                    ("unsaved-work", "immer Rückfrage")), command
+
+
+def test_guard_heredoc_at_shell_is_checked(work):
+    """R2-F3: An einer Shell bleibt der Heredoc-Rumpf Befehlstext."""
+    for category, command in (("data-delete", "bash <<EOF\nrm -rf src\nEOF"),
+                              ("unsaved-work", "ssh host <<'EOF'\ngit reset --hard\nEOF"),
+                              ("data-delete", "sh <<-X\n\trm -rf src\n\tX"),
+                              ("data-delete", "cat <<EOF | bash\nrm -rf src\nEOF")):
+        assert dl.guard_decision(command, work) == (category, "immer Rückfrage"), command
+    assert dl.guard_decision("cat <<EOF > run.sh\nrm -rf src\nEOF", work) is None
+
+
+def test_guard_heredoc_marker_in_quotes_is_no_heredoc(work):
+    """R2-F4: `<<WORT` in Anführungszeichen ist kein Heredoc."""
+    for command in ('echo "<<X"\nrm -rf src\nX', "echo '<<X'\nrm -rf src\nX"):
+        assert dl.guard_decision(command, work)[0] == "data-delete", command
+    assert dl.guard_decision('echo "a <<X" <<Y\nrm -rf src\nY', work) is None      # der zweite ist ein Heredoc
+
+
+def test_guard_push_mirror_asks(pushed):
+    """R2-F5: `remote.<r>.mirror=true` fragt ohne Refspec nach."""
+    repo = pushed
+    write_ledger(repo, block(1, "freigegeben", "push:origin/**"))
+    git(repo, "config", "remote.origin.mirror", "true")
+    assert "immer Rückfrage" in reason(run("git push", repo))
+    assert "immer Rückfrage" in reason(run("git push origin", repo))
+    git(repo, "config", "remote.origin.mirror", "false")
+    assert run("git push", repo) == ""
+
+
+def test_guard_directory_after_pushd_pipe_and_parentheses(pushed, tmp_path):
+    """R2-F6: pushd/popd und Wörter mit `(`/`)` machen das Verzeichnis unbekannt; cd wirkt nicht über | und &."""
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    git(approved, "init", "-q", "-b", "x")
+    write_ledger(approved, block(1, "freigegeben", "push:origin/**"))
+    assert run("cd ../approved && git push origin x", pushed) == ""
+    assert run("cd ../approved\ngit push origin x", pushed) == ""
+    for command in ("cd ../approved & git push origin x", "cd ../approved | git push origin x",
+                    "ls | cd ../approved && git push origin x"):
+        assert "keine Freigabe mit Schlüssel push:origin/x" in reason(run(command, pushed)), command
+    for command in ("pushd ../approved && git push origin x", "popd && git push origin x",
+                    "(cd ../approved) && git push origin x", "(cd ../approved && git push origin x)"):
+        assert reason(run(command, pushed)).endswith("immer Rückfrage (Verzeichnis unbekannt)"), command
+
+
+def test_guard_find_exec_checks_inner_command(work):
+    """R2-F7: Die Wörter nach -exec/-execdir/-ok/-okdir bis `;` oder `+` sind ein eigener Befehl."""
+    for category, command in (("data-delete", "find . -exec sudo rm -rf {} +"), ("data-delete", "find . -ok rm {} ;"),
+                              ("data-delete", "find . -okdir rm {} \\;"),
+                              ("unsaved-work", "find . -exec git checkout -- {} ;"),
+                              ("unsaved-work", "find . -name x -exec echo {} \\; -exec git reset --hard \\;")):
+        assert dl.guard_decision(command, work) == (category, "immer Rückfrage"), command
+    assert dl.guard_decision("find . -exec git status {} ; -print", work) is None
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="Hooks laufen über bash")
+def test_hook_snippet_requires_python3(work, tmp_path):
+    """R2-F8: python3 oder python nur ab Python 3.8; sonst die Meldung „kein Python 3“."""
+    command = snippet_command()
+    (work / ".claude" / "hooks").mkdir(parents=True)
+    shutil.copy(SKILL_DIR / "scripts" / "decide_log.py", work / ".claude" / "hooks" / "decide_log.py")
+    old, mixed = tmp_path / "old", tmp_path / "mixed"
+    for folder in (old, mixed):
+        folder.mkdir()
+        (folder / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        (folder / "python3").chmod(0o755)
+    (old / "python").symlink_to(old / "python3")
+    (mixed / "python").symlink_to(sys.executable)
+
+    def hook(path):
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(work), "PATH": str(path)}
+        return subprocess.run([shutil.which("bash"), "-c", command], cwd=work, input=payload("rm -rf data", work),
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    done = hook(old)
+    assert done.returncode == 0, done
+    assert json.loads(done.stdout) == {"systemMessage": "[decide] Hook ungeprüft — kein Python 3"}
+    done = hook(mixed)
+    assert done.returncode == 0, done
+    assert reason(done.stdout.strip()).startswith("decide: data-delete")
+
+
+def test_guard_wrappers_with_path_and_values(work):
+    """R2-F9: Wrapper mit Pfad, `sudo -r/-t/--role/--type` mit Wert, `env -S` → nicht zerlegbar."""
+    for command in ("sudo -r role rm -rf src", "sudo -t type rm -rf src", "sudo --role r --type t rm -rf src",
+                    "/usr/bin/env rm -rf src", "/usr/bin/sudo -u root rm -rf src"):
+        assert dl.guard_decision(command, work) == ("data-delete", "immer Rückfrage"), command
+    for command in ("env -S 'rm -rf src'", "/usr/bin/env --split-string='rm -rf src'"):
+        assert dl.guard_decision(command, work)[1] == UNPARSED, command
+
+
+def test_reference_describes_what_guard_does_not_parse():
+    """R2-F10: reversibility.md beschreibt `$(…)`, Klammern und Heredocs wie der Code."""
+    section = REVERSIBILITY.read_text(encoding="utf-8").split("## Befehle, die guard erkennt", 1)[1]
+    section = " ".join(section.split("\n## ", 1)[0].split())
+    assert "trennen auch" not in section and "nach einer Subshell" not in section
+    assert "`bash`, `sh`, `zsh`, `dash`, `ksh`, `ssh`" in section
+    assert "ausgeglichene Anführungszeichen" in section
+    assert "„Befehl nicht zerlegbar“ (unbalancierte Anführungszeichen, `$(` oder ein Backtick" in section
+    assert "`-ok`" in section and "`pushd`" in section and "`env -S`" in section and "mirror" in section
+
+
+def test_guard_root_lazy_and_one_precheck(pushed, work, monkeypatch):
+    """R2-F11: eine Vorprüfung; Wurzel erst bei Bedarf und einmal je Verzeichnis; SQL-Programme aus _GUARD_CHECKS."""
+    source = (SKILL_DIR / "scripts" / "decide_log.py").read_text(encoding="utf-8")
+    assert source.count("_PROGRAM_RE.search(") == 1
+    assert "_SQL_PROGRAM_RE" not in source and "psql|sqlite3|mysql" not in source
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/**"))
+    calls, real = [], dl.repo_root
+
+    def spy(directory):
+        calls.append(str(directory))
+        return real(directory)
+    monkeypatch.setattr(dl, "repo_root", spy)
+    assert run("rm a.txt && git status", work) == "" and calls == []
+    assert run("git push origin x && git push origin y && git push", pushed) == ""
+    assert calls == [str(pushed)]
 
 
 # --- Gleichlauf mit der Reference ------------------------------------------------------

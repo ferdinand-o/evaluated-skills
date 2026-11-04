@@ -1,5 +1,5 @@
 {
-  "_comment": "G3-Vorlage (Spec 00 §4, Spec 28 Abschnitt Hook) — wird NIE automatisch installiert. Ohne diesen Hook bleibt decide G1 (SKILL.md) und check G2: Es meldet, blockiert aber nicht. Übernehmen: scripts/decide_log.py nach .claude/hooks/ kopieren, dann diesen Block in .claude/settings.json oder .claude/settings.local.json mischen. Mit Hook fragt Claude Code bei einem erkannten Befehl (references/reversibility.md, „Befehle, die guard erkennt“) den Nutzer, bis er antwortet. Fehlt die Kopie oder Python (python3, sonst python), meldet der Hook „ungeprüft“ und hält nichts an.",
+  "_comment": "G3-Vorlage (Spec 00 §4, Spec 28 Abschnitt Hook) — wird NIE automatisch installiert. Ohne diesen Hook bleibt decide G1 (SKILL.md) und check G2: Es meldet, blockiert aber nicht. Übernehmen: scripts/decide_log.py nach .claude/hooks/ kopieren, dann diesen Block in .claude/settings.json oder .claude/settings.local.json mischen. Mit Hook fragt Claude Code bei einem erkannten Befehl (references/reversibility.md, „Befehle, die guard erkennt“) den Nutzer, bis er antwortet. Fehlt die Kopie oder Python ab 3.8 (python3, sonst python), meldet der Hook „ungeprüft“ und hält nichts an.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=$(command -v python3 || command -v python); if [ ! -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" ]; then echo '{\"systemMessage\": \"[decide] Hook ungeprüft — .claude/hooks/decide_log.py fehlt\"}'; elif [ -z \"$p\" ]; then echo '{\"systemMessage\": \"[decide] Hook ungeprüft — kein Python\"}'; else exec \"$p\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" guard; fi"
+            "command": "p=; for c in python3 python; do if command -v \"$c\" >/dev/null 2>&1 && \"$c\" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then p=$c; break; fi; done; if [ ! -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" ]; then echo '{\"systemMessage\": \"[decide] Hook ungeprüft — .claude/hooks/decide_log.py fehlt\"}'; elif [ -z \"$p\" ]; then echo '{\"systemMessage\": \"[decide] Hook ungeprüft — kein Python 3\"}'; else exec \"$p\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/decide_log.py\" guard; fi"
           }
         ]
       }

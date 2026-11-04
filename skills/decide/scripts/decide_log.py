@@ -47,7 +47,7 @@ import stat
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import date, datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -1746,10 +1746,14 @@ GUARD_SHOWN = 80                                    # Zeichen des Befehls im Gru
 HOOK_UNCHECKED = "[decide] Hook ungeprüft"
 _GUARD_PROGRAMS = tuple(dict.fromkeys(command.split()[0] for command in GUARD_COMMANDS))
 _PROGRAM_RE = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, _GUARD_PROGRAMS)) + r")(?![\w.-])")
-_SQL_PROGRAM_RE = re.compile(r"(?<![\w.-])(?:psql|sqlite3|mysql)(?![\w.-])")
-_SEPARATOR_CHARS = ";&|\n()"
+_SEPARATOR_CHARS = ";&|\n"
 _CONTINUATION_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")         # `\` am Zeilenende: Zeile geht weiter
 _HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*(['\"]?)([A-Za-z_][\w.-]*)\2")
+_SHELL_RE = re.compile(r"(?<![\w.-])(?:bash|sh|zsh|dash|ksh|ssh)(?![\w.-])")   # dort bleibt ein Heredoc Befehl
+# Die Commit-Vorlage `"$(cat <<'EOF' … EOF\n)"`: ein Wort mit dem wörtlichen Rumpf, keine Ersetzung.
+_CAT_HEREDOC_RE = re.compile(r"\"\$\(cat <<(['\"])([A-Za-z_][\w.-]*)\1\n((?:(?!\2\n)[^\n]*\n)*)\2\n\)\"")
+_QUOTED_RE = re.compile(r"\\.|(\"(?:\\.|[^\"\\])*\")|'[^']*'", re.S)   # Gruppe 1: doppelte Anführungszeichen
+_SUBSTITUTION_RE = re.compile(r"\$\(|`")
 _REDIRECT_OP_RE = re.compile(r"\d*(?:>>?|<<?<?|<>|>&|<&)")       # Umleitung ohne Ziel im selben Wort
 _REDIRECT_RE = re.compile(r"\d*(?:>>?|<<?<?|<>)\S")              # Umleitung mit Ziel im selben Wort
 _ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
@@ -1757,14 +1761,16 @@ _PREFIX_WORDS = frozenset({"!", "{", "if", "then", "else", "elif", "do", "while"
 # Wrapper vor dem Programm mit ihren Optionen, die das nächste Wort als Wert nehmen (Spec 28,
 # „Was vor dem Programm steht“); `timeout` nimmt danach die Dauer.
 _WRAPPERS = {
-    "sudo": {"-u", "--user", "-g", "--group", "-p", "-C", "-h", "-D", "-R", "-T", "-U"}, "doas": {"-u", "-C"},
-    "env": {"-u", "--unset", "-C", "--chdir"}, "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "sudo": {"-u", "--user", "-g", "--group", "-p", "-C", "-h", "-D", "-R", "-T", "-U", "-r", "--role", "-t",
+             "--type"}, "doas": {"-u", "-C"}, "env": {"-u", "--unset", "-C", "--chdir"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
     "nice": {"-n", "--adjustment"}, "ionice": {"-c", "--class", "-n", "--classdata"},
     "stdbuf": {"-i", "-o", "-e"}, "nohup": set(), "time": set(), "command": set(), "exec": {"-a"},
 }
+_FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
 _GIT_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env")
 _GIT_REDIRECT = ("-c", "--git-dir", "--namespace", "--config-env")   # können das Push-Ziel umlenken
-_CURL_VALUE = frozenset("AbcCDeEHKmoPQrtuUwxyYz")   # curl-Kurzoptionen mit Wert (Rest des Worts oder nächstes)
+_CURL_VALUE = frozenset("AbcCDeEHKmoPQrtuUwxXyYz")  # curl-Kurzoptionen mit Wert (Rest des Worts oder nächstes)
 _PUSH_QUIET = frozenset({"-u", "--set-upstream", "-v", "--verbose", "-q", "--quiet", "--no-verify", "--progress",
                          "--porcelain"})
 _GH_API_DATA = ("-f", "-F", "--field", "--raw-field", "--input")
@@ -1774,55 +1780,56 @@ _SQL_WHERE_RE = re.compile(r"(?i)\bWHERE\b")
 
 
 def _cut_heredocs(command):
-    """(Text ohne Heredoc-Rümpfe, [(Zeile mit `<<WORT`, Rumpf)]). Ein Rumpf reicht bis zur Zeile `WORT`
-    (bei `<<-` mit führenden Tabs); fehlt sie, bleibt der Text ab dort, wie er ist."""
+    """(Text ohne Heredoc-Rümpfe, [(Zeile mit `<<WORT`, Rumpf, WORT in Anführungszeichen)]); ein Rumpf ohne
+    Zeile `WORT` bleibt stehen. Nicht in einer Zeile mit Shell (`_SHELL_RE`) oder mit offenen
+    Anführungszeichen bis `<<` (`echo "<<X"`)."""
     lines, kept, bodies, i = command.split("\n"), [], [], 0
     while i < len(lines):
         line = lines[i]
         i += 1
         kept.append(line)
-        for dash, _, word in _HEREDOC_RE.findall(line):
+        for match in () if _SHELL_RE.search(line) else _HEREDOC_RE.finditer(line):
+            dash, quote, word = match.groups()
+            if set(_QUOTED_RE.sub("", line[:match.start()])) & set("'\""):
+                continue
             end = next((j for j in range(i, len(lines)) if (lines[j].lstrip("\t") if dash else lines[j]) == word),
                        None)
             if end is None:
                 break
-            bodies.append((line, "\n".join(lines[i:end])))
+            bodies.append((line, "\n".join(lines[i:end]), bool(quote)))
             i = end + 1
     return "\n".join(kept), bodies
 
 
 def _split_parts(command):
-    """Die Teile eines Bash-Befehls als Wortlisten; `(` und `)` stehen als eigene Teile `["("]`,
-    `[")"]`. Zerlegt mit `shlex` (posix, Trenner `;&|()` und Zeilenumbruch nur außerhalb von
-    Anführungszeichen, kein Kommentarzeichen — `#` mitten im Wort wie in `https://x/#a` beendet bei
-    Bash nichts); `\\` am Zeilenende verbindet die Zeilen wie in Bash. Umleitungen (`2>&1`,
-    `>/dev/null`, `&> log`, `>| log`) fallen weg, `&` darin trennt nichts. Wirft ValueError bei
-    unbalancierten Anführungszeichen."""
-    text = _CONTINUATION_RE.sub(r"\1", command).replace(">|", ">")
+    """Die Teile eines Bash-Befehls als (Wörter, Trenner davor, Trenner danach, Klammer abgestreift), mit
+    `shlex` (posix, Trenner `;&|` und Zeilenumbruch außerhalb von Anführungszeichen, kein Kommentarzeichen,
+    `\\` am Zeilenende verbindet). Führende `(`, schließende `)` und Umleitungen (`2>&1`, `&> log`, `>| log`)
+    fallen weg. Wirft ValueError bei unbalancierten Anführungszeichen."""
+    text = _CONTINUATION_RE.sub(r"\1", command).replace(">|", ">").replace("\\;", "'\\;'")   # `\;` ist ein Wort
     lexer = shlex.shlex(text, posix=True, punctuation_chars=_SEPARATOR_CHARS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
     tokens = list(lexer)
-    parts, words, i = [], [], 0
+    parts, words, before, paren, i = [], [], "", False, 0
     while i < len(tokens):
         token = tokens[i]
         i += 1
         if not token or not set(token) <= set(_SEPARATOR_CHARS):
-            words.append(token)
+            word = token.lstrip("(").rstrip(")")
+            paren = paren or word != token
+            if word or not token:
+                words.append(word)
         elif token == "&" and words and re.fullmatch(r"\d*[<>]", words[-1]) and i < len(tokens):
             words.pop()                                 # `2>&1`, `>&2`: Umleitung, kein Hintergrund
             i += 1
         elif token == "&" and i < len(tokens) and tokens[i].startswith(">"):
             continue                                    # `&>log`, `&> log`: Umleitung folgt
         else:
-            if words:
-                parts.append(words)
-                words = []
-            parts += [[char] for char in token if char in "()"]
-    if words:
-        parts.append(words)
-    return [kept for kept in (_without_redirects(part) for part in parts) if kept]
+            parts.append((_without_redirects(words), before, token, paren))
+            words, before, paren = [], token, False
+    return parts + [(_without_redirects(words), before, "", paren)]
 
 
 def _without_redirects(words):
@@ -1839,18 +1846,21 @@ def _without_redirects(words):
 
 def _program_words(words):
     """Die Wörter ab dem Programmnamen: führende Zuweisungen (`VAR=x`), Schlüsselwörter wie `then`,
-    `do` und die Wrapper aus `_WRAPPERS` samt Optionen und Werten fallen weg."""
+    `do` und die Wrapper aus `_WRAPPERS` (auch mit Pfad) samt Optionen und Werten fallen weg. None bei
+    `env -S`/`--split-string` (guard zerlegt den Text darin nicht)."""
     i = 0
     while i < len(words):
-        word = words[i]
+        word, name = words[i], words[i].rsplit("/", 1)[-1]
         i += 1
-        if word in _WRAPPERS:
+        if name in _WRAPPERS:
             while i < len(words) and words[i].startswith("-"):
                 i += 1
                 if words[i - 1] == "--":
                     break
-                i += words[i - 1] in _WRAPPERS[word]
-            i += word == "timeout"                      # die Dauer
+                if name == "env" and words[i - 1].startswith(("-S", "--split-string")):
+                    return None
+                i += words[i - 1] in _WRAPPERS[name]
+            i += name == "timeout"                      # die Dauer
         elif not (_ASSIGNMENT_RE.match(word) or word in _PREFIX_WORDS):
             return words[i - 1:]
     return []
@@ -1881,8 +1891,8 @@ def _split_args(args):
 
 def _rm_exempt(target, cwd, root):
     """Ein absolutes Ziel nur unter /tmp/ (wie angegeben, nicht über `cwd` aufgelöst — ein Repo unter
-    /tmp bleibt geschützt); ein relatives ohne `..`, `~`, `$` unter `.skills/cache` (relativ zur Wurzel)
-    oder mit einer Pfadkomponente aus `RM_EXEMPT_PARTS`."""
+    /tmp bleibt geschützt); ein relatives ohne `..`, `~`, `$` unter `.skills/cache` (relativ zur Wurzel,
+    `root(cwd)`) oder mit einer Pfadkomponente aus `RM_EXEMPT_PARTS`."""
     path = posixpath.normpath(target)
     if target.startswith("/"):
         return path.startswith(RM_TMP)
@@ -1890,7 +1900,7 @@ def _rm_exempt(target, cwd, root):
         return False
     if cwd is not None:
         full = posixpath.normpath(posixpath.join(Path(cwd).as_posix(), path))
-        base = Path(root).as_posix().rstrip("/") + "/"
+        base = Path(root(cwd)).as_posix().rstrip("/") + "/"
         if full == base + RM_EXEMPT_PREFIX or full.startswith(base + RM_EXEMPT_PREFIX + "/"):
             return True
     return any(part in RM_EXEMPT_PARTS for part in path.split("/"))
@@ -1898,44 +1908,31 @@ def _rm_exempt(target, cwd, root):
 
 def _rm_hit(args, cwd, root):
     longs, shorts, operands, _ = _split_args(args)
-    if "--recursive" not in longs and not shorts & {"r", "R"}:
-        return False
-    return not operands or not all(_rm_exempt(target, cwd, root) for target in operands)
-
-
-def _method_hit(method):
-    return method.upper() not in ("GET", "HEAD")
+    return bool("--recursive" in longs or shorts & {"r", "R"}) and (
+        not operands or not all(_rm_exempt(target, cwd, root) for target in operands))
 
 
 def _curl_hit(args, cwd, root):
     """Methode außer GET/HEAD (`-X`, `-X<m>`, `--request`, `--request=<m>`), `--data*`, `--form*`,
     `--json`, `-T`/`--upload-file` oder ein Kurzoptions-Bündel mit `d` oder `F`."""
     i = 0
-    while i < len(args):
-        arg = args[i]
-        i += 1
-        if arg == "--":
-            break
+    while i < len(args) and args[i] != "--":
+        arg, i = args[i], i + 1
         if arg.startswith("--"):
-            name, eq, value = arg.partition("=")
+            name, _, value = arg.partition("=")
             if name.startswith(("--data", "--form")) or name in ("--json", "--upload-file"):
                 return True
-            if name == "--request":
-                if not eq:
-                    value, i = (args[i] if i < len(args) else ""), i + 1
-                if _method_hit(value):
-                    return True
-            continue
-        if not arg.startswith("-") or arg == "-":
+            if name != "--request":
+                continue
+            arg = "-X" + value                          # `--request=M` wie `-XM`, `--request M` wie `-X M`
+        elif not arg.startswith("-") or arg == "-":
             continue
         for k, letter in enumerate(arg[1:], 2):
             if letter in "dFT":
                 return True
-            if letter == "X" or letter in _CURL_VALUE:
-                value = arg[k:]
-                if not value:
-                    value, i = (args[i] if i < len(args) else ""), i + 1
-                if letter == "X" and _method_hit(value):
+            if letter in _CURL_VALUE:
+                value, i = (arg[k:], i) if arg[k:] else ((args[i] if i < len(args) else ""), i + 1)
+                if letter == "X" and value.upper() not in ("GET", "HEAD"):
                     return True
                 break
     return False
@@ -1956,9 +1953,22 @@ def _gh_api_hit(args, cwd, root):
     return False
 
 
+def _find_commands(args):
+    """Die Befehle hinter `-exec`, `-execdir`, `-ok`, `-okdir` bis `;` oder `+`, ab dem Programmnamen."""
+    commands, inner = [], None
+    for arg in args + [";"]:
+        if inner is None:
+            inner = [] if arg in _FIND_EXEC else None
+        elif arg in (";", "\\;", "+"):
+            commands.append(_program_words(inner) or [""])
+            inner = None
+        else:
+            inner.append(arg)
+    return commands
+
+
 def _find_hit(args, cwd, root):
-    return "-delete" in args or any(arg in ("-exec", "-execdir") and nxt.rsplit("/", 1)[-1] == "rm"
-                                    for arg, nxt in zip(args, args[1:]))
+    return "-delete" in args or any(words[0].rsplit("/", 1)[-1] == "rm" for words in _find_commands(args))
 
 
 def _wget_hit(args, cwd, root):
@@ -1981,15 +1991,12 @@ def _git_checkout_hit(args, cwd, root):
 
 def _git_restore_hit(args, cwd, root):
     longs, shorts, _, _ = _split_args(args)
-    staged = "--staged" in longs or "S" in shorts
-    worktree = "--worktree" in longs or "W" in shorts
-    return not (staged and not worktree)
+    return not (("--staged" in longs or "S" in shorts) and not ("--worktree" in longs or "W" in shorts))
 
 
 def _git_branch_hit(args, cwd, root):
     longs, shorts, _, _ = _split_args(args)
-    force = "--force" in longs or "f" in shorts
-    return "D" in shorts or (("--delete" in longs or "d" in shorts) and force)
+    return "D" in shorts or (("--delete" in longs or "d" in shorts) and ("--force" in longs or "f" in shorts))
 
 
 def _options_hit(longs=(), shorts=""):
@@ -2002,21 +2009,11 @@ def _options_hit(longs=(), shorts=""):
 
 _GUARD_CHECKS = {
     "rm": _rm_hit, "curl": _curl_hit, "wget": _wget_hit, "find": _find_hit, "gh api": _gh_api_hit,
-    "psql": _sql_hit, "sqlite3": _sql_hit, "mysql": _sql_hit,
-    "git clean": _options_hit(["--force"], "f"),
-    "git branch": _git_branch_hit,
-    "git reset": _options_hit(["--hard", "--merge", "--keep"]),
-    "git checkout": _git_checkout_hit,
-    "git restore": _git_restore_hit,
+    "psql": _sql_hit, "sqlite3": _sql_hit, "mysql": _sql_hit, "git clean": _options_hit(["--force"], "f"),
+    "git branch": _git_branch_hit, "git reset": _options_hit(["--hard", "--merge", "--keep"]),
+    "git checkout": _git_checkout_hit, "git restore": _git_restore_hit,
     "git switch": _options_hit(["--force", "--discard-changes"], "f"),
 }                                                   # fehlt ein Befehl hier: erkannt heißt immer Rückfrage
-
-
-def _current_branch(directory):
-    """Der aktuelle Zweig in `directory`; None bei abgelöstem HEAD oder Fehler."""
-    result = _git(directory, "rev-parse", "--abbrev-ref", "HEAD")
-    branch = result.stdout.strip()
-    return branch if result.returncode == 0 and branch and branch != "HEAD" else None
 
 
 def _push_target(args, directory):
@@ -2034,10 +2031,12 @@ def _push_target(args, directory):
             return None, f"{GUARD_ALWAYS} (kein Push-Ziel)"
         if operands and not target.startswith(operands[0] + "/"):
             return None, f"{GUARD_ALWAYS} (Remote ist nicht das von @{{push}})"
-        config = _git(directory, "config", "--get-regexp", r"^(push\.default|remote\..+\.push)$").stdout
+        config = _git(directory, "config", "--get-regexp", r"^(push\.default|remote\..+\.(push|mirror))$").stdout
         for key, _, value in (line.partition(" ") for line in config.splitlines()):
-            remote = key[len("remote."):-len(".push")]
-            if (key, value) == ("push.default", "matching") or (key != "push.default" and target.startswith(remote + "/")):
+            remote, _, kind = key[len("remote."):].rpartition(".")
+            if (key, value) == ("push.default", "matching") or (
+                    key != "push.default" and target.startswith(remote + "/")
+                    and (kind == "push" or value.lower() not in ("false", "no", "off", "0"))):
                 return None, f"{GUARD_ALWAYS} ({key} {value}: mehr als ein Ziel)"
         return target, None
     remote, refspec = operands
@@ -2047,8 +2046,9 @@ def _push_target(args, directory):
     if not colon:
         dest = source
     if source == "HEAD":
-        branch = _current_branch(directory)
-        if not branch:
+        head = _git(directory, "rev-parse", "--abbrev-ref", "HEAD")
+        branch = head.stdout.strip() if head.returncode == 0 else ""
+        if branch in ("", "HEAD"):
             return None, f"{GUARD_ALWAYS} (abgelöster HEAD)"
         dest = branch if dest == "HEAD" else dest
     elif _git(directory, "show-ref", "--verify", "--quiet", f"refs/tags/{source}").returncode == 0:
@@ -2076,7 +2076,7 @@ def _push_approved(target, ledger_root):
 def _guard_git(args, cwd, root):
     """(Kategorie, Grund) oder None für `git <args>`. Globale Optionen fallen weg, die aus `_GIT_VALUE`
     samt Wert (auch `--opt=wert`); `-C <pfad>` (relativ zu `cwd`) ist das Verzeichnis für Push-Ziel,
-    Zweig, Ablage und vorhandene Pfade. `cwd` None heißt unbekannt (nach `cd $X`)."""
+    Zweig, Ablage (`root(verzeichnis)`) und vorhandene Pfade. `cwd` None heißt unbekannt (nach `cd $X`)."""
     directory, redirected, i = cwd, False, 0
     while i < len(args) and args[i].startswith("-"):
         name, eq, value = args[i].partition("=") if args[i].startswith("--") else (args[i], "", "")
@@ -2100,7 +2100,7 @@ def _guard_git(args, cwd, root):
             return "push", f"{GUARD_ALWAYS} (Ziel nicht bestimmbar: {error})"
         if target is None:
             return None if why is None else ("push", why)
-        approved, problem = _push_approved(target, repo_root(directory))
+        approved, problem = _push_approved(target, root(directory))
         if approved:
             return None
         return "push", f"keine Freigabe mit Schlüssel push:{target} in {LEDGER_SHOWN}" + (
@@ -2114,18 +2114,19 @@ def _guard_git(args, cwd, root):
     return (GUARD_COMMANDS[command], GUARD_ALWAYS) if check is None or check(rest, directory, root) else None
 
 
-def _contains(args, words):
-    return any(args[i:i + len(words)] == words for i in range(len(args) - len(words) + 1))
-
-
 def _guard_part(words, cwd, root):
-    """(Kategorie, Grund) oder None für einen Teil ab dem Programmnamen."""
+    """(Kategorie, Grund) oder None für einen Teil ab dem Programmnamen; `root(verzeichnis)` gibt die
+    Repo-Wurzel. Die Befehle hinter `find -exec …` prüft es wie eigene Teile."""
     program, args = words[0].rsplit("/", 1)[-1], words[1:]
     if program == "git":
         return _guard_git(args, cwd, root)
+    if program == "find":
+        hit = next(filter(None, (_guard_part(inner, cwd, root) for inner in _find_commands(args))), None)
+        if hit:
+            return hit
     for command, category in GUARD_COMMANDS.items():
         name, *sub = command.split()
-        if name == program and (not sub or _contains(args, sub)):
+        if name == program and (not sub or any(args[i:i + len(sub)] == sub for i in range(len(args)))):
             check = _GUARD_CHECKS.get(command)
             if check is None or check(args, cwd, root):
                 return category, GUARD_ALWAYS
@@ -2137,51 +2138,55 @@ def _shown_command(text):
     return text if len(text) <= GUARD_SHOWN else text[:GUARD_SHOWN - 1] + "…"
 
 
+def _unparsed(command):
+    names = set(_PROGRAM_RE.findall(command))
+    categories = dict.fromkeys(category for cmd, category in GUARD_COMMANDS.items() if cmd.split()[0] in names)
+    return ", ".join(categories), _shown_command(command), GUARD_UNPARSED
+
+
 def _guard_hit(command, root, cwd=None):
-    """(Kategorie, Teil auf `GUARD_SHOWN` Zeichen gekürzt, Grund) der ersten Rückfrage, oder None.
-    Ohne Programmnamen der Tabelle im Text endet es vor jedem Zerlegen und jedem Git-Aufruf.
-    `cd <dir>` setzt das Verzeichnis für die folgenden Teile, eine Subshell `( … )` stellt es danach
-    wieder her; ein Heredoc-Rumpf ist kein Befehl, an psql/sqlite3/mysql wird er wie ein Argument geprüft."""
+    """(Kategorie, Teil auf `GUARD_SHOWN` Zeichen, Grund) der ersten Rückfrage, oder None. Grund ist „immer
+    Rückfrage“ (mit Ursache in Klammern), „keine Freigabe mit Schlüssel push:<ziel> in …“ oder „Befehl nicht
+    zerlegbar“ (`$(`/Backtick außerhalb einfacher Anführungszeichen, `env -S`, offene Anführungszeichen).
+    Ohne Programmnamen der Tabelle kein Git-Aufruf; `root` None: Wurzel bei Bedarf, einmal je Verzeichnis."""
     if not _PROGRAM_RE.search(command):
         return None
-    text, heredocs = _cut_heredocs(command)
+    text, heredocs = _cut_heredocs(_CAT_HEREDOC_RE.sub(lambda m: shlex.quote(m.group(3).rstrip("\n")), command))
+    if _SUBSTITUTION_RE.search(_QUOTED_RE.sub(lambda m: m.group(1) or "", text)) or any(
+            not quoted and _SUBSTITUTION_RE.search(body) for _, body, quoted in heredocs):
+        return _unparsed(command)
     try:
         parts = _split_parts(text)
     except ValueError:
-        names = set(_PROGRAM_RE.findall(text))
-        if not names:
-            return None
-        categories = dict.fromkeys(category for cmd, category in GUARD_COMMANDS.items()
-                                   if cmd.split()[0] in names)
-        return ", ".join(categories), _shown_command(command), GUARD_UNPARSED
-    cwd, outer = Path(cwd or root), []
-    for words in parts:
-        if words == ["("]:
-            outer.append(cwd)
-            continue
-        if words == [")"]:
-            cwd = outer.pop() if outer else cwd
-            continue
+        return _unparsed(command)
+    cwd = Path(cwd or root)
+    roots = {cwd: Path(root)} if root else {}
+    root_of = lambda directory: roots.get(directory) or roots.setdefault(directory, repo_root(directory))  # noqa: E731
+    for words, before, after, paren in parts:
         program = _program_words(words)
-        if program[:1] == ["cd"]:
-            cwd = _chdir(cwd, next((word for word in program[1:] if not word.startswith("-")), ""))
-            continue
-        hit = program and _guard_part(program, cwd, Path(root))
-        if hit:
-            return hit[0], _shown_command(" ".join(words)), hit[1]
-    for line, body in heredocs:
-        if _SQL_PROGRAM_RE.search(line) and _sql_hit([body], cwd, root):
+        if program is None:
+            return _unparsed(command)
+        if program[:1] in (["pushd"], ["popd"]):
+            cwd = None
+        elif program[:1] == ["cd"]:
+            if not ("|" in before.replace("||", "") or set(after.replace("&&", "").replace("||", "")) & set("|&")):
+                cwd = _chdir(cwd, next((word for word in program[1:] if not word.startswith("-")), ""))
+        else:
+            hit = program and _guard_part(program, cwd, root_of)
+            if hit:
+                return hit[0], _shown_command(" ".join(words)), hit[1]
+        cwd = None if paren else cwd
+    sql = {name for name, check in _GUARD_CHECKS.items() if check is _sql_hit}
+    for line, body, _ in heredocs:
+        if sql & set(_PROGRAM_RE.findall(line)) and _sql_hit([body], cwd, root_of):
             return "data-delete", _shown_command(line), GUARD_ALWAYS
     return None
 
 
 def guard_decision(command, root, cwd=None):
-    """None (nichts erkannt, oder `git push` mit freigegebenem Ziel) oder (Kategorie, Grund) für den
-    Bash-Befehl `command`; bei mehreren Teilen zählt die erste Rückfrage. `root` ist die Repo-Wurzel
-    (Ablage), `cwd` das Arbeitsverzeichnis des Befehls (Default `root`). Grund ist „immer Rückfrage“
-    (manchmal mit Ursache in Klammern), „keine Freigabe mit Schlüssel push:<ziel> in
-    docs/big-decisions.md“ oder „Befehl nicht zerlegbar“. Was erkannt wird, steht in `GUARD_COMMANDS`,
-    den Prüfungen `_GUARD_CHECKS` und `_push_target` (Spec 28, Abschnitt Hook)."""
+    """None (nichts erkannt, oder `git push` mit freigegebenem Ziel) oder (Kategorie, Grund) wie
+    `_guard_hit`; `root` ist die Repo-Wurzel von `cwd` (Default `root`). Was erkannt wird, steht in
+    `GUARD_COMMANDS`, `_GUARD_CHECKS` und `_push_target` (Spec 28, Abschnitt Hook)."""
     hit = _guard_hit(command, root, cwd)
     return None if hit is None else (hit[0], hit[2])
 
@@ -2191,11 +2196,9 @@ def _hook_unchecked(why):
 
 
 def guard(text):
-    """Antwort des Hooks auf das Hook-JSON `text` (`tool_input.command`, `cwd`): "" (nichts erkannt
-    oder freigegeben), eine Zeile `{"hookSpecificOutput": {"hookEventName": "PreToolUse",
-    "permissionDecision": "ask", "permissionDecisionReason": "decide: <kategorie> — <befehl>: <grund>"}}`
-    oder bei einem eigenen Fehler `{"systemMessage": "[decide] Hook ungeprüft — <grund>"}`. Wirft nie;
-    JSON mit ASCII-Escapes, damit keine Kodierung von stdout stört."""
+    """Antwort auf das Hook-JSON `text` (`tool_input.command`, `cwd`): "" (nichts erkannt oder freigegeben),
+    eine Zeile `hookSpecificOutput` mit `permissionDecision` `ask` und dem Grund „decide: <kategorie> —
+    <befehl>: <grund>“, oder bei einem eigenen Fehler `systemMessage`. Wirft nie; JSON mit ASCII-Escapes."""
     try:
         try:
             data = json.loads(text)
@@ -2208,9 +2211,7 @@ def guard(text):
         if not isinstance(command, str):
             return _hook_unchecked("tool_input.command fehlt")
         cwd = data.get("cwd") if isinstance(data.get("cwd"), str) and data.get("cwd") else os.getcwd()
-        if not _PROGRAM_RE.search(command):
-            return ""                               # kein Programm der Tabelle: kein Git-Aufruf
-        hit = _guard_hit(command, repo_root(cwd), cwd)
+        hit = _guard_hit(command, None, cwd)
         if hit is None:
             return ""
         category, part, why = hit
@@ -2229,10 +2230,8 @@ def _guard_main():
     except Exception as error:
         out = _hook_unchecked(f"{type(error).__name__}: {error}")
     if out:
-        try:
+        with suppress(Exception):
             print(out)
-        except Exception:
-            pass
     return 0
 
 
