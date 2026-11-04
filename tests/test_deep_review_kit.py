@@ -9485,3 +9485,54 @@ def test_cp9_f1_path_mode_report_counts_like_the_block_header(tmp_path):
     report = kit.write_report(directory).read_text(encoding="utf-8").splitlines()
     [row] = [ln for ln in report if ln.startswith("| p1 |")]
     assert row.split(" | ")[3] == "0", row
+
+
+def _cp9r2_rows(kit, tmp_path, directory, packets):
+    """Alle Pakete mit leerem Ergebnis annehmen, Bericht schreiben, Zeilen je Paket-ID."""
+    for pid in packets:
+        _rec(kit, directory, pid, "/code-review", _payload(tmp_path, [], f"{pid}.json"))
+    kit.merge(directory)
+    report = kit.write_report(directory).read_text(encoding="utf-8").splitlines()
+    return {ln.split(" | ")[0].strip("| "): ln.split(" | ")[3]
+            for ln in report if ln.startswith("| p")}
+
+
+def test_cp9r2_f2_report_reads_block_header_in_range_mode(tmp_path):
+    """Fund 7842: Der Bericht liest die Zahl aus dem Kopf-Feld des Blocks, auch wenn der
+    Speicher eine andere Zahl hergibt (z. B. nach `--since` mit Delphi-Live-Sammlung)."""
+    kit = _kit()
+    root = _fresh_repo(tmp_path / "repo")
+    _commit_files(root, "basis", {
+        "src/__init__.py": "",
+        "src/b.py": 'def load(x):\n    if x:\n        raise KeyError("i")\n    return x\n'})
+    git(root, "tag", "base")
+    _commit_files(root, "neu", {
+        "src/a.py": "from src.b import load\n\n\ndef run(x):\n    return load(x)\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    directory = kit.run_dir(root, run)
+    [item] = kit.write_counterparts(root, run)
+    block = directory / "packets" / "p1.md"
+    text = block.read_text(encoding="utf-8")
+    old = f"| {kit.BLOCK_COUNT_FIELD}: {item['counterparts']} -->"
+    assert old in text.split("\n", 1)[0]
+    block.write_text(text.replace(old, f"| {kit.BLOCK_COUNT_FIELD}: 3 -->", 1),
+                     encoding="utf-8")
+    assert _cp9r2_rows(kit, tmp_path, directory, ["p1"]) == {"p1": "3"}
+
+
+def test_cp9r2_f2_report_equals_header_for_call_and_definition_in_different_spans(
+        tmp_path, monkeypatch):
+    """Fund 7842, zweiter Teil: Aufruf in Spanne 1, Definition in Spanne 2 derselben Datei —
+    die Spalte Gegenstellen im Bericht gleicht dem Kopf-Feld jedes Pakets."""
+    kit = _kit()
+    root = _bare_repo(tmp_path / "repo", {"src/m.py": SPAN_M})
+    monkeypatch.setattr(kit, "PATH_SPLIT_AT", 5)
+    monkeypatch.setattr(kit, "PATH_PACKET_SIZE", 12)
+    plan = kit.build_path_plan(root, "src", "standard", "bugs", False)
+    run = plan["_meta"]["run"]
+    directory = kit.run_dir(root, run)
+    items = {i["packet"]: i for i in kit.write_counterparts(root, run)}
+    assert len(items) > 1 and any(i["counterparts"] for i in items.values())
+    rows = _cp9r2_rows(kit, tmp_path, directory, list(items))
+    assert rows == {pid: str(i["counterparts"]) for pid, i in items.items()}

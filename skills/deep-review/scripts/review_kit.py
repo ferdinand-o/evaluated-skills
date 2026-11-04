@@ -1152,8 +1152,9 @@ def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile:
     schreiben. `head` sind die ersten Felder des Plans (`mode`, beim Pfad-Modus `paths`,
     `range`, `base`, `target`, `log_base`, `root`; `mode` ist `range` oder `path`, ein Plan
     ohne `mode` gilt als `range`, E8). Speicher und Schlüssel sind auch im Pfad-Modus
-    ungefiltert; den Pfad-Filter (`_leaving_path`) wendet allein `write_counterparts` je Paket
-    an. Scheitert das Schreiben, bleibt kein Laufordner."""
+    ungefiltert; den Pfad-Filter (`_leaving_path`) wendet `write_counterparts` je Paket an
+    und schreibt die Zahl ins Kopf-Feld des Blocks, aus dem der Bericht sie liest
+    (`_counterpart_cell`; nur ohne Block zählt er aus dem Speicher). Scheitert das Schreiben, bleibt kein Laufordner."""
     # Der schon aufgelöste Span geht an die Sammler: kein zweites Auflösen der SHAs. Je Datei
     # abgelegt (`store_collected`), damit `counterparts` nicht noch einmal sammelt.
     collected = None
@@ -6038,8 +6039,8 @@ def write_counterparts(repo, run_id):
     Stelle dieses Filters) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
     Pfad-Modus (`mode: path`): Die Sammler bekommen den Span des Plans (Basis ist ein Baum, `range`
     kein Log-Bereich), und je Paket bleiben nur Einträge, die die Dateien dieses Pakets
-    verlassen (`_leaving_path` über `files` und Spannen des Pakets — die einzige Stelle
-    dieses Filters; der Speicher ist ungefiltert); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
+    verlassen (`_leaving_path` über `files` und Spannen des Pakets — hier wird einmal gefiltert;
+    der Speicher ist ungefiltert, der Bericht liest die Zahl aus dem Kopf-Feld, `_counterpart_cell`); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
     Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
@@ -7822,20 +7823,23 @@ def _block_count(directory: Path, run_id: str, pid: str) -> str | None:
 
 def _counterpart_cell(plan: dict, packet: dict, stored, directory: Path, run_id: str) -> str:
     """Spalte Gegenstellen eines Pakets: bei Fokus quality `NOT_COLLECTED_QUALITY`, ein Paket
-    nur aus Dateien ohne Sammler `NO_COLLECTOR`, sonst die Zahl der Gegenstellen seiner
-    Dateien aus dem Speicher von `plan` (dieselbe Zahl, die `counterparts` nennt; im
-    Pfad-Modus wie dort nur die Einträge, die das Paket verlassen, `_leaving_path`). Fehlt der
-    Speicher oder passt er nicht zum Plan (`stored` None: `plan` konnte ihn nicht schreiben —
-    `build_plan` unterdrückt den Fehler —, oder ein Lauf aus Spec 26), die Zahl aus dem Block
-    `packets/<id>.md`, den `counterparts` dann live gesammelt hat (`_block_count`); fehlt
-    auch der, `REPORT_NO_DATA`."""
+    nur aus Dateien ohne Sammler `NO_COLLECTOR`, sonst die Zahl aus dem Kopf-Feld
+    `| counterparts: <n>` von `packets/<id>.md` (`_block_count`), wenn der Block zu Lauf und
+    Paket gehört — die eine Quelle der Zahl: `write_counterparts` filtert einmal (Pfad-Modus,
+    Spannen, Delphi-Live-Sammlung) und schreibt das Ergebnis dorthin, der Bericht liest es nur.
+    Fehlt der Block (`counterparts` lief noch nicht), zählt die Spalte aus dem Speicher von
+    `plan` mit derselben Filterkette wie `write_counterparts` (`_stored_found` mit Spannen,
+    im Pfad-Modus `_leaving_path`); fehlt auch der Speicher (`stored` None), `REPORT_NO_DATA`."""
     if plan.get("focus") == "quality":
         return NOT_COLLECTED_QUALITY
     files = [str(f) for f in packet["files"]]
     if not any(_has_collector(f) for f in files):
         return NO_COLLECTOR
+    counted = _block_count(directory, run_id, packet["id"])
+    if counted is not None:
+        return counted
     if stored is None:
-        return _block_count(directory, run_id, packet["id"]) or REPORT_NO_DATA
+        return REPORT_NO_DATA
     spans = _packet_spans(packet)
     entries = _stored_found(stored, files, spans).entries
     if plan.get("mode") == "path":
