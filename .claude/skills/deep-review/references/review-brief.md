@@ -1,13 +1,15 @@
 # Review-Auftrag je Paket
 
 Referenz für den Hauptagenten (Ablauf Schritt 4). Hier steht, was du einem Reviewer je Paket
-sagst und in welcher Form das Ergebnis zurückkommt, in drei Fassungen:
+sagst und in welcher Form das Ergebnis zurückkommt, in drei Fassungen, dazu der Auftrag an den
+Prüfer von `verify`:
 
 | Fassung | wann |
 | --- | --- |
 | [Fokus `bugs` mit `/code-review`](#fassung-1-code-review-fokus-bugs) | Normalfall, auch Profil `checkpoint` |
 | [Fokus `quality`](#fassung-2-fokus-quality) | „Wartbarkeit“, „Qualität“, „Code-Hygiene“ |
 | [Review ohne /code-review](#review-ohne-code-review) | `/code-review` ist nicht verfügbar (claude.ai, andere Agenten) |
+| [Prüfer-Auftrag für `verify`](#prüfer-auftrag-für-verify) | ein Fund soll unabhängig geprüft werden (Profil `checkpoint` oder `--verify`) |
 
 Fokus `security` hat ein Paket `s1`. Ob `/security-review` es prüfen kann, hängt am Bereich
 des Plans; die zwei Fälle stehen unter [Fokus `security`](#fokus-security). Es gilt dasselbe
@@ -21,11 +23,16 @@ Beides wird hier nicht wiederholt.
 
 ## Fassung 1: `/code-review`, Fokus `bugs`
 
-Je Paket in Plan-Reihenfolge ein Aufruf:
+Je Paket in Plan-Reihenfolge ein Aufruf, mit der Stufe des Plans (`level`, die Zeile `Reviews:`
+von `plan` nennt sie; Standard `medium`, im Profil `checkpoint` `high`):
 
 ```
-/code-review --max-findings all <von>..<bis>
+/code-review <stufe> --max-findings all <von>..<bis>
 ```
+
+Der Auftrag ist die Datei `packets/<id>.prompt.md`. Den Pfad der Datei nennt `counterparts`;
+er steht im Aufruf, und das Review liest die Datei bis zur letzten Zeile. Ein Unteragent je
+Paket bekommt den Aufruf samt Pfad.
 
 - `<von>..<bis>` ist immer das `range` des Pakets, so wie `counterparts` es je Paket ausgibt
   (`<id>: <bereich> · …`). Den Originalbereich setzt du nicht selbst ein: Er ist es nur bei
@@ -33,10 +40,13 @@ Je Paket in Plan-Reihenfolge ein Aufruf:
   Übernahme (eine Datei in `file_keys` hat `reused_from`) bekommt auch ein einzelnes Paket
   Hilfscommits, und dann ist es deren `<von>..<bis>`. Ein `--since`, das nichts übernommen
   hat, lässt den Plan, wie er war.
-- Den Inhalt von `packets/<id>.prompt.md` (Auftrag, Block, Rückgabeformat und Marke) gibst du
-  **jedem Unteragenten unverändert** mit: nicht gekürzt, nicht umformuliert, nicht nach
-  Verdacht ausgewählt. Auch der Satz zu den nicht aufgelösten Stellen und eine Kappung bleiben
-  stehen.
+- Die Datei `packets/<id>.prompt.md` (Auftrag, Block, Rückgabeformat und Marke) gibst du
+  **jedem Unteragenten unverändert** mit, als Pfad oder als ganzen Text: nicht gekürzt, nicht
+  umformuliert, nicht nach Verdacht ausgewählt. Auch der Satz zu den nicht aufgelösten Stellen
+  und eine Kappung bleiben stehen. Im Pfad-Modus (`mode: path`) steht dort statt eines
+  Diff-Bereichs der Pfad mit dem Ziel; die Dateien stehen als neu.
+- Hat das Paket eine Spanne, nennt die Datei sie (`datei:von-bis`): Nur diese Zeilen sind
+  geändert, der Rest der Datei steht auf dem Stand des Ziels.
 - Bei Delphi-Dateien im Paket steht [delphi.md](delphi.md) schon darin.
 - Im Profil `checkpoint` steht das Soll aus `--soll-file` schon darin, als eigener Abschnitt
   „Soll“ unter dem Auftrag.
@@ -67,7 +77,9 @@ Auftrag an den Reviewer (Platzhalter in `<…>` ersetzt du):
 > `<der Block, von counterparts unten eingesetzt>`
 
 Der Fund an einer Gegenstelle hat als `file` die Datei der Gegenstelle, nicht die des
-Aufrufers. Der Aufrufer steht dann in `summary`.
+Aufrufers. Der Aufrufer steht dann in `summary`. Eine Gegenstelle mit „(Name eindeutig, ohne
+Sammler)“ ist nur nach Namen gefunden; der Reviewer prüft am Aufruf, ob sie gemeint ist
+([counterparts.md](counterparts.md#namens-rückfall)).
 
 ## Fassung 2: Fokus `quality`
 
@@ -222,7 +234,7 @@ Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py recor
 | `line` | eine Zahl, ein Bereich `"a-b"` oder `null`, wenn keine einzelne Zeile gemeint ist |
 | `summary` | Text, Pflicht: was falsch ist, in einem Satz |
 | `failure_scenario` | Text mit dem Ablauf, der scheitert, oder `null` |
-| `evidence` | optional: der Befehl und seine Ausgabe oder zitierte Zeilen mit `Datei:Zeile` |
+| `evidence` | optional: der Befehl und seine Ausgabe oder zitierte Zeilen mit `Datei:Zeile`; ein Fund mit `evidence` gilt als belegt und bekommt von `verify` keinen Prüfauftrag |
 
 ```json
 {"marke": "dr-p1-3f9a2c", "stufe": "<stufe>", "findings": [
@@ -239,8 +251,13 @@ Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py recor
   kein Ergebnis; `audit` meldet das Paket dann unter `missing`.
 - Eine bloße Liste der Funde nimmt `record` nur mit `--no-block` an, also ohne
   Gegenstellen-Block; `audit` nennt das Paket dann unter `no_block`. `--no-block` vermerkt
-  das immer, auch bei einem Objekt mit passender Marke; eine genannte `stufe` wird auch dann
-  geprüft und gespeichert, außer bei den Werkzeugen ohne Stufe.
+  das immer (`no_block: true`), auch bei einem Objekt mit passender Marke; eine genannte `stufe`
+  wird auch dann geprüft und gespeichert, außer bei den Werkzeugen ohne Stufe. Nimm es nur, wenn
+  der Reviewer die Datei nicht bekam; `no_block` macht den Lauf nicht unvollständig, der
+  Bericht nennt das Paket.
+- Die Marke ist eine Auskunft, kein Beleg: Sie zeigt nur, dass der Schreiber des Ergebnisses
+  die Datei bis zur letzten Zeile kennt. Dass der Unteragent den Auftrag sah, belegt nur sein
+  Transkript.
 - Weitere Felder fallen weg.
 
 `record` prüft jeden Fund so, und **ein** ungültiger Fund macht die ganze Liste ungültig; es
@@ -271,15 +288,45 @@ review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> [--no-block] <
   Hauptkontext über den Bereich von `s1` aus `counterparts` in jedem anderen Fall, auch ohne
   `origin/HEAD` und nach `--since` mit Übernahme ([Fokus `security`](#fokus-security)); sonst
   `"Review ohne /code-review"`.
-- Die Namen der beiden Werkzeuge stehen ohne Schrägstrich am Anfang: Git Bash unter Windows
-  schreibt ein Argument wie `/code-review` in einen Windows-Pfad um
-  (`C:/Program Files/Git/code-review`), und die Kopfzeile des Berichts passte dann nie.
-  `record` speichert `code-review` als `/code-review` und `security-review` als
-  `/security-review`; auch ein so umgeschriebener Pfad wird zurückgelegt. „Review ohne
-  /code-review" beginnt nicht mit `/` und bleibt, wie es ist. Der Bericht übernimmt das
-  gespeicherte Werkzeug aus `results/<id>.json` (`_meta.tool`), also `/code-review`.
+- Die Namen der beiden Werkzeuge stehen ohne Schrägstrich am Anfang (Git Bash unter Windows
+  schreibt sonst einen Pfad daraus); `record` setzt ihn wieder ein, auch bei `code-review high`.
+  Einzelheiten und die Namen „Review ohne …“: [packets.md](packets.md#werkzeugname-und-git-bash).
 - `-` liest das Ergebnis von stdin als UTF-8, eine Datei ebenso; ein BOM am Anfang zählt in
   beiden Fällen nicht.
 - Angenommen wird nur, wenn das Paket im Plan steht und noch kein Ergebnis hat. Ein zweites
   Ergebnis wird abgewiesen; ein falsches ebenso, und dann bleibt `results/` unberührt.
   Korrigiere es und rufe `record` erneut auf.
+
+## Prüfer-Auftrag für `verify`
+
+`verify --run <lauf>` schreibt je Fund ohne `evidence` und ohne Urteil `verify/<n>.md`. Je Auftrag
+startest du einen Unteragenten (Modell Sonnet) und gibst ihm die Datei unverändert mit; er
+bekommt weder den Paketblock noch das Ergebnis des Reviewers. Der Auftrag enthält nur:
+
+- Datei, Zeile und das Szenario des Reviewers (`failure_scenario`) sowie den Commit, dessen Stand
+  er liest (`git show <commit>:<datei>`), nicht die `summary`; so schreibt er die Behauptung nicht
+  ab, sondern prüft sie mit einem eigenen Ablauf (Eingabe, Weg, Ergebnis);
+- den Schlüssel des Funds (`key`), den er unverändert zurückgibt;
+- die Grenzen: Schreiben nur unter `verify/<key>/work/` im Laufordner, Python nur mit `-I`,
+  Code aus dem Repo nicht importieren oder starten, sondern lesen. Das verlangt die Datei, ein
+  Mechanismus erzwingt es nicht (G1).
+
+Die Antwort ist ein Objekt `{"key", "urteil", "beleg"}`:
+
+| `urteil` | `beleg` |
+| --- | --- |
+| `bestätigt` | der Ablauf mit `Datei:Zeile` |
+| `widerlegt` | Pflicht: was den Ablauf verhindert, als zitierte Zeilen mit `Datei:Zeile` oder Befehl und Ausgabe |
+| `unklar` | woran es fehlt |
+
+Übergabe an das Skript, danach `merge`, damit das Urteil in `findings.json` steht:
+
+```
+review_kit.py verdict --run <lauf> <datei|->
+review_kit.py merge --run <lauf>
+```
+
+Gab ein Prüfer keinen `key` zurück, nennt `--number <n>` den Auftrag, dessen Schlüssel gilt.
+`verdict` weist `widerlegt` ohne Beleg ab und weiß nichts davon, was ein Prüfer wirklich geprüft
+hat; das Urteil ist eine Auskunft eines zweiten Lesers. Was `verify` und `verdict` sonst tun,
+steht in [packets.md](packets.md#prüfen-verify-und-verdict).

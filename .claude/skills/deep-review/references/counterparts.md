@@ -2,15 +2,20 @@
 
 Referenz für den Hauptagenten. Was `review_kit.py counterparts --run <lauf>` je Paket sammelt,
 wie `packets/<id>.md` aussieht und wie der Reviewer den Block liest. Den Block gibst du jedem
-Unteragenten von `/code-review` unverändert mit (`review-brief.md`). Grenzwerte stehen in
-`packets.md`.
+Unteragenten von `/code-review` unverändert mit, als Teil von `packets/<id>.prompt.md`
+(`review-brief.md`). Grenzwerte stehen in `packets.md`. `plan` sammelt die Gegenstellen einmal
+und legt sie je Datei im Laufordner ab (`counterparts.json`); `counterparts` schreibt aus
+dieser Ablage die Blöcke. Im [Pfad-Modus](packets.md#pfad-modus) filtert es zusätzlich
+je Paket.
 
 ## Woher die Daten kommen
 
 - Geänderte Zeilen aus `git diff -U0` über den Bereich des Plans (Merge-Basis..ZIEL), nur für
   die Dateien des Pakets. Eine reine Löschung ändert keine Zeile am ZIEL.
 - Der Code kommt aus Git am ZIEL, nie aus dem Arbeitsbaum. Python wird nur per `ast`
-  gelesen, Delphi per Text-Scanner. Zielcode wird nie importiert oder gestartet.
+  gelesen, Delphi und TypeScript/JavaScript per Text-Scanner (Strings, Template-Literale und
+  Kommentare ausgeblendet), alle übrigen Sprachen per Namenssuche. Zielcode wird nie
+  importiert oder gestartet.
 - Gesucht wird im ganzen Repo am ZIEL, auch in vendortem Code und in Dateien, die nicht im
   Diff stehen. `.skills/` zählt nicht.
 - Mechanisch: Jede Stelle, die die Sammelregel trifft, steht im Block. Es gibt keine Auswahl
@@ -26,6 +31,9 @@ Unteragenten von `/code-review` unverändert mit (`review-brief.md`). Grenzwerte
 | Delphi | `.pas`, `.dpr`, `.dpk` | Aufruf auf einer geänderten Zeile | die Implementierung etwas wirft oder ihr Kopf einen Default-Wert hat |
 | Delphi | | `Extract`, `ExtractPair`, `ExtractItem`, `Remove`, `Delete`, `Clear`, `Dequeue`, `Pop`, `Free`, `FreeAndNil`, `SetContentStream` auf einer geänderten Zeile (`Delete`, `Clear`, `Dequeue` und `Pop` geben bei OwnsObjects frei, `ExtractItem` gibt ab; an TDictionary/TObjectDictionary gibt es nur `ExtractPair`; eigene Methoden `ExtractKey`/`ExtractValue` bekommen keinen Besitz-Hinweis) | der Typ des Empfängers auflösbar ist (Klasse im Repo oder Besitz-Default der RTL) |
 | Delphi | | geändertes `inherited Create(…)` im Konstruktor einer Klasse mit Besitz-Default der RTL | immer |
+| TypeScript, JavaScript | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | Aufruf auf einer geänderten Zeile | die Gegenstelle etwas wirft (`throw`) oder `async` ist und der Aufruf kein `await` hat |
+| TypeScript, JavaScript | | geänderte `catch`-Klausel | ein Aufruf im `try`-Block eine Gegenstelle erreicht, die etwas wirft |
+| Java, C#, Go, Rust, C, C++, Kotlin, Swift | `.java`, `.cs`, `.go`, `.rs`, `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hpp`, `.hh`, `.hxx`, `.kt`, `.kts`, `.swift` | Aufruf auf einer geänderten Zeile | der Name im Repo genau einmal definiert ist und dessen Rumpf `throw` oder `panic` enthält ([Namens-Rückfall](#namens-rückfall)) |
 | andere | alle übrigen Endungen | keine | nie: „Gegenstellen nicht gesammelt (Sprache)“ |
 
 Endungen ohne Rücksicht auf Groß/Klein. Fokus `quality` sammelt keine Gegenstellen. Der Block
@@ -54,6 +62,51 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
   zeigt höchstens zwölf Zeilen. Endet er an einer mehrdeutigen Gegenstelle, wird die
   Weitergabe gezählt.
 
+### TypeScript und JavaScript
+
+- **Auflösung:** Ein Name zählt, wenn ihn `import f from './x'`, `import { f } from '../y'`,
+  `import * as m from './z'` oder `const { f } = require('./z')` / `const m = require('./z')`
+  (dann `m.f(…)`) an eine **relative** Datei bindet. Die Endung ergibt sich in der Folge `.ts`,
+  `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, danach `x/index.*`. Nicht aufgelöst werden Pakete
+  (`node_modules`), Pfad-Aliase aus `tsconfig.json` (`@/x`) und relative Importe ohne Datei am
+  Ziel; sie stehen nicht im Block, zählen aber als „nicht aufgelöst“. Eine geänderte Datei unter
+  `node_modules` steht mit dem Grund „unter node_modules, Gegenstellen nicht gesammelt“ in der
+  Dateiliste.
+- **Definition:** `function f`, `export function f`, `const f = (…) =>`, `export const f = async …`,
+  `exports.f = …`, mit der Signaturzeile. Klassenmethoden und Re-Exports (`export … from`)
+  werden nicht aufgelöst.
+- **Wann ein Eintrag entsteht:** wenn die Gegenstelle `throw` enthält oder wenn sie `async` ist
+  und der Aufruf ohne `await` steht (nicht als `return f(…)`, nicht vor `.then(`, `.catch(`,
+  `.finally(`). `wirft:` und die `throw`-Zeilen kommen aus dem Rumpf, transitiv in derselben
+  Datei bis `RAISE_DEPTH` (2). Der async-Fall trägt die Zeile `async: Aufruf ohne await, …`.
+- **`catch`:** Je geänderter `catch`-Klausel (vom Wort `catch` bis zur schließenden Klammer; die
+  Verengung steht in TypeScript im Rumpf, etwa `if (e instanceof …)`) ein Eintrag mit den
+  werfenden Gegenstellen der Aufrufe im `try`-Block, wie bei Python. Die Überschrift ist
+  `### <datei>:<zeile> catch (e)`.
+- **Nicht gesammelt:** Typinferenz und ein geändertes Argument mit seinem Weg (`Weg:` gibt es
+  nur bei Python).
+
+### Namens-Rückfall
+
+Für Java, C#, Go, Rust, C, C++, Kotlin und Swift gibt es keinen eigenen Sammler, nur diese
+Namenssuche:
+
+- **Auflösung:** Der Name eines Aufrufs auf einer geänderten Zeile wird im ganzen Repo am Ziel
+  gesucht, auch über Dateien und Sprachen hinweg (`func Name(` für Go, `fn name(` für Rust,
+  `fun`/`func` für Kotlin und Swift, Rückgabetyp plus `Name(…) {` für Java, C#, C und C++). Gibt
+  es genau eine Definition, steht sie im Block mit Signaturzeile und der Kennzeichnung
+  **„(Name eindeutig, ohne Sammler)“**. Zwei oder mehr gleichnamige Definitionen: nicht aufgelöst,
+  gezählt. Mehrfache Namen werden nicht geraten, auch nicht mit Importen: Importe, Überladungen
+  und Besitz kennt dieser Rückfall nicht.
+- **Eintrag:** nur, wenn der Rumpf der Definition eine direkte `throw`- oder `panic`-Zeile hat;
+  sie steht unter `wirft:` und als `throw … at <datei>:<zeile>` bzw. `panic … at …`. Würfe in
+  Funktionen, die der Rumpf aufruft, folgt der Rückfall nicht. Eine Deklaration ohne Rumpf
+  (Protokoll, Interface, `abstract`) hat keine Zeile.
+- **C und C++:** auch `int Parser::parse(…) {`, Zeiger- und Referenz-Rückgaben und
+  `const`/`noexcept`/`override`/`-> T` vor `{`. Der Name ist der letzte Teil nach `::`: Der
+  Aufruf `parse(x)` trifft `Parser::parse`. Der Typ einer `throw`-Zeile endet vor einem `::`
+  (`throw std::out_of_range(…)` erscheint als `throw std`), die Zeile selbst ist lesbar.
+
 ### Delphi
 
 - **Aufrufe:** `Name(`, `Obj.Name(`, `Name<T>(` und im Rumpf einer Routine auch ohne Klammer
@@ -78,8 +131,9 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
 
 | nicht gesammelt | Folge im Block |
 | --- | --- |
-| Sprachen ohne Sammler (TypeScript, Java, SQL, …) | Dateizeile `` - `<datei>` — Gegenstellen nicht gesammelt (Sprache) `` |
-| Aufrufe ohne Importbezug mit mehr als 3 gleichnamigen Definitionen | fehlen, gezählt als „nicht aufgelöst“ |
+| Sprachen ohne Sammler und ohne Namens-Rückfall (SQL, Shell, …) | Dateizeile `` - `<datei>` — Gegenstellen nicht gesammelt (Sprache) `` |
+| Aufrufe ohne Importbezug mit mehr als 3 gleichnamigen Definitionen (Python, Delphi); mehrfach definierte Namen im Namens-Rückfall | fehlen, gezählt als „nicht aufgelöst“ |
+| TypeScript/JavaScript: Pakete, `node_modules`, Pfad-Aliase, Klassenmethoden, Re-Exports, Typinferenz | fehlen; nicht aufgelöste Importe sind gezählt |
 | Aufrufe, deren Definition nichts wirft (Delphi: auch ohne Default) und ohne geändertes Argument | fehlen, nicht gezählt |
 | `raise` in anderen Modulen bzw. Units als der Definition | fehlen in `wirft:` |
 | Typinferenz: Ausdrücke, Funktionsergebnisse, Delphi-`with` und Indexer | Python löst `obj.name(...)` mit unbekanntem Empfänger nur bei eindeutigem, nicht eingebautem Methodennamen auf (markiert), sonst zählt die Stelle; Delphi zeigt keine Gegenstelle |
@@ -88,13 +142,13 @@ sagt dann „Gegenstellen nicht gesammelt (Fokus quality).“
 
 Gründe für nicht lesbare Dateien: `Syntaxfehler`, `Symlink`, `Pfad nicht UTF-8`,
 `Submodul (gitlink), keine Datei`, `Blöcke gehen nicht auf (Delphi-Scanner)`,
-`nicht als Datei im Baum des ZIELS`. Nicht lesbare Dateien derselben Sprache außerhalb des
+`unter node_modules, Gegenstellen nicht gesammelt`, `nicht als Datei im Baum des ZIELS`. Nicht lesbare Dateien derselben Sprache außerhalb des
 Pakets stehen als eine Zahl am Ende des Blocks, denn dort wurde nicht gesucht.
 
 ## Zeilenformat des Paketblocks
 
 ```
-<!-- skill: deep-review | schema: 1 | generated: … counterparts --run <lauf> | packet: <id> -->
+<!-- skill: deep-review | schema: 1 | generated: … counterparts --run <lauf> | packet: <id> | counterparts: <n> -->
 # Paket <id>
 
 Bereich: `<von>..<bis>`
@@ -119,13 +173,19 @@ Dateien (<n>):
 
 | Überschrift | Art |
 | --- | --- |
-| `### <datei>:<zeile> ruft <name>(...)` | Aufruf (Python, Delphi) |
+| `### <datei>:<zeile> ruft <name>(...)` | Aufruf (Python, Delphi, TypeScript/JavaScript, Namens-Rückfall) |
 | `### <datei>:<zeile> except <Typen>` | geänderte `except`-Klausel (Python; ohne Typ `alles`) |
+| `### <datei>:<zeile> catch (e)` | geänderte `catch`-Klausel (TypeScript/JavaScript) |
 | `### <datei>:<zeile> <Op> auf <Empfänger>: <Typ>` | Freigabe oder Entnahme (Delphi) |
 | `### <datei>:<zeile> inherited Create auf Self: <Klasse>` | Konstruktor einer besitzenden Klasse (Delphi) |
 
+- `| counterparts: <n>` in der Kopfzeile ist die Zahl der Gegenstellen des Pakets, maschinenlesbar
+  (Bericht und `packets.md`); bei Fokus `quality` fehlt das Feld.
 - Hat eine Zeile mehrere Einträge für denselben Namen, trägt die Überschrift die Spalte:
   `### <datei>:<zeile>:<spalte> …`.
+- Zeilen unter einer Gegenstelle bei TypeScript/JavaScript und Namens-Rückfall: `wirft: <Typ>`
+  mit `throw <Typ> at <datei>:<zeile>` bzw. `panic … at …`, bei einem Aufruf ohne `await` die
+  Zeile `async: Aufruf ohne await, das Ergebnis und ein Fehler werden nicht abgewartet`.
 - Delphi-Zeilen unter einer Gegenstelle: `deklariert: <datei>:<zeile>`,
   `inherited Create(…) at <datei>:<zeile>`, `Besitz (RTL): …`.
 - Einträge stehen nach Datei, Zeile und Art sortiert.
@@ -163,6 +223,49 @@ Der Diff verengt in `sensors/ingest.py` ein `except (ValueError, OverflowError)`
   bevor du daraus einen Fund machst.
 - Ein Name in Kleinbuchstaben in `wirft:` (`raise err`) ist eine Variable. Ihren Typ zeigt
   erst die Zeile selbst.
+
+### `catch` und `async` in TypeScript
+
+Der Diff in `web/checkout.ts` fängt in einem `try` um `reserve(user, units)` nur noch
+`TypeError` ab und ruft `recordUsage(user, got)` ohne `await`:
+
+```
+### web/checkout.ts:6 ruft recordUsage(...)
+- Gegenstelle recordUsage [shared/quota.ts:10]: async function recordUsage(user: string, units: number)
+  async: Aufruf ohne await, das Ergebnis und ein Fehler werden nicht abgewartet
+
+### web/checkout.ts:8 catch (e)
+- Gegenstelle reserve [shared/quota.ts:3]: function reserve(user: string, units: number)
+  wirft: QuotaExceeded
+    throw QuotaExceeded at shared/quota.ts:5
+```
+
+- Wie bei `except`: `wirft:` gegen das, was die `catch`-Klausel behält. `QuotaExceeded` erfüllt
+  `e instanceof TypeError` nicht und läuft per `throw e` nach oben. Öffne `shared/quota.ts:5`,
+  und prüfe, ob der Aufrufer weiter oben den Fehler fängt.
+- Ein `async:`-Eintrag sagt nur, dass der Aufruf nicht abgewartet wird. Ob das Ergebnis oder
+  ein Fehler dort gebraucht wird, zeigt erst der Rumpf; ein Fehler von `recordUsage` wird zu
+  einem unbehandelten Promise-Fehler und erreicht das `catch` nicht.
+- `node_modules`, Pfad-Aliase und Klassenmethoden fehlen im Block. Ein Aufruf dorthin steht
+  unter „nicht aufgelöst“ und gehört in das normale Review.
+
+### Namens-Rückfall: eindeutiger Name
+
+Der Diff in `native/ring.cpp` ruft `Ring::pop(n - 1)` aus `drain`:
+
+```
+### native/ring.cpp:8 ruft pop(...)
+- Gegenstelle pop [native/ring.cpp:2]: int Ring::pop(int n) (Name eindeutig, ohne Sammler)
+  wirft: std
+    throw std at native/ring.cpp:4
+```
+
+- Die Kennzeichnung sagt: Der Name `pop` gibt es im Repo einmal, mehr weiß der Block nicht. Ob
+  der Aufruf wirklich diese Definition trifft (Klasse, Überladung, Import), prüfst du am
+  Aufruf selbst. Gäbe es `pop` zweimal, fehlte der Eintrag und die Stelle zählte als „nicht
+  aufgelöst“.
+- `wirft:` zeigt nur die direkten `throw`-/`panic`-Zeilen des Rumpfs; öffne die Zeile
+  `throw … at …` für den vollen Ausdruck. Was `pop` über Aufrufe tiefer wirft, steht nicht da.
 
 ### `Weg:` bis zur Bedingung
 
