@@ -58,8 +58,8 @@ Auftrag an den Reviewer (Platzhalter in `<…>` ersetzt du):
 >    keine Verträge gibt.
 > 4. Melde nur, was du mit einem konkreten Ablauf belegen kannst: Eingabe, Weg, falsches
 >    Ergebnis. Keine Vermutung ohne Ablauf.
-> 5. Antworte nur mit der JSON-Liste aus dem [Rückgabeformat](#rückgabeformat), bei keinem
->    Fund mit `[]`.
+> 5. Antworte nur mit dem JSON-Objekt aus dem [Rückgabeformat](#rückgabeformat) (`marke`,
+>    `stufe`, `findings`), bei keinem Fund mit `"findings": []`.
 >
 > Paketblock:
 >
@@ -89,8 +89,8 @@ hier nicht der Weg, weil es Änderungen schreibt, und deep-review behebt nichts.
 >
 > Geschmack, Stil ohne Regel und „könnte schöner sein“ ohne eine dieser Grundlagen melde nicht.
 > `failure_scenario` nennt, was bei der nächsten Änderung an der Stelle schiefgeht, oder `null`.
-> Antworte nur mit der JSON-Liste aus dem [Rückgabeformat](#rückgabeformat), bei keinem Fund mit
-> `[]`.
+> Antworte nur mit dem JSON-Objekt aus dem [Rückgabeformat](#rückgabeformat) (`marke`, `stufe`,
+> `findings`), bei keinem Fund mit `"findings": []`.
 >
 > Paketblock:
 >
@@ -128,6 +128,32 @@ Der Bereich von `counterparts` sind die Hilfscommits.
 Im zweiten Fall nennt der Bericht das Werkzeug wörtlich „Review ohne /security-review“ in der
 Kopfzeile und in der Übergabe, wie beim Review ohne /code-review.
 
+### Auftrag an den Reviewer
+
+Was oben steht, entscheidest du als Hauptagent. Der Reviewer bekommt in beiden Fällen nur
+diesen Auftrag; `counterparts` schreibt ihn in `packets/s1.prompt.md`.
+
+> Prüfe die Änderung `<von>..<bis>` (Paket `<id>`) ausschließlich auf Sicherheit. Unten steht
+> der Paketblock mit den Gegenstellen der geänderten Aufrufe als Kontext.
+>
+> 1. **Eingaben von außen.** Wo kommen Daten aus Anfrage, Datei, Umgebung, Kommandozeile oder
+>    Netz in die geänderten Zeilen, und werden sie geprüft, bevor sie wirken?
+> 2. **Rechte.** Prüft die geänderte Stelle, wer sie aufrufen oder was er lesen und schreiben
+>    darf, und lässt sich die Prüfung umgehen (fehlt, kommt zu spät, Pfad außerhalb des
+>    erlaubten Bereichs)?
+> 3. **Geheimnisse.** Landen Schlüssel, Passwörter oder Tokens im Code, in Logs, in
+>    Fehlermeldungen oder in Ausgaben?
+> 4. **Injection.** Gelangt eine Eingabe von außen ungeprüft in SQL, Shell, Pfade, Templates,
+>    `eval` oder eine Deserialisierung?
+> 5. Melde nur, was du mit einem konkreten Ablauf belegen kannst: Eingabe, Weg, Schaden.
+>    Fehler im Verhalten ohne Folge für die Sicherheit und Wartbarkeit melde nicht.
+> 6. **Rückgabe.** Antworte nur mit dem JSON-Objekt aus dem [Rückgabeformat](#rückgabeformat)
+>    (`marke`, `stufe`, `findings`), bei keinem Fund mit `"findings": []`.
+>
+> Paketblock:
+>
+> `<Inhalt von packets/<id>.md, unverändert>`
+
 ## Review ohne /code-review
 
 Ohne `/code-review` läuft dieselbe Paketfolge im Hauptkontext. Die Pakete, die Gegenstellen
@@ -137,7 +163,7 @@ Leser weiß, dass hier kein eigener Unteragent und kein zweiter Blick gelesen ha
 
 Je Paket, in Plan-Reihenfolge, eines nach dem anderen:
 
-1. Lies `packets/<id>.md` ganz.
+1. Lies `packets/<id>.prompt.md` ganz (Auftrag, Block und Marke).
 2. Lies die Änderung mit `git diff <von>..<bis>` (nur die Paketdateien). `<von>..<bis>` ist
    immer der Bereich, den `counterparts` für das Paket ausgegeben hat, auch bei `split: false`:
    Beim Wurzel-Commit und nach `--since` mit Übernahme sind es Hilfscommits, nicht der
@@ -151,12 +177,12 @@ Je Paket, in Plan-Reihenfolge, eines nach dem anderen:
    Fassung 1, Punkt 1. Öffne die genannte Stelle, bevor du einen Fund schreibst.
 5. Gehe danach die geänderten Zeilen durch: Logik, Randwerte, Fehlerpfade, Aufrufer außerhalb
    des Pakets. Bei Delphi-Dateien nimmst du [delphi.md](delphi.md) als Prüfliste.
-6. Schreibe die Liste im [Rückgabeformat](#rückgabeformat), rufe `record` auf und beginne
+6. Schreibe das Objekt im [Rückgabeformat](#rückgabeformat), rufe `record` auf und beginne
    erst dann das nächste Paket.
 
 Regeln:
 
-- Kein Paket überspringen und keine zwei Pakete in einer Liste mischen; `record` nimmt je
+- Kein Paket überspringen und keine zwei Pakete in einem Ergebnis mischen; `record` nimmt je
   Paket genau ein Ergebnis an.
 - Ein Fund braucht einen Ablauf (Eingabe, Weg, falsches Ergebnis) in `failure_scenario`. Kannst
   du keinen angeben, ist es kein Fund, sondern eine Frage für den Nutzer, und gehört in die
@@ -172,8 +198,17 @@ Regeln:
 
 ## Rückgabeformat
 
-Die Antwort ist eine JSON-Liste. Je Fund ein Objekt mit genau diesen Feldern, dieselben, die
-`review_kit.py record` annimmt:
+Die Antwort ist ein JSON-Objekt `{"marke", "stufe", "findings"}`:
+
+- `marke`: die Marke aus der letzten Zeile von `packets/<id>.prompt.md` (`Paket-Marke: …`),
+  genau so.
+- `stufe`: die Stufe, mit der `/code-review` wirklich lief (`low`, `medium`, `high`, `xhigh`
+  oder `max`). Die Stufe in `packets/<id>.prompt.md` ist die Vorgabe für den Aufruf
+  `/code-review <stufe>`, kein Wert zum Abschreiben: Lief es niedriger, steht hier die
+  niedrigere, und `audit` nennt das Paket unter `below_level`.
+- `findings`: die Liste der Funde, bei keinem Fund `[]`.
+
+Je Fund ein Objekt mit genau diesen Feldern, dieselben, die `review_kit.py record` annimmt:
 
 | Feld | Inhalt |
 | --- | --- |
@@ -181,21 +216,23 @@ Die Antwort ist eine JSON-Liste. Je Fund ein Objekt mit genau diesen Feldern, di
 | `line` | eine Zahl, ein Bereich `"a-b"` oder `null`, wenn keine einzelne Zeile gemeint ist |
 | `summary` | Text, Pflicht: was falsch ist, in einem Satz |
 | `failure_scenario` | Text mit dem Ablauf, der scheitert, oder `null` |
+| `evidence` | optional: der Befehl und seine Ausgabe oder zitierte Zeilen mit `Datei:Zeile` |
 
 ```json
-[
+{"marke": "dr-p1-3f9a2c", "stufe": "<stufe>", "findings": [
   {"file": "billing/invoice.py", "line": 57,
    "summary": "total wird jetzt mit mode=\"floor\" gerundet; round_cents schneidet dann ab statt zu runden",
    "failure_scenario": "Eine Position von 19,999 ergibt 19,99 statt 20,00, die Summe der Positionen weicht vom Rechnungsbetrag ab."},
   {"file": "billing/rounding.py", "line": "28-31",
    "summary": "Der Zweig für mode == \"floor\" liefert int statt Decimal (Gegenstelle zu invoice.py:57)",
    "failure_scenario": null}
-]
+]}
 ```
 
-- Ein Paket ohne Funde liefert `[]`. Weglassen des Ergebnisses ist kein Ergebnis; `audit`
-  meldet das Paket dann unter `missing`.
-- Ein Objekt mit der Liste unter `findings` geht auch, die reine Liste ist der Normalfall.
+- Ein Paket ohne Funde liefert das Objekt mit `"findings": []`. Weglassen des Ergebnisses ist
+  kein Ergebnis; `audit` meldet das Paket dann unter `missing`.
+- Eine bloße Liste der Funde nimmt `record` nur mit `--no-block` an, also ohne
+  Gegenstellen-Block; `audit` nennt das Paket dann unter `no_block`.
 - Weitere Felder fallen weg.
 
 `record` prüft jeden Fund so, und **ein** ungültiger Fund macht die ganze Liste ungültig; es
@@ -203,7 +240,7 @@ wird nichts geschrieben:
 
 | Prüfung | angenommen | abgewiesen |
 | --- | --- | --- |
-| Antwort | JSON-Liste, oder Objekt mit Liste unter `findings`; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, stdin kein UTF-8, Datei kein UTF-8 |
+| Antwort | Objekt mit der Marke des Pakets unter `marke`, einer Stufe unter `stufe` und der Liste unter `findings`; mit `--no-block` auch eine bloße Liste oder ein Objekt ohne passende Marke; über stdin und aus einer Datei UTF-8, mit oder ohne BOM am Anfang | kein JSON, anderes JSON, ohne `--no-block` eine bloße Liste, keine oder eine fremde Marke, keine oder eine unbekannte Stufe; stdin kein UTF-8, Datei kein UTF-8 |
 | Fund | ein Objekt | alles andere, etwa ein Text oder eine Liste |
 | `file` | nicht leerer Text; `\` wird `/`, `./` fällt weg, ein absoluter Pfad im Repo wird relativ | fehlt, leer oder kein Text; ein Glied `..`; ein absoluter Pfad außerhalb des Repos |
 | `line` | ganze Zahl ≥ 0; Text `12`, `L12`, `12-14`, `12 - 14`, `12–14`, `L12-L14`, `12 bis 14` (vertauschte Enden werden sortiert, `12-12` wird 12); `null`, fehlt oder leerer Text wird `null` | negative Zahl, Kommazahl, `true`/`false`, Objekt, Liste; Text ohne diese Form, etwa `"near 40"`, `"ca. 12"` oder `"12, 15"` |
@@ -216,7 +253,7 @@ Ablauf in `failure_scenario` ist ein Satz als Text, kein Objekt mit Feldern.
 Übergabe an das Skript, ohne Skriptpfad hier (der steht in der SKILL.md):
 
 ```
-review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->
+review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> [--no-block] <datei|->
 ```
 
 - `<werkzeug>` ist das, was lief: `code-review`; `security-review` nur, wenn ZIEL HEAD
@@ -233,8 +270,8 @@ review_kit.py record --run <lauf> --packet <id> --tool <werkzeug> <datei|->
   `/security-review`; auch ein so umgeschriebener Pfad wird zurückgelegt. „Review ohne
   /code-review" beginnt nicht mit `/` und bleibt, wie es ist. Der Bericht übernimmt das
   gespeicherte Werkzeug aus `results/<id>.json` (`_meta.tool`), also `/code-review`.
-- `-` liest die Liste von stdin als UTF-8, eine Datei ebenso; ein BOM am Anfang zählt in
+- `-` liest das Ergebnis von stdin als UTF-8, eine Datei ebenso; ein BOM am Anfang zählt in
   beiden Fällen nicht.
 - Angenommen wird nur, wenn das Paket im Plan steht und noch kein Ergebnis hat. Ein zweites
-  Ergebnis wird abgewiesen; eine falsche Liste ebenso, und dann bleibt `results/` unberührt.
-  Korrigiere die Liste und rufe `record` erneut auf.
+  Ergebnis wird abgewiesen; ein falsches ebenso, und dann bleibt `results/` unberührt.
+  Korrigiere es und rufe `record` erneut auf.
