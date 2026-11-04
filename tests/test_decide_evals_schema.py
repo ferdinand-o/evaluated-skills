@@ -49,7 +49,7 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 PLACEHOLDER_RE = re.compile(r"<[^<>\s]+>")
 SPAN_RE = re.compile(r"`([^`]+)`")
 # Eine Inline-Code-Spanne, die so beginnt, ist ein Aufruf (in der SKILL.md nur im Codezaun erlaubt).
-INLINE_CALL_RE = re.compile(r"decide_log\.py\s+\S|(add|resolve|brief|check)\b.*\s--", re.DOTALL)
+INLINE_CALL_RE = re.compile(r"decide_log\.py\s+\S|(add|resolve|check)\b.*\s--", re.DOTALL)
 UPGRADED_TOPIC = "<regelthema>"     # Platzhalter für das Thema einer Regel `immer fragen`
 
 

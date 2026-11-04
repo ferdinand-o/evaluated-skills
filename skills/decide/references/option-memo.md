@@ -8,7 +8,7 @@ Beide sagen dasselbe; den Block legt `decide_log.py add --class gross` an.
 ## Form der Vorlage
 
 1. **Auftrag zuerst.** Ein Satz: Was ist die laufende Aufgabe, und was hängt an der Antwort?
-   (Der Anlass aus `brief`, derselbe Gedanke: ohne ihn weiß der Nutzer nicht, wofür er
+   (Der Anlass aus der Vorlage `references/brief.md`, derselbe Gedanke: ohne ihn weiß der Nutzer nicht, wofür er
    entscheidet.)
 2. **Frage.** Ein Satz, neutral, ohne Empfehlung darin.
 3. **Zwei bis vier Optionen**, je mit Buchstabe, Inhalt, Folgen und Umkehrbarkeit. Weniger als
