@@ -240,9 +240,10 @@ Skript das Thema in der Schreibweise der Regel in Protokoll und Ablage.
 `check --range <rev>` liest `git diff <rev>` (Commits seit `<rev>` und Arbeitsbaum) und die
 unversionierten Dateien aus `git ls-files --others --exclude-standard`, die Ablage aus der
 Arbeitskopie. `<rev>` ist genau eine Revision, die `git rev-parse --verify <rev>^{commit}`
-auflöst. Alles andere — `<a>..<b>`, `<a>...<b>`, `^!`, `^@`, `^-`, eine Revision, die nicht
-auflöst — endet mit Exit 2 und „ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den
-Bereich selbst prüfen“; ein Repo ohne Arbeitsbaum (Bare-Repo) mit Exit 2 und „ungeprüft — kein
+auflöst. Bereichs-Syntax — `<a>..<b>`, `<a>...<b>`, `^!`, `^@`, `^-`, ein führendes `^` —
+endet mit Exit 2 und „ungeprüft — check nimmt eine Revision, nicht „<angabe>“; den Bereich selbst
+prüfen“; eine einzelne Revision, die nicht auflöst, mit Exit 2 und „ungeprüft — Revision
+„<angabe>“ nicht gefunden (<erste Zeile der Meldung von git>)“ (Prüfpunkt 2026-11-04); ein Repo ohne Arbeitsbaum (Bare-Repo) mit Exit 2 und „ungeprüft — kein
 Arbeitsbaum“. Zyklus 2 streicht die Bereiche: Die Übergabe braucht nur „seit dem Commit vor der
 Aufgabe“, ein PR-Diff ist der seltene Fall und geht an den Nutzer. Eine Datei im Diff, die das
 Skript nicht lesen kann (Kodierung, Rechte), meldet es als Stelle „unlesbar — selbst prüfen“
