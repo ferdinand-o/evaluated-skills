@@ -302,7 +302,10 @@ zusammengesetzte Wörter entsteht, sieht `guard` nicht (known-limits).
    im Code), endet `guard` ohne Ausgabe und ohne Subprozess.
 2. **Commit-Vorlage ausblenden.** Der Rumpf der Commit-Vorlage von Claude Code
    (`"$(cat <<'WORT'` … `WORT` … `)"`, auch `<< 'WORT'`, `<<-'WORT'`, `"WORT"`) ist Text, kein
-   Befehl; er wird vor den folgenden Schritten durch ein leeres Wort ersetzt.
+   Befehl, wenn direkt davor `-m`, `--message`, `-F`, `--body`, `--title` oder `--notes` steht;
+   er wird vor den folgenden Schritten durch ein leeres Wort ersetzt. Ein `\` am Zeilenende
+   verbindet zwei Zeilen zu einer; `;`, `&` und `|` innerhalb von Anführungszeichen trennen
+   keine Befehle.
 3. **Muster.** Jedes Muster der Tabelle läuft über den ganzen übrigen Text. Trifft eines außer
    `git push`, ist die Antwort `ask` mit „immer Rückfrage“ — auch wenn der Treffer in einer
    Zeichenkette steht (unnötige Rückfrage statt übersehenem Befehl).
@@ -318,7 +321,7 @@ zusammengesetzte Wörter entsteht, sieht `guard` nicht (known-limits).
 | --- | --- |
 | `push` | `git` (auch mit globalen Optionen davor) `push`; `gh pr merge`; `gh release create` |
 | `external` | `gh pr create`, `gh pr comment`, `gh pr close`, `gh pr review`, `gh pr edit`, `gh issue create`, `gh issue close`, `gh issue comment`, `gh repo delete`, `gh release delete`; `gh api` mit `-X`/`--method` außer `GET` oder mit `-f`, `-F`, `--field`, `--raw-field`, `--input`; `npm`, `yarn`, `pnpm`, `cargo`, `uv`, `poetry` mit `publish`; `twine upload`; `docker push`; `terraform apply`, `terraform destroy`; `kubectl … apply`, `kubectl … delete`; `curl` mit `-X`/`--request` außer `GET`/`HEAD` oder mit `-d`, `--data*`, `-F`, `--form*`, `--json`, `-T`, `--upload-file` (auch gebündelt, `-sSd`); `wget` mit `--post-data`, `--post-file`, `--method` |
-| `data-delete` | `rm` mit `-r`, `-R`, `--recursive` (auch gebündelt), außer die Ausnahmeliste trifft; `find` mit `-delete` oder mit `-exec`/`-execdir`/`-ok`/`-okdir` und `rm`; `git clean` mit `-f`/`--force` (auch gebündelt); `git branch -D` oder `--delete --force`; `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, wenn im Text auch `psql`, `sqlite3` oder `mysql` steht |
+| `data-delete` | `rm` mit `-r`, `-R`, `--recursive` (auch gebündelt), außer die Ausnahmeliste trifft; `find` mit `-delete` oder mit `-exec`/`-execdir`/`-ok`/`-okdir` und `rm`; `git clean` mit `-f`/`--force` (auch gebündelt); `git branch -D` oder `--delete --force`; `DROP TABLE`, `DROP DATABASE`, `DROP SCHEMA`, `DROP COLUMN`, `TRUNCATE` oder `DELETE FROM` ohne folgendes `WHERE` bis zum nächsten `;`, Anführungszeichen oder `&&`, wenn im Text auch `psql`, `sqlite3` oder `mysql` steht |
 | `unsaved-work` | `git reset --hard`, `--merge`, `--keep`; `git checkout` mit `--`, `.`, `-f`/`--force`; `git restore` außer mit nur `--staged`/`-S`; `git switch -f`, `--discard-changes`; `git stash drop`, `git stash clear` |
 
 Ausnahmeliste für `rm -r` (*Annahme:* Inhalt dort ist regenerierbar): Die Wörter hinter `rm` bis
