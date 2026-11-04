@@ -4213,6 +4213,19 @@ BRIEF_SECURITY_TASK = "### Auftrag an den Reviewer"
 BRIEF_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")     # Verweis auf einen Anker der Referenz
 REFERENCES_DIR = Path(__file__).parent.parent / "references"
 HTML_HEAD_RE = re.compile(r"\A\s*(?:<!--.*?-->\s*)+", re.DOTALL)   # Kopfzeile(n) einer Referenz
+# Zeile direkt nach der Kopfzeile von packets/<id>.prompt.md: wer nur den Anfang liest, sieht
+# Marke und Ort des Rückgabeformats. Nicht gleich der letzten Zeile `Paket-Marke: <marke>`.
+PROMPT_MARKER_HINT = ("Paket-Marke: {marker} — Rückgabeformat am Ende dieser Datei; lies die "
+                      "Datei bis zur letzten Zeile.")
+PROMPT_WARN_CHARS = 40000   # darüber nennt counterparts die Größe der prompt.md (kein Abbruch)
+# Was `plan` bei Fokus security als Review nennt: dort läuft kein /code-review mit Stufe.
+SECURITY_REVIEWS = "/security-review oder Review im Hauptkontext"
+
+
+def _review_level(plan: dict) -> str | None:
+    """Die Stufe für `/code-review <stufe>` (`plan_level`); None bei Fokus security, wo
+    `/security-review` oder ein Review im Hauptkontext ohne Stufe läuft."""
+    return None if plan.get("focus") == "security" else plan_level(plan)
 
 
 def _check_packet_id(packet_id) -> str:
@@ -4338,7 +4351,9 @@ def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
 
 def write_prompt(run_path, packet, block, level, *, inputs=None):
     """`packets/<id>.prompt.md` im Laufordner `run_path` schreiben (Spec 28, Ablauf Schritt 3):
-    die Kopfzeile wie bei `packets/<id>.md` (`_packet_header`), der Auftragstext aus
+    die Kopfzeile wie bei `packets/<id>.md` (`_packet_header`), direkt darunter die Marke mit
+    dem Hinweis, dass Rückgabeformat und Marke am Ende stehen (`PROMPT_MARKER_HINT`; die Zeile
+    ist nicht gleich der letzten), der Auftragstext aus
     `references/review-brief.md` (`_brief_text`, nach dem Fokus des Plans), der Bereich
     `<von>..<bis>` (`packet["range"]`), die Stufe `level`, im Profil `checkpoint` das Soll
     (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
@@ -4346,7 +4361,9 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
     Vorgabe für den Aufruf, im Beispiel die Marke vorausgefüllt, `stufe` als Platzhalter:
     einzusetzen ist die Stufe, mit der `/code-review` wirklich lief) und als letzte Zeile
-    `Paket-Marke: <marke>`. `packet` trägt `id`, `range`, `marker` und `files`. `inputs`
+    `Paket-Marke: <marke>`. `level` None (Fokus security, `_review_level`): kein
+    `/code-review`, also weder Stufe im Bereich noch Vorgabe und `stufe` im Rückgabeformat.
+    `packet` trägt `id`, `range`, `marker` und `files`. `inputs`
     (`_PromptInputs`) reicht `write_counterparts` für alle Pakete einmal herein; ohne liest
     `write_prompt` Plan, Auftrag, Soll und Prüfliste selbst. Atomar, überschreibt eine frühere
     Datei. Rückgabe: der Pfad."""
@@ -4356,32 +4373,39 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     _check_packet_id(pid)
     if not isinstance(marker, str) or not marker or "\n" in marker:
         raise KitError(f"Paket {pid} hat keine Marke")
-    if level not in LEVELS:
+    if level is not None and level not in LEVELS:
         raise KitError(f"Stufe {level!r} ist keine Stufe aus {', '.join(LEVELS)}")
     if inputs is None:
         inputs = _prompt_inputs(repo, _read_plan(directory / "plan.json", run_id),
                                 _has_delphi(packet))
     task = inputs.task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
-    parts = [task, f"## Bereich\n\n`{rng}`\n\nStufe: {level}"]
+    parts = [PROMPT_MARKER_HINT.format(marker=marker), task,
+             f"## Bereich\n\n`{rng}`" + (f"\n\nStufe: {level}" if level is not None else "")]
     if inputs.soll:
         parts.append(f"## Soll\n\n{inputs.soll}")
     parts.append(f"Paketblock:\n\n{block.strip()}")
     if _has_delphi(packet):
         parts.append(inputs.delphi if inputs.delphi is not None else _delphi_text())
+    if level is None:
+        ask, stufe, rule = ("Antworte nur mit einem JSON-Objekt in dieser Form; `marke` setzt du "
+                            "genau so ein:", "", "")
+    else:
+        ask = (f"Vorgabe für den Aufruf: `/code-review {level}`. Antworte nur mit einem "
+               "JSON-Objekt in dieser Form; `marke` setzt du genau so ein, für `<stufe>` die "
+               "Stufe, mit der `/code-review` wirklich lief:")
+        stufe = ' "stufe": "<stufe>",'
+        rule = (f"\n- `stufe` ist die Stufe, mit der `/code-review` wirklich lief "
+                f"(`{'`, `'.join(LEVELS)}`), nicht abgeschrieben: Lief es unter `{level}`, "
+                "steht hier die niedrigere.")
     parts.append(
-        "## Rückgabeformat\n\n"
-        f"Vorgabe für den Aufruf: `/code-review {level}`. Antworte nur mit einem JSON-Objekt "
-        "in dieser Form; `marke` setzt du genau so ein, für `<stufe>` die Stufe, mit der "
-        "`/code-review` wirklich lief:\n\n"
-        f'```json\n{{"marke": "{marker}", "stufe": "<stufe>", "findings": [\n'
+        f"## Rückgabeformat\n\n{ask}\n\n"
+        f'```json\n{{"marke": "{marker}",{stufe} "findings": [\n'
         '  {"file": "...", "line": 12, "summary": "...", "failure_scenario": "...", '
         '"evidence": "..."}\n]}\n```\n\n'
         "- `findings` sind die Funde im Format oben (`file`, `line`, `summary`, "
         "`failure_scenario`); bei keinem Fund `\"findings\": []`.\n"
         "- `evidence` ist je Fund optional: der Befehl und seine Ausgabe oder zitierte Zeilen "
-        "mit `Datei:Zeile`.\n"
-        f"- `stufe` ist die Stufe, mit der `/code-review` wirklich lief (`{'`, `'.join(LEVELS)}`), "
-        f"nicht abgeschrieben: Lief es unter `{level}`, steht hier die niedrigere.")
+        f"mit `Datei:Zeile`.{rule}")
     path = directory / "packets" / f"{pid}.prompt.md"
     _write_text(path, _packet_header(run_id, pid) + "\n\n".join(parts)
                 + f"\n\nPaket-Marke: {marker}\n")
@@ -4421,6 +4445,7 @@ def write_counterparts(repo, run_id):
     gelesen, `_prompt_inputs`). Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
+    "prompt_chars" (ihre Länge in Zeichen; die Ausgabe nennt sie über `PROMPT_WARN_CHARS`),
     "counterparts", "shown", "unresolved"}`."""
     repo = _toplevel(repo)
     run_id = _check_run_id(run_id)
@@ -4449,7 +4474,7 @@ def write_counterparts(repo, run_id):
     written = []
     plan = _ensure_markers(repo, run_id)
     markers = {p["id"]: p["marker"] for p in plan["packets"]}
-    level = plan_level(plan)
+    level = _review_level(plan)
     # Auftrag, Soll und Prüfliste sind für alle Pakete gleich: einmal gelesen.
     inputs = _prompt_inputs(repo, plan, any(_has_delphi(p) for p, _r, _f in collected))
     for packet, rng, found in collected:
@@ -4487,6 +4512,7 @@ def write_counterparts(repo, run_id):
         prompt = write_prompt(run_dir(repo, run_id), shown_packet, body, level, inputs=inputs)
         written.append({"packet": pid, "range": rng, "path": rel.as_posix(),
                         "prompt": prompt.relative_to(repo).as_posix(),
+                        "prompt_chars": len(prompt.read_text(encoding="utf-8")),
                         "counterparts": total, "shown": shown, "unresolved": unresolved})
     return written
 
@@ -4733,9 +4759,21 @@ class _Reviewed(NamedTuple):
 class _Earlier(NamedTuple):
     """Was ein früherer Lauf reviewt hat: `files` (Datei → `_Reviewed`) und `outside` — die
     Funde zu Dateien außerhalb ihres Pakets (etwa zur Definitionsdatei einer Gegenstelle), je
-    als Element `{"finding", "packet_files", "file_blob"}` wie in `file_keys[…].outside`."""
+    als Element `{"finding", "packet_files", "file_blob"}` wie in `file_keys[…].outside`.
+    Dazu, nur mit `min_level`: `below`, je angenommenes Ergebnis unter dieser Stufe
+    `(Paket-ID, Stufe)` in Plan-Reihenfolge, und `counted`, die Zahl der übrigen."""
     files: dict
     outside: list
+    below: tuple = ()
+    counted: int = 0
+
+
+class _PassedOver(NamedTuple):
+    """Was `apply_since` übergangen hat, für die Zeile `Übergangen: <lauf>[ <paket>] (<why>)`
+    der Ausgabe von `plan`: ein ganzer Lauf (`packet` None) oder ein Ergebnis eines Pakets."""
+    run: str
+    packet: str | None
+    why: str
 
 
 def _accepted_results(directory: Path, plan: dict):
@@ -4770,7 +4808,9 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     `run`, wie es ist (fehlt es, der `reused_from` des Eintrags). `plan` ist geprüft
     (`_earlier_plan`). Mit `min_level` zählt ein Ergebnis nur, wenn seine gespeicherte Stufe
     (ohne Feld: `plan_level(plan)`) in `LEVELS` mindestens so hoch ist (`_accepted_results`);
-    die übrigen nennt die Ausgabe von `plan` (`_since_passed_over`)."""
+    die übrigen stehen unter `below`, und die Ausgabe von `plan` nennt sie. Die übernommenen
+    Einträge des Laufs zählen mit `min_level` nur, wenn seine geplante Stufe mindestens so hoch
+    ist: Er hat sie nur aus Läufen auf seiner eigenen Stufe übernommen."""
     directory = Path(directory)
     keyed = plan.get("file_keys") or {}
     run_id = directory.name
@@ -4779,10 +4819,12 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
     def reviewed(info: dict, findings: list) -> _Reviewed:
         return _Reviewed(info["key"], info.get("base_blob"), info.get("target_blob"), findings)
 
-    files, outside = {}, []
+    files, outside, below, counted = {}, [], [], 0
     for packet, result, level in _accepted_results(directory, plan):
         if min_level is not None and _below(level, min_level):
+            below.append((packet["id"], level))
             continue
+        counted += 1
         own = set(packet["files"])
         found = [{**f, "run": run_id} for f in result.findings]
         for path in packet["files"]:
@@ -4794,8 +4836,10 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
         blobs = _file_blobs(repo, plan["target"], {item["finding"]["file"] for item in outside})
         for item in outside:
             item["file_blob"] = blobs[item["finding"]["file"]]
+    take_reused = min_level is None or not _below(plan_level(plan), min_level)
     for path, info in keyed.items():
-        if isinstance(info.get("reused_from"), str) and isinstance(info.get("findings"), list):
+        if take_reused and isinstance(info.get("reused_from"), str) \
+                and isinstance(info.get("findings"), list):
             # Ohne `run` (Plan von vor dieser Regel) gilt der Lauf, aus dem er übernahm.
             mine = [{**f, "run": f.get("run", info["reused_from"])} for f in info["findings"]
                     if f["file"] == path]
@@ -4803,7 +4847,7 @@ def _earlier_files(directory: Path, plan: dict, min_level=None) -> _Earlier:
             for item in copy.deepcopy(info.get("outside", [])):
                 item["finding"]["run"] = item["finding"].get("run", info["reused_from"])
                 outside.append(item)
-    return _Earlier(files, outside)
+    return _Earlier(files, outside, tuple(below), counted)
 
 
 def _run_age(directory: Path, run_id: str) -> tuple:
@@ -4845,41 +4889,19 @@ def _coverage_chain(start: str, goal: str, steps: dict):
 
 
 def _since_skip(plan: dict, eplan: dict) -> str | None:
-    """Warum `apply_since` den früheren Plan `eplan` für `plan` übergeht — anderer Fokus, ein
-    Profil, aus dem `plan` nicht übernimmt (`SINCE_PROFILES`), oder eine niedrigere Stufe
-    (`plan_level`) —, als Text für die Ausgabe von `plan`; None, wenn er zählt."""
+    """Warum `apply_since` den früheren Plan `eplan` für `plan` ganz übergeht — anderer Fokus
+    oder ein Profil, aus dem `plan` nicht übernimmt (`SINCE_PROFILES`) —, als Text für die
+    Ausgabe von `plan`; None, wenn er zählt. Die Stufe prüft `_earlier_files` je Ergebnis."""
     if eplan.get("focus") != plan.get("focus"):
         return f"Fokus {eplan.get('focus')} statt {plan.get('focus')}"
     allowed = SINCE_PROFILES.get(plan.get("profile"), ())
     if eplan.get("profile") not in allowed:
         return (f"Profil {eplan.get('profile')}, {plan.get('profile')} übernimmt nur aus "
                 f"{', '.join(allowed)}")
-    if LEVELS.index(plan_level(eplan)) < LEVELS.index(plan_level(plan)):
-        return f"Stufe {plan_level(eplan)} unter {plan_level(plan)}"
     return None
 
 
-def _since_passed_over(plan, run_dirs) -> list[tuple[str, str]]:
-    """Was `apply_since` für `plan` übergeht, je `(was, Grund)` in der Reihenfolge von
-    `run_dirs` — für die Zeilen `Übergangen: <was> (<grund>)` der Ausgabe von `plan`: ein
-    ganzer Lauf nach `_since_skip` (`was` = Lauf-ID), sonst je angenommenes Ergebnis, dessen
-    gespeicherte Stufe unter der des Plans liegt (`was` = `<lauf> <paket>`, Grund `Stufe <x>
-    unter <y>`; `_earlier_files` übergeht es)."""
-    out = []
-    need = plan_level(plan)
-    for directory in run_dirs:
-        run_id, eplan = _earlier_plan(directory)
-        why = _since_skip(plan, eplan)
-        if why is not None:
-            out.append((run_id, why))
-            continue
-        out += [(f"{run_id} {packet['id']}", f"Stufe {level} unter {need}")
-                for packet, _result, level in _accepted_results(Path(directory), eplan)
-                if _below(level, need)]
-    return out
-
-
-def apply_since(plan, run_dirs):
+def apply_since(plan, run_dirs, passed_over=None):
     """Folgelauf (`--since`, Spec 26): übernimmt je Datei die Funde früherer Läufe.
 
     `plan`: der Plan des neuen Laufs wie `build_plan` ihn liefert (Dict mit `file_keys`);
@@ -4893,12 +4915,15 @@ def apply_since(plan, run_dirs):
     (Pflicht) als Soll statt der Commit-Messages, einem Soll mindestens so genau. Also
     übernimmt ein `standard`-Plan aus `standard`- und `checkpoint`-Läufen, ein
     `checkpoint`-Plan nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte nur die
-    Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen. Ebenso zählen nur
-    Läufe, deren Stufe (`plan_level`: `level`, ohne den Standard ihres Profils) in `LEVELS`
-    mindestens so hoch ist wie die des neuen Plans — ein Review auf `low` trägt keinen Plan
-    auf `high`, weder als passender Lauf noch als Glied einer Kette. Die Regel steht in
-    `_since_skip`; die Ausgabe von `plan` nennt jeden so übergangenen Lauf mit Grund
-    (`_since_passed_over`). Darin gilt eine
+    Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen (`_since_skip`).
+    Ebenso zählen nur Ergebnisse, deren gespeicherte Stufe (ohne Feld die Stufe ihres Plans,
+    `plan_level`: `level`, ohne den Standard seines Profils) in `LEVELS` mindestens so hoch ist
+    wie die des neuen Plans — ein Review auf `low` trägt keinen Plan auf `high`, weder als
+    passender Lauf noch als Glied einer Kette (`_earlier_files` mit `min_level`). Mit einer
+    Liste `passed_over` hängt `apply_since` daran je übergangenen Lauf und je übergangenes
+    Ergebnis ein `_PassedOver` in der Reihenfolge von `run_dirs`, für die Ausgabe von `plan`;
+    ein Lauf, dessen geplante Stufe darunter liegt und von dem kein Ergebnis zählt, steht dort
+    als ganzer Lauf (`Stufe <x> unter <y>`). Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
     oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
@@ -4965,15 +4990,25 @@ def apply_since(plan, run_dirs):
                        f"ist keine Stufe aus {', '.join(LEVELS)})")
     new = copy.deepcopy(plan)
     own_run = (plan.get("_meta") or {}).get("run") if isinstance(plan.get("_meta"), dict) else None
-    earlier, repo = {}, None
+    earlier, repo, need, passed = {}, None, plan_level(plan), []
     for directory in run_dirs:
         run_id, eplan = _earlier_plan(directory)
         if run_id == own_run:
             raise KitError(f"Lauf {run_id} kann nicht auf sich selbst folgen (--since)")
-        if _since_skip(plan, eplan) is not None:
+        why = _since_skip(plan, eplan)
+        if why is None:
+            files = _earlier_files(Path(directory), eplan, need)
+            if not files.counted and _below(plan_level(eplan), need):
+                why = f"Stufe {plan_level(eplan)} unter {need}"
+        if why is not None:
+            passed.append(_PassedOver(run_id, None, why))
             continue
-        earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan, plan_level(plan)))
+        passed += [_PassedOver(run_id, pid, f"Stufe {level} unter {need}")
+                   for pid, level in files.below]
+        earlier[run_id] = (_run_age(Path(directory), run_id), files)
         repo = repo or _layout(Path(directory))[0]
+    if passed_over is not None:
+        passed_over.extend(passed)
     youngest_first = sorted(earlier, key=lambda r: earlier[r][0], reverse=True)
 
     reused = {}
@@ -5071,10 +5106,12 @@ def _check_fresh(repo: Path, run_id: str, plan: dict) -> None:
                        "Paketen; einen neuen Lauf planen")
 
 
-def plan_since(repo, run_id, since):
+def plan_since(repo, run_id, since, passed_over=None):
     """`plan --since`: `apply_since` auf dem geschriebenen Plan des Laufs `run_id` mit den
     Läufen `since` (Lauf-IDs, Ordner unter `.skills/cache/deep-review/`), zurückgeschrieben
-    unter der Sperre des Plans; `_meta.generated` bekommt ` --since <id>[,<id>…]`. Nur auf
+    unter der Sperre des Plans; `_meta.generated` bekommt ` --since <id>[,<id>…]`.
+    `passed_over` (eine Liste oder None) reicht `apply_since` die übergangenen Läufe und
+    Ergebnisse herein (`_PassedOver`), damit `plan` sie nennt, ohne sie neu zu lesen. Nur auf
     einem frischen Lauf (`_check_fresh`): schon mit `--since` geplant, oder mit Ergebnissen,
     Paketblöcken oder Hilfscommit-Refs, ist ein KitError, der die Ursache nennt.
     Rückgabe: der geschriebene Plan, wie `_write_plan` ihn liefert — nicht neu gelesen, also
@@ -5091,7 +5128,7 @@ def plan_since(repo, run_id, since):
     with _plan_lock(run_dir(repo, run_id), run_id):
         path, plan = _load_plan(repo, run_id)
         _check_fresh(repo, run_id, plan)
-        new = apply_since(plan, [run_dir(repo, s) for s in ids])
+        new = apply_since(plan, [run_dir(repo, s) for s in ids], passed_over)
         new["_meta"] = {**new["_meta"], "generated": f"{new['_meta']['generated']} --since "
                                                      f"{','.join(ids)}"}
         return _write_plan(path, new)
@@ -5352,11 +5389,13 @@ def record(run_path, packet, tool, payload_path, no_block=False):
     ohne Funde. `marke` muss die Marke des Pakets aus `plan.json` sein (`counterparts` hat sie
     vergeben), `stufe` eine aus `LEVELS` — die Stufe, mit der `/code-review` lief; liegt sie
     unter der Stufe des Plans, wird das Ergebnis angenommen und `audit` nennt es unter
-    `below_level`. Eine bloße Liste, ein Objekt ohne Marke oder mit der Marke eines anderen
-    Pakets, ohne oder mit unbekannter Stufe ist ein KitError, nichts wird geschrieben.
-    `no_block=True` (`--no-block`) nimmt eine bloße Liste oder ein Objekt ohne passende Marke
-    an (die Stufe ist dann optional, aber wenn genannt, gültig) und setzt `no_block: true`;
-    passt die Marke, ist das Ergebnis kein `no_block`. Angenommen wird nur, wenn das Paket im
+    `below_level`. Pflicht ist `stufe` nur bei `tool` `/code-review`; bei anderen Werkzeugen
+    (`/security-review`, Review im Hauptkontext) gibt es keine, und ohne Feld gilt die Stufe
+    des Plans. Eine bloße Liste, ein Objekt ohne Marke oder mit der Marke eines anderen
+    Pakets, bei `/code-review` ohne Stufe, oder mit unbekannter Stufe ist ein KitError, nichts
+    wird geschrieben. `no_block=True` (`--no-block`) nimmt eine bloße Liste oder ein Objekt
+    ohne passende Marke an (die Stufe ist dann optional, aber wenn genannt, gültig) und setzt
+    immer `no_block: true`, auch bei passender Marke. Angenommen wird nur, wenn das Paket im
     Plan steht und noch kein Ergebnis hat; sonst — und bei ungültigen Funden oder einem leeren
     Werkzeug — ein KitError, und nichts wird geschrieben. Schreibt unter der Sperre des Plans
     `results/<id>.json` mit `_meta` (`generated`, `run`, `packet` = Paket-ID, `tool`, `plan` =
@@ -5399,7 +5438,7 @@ def record(run_path, packet, tool, payload_path, no_block=False):
             if not valid:
                 raise KitError(f"Marke {marke!r} gehört nicht zu Paket {packet} — nicht "
                                "angenommen")
-            if stufe is None:
+            if stufe is None and tool == "/code-review":
                 raise KitError(f"Ergebnis für Paket {packet} ohne stufe (die Stufe, mit der "
                                f"/code-review lief: {', '.join(LEVELS)}) — nicht angenommen")
         if stufe is not None and (not isinstance(stufe, str) or stufe not in LEVELS):
@@ -5415,7 +5454,7 @@ def record(run_path, packet, tool, payload_path, no_block=False):
             payload["marke"] = marke
         if stufe is not None:
             payload["level"] = stufe
-        if no_block and not valid:
+        if no_block:
             payload["no_block"] = True
         return write_json(target, meta, payload)
 
@@ -5852,7 +5891,7 @@ def _cmd_plan(args) -> int:
         # SINCE_PROFILES setzt voraus, dass jeder checkpoint-Lauf ein Soll hatte.
         raise KitError("Profil checkpoint braucht --soll-file <datei> (das Soll des Bereichs)")
     repo = _toplevel(args.repo)
-    since = None
+    since, passed = None, []
     if args.since is not None:
         since = [s.strip() for s in args.since.split(",") if s.strip()]
         if not since:
@@ -5879,7 +5918,7 @@ def _cmd_plan(args) -> int:
     directory = run_dir(repo, run_id)
     try:
         if since:
-            plan = plan_since(repo, run_id, since)
+            plan = plan_since(repo, run_id, since, passed)
         if soll is not None:
             with _plan_lock(directory, run_id):
                 path, plan = _load_plan(repo, run_id)
@@ -5902,15 +5941,17 @@ def _cmd_plan(args) -> int:
         print(f"{packet['id']}: {len(packet['files'])} Datei(en), {packet['changed_lines']} Zeilen")
     if not plan["packets"]:
         print("Pakete: keine — alle Dateien übernommen")
-    print(f"Reviews: {len(plan['packets'])} × /code-review {plan_level(plan)}")
+    level = _review_level(plan)
+    tool = SECURITY_REVIEWS if level is None else f"/code-review {level}"
+    print(f"Reviews: {len(plan['packets'])} × {tool}")
     reused = [p for p, info in plan["file_keys"].items() if info.get("reused_from")]
     if reused:
         print(f"Übernommen (--since): {len(reused)} Datei(en)")
     # Je übergangenem --since-Lauf eine Zeile mit Grund: sonst zahlt der Nutzer ein volles
     # Review, ohne zu sehen, warum nichts übernommen wurde.
-    named = [run_dir(repo, s) for s in dict.fromkeys(since or ())]
-    for earlier, why in _since_passed_over(plan, named):
-        print(f"Übergangen: {earlier} ({why})")
+    for item in passed:
+        what = item.run if item.packet is None else f"{item.run} {item.packet}"
+        print(f"Übergangen: {what} ({item.why})")
     if plan["not_reviewed"]:
         print(f"Nicht reviewt: {len(plan['not_reviewed'])} Datei(en)")
     return 0
@@ -5922,6 +5963,11 @@ def _cmd_counterparts(args) -> int:
         print(f"{item['packet']}: {item['range']} · {item['prompt']} · "
               f"{item['counterparts']} Gegenstellen, {item['shown']} gezeigt, "
               f"{item['unresolved']} nicht aufgelöst")
+        if item["prompt_chars"] > PROMPT_WARN_CHARS:
+            # Ein Hinweis, kein Abbruch: ein einzelnes Read schneidet so eine Datei ab.
+            print(f"  Hinweis: {item['prompt']} hat {item['prompt_chars']} Zeichen (über "
+                  f"{PROMPT_WARN_CHARS}) — der Reviewer liest sie in Teilen bis zur letzten "
+                  "Zeile (Paket-Marke).")
     return 0
 
 
