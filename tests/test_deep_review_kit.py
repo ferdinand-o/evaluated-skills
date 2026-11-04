@@ -7636,3 +7636,180 @@ def test_b_every_span_carries_a_changed_line(tmp_path):
         assert spans[0][0][0] == 1 and spans[-1][0][1] == 62
         assert all(a[0][1] + 1 == b[0][0] for a, b in zip(spans, spans[1:]))
     assert [s for s, _n in kit._file_spans(root, "base..HEAD", "m.py", 2)] == [(1, 39), (40, 62)]
+
+
+def _span_repo(root, base, after, mode_x=False):
+    """Repo mit Tag `base` und einem Commit danach; `mode_x` setzt big.py dabei auf 100755."""
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    _commit_files(root, "basis", base)
+    git(root, "tag", "base")
+    for rel, text in after.items():
+        (root / rel).write_text(text, encoding="utf-8")
+    git(root, "add", "-A")
+    if mode_x:
+        git(root, "update-index", "--chmod=+x", "big.py")
+    git(root, "commit", "--quiet", "-m", "änderung")
+    return root
+
+
+def test_b_span_mode_change_in_first_span(tmp_path):
+    """Modusänderung einer geteilten Datei: im ersten Spannen-Paket der Datei trägt `von` den
+    Modus der Basis (der Diff zeigt `old mode`/`new mode`), in den übrigen den des Ziels."""
+    kit = _kit()
+    root = _span_repo(tmp_path, {"lib.py": SPAN_LIB, "big.py": "x = 1\n"},
+                      {"big.py": _span_python(1300)}, mode_x=True)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    assert len(plan["packets"]) == 3
+    shown = []
+    for packet in plan["packets"]:
+        von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
+        mode = git(root, "ls-tree", von, "--", "big.py").split()[0]
+        diff = git(root, "diff", von, bis)
+        shown.append((_span_of(packet)[1][0], mode, "old mode 100644" in diff
+                      and "new mode 100755" in diff))
+    assert shown == [(1, "100644", True)] + [(start, "100755", False) for start, _m, _s in shown[1:]]
+
+
+def test_b_span_diff_never_empty_without_final_newline(tmp_path):
+    """Basis ohne Zeilenende am Schluss, Ziel hängt Zeilen an: git zählt die letzte Basis-Zeile
+    als geändert. Trotzdem ist `git diff von..bis` für jede Spanne nicht leer."""
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"m.txt": b"a\nb\nc\nd\ne\nx"},
+                        {"m.txt": b"a\nb\nc\nd\ne\nx\nn1\nn2\nn3\n"})
+    span = kit.split_range(root, "base..HEAD")
+    diff = kit._file_diff(root, span, "m.txt")
+    target = b"".join(diff.target)
+    spans = kit._file_spans(root, "base..HEAD", "m.txt", 2)
+    assert len(spans) > 1 and sum(n for _s, n in spans) == 5
+    assert spans[0][0][0] == 1 and spans[-1][0][1] == 9
+    assert all(a[0][1] + 1 == b[0][0] for a, b in zip(spans, spans[1:]))
+    assert all(kit._von_content(diff, [s]) != target for s, _n in spans)
+    # Ende zu Ende: jedes Paket hat einen nicht leeren Bereich.
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", 2, False)
+    run = plan["_meta"]["run"]
+    assert len(plan["packets"]) > 1 and all("spans" in p for p in plan["packets"])
+    for packet in plan["packets"]:
+        von, bis = kit.make_packet_range(root, run, packet["id"], None, None).split("..")
+        assert git(root, "diff", von, bis).strip()
+
+
+def test_b_no_tiny_span_before_definition(tmp_path):
+    """Vor einer Definition (oder Leerzeile) wird nur geschnitten, wenn die Spanne dann
+    mindestens SPAN_MIN_SHARE × packet_size geänderte Zeilen trägt; die letzte darf kleiner sein."""
+    kit = _kit()
+    assert 0 < kit.SPAN_MIN_SHARE < 1
+    weights = [0] + [1] * 1310
+    spans = kit._cut_spans(weights, [6], [], 600)
+    assert [1, 5] not in spans and spans[0][0] == 1
+    assert all(sum(weights[a:b + 1]) >= 600 * kit.SPAN_MIN_SHARE for a, b in spans[:-1])
+    assert kit._cut_spans(weights, [6], [5], 600)[0] != [1, 5]
+    # Eine Definition weit genug hinten bleibt die Grenze.
+    assert kit._cut_spans(weights, [6, 400], [], 600)[0] == [1, 399]
+    # Ende zu Ende: Importe 1–5, `class Big:` ab Zeile 6, 1310 Zeilen.
+    text = ("".join(f"import m{i}\n" for i in range(5)) + "class Big:\n"
+            + "".join(f"    a_{j} = {j}\n" for j in range(1304)))
+    root = _commit_repo(tmp_path, {"README.md": "# r\n"}, {"big.py": text})
+    found = kit.split_file_spans(root, "base..HEAD", "big.py", 600)
+    assert [1, 5] not in found and found[0][0] == 1 and found[-1][1] == 1310
+    assert all(b - a + 1 >= 600 * kit.SPAN_MIN_SHARE for a, b in found[:-1])
+
+
+def test_b_merge_reused_only_group_has_no_packets():
+    """Eine Gruppe nur aus übernommenen Funden bekommt `packets: []`, auch in einer Datei mit
+    Spannen; mit einer Quelle aus einem Ergebnis dieses Plans kommt das Spannen-Paket dazu."""
+    kit = _kit()
+    rank = {"p1": 0, "p2": 1}
+    plan_spans = {"g.py": [("p2", 1, 100)]}
+    reused = kit._Source(_finding("g.py", 10, "alt"), None, "2026-11-01-000000-abcdef0-aaaa")
+    [only] = kit._merge_sources([reused], rank, plan_spans)
+    assert only["packets"] == [] and only["reused_from"] == "2026-11-01-000000-abcdef0-aaaa"
+    fresh = kit._Source(_finding("g.py", 11, "neu"), "p1", None)
+    [both] = kit._merge_sources([reused, fresh], rank, plan_spans)
+    assert both["packets"] == ["p1", "p2"]
+
+
+def test_b_render_block_checks_spans():
+    """Ein fehlerhaftes `spans` ist ein KitError wie bei den anderen optionalen Schlüsseln."""
+    kit = _kit()
+    good = {"id": "p1", "files": ["a.py"], "spans": [{"file": "a.py", "lines": [1, 4]}]}
+    assert "a.py:1-4" in kit.render_block(good, [], 0, None)
+    for spans in ("a.py", [{"file": "a.py"}], [{"file": "a.py", "lines": 5}],
+                  [{"file": "a.py", "lines": [4, 1]}], [{"file": "a.py", "lines": [1, True]}],
+                  [{"file": "a.py", "lines": [0, 2]}], [{"file": "b.py", "lines": [1, 2]}],
+                  [{"file": 3, "lines": [1, 2]}], ["a.py"]):
+        with pytest.raises(kit.KitError, match="spans"):
+            kit.render_block({**good, "spans": spans}, [], 0, None)
+
+
+def test_b_one_diff_helper(tmp_path):
+    """Ein `git diff -U0` mit einer Flag-Liste und ein Hunk-Parser für `_changed_lines` und
+    `_file_diff`: die geänderten Zeilen der Sammler sind genau die hinzugefügten Zeilen der Hunks."""
+    kit = _kit()
+    source = Path(kit.__file__).read_text(encoding="utf-8")
+    assert source.count('"--inter-hunk-context=0"') == 1
+    assert not hasattr(kit, "HUNK_BOTH_RE")
+    base = _lines(40)
+    lines = base.splitlines(keepends=True)
+    after = "".join(lines[:3] + ["neu = 1\n"] + lines[5:20] + lines[22:] + ["ende = 2\n"])
+    root = _commit_repo(tmp_path, {"m.py": base}, {"m.py": after})
+    span = kit.split_range(root, "base..HEAD")
+    diff = kit._file_diff(root, span, "m.py")
+    added = {line for _a, _b, c, d in diff.hunks for line in range(c, c + d)}
+    assert kit._changed_lines(root, span, ["m.py"]) == {"m.py": added} and added
+
+
+def _three_span_run(kit, tmp_path):
+    """Lauf über big.py (an der Basis eine Zeile, am Ziel 1.300): drei Spannen-Pakete."""
+    root = _span_repo(tmp_path, {"lib.py": SPAN_LIB, "big.py": "x = 1\n"},
+                      {"big.py": _span_python(1300)})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    assert len(plan["packets"]) == 3
+    return root, plan, plan["_meta"]["run"]
+
+
+def test_b_span_diff_once_per_file(tmp_path, monkeypatch):
+    """`_file_diff` je (Basis, Ziel, Pfad) einmal je Prozess: counterparts für eine Datei in
+    drei Spannen ruft `git diff -U0` einmal."""
+    kit = _kit()
+    root, _plan, run = _three_span_run(kit, tmp_path)
+    kit._file_diff_cached.cache_clear()
+    calls = _spy_git(kit, monkeypatch)
+    kit.write_counterparts(root, run)
+    assert len([c for c in calls if c[0] == "diff" and "-U0" in c]) == 1
+
+
+def test_b_span_collect_once_and_filter_once(tmp_path, monkeypatch):
+    """Ohne Speicher sammelt counterparts eine Datei in drei Spannen einmal und filtert je
+    Spanne an einer Stelle: Stellen und nicht aufgelöste zählen je Spanne."""
+    kit = _kit()
+    root, plan, run = _three_span_run(kit, tmp_path)
+    spans = [_span_of(p)[1] for p in plan["packets"]]
+    (_run_path(root, plan) / kit.COLLECTED_NAME).unlink()
+    sites = [spans[0][0] + 1, spans[1][0] + 1, spans[1][0] + 2, spans[2][1]]
+    seen = []
+
+    def collect(repo, rng, files, per_file=None):
+        seen.append(list(files))
+        mine = [str(f) for f in files if str(f) == "big.py"]
+        entries = [{"file": "big.py", "line": n, "kind": "call", "lines": [f"### big.py:{n} x"]}
+                   for n in sites] if mine else []
+        unresolved = [["big.py", n, 1] for n in sites] if mine else []
+        if per_file is not None:
+            for rel in mine:
+                per_file[rel] = {"entries": entries, "unresolved": unresolved, "unparsed": None}
+        return kit.Collected(entries, len(unresolved), [])
+
+    monkeypatch.setattr(kit, "COLLECTORS", (kit.COLLECTORS[0]._replace(collect=collect),
+                                            kit.COLLECTORS[1]))
+    written = kit.write_counterparts(root, run)
+    assert len([f for f in seen if "big.py" in f]) == 1
+    assert [(w["counterparts"], w["unresolved"]) for w in written] == [(1, 1), (2, 2), (1, 1)]
+    block = (_run_path(root, plan) / "packets" / "p2.md").read_text(encoding="utf-8")
+    assert "2 Stelle(n) nach der Sammelregel" in block and "2 nicht aufgelöst" in block
+    # render_block filtert nicht selbst: es zeigt die Stellen, die der Aufrufer übergibt.
+    outside = {"file": "big.py", "line": spans[0][0], "kind": "call", "lines": ["### big.py:1 y"]}
+    shown = kit.render_block({**plan["packets"][1]}, [outside], 0, None)
+    assert "### big.py:1 y" in shown and "1 Stelle(n)" in shown

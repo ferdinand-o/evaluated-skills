@@ -71,6 +71,8 @@ from typing import NamedTuple
 # Grenzwerte (Spec 26, E7). Der Report nennt sie.
 SPLIT_AT = 800            # bis hierher ein Paket über den Originalbereich
 PACKET_SIZE = 600         # obere Paketgröße beim Teilen (kleiner von diesem Wert und split_at)
+SPAN_MIN_SHARE = 0.25     # Spanne vor Definition/Leerzeile nur ab diesem Anteil von packet_size
+FILE_DIFF_CACHE = 256     # Diffs je (Repo, Basis, Ziel, Pfad), die ein Prozess behält (Spannen)
 BLOCK_MAX_CHARS = 30000   # Gegenstellen-Block je Paket
 MERGE_LINE_GAP = 3        # Funde derselben Datei mit höchstens diesem Abstand vereinigen
 RAISE_DEPTH = 2           # raise-Stellen transitiv im selben Modul
@@ -534,7 +536,7 @@ def _pack(files, focus, split_at, packet_size, repo=None, rng=None):
 # seinem Anker (die erste Zeile des Hunks am ZIEL, bei einer reinen Löschung die Zeile danach).
 # Dieselbe Regel baut `von`: Zeilen der Spanne auf dem Stand der Basis, der Rest am ZIEL.
 
-HUNK_BOTH_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+HUNK_RE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")   # a,b → c,d
 SPAN_LINE_RE = re.compile(rb"[^\n]*\n|[^\n]+\Z")       # Zeilen wie git sie zählt, mit Zeilenende
 PAS_IMPLEMENTATION_RE = re.compile(r"\s*implementation\b", re.IGNORECASE)
 # Routine der obersten Ebene: Kopf in Spalte 0 (lokale Routinen sind eingerückt).
@@ -551,28 +553,58 @@ class _FileDiff(NamedTuple):
     hunks: list
 
 
+def _diff_hunks(repo: Path, span: Span, files) -> dict:
+    """Die Hunks `(a, b, c, d)` aus `@@ -a,b +c,d @@` je Datei am ZIEL — die eine Stelle, an
+    der `git diff -U0 BASIS ZIEL -- <dateien>` läuft (Pathspecs in Stücken), ohne
+    Umbenennungen, externe Diffs, Textconv und Farbe, mit festen Präfixen `a/` `b/` gegen
+    `diff.noprefix` und `--inter-hunk-context=0` gegen `diff.interHunkContext` (sonst zählten
+    Kontextzeilen zwischen zwei Hunks als geändert). Ein Hunk-Parser (`HUNK_RE`) für die
+    Sammler (`_changed_lines`) und die Spannen (`_file_diff`). Eine gelöschte Datei fehlt."""
+    hunks: dict[str, list] = {}
+    for chunk in _literal_chunks(files):
+        out = _git(repo, "diff", "-U0", "--inter-hunk-context=0", "--no-renames",
+                   "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/",
+                   "--dst-prefix=b/", span.base, span.target, "--", *chunk)
+        current, header = None, False
+        for line in out.split("\n"):
+            if line.startswith("diff --git "):
+                current, header = None, True
+            elif header and line.startswith("+++ "):
+                name = _unquote_path(line[4:])
+                current = name[2:] if name.startswith("b/") else None
+            elif line.startswith("@@"):
+                header = False
+                match = HUNK_RE.match(line)
+                if match and current is not None:
+                    hunks.setdefault(current, []).append(
+                        (int(match[1]), int(match[2] or 1), int(match[3]), int(match[4] or 1)))
+    return hunks
+
+
 def _file_diff(repo: Path, span: Span, path: str):
     """`_FileDiff` von `path` über `span`, aus Git (nie aus dem Arbeitsbaum); None, wenn die
     Datei am ZIEL keine reguläre Datei ist (fehlt, Symlink, Submodul). Ist sie an der Basis
-    keine reguläre Datei (neu, vorher Symlink oder Submodul), gilt jede Zeile als neu."""
-    found = _tree_entries(repo, span.target, [path])
+    keine reguläre Datei (neu, vorher Symlink oder Submodul), gilt jede Zeile als neu. Je
+    Repo, Basis, Ziel und Pfad einmal je Prozess berechnet (`_file_diff_cached`): `plan`
+    teilt die Datei, `counterparts` baut je Spannen-Paket `von` aus demselben Diff."""
+    return _file_diff_cached(str(repo), span.base, span.target, str(path))
+
+
+@functools.lru_cache(maxsize=FILE_DIFF_CACHE)
+def _file_diff_cached(repo_text: str, base: str, target: str, path: str):
+    """`_file_diff` für unveränderliche Schlüssel (SHAs); das Ergebnis wird nicht verändert."""
+    repo = Path(repo_text)
+    found = _tree_entries(repo, target, [path])
     if path not in found or found[path][1] != "blob" or found[path][0] not in REGULAR_MODES:
         return None
-    before = _tree_entries(repo, span.base, [path])
+    before = _tree_entries(repo, base, [path])
     base_sha = before[path][2] if path in before and before[path][0] in REGULAR_MODES else None
     blobs = _blob_contents(repo, [found[path][2]] + ([base_sha] if base_sha else []))
-    target = SPAN_LINE_RE.findall(blobs[found[path][2]])
+    lines = SPAN_LINE_RE.findall(blobs[found[path][2]])
     if base_sha is None:
-        return _FileDiff(target, [], [(0, 0, 1, len(target))] if target else [])
-    out = _git(repo, "diff", "-U0", "--inter-hunk-context=0", "--no-renames", "--no-ext-diff",
-               "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/",
-               span.base, span.target, "--", f":(literal){path}")
-    hunks = []
-    for line in out.split("\n"):
-        match = HUNK_BOTH_RE.match(line) if line.startswith("@@") else None
-        if match:
-            hunks.append((int(match[1]), int(match[2] or 1), int(match[3]), int(match[4] or 1)))
-    return _FileDiff(target, SPAN_LINE_RE.findall(blobs[base_sha]), hunks)
+        return _FileDiff(lines, [], [(0, 0, 1, len(lines))] if lines else [])
+    hunks = _diff_hunks(repo, Span(base, target, None), [path]).get(path, [])
+    return _FileDiff(lines, SPAN_LINE_RE.findall(blobs[base_sha]), hunks)
 
 
 def _anchor(c: int, d: int, n: int) -> int:
@@ -621,12 +653,19 @@ def _definition_starts(path: str, data: bytes) -> list:
 def _cut_spans(weights: list, starts: list, blanks: list, packet_size: int) -> list:
     """Spannen `[von, bis]` über die Zeilen 1…n: ab dem Anfang so viele Zeilen, wie ihr Gewicht
     `packet_size` nicht übersteigt; geschnitten vor der letzten Definition darin (`starts`),
-    sonst nach der letzten Leerzeile darin (`blanks`), sonst genau dort. Jede Spanne trägt
-    mindestens eine geänderte Zeile: Geschnitten wird nie vor der ersten geänderten Zeile der
-    Spanne, und was nach der letzten geänderten Zeile kommt, gehört zur letzten Spanne. Eine
-    einzelne Zeile über `packet_size` ist eine Spanne für sich."""
+    sonst nach der letzten Leerzeile darin (`blanks`), sonst genau dort. Vor einer Definition
+    und nach einer Leerzeile nur, wenn die Spanne dann mindestens `SPAN_MIN_SHARE` ×
+    `packet_size` geänderte Zeilen trägt — keine Kleinst-Spanne (etwa nur die Importe vor der
+    ersten Klasse) als eigenes Paket; die letzte Spanne der Datei darf kleiner sein. Jede
+    Spanne trägt mindestens eine geänderte Zeile: Geschnitten wird nie vor der ersten
+    geänderten Zeile der Spanne, und was nach der letzten geänderten Zeile kommt, gehört zur
+    letzten Spanne. Eine einzelne Zeile über `packet_size` ist eine Spanne für sich."""
     n = len(weights) - 1
     changed = [line for line in range(1, n + 1) if weights[line]]
+    prefix = [0]                                     # prefix[i]: Gewicht der Zeilen 1…i
+    for line in range(1, n + 1):
+        prefix.append(prefix[-1] + weights[line])
+    least = SPAN_MIN_SHARE * packet_size
     spans, start = [], 1
     while start <= n:
         total, last = 0, start - 1
@@ -640,11 +679,11 @@ def _cut_spans(weights: list, starts: list, blanks: list, packet_size: int) -> l
         first = changed[bisect.bisect_left(changed, start)]   # erste geänderte Zeile ab start
         cut = None
         i = bisect.bisect_right(starts, last + 1)
-        if i and starts[i - 1] > first:
+        if i and starts[i - 1] > first and prefix[starts[i - 1] - 1] - prefix[start - 1] >= least:
             cut = starts[i - 1] - 1
         if cut is None:
             j = bisect.bisect_right(blanks, last)
-            if j and blanks[j - 1] >= first:
+            if j and blanks[j - 1] >= first and prefix[blanks[j - 1]] - prefix[start - 1] >= least:
                 cut = blanks[j - 1]
         if cut is None:
             cut = max(last, first)
@@ -666,9 +705,32 @@ def _file_spans(repo, rng, path, packet_size) -> list:
         return []
     weights = _line_weights(diff)
     blanks = [i for i, line in enumerate(diff.target, 1) if not line.strip()]
-    spans = _cut_spans(weights, _definition_starts(path, b"".join(diff.target)), blanks,
-                       packet_size)
-    return [((a, b), sum(weights[a:b + 1])) for a, b in spans]
+    target = b"".join(diff.target)
+    spans = _cut_spans(weights, _definition_starts(path, target), blanks, packet_size)
+    return [((a, b), sum(weights[a:b + 1])) for a, b in _merge_empty_spans(diff, target, spans)]
+
+
+def _merge_empty_spans(diff: _FileDiff, target: bytes, spans: list) -> list:
+    """Die Spannen, wobei eine, deren `von` gleich dem Ziel wäre (`_von_content`, leerer Diff
+    `von..bis`), mit der folgenden zusammengelegt wird (die letzte mit der vorigen). Das kommt
+    vor, wenn die letzte Zeile der Basis kein Zeilenende hat und das Ziel dahinter Zeilen
+    anhängt: git zählt sie als geändert (gelöscht und mit Zeilenende neu), mitten in `von`
+    braucht sie aber ihr Zeilenende — ihre Spanne allein zeigte nichts. So bleibt die Regel
+    „jede Spanne hat einen nicht leeren Diff" ohne Sonderfall in den Gewichten; die Summe der
+    Gewichte bleibt die der Datei."""
+    spans = [list(item) for item in spans]
+    i = 0
+    while len(spans) > 1 and i < len(spans):
+        if _von_content(diff, [tuple(spans[i])]) != target:
+            i += 1
+            continue
+        if i + 1 < len(spans):
+            spans[i + 1][0] = spans[i][0]
+        else:
+            spans[i - 1][1] = spans[i][1]
+        del spans[i]
+        i = max(i - 1, 0)
+    return spans
 
 
 def split_file_spans(repo, rng, path, packet_size):
@@ -1478,18 +1540,24 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
 
     `spans` (Pfad → Liste `(von, bis)`, `_packet_spans`): eine Datei mit Spanne steht in `von`
     nicht auf dem Stand der Basis, sondern mit dem Inhalt aus `_von_content` (außerhalb der
-    Spanne ZIEL, innerhalb Basis) und dem Modus am ZIEL, als Blob über `git hash-object -w`
-    geschrieben — `von..bis` zeigt so nur die Zeilen der Spanne."""
+    Spanne ZIEL, innerhalb Basis), als Blob über `git hash-object -w` geschrieben — `von..bis`
+    zeigt so nur die Zeilen der Spanne. Modus: Im ersten Spannen-Paket der Datei (dem mit der
+    kleinsten Anfangszeile ihrer Spannen im Plan) trägt sie in `von` den Modus der Basis, wenn
+    sie dort eine reguläre Datei ist, so dass eine Modusänderung (`chmod +x`) genau einmal
+    erscheint; in den übrigen Spannen-Paketen (und bei einer neuen Datei) den Modus am ZIEL."""
     target = plan["target"]
     null = "0" * len(target)
     von_entries = _tree_entries(repo, plan["base"], files)
     span = Span(plan["base"], target, plan["log_base"])
+    first = {path: min(a for _pid, a, _b in ranges) for path, ranges in _plan_spans(plan).items()}
     for path, ranges in (spans or {}).items():
         diff = _file_diff(repo, span, path) if path in target_entries else None
         if diff is not None:
             sha = _git(repo, "hash-object", "-w", "--no-filters", "--stdin",
                        stdin=_von_content(diff, ranges)).strip()
-            von_entries[path] = (target_entries[path][0], "blob", sha)
+            base_mode = von_entries[path][0] if path in von_entries else None
+            keep = base_mode in REGULAR_MODES and any(a == first.get(path) for a, _b in ranges)
+            von_entries[path] = (base_mode if keep else target_entries[path][0], "blob", sha)
     von_info = _index_info(files, von_entries, null)
     bis_info = _index_info(files, target_entries, null)
     message = _range_message(repo, plan["log_base"], target)
@@ -1561,7 +1629,8 @@ def make_packet_range(repo, run_id, packet, base, target):
     `git diff von..bis` zeigt so genau die Paketdateien, der Reviewer sieht den vollen Code.
     Ein Paket mit `spans` (Spec 28): die Datei steht in `von` außerhalb der Spanne am ZIEL und
     innerhalb auf dem Stand der Basis (neue Datei: die Zeilen der Spanne fehlen), `bis` bleibt
-    der Baum von ZIEL — `von..bis` zeigt nur die Zeilen der Spanne (`_helper_commits`).
+    der Baum von ZIEL — `von..bis` zeigt nur die Zeilen der Spanne; eine Modusänderung der
+    Datei zeigt ihr erstes Spannen-Paket (`_helper_commits`).
     HEAD, Index und Arbeitsbaum des Nutzers bleiben unberührt.
 
     Lesen, Bauen und Schreiben von `plan.json` laufen unter der Sperre `plan.lock` des
@@ -1721,7 +1790,6 @@ SKIP_UNBALANCED = "Blöcke gehen nicht auf (Delphi-Scanner)"
 SKIP_BRANCH = "geänderte Zeile(n) in nicht gelesenem bedingtem Zweig"
 _BRANCH_REASON = re.compile(r"(\d+) " + re.escape(SKIP_BRANCH) + r" \(.*\)")
 QUALITY_INTRO = "## Gegenstellen\n\nGegenstellen nicht gesammelt (Fokus quality).\n"
-HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _C_ESCAPES = {ord(k): ord(v) for k, v in
               {"a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
                '"': '"', "\\": "\\"}.items()}
@@ -1789,30 +1857,13 @@ def _unquote_path(raw: str) -> str:
 
 
 def _changed_lines(repo: Path, span: Span, files) -> dict:
-    """Geänderte Zeilen am ZIEL je Datei: `git diff -U0 BASIS ZIEL -- <dateien>` (Pathspecs in
-    Stücken), ohne Umbenennungen, externe Diffs, Textconv und Farbe, mit festen Präfixen
-    `a/` `b/` gegen `diff.noprefix` und `--inter-hunk-context=0` gegen
-    `diff.interHunkContext` (sonst zählten Kontextzeilen zwischen zwei Hunks als geändert).
-    Eine reine Löschung ändert keine Zeile am ZIEL; eine gelöschte Datei fehlt."""
+    """Geänderte Zeilen am ZIEL je Datei, aus den Hunks von `_diff_hunks` (dieselben wie für
+    die Spannen). Eine reine Löschung ändert keine Zeile am ZIEL; eine gelöschte Datei fehlt."""
     changed: dict[str, set] = {}
-    for chunk in _literal_chunks(files):
-        out = _git(repo, "diff", "-U0", "--inter-hunk-context=0", "--no-renames",
-                   "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/",
-                   "--dst-prefix=b/", span.base, span.target, "--", *chunk)
-        current, header = None, False
-        for line in out.split("\n"):
-            if line.startswith("diff --git "):
-                current, header = None, True
-            elif header and line.startswith("+++ "):
-                name = _unquote_path(line[4:])
-                current = name[2:] if name.startswith("b/") else None
-            elif line.startswith("@@"):
-                header = False
-                match = HUNK_RE.match(line)
-                if match and current is not None:
-                    start, count = int(match.group(1)), int(match.group(2) or 1)
-                    if count:
-                        changed.setdefault(current, set()).update(range(start, start + count))
+    for path, hunks in _diff_hunks(repo, span, files).items():
+        for _a, _b, start, count in hunks:
+            if count:
+                changed.setdefault(path, set()).update(range(start, start + count))
     return changed
 
 
@@ -4219,7 +4270,25 @@ def _packet_extras(packet) -> tuple[dict, str, str | None]:
     intro = packet.get("intro")
     if intro is not None and not isinstance(intro, str):
         raise KitError(f"intro muss ein Text sein, nicht {intro!r}")
+    _check_spans(packet)
     return unreadable, "".join(f"\n{note}\n" for note in notes), intro
+
+
+def _check_spans(packet) -> None:
+    """`spans` eines Pakets für `render_block`: fehlt es, ist es leer; sonst eine Liste von
+    Objekten mit `file` (Text, eine Datei des Pakets) und `lines` `[von, bis]` (ganze Zahlen,
+    1 ≤ von ≤ bis). Falsche Form: KitError."""
+    spans = packet.get("spans") or []
+    files = {str(f) for f in packet.get("files") or []}
+    if not isinstance(spans, (list, tuple)):
+        raise KitError(f"spans muss eine Liste von Objekten (file, lines) sein, nicht {spans!r}")
+    for item in spans:
+        lines = item.get("lines") if isinstance(item, dict) else None
+        if not (isinstance(item, dict) and isinstance(item.get("file"), str)
+                and item["file"] in files and isinstance(lines, (list, tuple)) and len(lines) == 2
+                and all(_is_count(n) and n >= 1 for n in lines) and lines[0] <= lines[1]):
+            raise KitError(f"spans: Objekt mit file (Datei des Pakets) und lines [von, bis] "
+                           f"erwartet, nicht {item!r}")
 
 
 def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
@@ -4233,8 +4302,7 @@ def _render(packet, entries, unresolved, cap) -> tuple[str, int]:
     unreadable, notes, intro = _packet_extras(packet)
     files = [str(f) for f in packet.get("files") or []]  # einmal als Text, für Zeilen und Zahl
     rng = packet.get("range")
-    spans, shown_spans = _packet_spans(packet), _spans_text(packet)
-    entries = [e for e in entries if _in_spans(spans, e["file"], e["line"])]
+    shown_spans = _spans_text(packet)
     title = (f"# Paket {packet.get('id')}\n\n"
              + (f"Bereich: `{rng}`" if rng else "Bereich: noch nicht gebaut")
              + (f"\n\nSpanne: `{shown_spans}`" if shown_spans else "")
@@ -4306,9 +4374,9 @@ def render_block(packet, entries, unresolved, cap):
     Kopfzeile des Artefakts (E3) setzt `write_counterparts` davor und zieht sie vom `cap`
     ab.
 
-    Trägt das Paket `spans` (Spec 28), nennt der Kopf die Spanne, und der Block nimmt nur die
-    Einträge, deren Aufrufstelle in der Spanne ihrer Datei liegt (`_in_spans`); `unresolved`
-    zählt der Aufrufer schon so (`_stored_found` mit Spannen).
+    Trägt das Paket `spans` (Spec 28), nennt der Kopf die Spanne. Gefiltert wird nicht hier:
+    Einträge und `unresolved` gelten schon der Spanne — beide filtert der Aufrufer an einer
+    Stelle (`_stored_found` mit Spannen, `_in_spans`); der Block zeigt, was er bekommt.
 
     Neben `id`, `range` und `files` liest der Block optionale Schlüssel des Pakets — jeder
     Sammler (Python, Delphi) erreicht alles, was ein Block zeigen kann, über diese vier
@@ -4324,6 +4392,8 @@ def render_block(packet, entries, unresolved, cap):
       Zahl der nicht lesbaren Dateien außerhalb des Pakets).
     - `intro`: Text, der den Anfang des Abschnitts ab `## Gegenstellen` samt Zählzeilen
       ersetzt (etwa „Gegenstellen nicht gesammelt (Fokus quality).").
+    - `spans`: Liste von Objekten `{"file", "lines": [von, bis]}` (`file` eine Datei des
+      Pakets, 1 ≤ von ≤ bis) — der Kopf nennt sie als `Spanne:`.
 
     Dateien und die Pfade in `unreadable` zählen als Text (`str`), auch als `Path`. Kopf,
     Hinweise und `notes` zählen gegen `cap` und werden nie gekappt.
@@ -4720,8 +4790,9 @@ def write_counterparts(repo, run_id):
     Speicher. So ist der Block mit und ohne Speicher byte-gleich. Daneben je Paket
     `packets/<id>.prompt.md` (`write_prompt`; Plan, Auftrag, Soll und Delphi-Prüfliste einmal
     gelesen, `_prompt_inputs`). Ein Paket mit `spans` (Spec 28) sammelt je Datei (Speicher oder
-    live mit `per_file`) und nimmt nur die Stellen, deren Aufrufstelle in der Spanne liegt
-    (`_stored_found` mit Spannen) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
+    live mit `per_file`, eine Datei in mehreren Spannen einmal je Lauf) und nimmt nur die
+    Stellen, deren Aufrufstelle in der Spanne liegt (`_stored_found` mit Spannen, die eine
+    Stelle dieses Filters) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
     Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
@@ -4738,15 +4809,18 @@ def write_counterparts(repo, run_id):
     stored = stored if _collected_matches(plan, stored) else None
     live = () if stored is None else _live_collectors(plan, stored)
     collected = []
+    # Spannen: je Datei einmal je Lauf gesammelt (Speicher, sonst live), je Paket gefiltert.
+    records = dict(stored["files"]) if stored is not None else {}
+    gathered: set = set()
     for packet in plan["packets"]:
         rng = make_packet_range(repo, run_id, packet["id"], None, None)
         found = None
         spans = _packet_spans(packet)
         if spans and not quality:
-            # Spannen: je Datei gesammelt (Speicher, sonst live), dann nur die Stellen der Spanne.
-            records = dict(stored["files"]) if stored is not None else {}
-            for collector in (live if stored is not None else COLLECTORS):
-                collector.collect(repo, plan_range, packet["files"], per_file=records)
+            fresh = [f for f in packet["files"] if str(f) not in gathered]
+            for collector in (live if stored is not None else COLLECTORS) if fresh else ():
+                collector.collect(repo, plan_range, fresh, per_file=records)
+            gathered.update(str(f) for f in fresh)
             found = _stored_found({"files": records}, packet["files"], spans)
         elif stored is not None:
             kept = [f for f in packet["files"] if not any(c.accepts(str(f)) for c in live)]
@@ -5905,7 +5979,8 @@ def _merge_sources(sources: list, rank: dict, plan_spans=None) -> list:
     wird die Zeile einmal gelesen (`_line_span`). Sortiert nach Datei, Zeile (ohne Zeile
     zuletzt) und Herkunft. `plan_spans` (Datei → Liste `(Paket, von, bis)`, `_plan_spans`): ein Fund
     in einer Datei mit Spannen gehört dazu dem Paket, dessen Spanne seine Zeile enthält
-    (`_span_packets`); ein Fund außerhalb aller Spannen behält nur seine Pakete."""
+    (`_span_packets`); ein Fund außerhalb aller Spannen behält nur seine Pakete, ein Fund nur
+    aus übernommenen Quellen (ohne `packet`) bekommt kein Spannen-Paket (`packets: []`)."""
     by_file: dict[str, list] = {}
     for order, source in enumerate(sources):
         by_file.setdefault(source.finding["file"], []).append((order, source))
@@ -5932,7 +6007,10 @@ def _merge_sources(sources: list, rank: dict, plan_spans=None) -> list:
                 member_lines.append([span])
                 anchor = reach = span[1]
         ranges = (plan_spans or {}).get(path, ())
-        out += [_merged(group, rank, _span_packets(ranges, lines))
+        # Das Spannen-Paket nur zu einer Gruppe mit einer Quelle aus einem Ergebnis dieses
+        # Plans: eine nur aus übernommenen Funden behält `packets: []`.
+        out += [_merged(group, rank, _span_packets(ranges, lines)
+                        if any(s.packet is not None for s in group) else ())
                 for group, lines in zip(groups, member_lines)]
         out += [_merged(group, rank) for group in loose]
     return out
