@@ -6169,13 +6169,13 @@ def test_b_cp2_f4_since_reuses_only_runs_reviewed_at_least_as_high(tmp_path, mon
     assert done["file_keys"]["a.py"]["reused_from"] == top["_meta"]["run"]
     # Ein Lauf ohne level gilt mit dem Standard seines Profils (checkpoint: high).
     old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
+    _rewrite_plan(root, old, lambda data: data.pop("level"))    # vor record, wie in Spec 26
     _record(kit, root, old, "p1", [_finding("a.py", 5, "alt")])
-    _rewrite_plan(root, old, lambda data: data.pop("level"))
     done = kit.apply_since(high_plan, [_run_path(root, old)])
     assert done["file_keys"]["a.py"]["reused_from"] == old["_meta"]["run"]
     std = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)   # standard: medium
+    _rewrite_plan(root, std, lambda data: data.pop("level"))    # vor record, wie in Spec 26
     _record(kit, root, std, "p1", [_finding("a.py", 5, "std")])
-    _rewrite_plan(root, std, lambda data: data.pop("level"))
     assert kit.apply_since(medium_plan, [_run_path(root, std)])[
         "file_keys"]["a.py"]["reused_from"] == std["_meta"]["run"]
     std_high = kit.build_plan(root, "base..t2", "standard", "bugs", None, False, level="high")
@@ -6245,3 +6245,114 @@ def test_b_cp2_f7_one_collect_call_and_one_sort_key(tmp_path, monkeypatch):
     assert [(e["file"], e["line"]) for e in kit._collect_all(root, "base..HEAD", ["a.py"]).entries] \
         == [("b.py", 9), ("a.py", 4), ("a.py", 1)]
     assert kit.file_keys(root, target, ["a.py"], entries) != before
+
+
+# --- Spec 28, Prüfpunkt 2, Runde 2 ------------------------------------------------------------
+
+def _accepted(kit, root, plan, packet="p1"):
+    """Ob das Ergebnis von `packet` zum Plan auf der Platte passt (`_read_result` wie audit)."""
+    run = plan["_meta"]["run"]
+    _path, loaded = kit._load_plan(root, run)
+    result, _why = kit._read_result(_run_path(root, plan) / "results" / f"{packet}.json", packet,
+                                    run, kit._plan_digest(loaded, run), root)
+    return result is not None
+
+
+def test_b_cp2r2_f1_level_is_part_of_the_plan_digest(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    high_plan = kit.build_plan(root, "base..t2", "checkpoint", "bugs", None, False)
+    low = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False, level="low")
+    _record(kit, root, low, "p1", [_finding("a.py", 5, "low")])
+    assert _accepted(kit, root, low)
+    # Stufe nach record geändert oder entfernt (Standard high): nicht mehr angenommen, und
+    # --since übernimmt das low-Review nicht als high.
+    for change in (lambda data: data.update(level="max"), lambda data: data.pop("level")):
+        _rewrite_plan(root, low, change)
+        assert not _accepted(kit, root, low)
+        assert kit.apply_since(high_plan, [_run_path(root, low)]) == high_plan
+        _rewrite_plan(root, low, lambda data: data.update(level="low"))
+        assert _accepted(kit, root, low)
+
+    # Ein Plan ohne level (Spec 26) behält seinen Fingerabdruck: sein Ergebnis bleibt angenommen.
+    old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
+    _rewrite_plan(root, old, lambda data: data.pop("level"))
+    _record(kit, root, old, "p1", [_finding("a.py", 5, "alt")])
+    run = old["_meta"]["run"]
+    _path, loaded = kit._load_plan(root, run)
+    ident = {"run": run, "range": loaded.get("range"), "base": loaded["base"],
+             "target": loaded["target"], "profile": loaded.get("profile"),
+             "focus": loaded.get("focus"),
+             "packets": [[p["id"], list(p["files"])] for p in loaded["packets"]]}
+    raw = json.dumps(ident, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert kit._plan_digest(loaded, run) == hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    assert _accepted(kit, root, old)
+    done = kit.apply_since(high_plan, [_run_path(root, old)])
+    assert done["file_keys"]["a.py"]["reused_from"] == run
+
+
+def test_b_cp2r2_f2_plan_names_since_runs_it_passed_over(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    low = kit.build_plan(root, "base..t1", "standard", "bugs", None, False, level="low")
+    _record(kit, root, low, "p1", [_finding("a.py", 5, "low")])
+    sec = kit.build_plan(root, "base..t1", "standard", "security", None, False)
+    _record(kit, root, sec, "s1", [])
+    good = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, good, "p1", [])
+    ids = [p["_meta"]["run"] for p in (low, sec, good)]
+    capsys.readouterr()
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--since", ",".join(ids)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"Übergangen: {ids[0]} (Stufe low unter medium)" in lines
+    assert f"Übergangen: {ids[1]} (Fokus security statt bugs)" in lines
+    assert not any(ids[2] in line for line in lines if line.startswith("Übergangen"))
+    assert "Übernommen (--since): 1 Datei(en)" in lines
+
+    # checkpoint übernimmt nur aus checkpoint: der standard-Lauf wird mit Grund genannt.
+    soll = tmp_path / "soll.md"
+    soll.write_text("# Soll\n", encoding="utf-8")
+    assert _cli(kit, root, "plan", "--range", "base..t2", "--profile", "checkpoint",
+                "--soll-file", soll, "--since", ids[2]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"Übergangen: {ids[2]} (Profil standard, checkpoint übernimmt nur aus checkpoint)" \
+        in lines
+    assert not any(line.startswith("Übernommen") for line in lines)
+
+
+def test_b_cp2r2_f3_deeply_nested_store_is_collected_again(tmp_path, monkeypatch):
+    kit = _kit()
+    root, run, directory = _python_store_run(kit, tmp_path)
+    with_store = _packet_blocks(kit, root, run)
+    (directory / kit.COLLECTED_NAME).write_text("[" * 200000 + "]" * 200000, encoding="utf-8")
+    assert kit.load_collected(directory) is None
+    assert _packet_blocks(kit, root, run) == with_store
+    # Ein Programmierfehler bleibt sichtbar.
+
+    def broken(*args, **kwargs):
+        raise TypeError("Programmierfehler")
+
+    monkeypatch.setattr(kit.json, "loads", broken)
+    with pytest.raises(TypeError):
+        kit.load_collected(directory)
+
+
+def test_b_cp2r2_f4_profile_is_checked_before_its_level(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    for plan in ({"profile": ["checkpoint"]}, {"profile": "extrem"}, {}):
+        with pytest.raises(kit.KitError, match="Profil"):
+            kit.plan_level(plan)
+    assert kit.plan_level({"profile": "checkpoint"}) == "high"
+    assert kit.plan_level({"profile": ["x"], "level": "low"}) == "low"
+    root = _since_repo(tmp_path / "repo")
+    high_plan = kit.build_plan(root, "base..t2", "checkpoint", "bugs", None, False)
+    for profile in (["checkpoint"], "extrem"):
+        old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
+        _rewrite_plan(root, old, lambda data: (data.pop("level"), data.update(profile=profile)))
+        with pytest.raises(kit.KitError, match="profile"):
+            kit._load_plan(root, old["_meta"]["run"])
+        with pytest.raises(kit.KitError, match="profile"):
+            kit.apply_since(high_plan, [_run_path(root, old)])

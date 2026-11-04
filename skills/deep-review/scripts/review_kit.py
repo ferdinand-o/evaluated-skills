@@ -665,11 +665,15 @@ def _plan_command(rng: str, profile: str, focus: str, split_at: int, with_tests:
 
 def plan_level(plan) -> str:
     """Stufe der Reviews eines Plans: `level`, ohne (Plan aus Spec 26) der Standard seines
-    Profils aus `PROFILE_LEVELS` (E8)."""
+    Profils aus `PROFILE_LEVELS` (E8). Ohne `level` und ohne Profil aus `PROFILES` ein
+    KitError — kein TypeError und kein stiller Standard."""
     level = plan.get("level")
     if level is not None:
         return level
-    return PROFILE_LEVELS.get(plan.get("profile"), PROFILE_LEVELS["standard"])
+    profile = plan.get("profile")
+    if not isinstance(profile, str) or profile not in PROFILES:
+        raise KitError(f"Plan ohne level mit Profil {profile!r} — erlaubt: {', '.join(PROFILES)}")
+    return PROFILE_LEVELS[profile]
 
 
 def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
@@ -961,7 +965,8 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
     ein Objekt, `base`/`target` Text, `log_base` Text oder null, `packets` eine Liste von
     Objekten mit eindeutiger `id` (Text aus Buchstaben, Ziffern, `_`, `-`), `files` (Liste
     von Text) und `range` (Text oder null), `notes` eine Liste von Objekten mit `packet`,
-    `kind`, `text` (Text) und `files` (Liste von Text). Alles andere ist ein KitError, kein
+    `kind`, `text` (Text) und `files` (Liste von Text), `profile` ein Wert aus `PROFILES`,
+    `level` (wenn gesetzt) einer aus `LEVELS`. Alles andere ist ein KitError, kein
     TypeError."""
     path = run_dir(repo, run_id) / "plan.json"
     return path, _read_plan(path, run_id)
@@ -995,6 +1000,8 @@ def _read_plan(path: Path, run_id: str) -> dict:
     for key in ("log_base", "range"):
         if plan.get(key) is not None and not isinstance(plan[key], str):
             raise bad(f"{key} ist weder Text noch null")
+    if not isinstance(plan.get("profile"), str) or plan["profile"] not in PROFILES:
+        raise bad(f"profile {plan.get('profile')!r} ist kein Profil aus {', '.join(PROFILES)}")
     if plan.get("level") is not None and plan["level"] not in LEVELS:
         raise bad(f"level {plan['level']!r} ist keine Stufe aus {', '.join(LEVELS)}")
     if not isinstance(plan["packets"], list):
@@ -4128,10 +4135,13 @@ def load_collected(run_path):
     """Den Gegenstellen-Speicher des Laufs lesen (`store_collected`); None, wenn er fehlt,
     nicht lesbar ist, ein anderes `_meta.schema` als `SCHEMA_VERSION` trägt oder nicht die
     Form hat (jedes Feld geprüft, bis zu den Elementen von `unresolved`) — dann sammelt
-    `write_counterparts` selbst. Ob er zum Plan passt, prüft `_collected_matches`."""
+    `write_counterparts` selbst. Ob er zum Plan passt, prüft `_collected_matches`. Nicht
+    lesbar ist auch eine Eingabe, an der `json.loads` mit `RecursionError` (zu tief
+    verschachtelt) oder `MemoryError` scheitert; ein Programmierfehler (etwa TypeError) bleibt
+    sichtbar."""
     try:
         data = json.loads((Path(run_path) / COLLECTED_NAME).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError, MemoryError):
         return None
     if not (isinstance(data, dict) and isinstance(data.get("_meta"), dict)
             and data["_meta"].get("skill") == SKILL_NAME
@@ -4619,6 +4629,34 @@ def _coverage_chain(start: str, goal: str, steps: dict):
     return None
 
 
+def _since_skip(plan: dict, eplan: dict) -> str | None:
+    """Warum `apply_since` den früheren Plan `eplan` für `plan` übergeht — anderer Fokus, ein
+    Profil, aus dem `plan` nicht übernimmt (`SINCE_PROFILES`), oder eine niedrigere Stufe
+    (`plan_level`) —, als Text für die Ausgabe von `plan`; None, wenn er zählt."""
+    if eplan.get("focus") != plan.get("focus"):
+        return f"Fokus {eplan.get('focus')} statt {plan.get('focus')}"
+    allowed = SINCE_PROFILES.get(plan.get("profile"), ())
+    if eplan.get("profile") not in allowed:
+        return (f"Profil {eplan.get('profile')}, {plan.get('profile')} übernimmt nur aus "
+                f"{', '.join(allowed)}")
+    if LEVELS.index(plan_level(eplan)) < LEVELS.index(plan_level(plan)):
+        return f"Stufe {plan_level(eplan)} unter {plan_level(plan)}"
+    return None
+
+
+def _since_passed_over(plan, run_dirs) -> list[tuple[str, str]]:
+    """Die Läufe aus `run_dirs`, die `apply_since` für `plan` übergeht, je `(Lauf-ID, Grund)`
+    nach `_since_skip`, in der Reihenfolge von `run_dirs` — für die Zeilen
+    `Übergangen: <lauf> (<grund>)` der Ausgabe von `plan`."""
+    out = []
+    for directory in run_dirs:
+        run_id, eplan = _earlier_plan(directory)
+        why = _since_skip(plan, eplan)
+        if why is not None:
+            out.append((run_id, why))
+    return out
+
+
 def apply_since(plan, run_dirs):
     """Folgelauf (`--since`, Spec 26): übernimmt je Datei die Funde früherer Läufe.
 
@@ -4636,7 +4674,9 @@ def apply_since(plan, run_dirs):
     Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen. Ebenso zählen nur
     Läufe, deren Stufe (`plan_level`: `level`, ohne den Standard ihres Profils) in `LEVELS`
     mindestens so hoch ist wie die des neuen Plans — ein Review auf `low` trägt keinen Plan
-    auf `high`, weder als passender Lauf noch als Glied einer Kette. Darin gilt eine
+    auf `high`, weder als passender Lauf noch als Glied einer Kette. Die Regel steht in
+    `_since_skip`; die Ausgabe von `plan` nennt jeden so übergangenen Lauf mit Grund
+    (`_since_passed_over`). Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
     oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
@@ -4708,9 +4748,7 @@ def apply_since(plan, run_dirs):
         run_id, eplan = _earlier_plan(directory)
         if run_id == own_run:
             raise KitError(f"Lauf {run_id} kann nicht auf sich selbst folgen (--since)")
-        if eplan.get("focus") != plan.get("focus") \
-                or eplan.get("profile") not in SINCE_PROFILES.get(plan.get("profile"), ()) \
-                or LEVELS.index(plan_level(eplan)) < LEVELS.index(plan_level(plan)):
+        if _since_skip(plan, eplan) is not None:
             continue
         earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan))
         repo = repo or _layout(Path(directory))[0]
@@ -4900,12 +4938,17 @@ def _shown_path(repo: Path, path) -> str:
 
 
 def _plan_digest(plan: dict, run_id: str) -> str:
-    """Fingerabdruck eines Plans für `_meta.plan` der Ergebnisse: Lauf, Bereich, Profil, Fokus
-    und je Paket ID und Dateien. Ohne `range` der Pakete und ohne `notes` — die schreiben
-    `counterparts` und `cleanup` später, ohne dass der Plan ein anderer wird."""
+    """Fingerabdruck eines Plans für `_meta.plan` der Ergebnisse: Lauf, Bereich, Profil, Fokus,
+    Stufe und je Paket ID und Dateien. Ohne `range` der Pakete und ohne `notes` — die schreiben
+    `counterparts` und `cleanup` später, ohne dass der Plan ein anderer wird. `level` zählt nur,
+    wenn der Plan das Feld trägt: Ein Plan aus Spec 26 ohne `level` behält seinen
+    Fingerabdruck, seine Ergebnisse bleiben angenommen (E8); eine nach `record` geänderte oder
+    entfernte Stufe macht sie ungültig."""
     ident = {"run": run_id, "range": plan.get("range"), "base": plan["base"],
              "target": plan["target"], "profile": plan.get("profile"), "focus": plan.get("focus"),
              "packets": [[p["id"], list(p["files"])] for p in plan["packets"]]}
+    if "level" in plan:
+        ident["level"] = plan["level"]
     raw = json.dumps(ident, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8", errors="surrogateescape")).hexdigest()
 
@@ -5564,6 +5607,11 @@ def _cmd_plan(args) -> int:
     reused = [p for p, info in plan["file_keys"].items() if info.get("reused_from")]
     if reused:
         print(f"Übernommen (--since): {len(reused)} Datei(en)")
+    # Je übergangenem --since-Lauf eine Zeile mit Grund: sonst zahlt der Nutzer ein volles
+    # Review, ohne zu sehen, warum nichts übernommen wurde.
+    named = [run_dir(repo, s) for s in dict.fromkeys(since or ())]
+    for earlier, why in _since_passed_over(plan, named):
+        print(f"Übergangen: {earlier} ({why})")
     if plan["not_reviewed"]:
         print(f"Nicht reviewt: {len(plan['not_reviewed'])} Datei(en)")
     return 0
