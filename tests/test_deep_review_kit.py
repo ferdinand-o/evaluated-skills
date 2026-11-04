@@ -119,7 +119,7 @@ def test_seeded_fixtures(tmp_path):
 
 KIT_PATH = "skills/deep-review/scripts/review_kit.py"
 RUN_ID_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d{6})-([0-9a-f]{7})-([0-9a-z]{4})$")
-PLAN_KEYS = ["_meta", "range", "base", "target", "log_base", "root", "profile", "focus", "level",
+PLAN_KEYS = ["_meta", "mode", "range", "base", "target", "log_base", "root", "profile", "focus", "level",
              "split", "split_at", "packet_size", "changed_lines", "packets", "file_keys", "not_reviewed"]
 PACKET_KEYS = ["id", "files", "changed_lines", "range", "reused_from"]
 
@@ -6448,9 +6448,10 @@ def test_b_cp2r2_f1_level_is_part_of_the_plan_digest(tmp_path, monkeypatch):
         _rewrite_plan(root, low, lambda data: data.update(level="low"))
         assert _accepted(kit, root, low)
 
-    # Ein Plan ohne level (Spec 26) behält seinen Fingerabdruck: sein Ergebnis bleibt angenommen.
+    # Ein Plan ohne level und mode (Spec 26) behält seinen Fingerabdruck: sein Ergebnis bleibt
+    # angenommen.
     old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
-    _rewrite_plan(root, old, lambda data: data.pop("level"))
+    _rewrite_plan(root, old, lambda data: (data.pop("level"), data.pop("mode")))
     _record(kit, root, old, "p1", [_finding("a.py", 5, "alt")])
     run = old["_meta"]["run"]
     _path, loaded = kit._load_plan(root, run)
@@ -7915,3 +7916,177 @@ def test_b_render_block_filters_spans():
     assert "### big.py:5 x" in text and "### lib.py:2000 x" in text
     assert "### big.py:900 x" not in text and "2 Stelle(n) nach der Sammelregel" in text
     assert kit._render(packet, entries, 0, None)[1] == 2
+
+
+# --- Pfad-Modus (Spec 28, Ablauf Schritt 1) -----------------------------------------------------
+
+PATH_LIB = 'def fail(x):\n    if x:\n        raise ValueError("lib")\n    return x\n'
+PATH_B = 'def helper(x):\n    if x:\n        raise KeyError("intern")\n    return x\n'
+PATH_A = ("from lib.errors import fail\nfrom src.b import helper\n\n\n"
+          "def run(x):\n    fail(x)\n    return helper(x)\n")
+PATH_PAS = "unit {0};\n\ninterface\n\nimplementation\n\nprocedure P{0};\nbegin\nend;\n\nend.\n"
+
+
+def _path_repo(root):
+    """`lib/errors.py` (außerhalb des Pfads, wirft), `src/a.py` ruft `fail` aus lib und
+    `helper` aus `src/b.py` (im Pfad, wirft); dazu Test, Doku, zwei Delphi-Units an der Wurzel
+    und ein zweiter Commit, der nur `lib/` ändert — der Pfad-Modus sieht keinen Verlauf."""
+    root.mkdir(parents=True)
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "user.email", "t@example.invalid")
+    git(root, "config", "user.name", "Test")
+    _commit_files(root, "basis", {"lib/__init__.py": "", "lib/errors.py": PATH_LIB,
+                                  "src/__init__.py": "", "src/a.py": PATH_A, "src/b.py": PATH_B,
+                                  "src/test_a.py": "def test_x():\n    assert True\n",
+                                  "src/README.md": "# src\n", "srcx/c.py": "c = 1\n",
+                                  "a.pas": PATH_PAS.format("a"), "b.pas": PATH_PAS.format("b")})
+    git(root, "tag", "base")
+    _commit_files(root, "nur lib", {"lib/errors.py": PATH_LIB + "z = 1\n"})
+    return root
+
+
+def _only_run(kit, root, before):
+    runs = sorted(set(_runs(root)) - set(before))
+    assert len(runs) == 1, runs
+    return runs[0], _plan_on_disk(kit, root, runs[0])
+
+
+def test_b_path_mode(tmp_path, monkeypatch, capsys):
+    kit = _kit()
+    root = _path_repo(tmp_path / "repo")
+    head = _rev(root, "HEAD")
+    assert (kit.PATH_SPLIT_AT, kit.PATH_PACKET_SIZE) == (6000, 3000)
+
+    # --help nennt --path.
+    with pytest.raises(SystemExit) as exc:
+        kit.main(["plan", "--help"])
+    assert exc.value.code == 0 and "--path" in capsys.readouterr().out
+
+    # plan --path src: mode path, Ziel HEAD, Basis = Baum des Ziels ohne die Pfad-Dateien.
+    before = _user_state(root)
+    assert _cli(kit, root, "plan", "--path", "src") == 0
+    out = capsys.readouterr().out
+    run, plan = _only_run(kit, root, [])
+    assert "Pfad: src" in out and "Reviews: 1 × /code-review medium" in out
+    assert plan["mode"] == "path" and plan["paths"] == ["src"]
+    assert "review_kit.py plan --path src" in plan["_meta"]["generated"]
+    assert plan["target"] == head and plan["log_base"] is None and plan["root"] is False
+    in_path = ["src/README.md", "src/__init__.py", "src/a.py", "src/b.py", "src/test_a.py"]
+    all_files = git(root, "ls-tree", "-r", "--name-only", "HEAD").split()
+    assert git(root, "ls-tree", "-r", "--name-only", plan["base"]).split() == [
+        f for f in all_files if f not in in_path]
+    assert plan["split"] is False and plan["split_at"] == 6000 and plan["packet_size"] == 3000
+    [packet] = plan["packets"]
+    assert packet["id"] == "p1" and packet["range"] is None
+    assert packet["files"] == ["src/__init__.py", "src/a.py", "src/b.py"]
+    assert plan["changed_lines"] == packet["changed_lines"] == 7 + 4
+    assert sorted(n["file"] for n in plan["not_reviewed"]) == ["src/README.md", "src/test_a.py"]
+    assert set(plan["file_keys"]) == set(packet["files"])
+    assert all(info["base_blob"] == kit.ABSENT_MARK for info in plan["file_keys"].values())
+    assert _refs(root) == [] and _user_state(root) == before
+
+    # counterparts: Hilfscommits mit den Pfad-Dateien als neu; bis^{tree} = Ziel; der
+    # Arbeitsbaum bleibt.
+    [item] = kit.write_counterparts(root, run)
+    assert _user_state(root) == before
+    plan = _plan_on_disk(kit, root, run)
+    von, bis = plan["packets"][0]["range"].split("..")
+    assert item["range"] == plan["packets"][0]["range"]
+    assert _rev(root, f"{bis}^{{tree}}") == _rev(root, "HEAD^{tree}")
+    assert _name_status(root, f"{von}..{bis}") == [("A", f) for f in packet["files"]]
+    assert "notes" not in plan or plan["notes"] == []
+    # Gegenstellen nur für Aufrufe, die den Pfad verlassen: fail (lib) ja, helper (src) nein.
+    directory = kit.run_dir(root, run)
+    block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
+    assert "ruft fail(...)" in block and "lib/errors.py" in block
+    assert "ruft helper(...)" not in block and "KeyError" not in block
+    assert "außerhalb der Dateien des Pfads" in block
+    assert item["counterparts"] == 1
+    stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
+    assert [e["line"] for e in stored["files"]["src/a.py"]["entries"]] == [6]
+    # Der Auftrag nennt Bereich und Pfad.
+    prompt = (directory / "packets" / "p1.prompt.md").read_text(encoding="utf-8")
+    area = prompt.split("## Bereich", 1)[1].split("\n## ", 1)[0]
+    assert f"{von}..{bis}" in area and "Pfad: `src`" in area
+
+    # report nennt den Pfad statt des Bereichs; audit vergleicht Text gegen Text.
+    _rec(kit, directory, "p1", "/code-review", _payload(tmp_path, [], "p1.json"))
+    kit.merge(directory)
+    report = kit.write_report(directory).read_text(encoding="utf-8").splitlines()
+    assert "| path: src |" in report[0] and "| range: " not in report[0]
+    assert report[1] == "# deep-review Pfad src"
+    assert kit.audit(directory, None)["complete"] is True
+
+    # Abweichender Arbeitsbaum in einer Pfad-Datei: Hinweis worktree_differs.
+    (root / "src" / "a.py").write_text(PATH_A + "x = 1\n", encoding="utf-8")
+    kit.write_counterparts(root, run)
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [(n["kind"], n["files"]) for n in notes] == [("worktree_differs", ["src/a.py"])]
+    git(root, "checkout", "--quiet", "--", "src/a.py")
+
+    # Zwei Dateien, durch Komma getrennt.
+    runs = _runs(root)
+    assert _cli(kit, root, "plan", "--path", "a.pas,b.pas") == 0
+    _run2, plan2 = _only_run(kit, root, runs)
+    assert plan2["mode"] == "path" and plan2["paths"] == ["a.pas", "b.pas"]
+    assert [p["files"] for p in plan2["packets"]] == [["a.pas", "b.pas"]]
+    assert git(root, "ls-tree", "-r", "--name-only", plan2["base"]).split() == [
+        f for f in all_files if f not in ("a.pas", "b.pas")]
+
+    # Über PATH_SPLIT_AT: Pakete bis PATH_PACKET_SIZE, eine große Datei in Spannen.
+    big = _span_python(130, "p")
+    _commit_files(root, "groß", {"src/big.py": big})
+    monkeypatch.setattr(kit, "PATH_SPLIT_AT", 40)
+    monkeypatch.setattr(kit, "PATH_PACKET_SIZE", 60)
+    split = kit.build_path_plan(root, ["src"], "standard", "bugs", False)
+    assert split["split"] is True and split["split_at"] == 40 and split["packet_size"] == 60
+    assert all(p["changed_lines"] <= 60 for p in split["packets"])
+    spans = [p["spans"][0]["lines"] for p in split["packets"] if "spans" in p]
+    assert len(spans) >= 3 and spans[0][0] == 1 and spans[-1][1] == 130
+    assert sum(p["changed_lines"] for p in split["packets"]) == split["changed_lines"] == 141
+    kit.write_counterparts(root, split["_meta"]["run"])
+    for p in _plan_on_disk(kit, root, split["_meta"]["run"])["packets"]:
+        von, bis = p["range"].split("..")
+        assert _rev(root, f"{bis}^{{tree}}") == _rev(root, "HEAD^{tree}")
+        if "spans" in p:
+            start, end = p["spans"][0]["lines"]
+            assert _diff_lines(root, von, bis) == ["+" + ln for ln in big.splitlines()[start - 1:end]]
+
+    # Falsche Aufrufe: --path mit --range Exit 2; --since, leerer und fehlender Pfad Exit 1.
+    runs = _runs(root)
+    with pytest.raises(SystemExit) as exc:
+        _cli(kit, root, "plan", "--path", "src", "--range", "base..HEAD")
+    assert exc.value.code == 2
+    assert _cli(kit, root, "plan", "--path", "src", "--since", run) == 1
+    assert "--since" in capsys.readouterr().err
+    for bad in (",", "fehlt", "../x"):
+        assert _cli(kit, root, "plan", "--path", bad) == 1, bad
+    assert _runs(root) == runs
+
+
+def test_b_path_mode_target_options_and_digest(tmp_path, capsys):
+    """`--target` setzt das Ziel des Pfad-Modus (Hinweis `target_not_head`); `--split-at` mit
+    `--path` und `--target` ohne `--path` sind Fehler; ein Bereichsplan trägt `mode: range`;
+    `mode` und `paths` gehören zum Fingerabdruck."""
+    kit = _kit()
+    root = _path_repo(tmp_path / "repo")
+    runs = _runs(root)
+    assert _cli(kit, root, "plan", "--path", "src/a.py,./src/a.py,src/b.py/", "--target",
+                "base") == 0
+    run, plan = _only_run(kit, root, runs)
+    assert plan["target"] == _rev(root, "base") and plan["paths"] == ["src/a.py", "src/b.py"]
+    assert "--target base" in plan["_meta"]["generated"]
+    kit.write_counterparts(root, run)
+    notes = _plan_on_disk(kit, root, run)["notes"]
+    assert [n["kind"] for n in notes] == ["target_not_head"]
+    digest = kit._plan_digest(plan, run)
+    assert kit._plan_digest({**plan, "paths": ["src"]}, run) != digest
+    assert kit._plan_digest({**plan, "mode": "range"}, run) != digest
+
+    runs = _runs(root)
+    assert _cli(kit, root, "plan", "--path", "src", "--split-at", "10") == 1
+    assert _cli(kit, root, "plan", "--range", "base..HEAD", "--target", "base") == 1
+    err = capsys.readouterr().err
+    assert "--split-at" in err and "--target" in err
+    assert _runs(root) == runs
+    assert kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)["mode"] == "range"

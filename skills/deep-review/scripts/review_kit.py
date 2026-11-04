@@ -11,7 +11,8 @@ bleiben unberührt (E6).
 
 Stand Task 7: Lauf-ID, JSON-Schreiber, Zählung über `git diff --numstat --no-renames`
 ab der Merge-Basis, Einordnung (reviewt oder `not_reviewed` mit Grund), Schnittregel mit
-Spannen in großen Dateien (`split_file_spans`, Spec 28), `build_plan`, Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
+Spannen in großen Dateien (`split_file_spans`, Spec 28), `build_plan`, der Pfad-Modus
+(`build_path_plan`, Spec 28: die Dateien eines Pfads am Ziel als neu), Paket-Bereiche (`make_packet_range`), `cleanup` und die Gegenstellen für
 Python (`collect_python`; Zielcode nur per `ast` gelesen) und Delphi (`collect_delphi`,
 Text-Scanner über `mask_pascal`), beide aus Git am ZIEL, mit `render_block` und
 `write_counterparts` (Spec 28: die Gegenstellen sammelt `plan` einmal und legt sie je Datei
@@ -24,6 +25,8 @@ mit den Unterbefehlen
 
     plan --range R [--profile P] [--focus F] [--level S] [--split-at N] [--since L[,L…]]
          [--soll-file D] [--with-tests]
+    plan --path P[,P…] [--target Z] [--profile P] [--focus F] [--level S] [--soll-file D]
+         [--with-tests]
     counterparts --run L
     record --run L --packet ID --tool T [--no-block] DATEI|-
     merge --run L
@@ -71,6 +74,8 @@ from typing import NamedTuple
 # Grenzwerte (Spec 26, E7). Der Report nennt sie.
 SPLIT_AT = 800            # bis hierher ein Paket über den Originalbereich
 PACKET_SIZE = 600         # obere Paketgröße beim Teilen (kleiner von diesem Wert und split_at)
+PATH_SPLIT_AT = 6000      # Pfad-Modus: bis hierher Zeilen der Pfad-Dateien ein Paket
+PATH_PACKET_SIZE = 3000   # Pfad-Modus: obere Paketgröße beim Teilen
 SPAN_MIN_SHARE = 0.25     # Spanne vor Definition/Leerzeile nur ab diesem Anteil von packet_size
 BLOCK_MAX_CHARS = 30000   # Gegenstellen-Block je Paket
 MERGE_LINE_GAP = 3        # Funde derselben Datei mit höchstens diesem Abstand vereinigen
@@ -97,6 +102,7 @@ CACHE_IGNORE_TEXT = "*\n"
 # Bootstrap-Regel: der erste Lauf nennt, was er anlegt, mit Pfad).
 CACHE_CREATED = f"Angelegt: {(CACHE_DIR / CACHE_IGNORE).as_posix()} (ignoriert den Cache)"
 DEFAULT_RANGE = "HEAD"    # ohne Bereich: der letzte Commit
+MODES = ("range", "path")  # `mode` im Plan; ohne Feld gilt `range` (Spec 26, E8)
 # Dieselbe Pathspec wie subagent-dev (plan_to_tasks.py, changed_lines); `numstat` ruft git
 # immer aus der Repo-Wurzel auf, `.` ist also das ganze Repo. Der Unterschied bleibt die
 # Basis: subagent-dev zählt `since..HEAD` direkt gegen BASIS (aus seinem Arbeitsordner),
@@ -1012,7 +1018,8 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     Hilfscommits (ein Basis-Commit mit leerem Baum), denn `/code-review` läse das blanke
     `<target>` als Ref und reviewte einen leeren Diff — deshalb trägt dort jedes Paket
     `range: null`, bis die Hilfscommits den reviewbaren Bereich liefern. Der Wortlaut des
-    Auftrags steht in `_meta.generated`. `changed_lines` zählt die
+    Auftrags steht in `_meta.generated`, `mode` ist `range` (Pfad-Modus: `build_path_plan`).
+    `changed_lines` zählt die
     reviewten Dateien; die übrigen stehen mit Grund unter `not_reviewed`, ein Pfad, der kein
     UTF-8 ist, in escapter Form (`caf\\xe9.png`) — als Quelldatei mit eigenem Grund
     `REASON_SOURCE_NOT_UTF8`, sonst `REASON_NOT_UTF8`. Ohne reviewte Datei: KitError
@@ -1043,14 +1050,7 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     übernommenen Delphi-Dateien ausgenommen, siehe dort). Der Speicher ist nur
     Zwischenspeicher: Scheitert sein Schreiben (KitError oder OSError), entsteht der Lauf ohne
     ihn. Fokus `quality` sammelt nichts und legt nichts ab."""
-    if profile not in PROFILES:
-        raise KitError(f"Profil {profile!r} unbekannt — erlaubt: {', '.join(PROFILES)}")
-    if focus not in FOCI:
-        raise KitError(f"Fokus {focus!r} unbekannt — erlaubt: {', '.join(FOCI)}")
-    if profile == "checkpoint" and focus != "bugs":
-        raise KitError("Profil checkpoint prüft nur Fokus bugs")
-    if level is not None and level not in LEVELS:
-        raise KitError(f"Stufe {level!r} unbekannt — erlaubt: {', '.join(LEVELS)}")
+    _check_plan_options(profile, focus, level)
     split_at = SPLIT_AT if split_at is None else split_at
     if not isinstance(split_at, int) or isinstance(split_at, bool) or split_at < 1:
         raise KitError(f"split_at muss eine positive Zahl sein, nicht {split_at!r}")
@@ -1060,11 +1060,48 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     stat = numstat(repo, rng)
     span = stat.span
     resolved = range_text(span)
+    reviewed, not_reviewed = _sorted_files(stat.counts, with_tests, f"in {rng!r}")
+    packet_size = min(PACKET_SIZE, split_at)
 
+    packed = _pack(reviewed, focus, split_at, packet_size, repo, span)
+    split = len(packed) > 1
+    root = span.log_base is None
+    # Beim Wurzel-Commit ist `resolved` nur `<ziel>`; /code-review läse das als Ref und
+    # reviewte einen leeren Diff — den Bereich liefern erst die Hilfscommits. Geteilte Pakete
+    # bekommen ihren Bereich ebenfalls erst dort.
+    packets = [{**p, "range": None if split or root else resolved, "reused_from": None}
+               for p in packed]
+    head = {"mode": "range", "range": resolved, "base": span.base, "target": span.target,
+            "log_base": span.log_base, "root": root}
+    return _write_new_plan(repo, span, _plan_command(rng, profile, focus, split_at, with_tests,
+                                                     level),
+                           head, profile, focus, level, split_at, packet_size, packets,
+                           reviewed, not_reviewed)
+
+
+def _check_plan_options(profile, focus, level) -> None:
+    """Profil, Fokus und Stufe eines neuen Plans — dieselbe Prüfung für `build_plan` und
+    `build_path_plan`; ein falscher Wert ist ein KitError."""
+    if profile not in PROFILES:
+        raise KitError(f"Profil {profile!r} unbekannt — erlaubt: {', '.join(PROFILES)}")
+    if focus not in FOCI:
+        raise KitError(f"Fokus {focus!r} unbekannt — erlaubt: {', '.join(FOCI)}")
+    if profile == "checkpoint" and focus != "bugs":
+        raise KitError("Profil checkpoint prüft nur Fokus bugs")
+    if level is not None and level not in LEVELS:
+        raise KitError(f"Stufe {level!r} unbekannt — erlaubt: {', '.join(LEVELS)}")
+
+
+def _sorted_files(counts: dict, with_tests: bool, where: str) -> tuple[dict, list]:
+    """(reviewte Dateien Pfad → Zeilen, `not_reviewed`) aus den gezählten Dateien `counts`
+    nach `classify` — für Bereichs- und Pfad-Modus dieselbe Regel. Ein Pfad, der kein UTF-8
+    ist, steht escapt unter `not_reviewed`: als Quelldatei mit `REASON_SOURCE_NOT_UTF8`, sonst
+    `REASON_NOT_UTF8`. Ohne reviewte Datei ein KitError „nichts zu reviewen <where>", der
+    solche Quelldateien nennt."""
     reviewed: dict[str, int] = {}
     not_reviewed = []
     source_not_utf8 = []
-    for path, lines in stat.counts.items():
+    for path, lines in counts.items():
         if not _is_utf8(path):
             # Erst einordnen: eine Quelldatei fehlt im Review, ein Bild oder Doku nicht.
             escaped = _escaped(path)
@@ -1083,19 +1120,21 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
         skipped = f", {len(not_reviewed)} Datei(en) ohne Review" if not_reviewed else ""
         sources = (f"; Quelldatei(en) mit Nicht-UTF-8-Pfad nicht reviewt: {', '.join(source_not_utf8)}"
                    if source_not_utf8 else "")
-        raise KitError(f"nichts zu reviewen in {rng!r}: keine geänderte Quelldatei{skipped}{sources}")
-    changed = sum(reviewed.values())
-    packet_size = min(PACKET_SIZE, split_at)
+        raise KitError(f"nichts zu reviewen {where}: keine geänderte Quelldatei{skipped}{sources}")
+    return reviewed, not_reviewed
 
-    packed = _pack(reviewed, focus, split_at, packet_size, repo, span)
-    split = len(packed) > 1
-    root = span.log_base is None
-    # Beim Wurzel-Commit ist `resolved` nur `<ziel>`; /code-review läse das als Ref und
-    # reviewte einen leeren Diff — den Bereich liefern erst die Hilfscommits. Geteilte Pakete
-    # bekommen ihren Bereich ebenfalls erst dort.
-    packets = [{**p, "range": None if split or root else resolved, "reused_from": None}
-               for p in packed]
 
+def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile: str,
+                    focus: str, level, split_at: int, packet_size: int, packets: list,
+                    reviewed: dict, not_reviewed: list, inside=None) -> dict:
+    """Der gemeinsame Schluss von `build_plan` und `build_path_plan`: Gegenstellen sammeln
+    (außer Fokus `quality`), `file_keys`, Laufordner, `plan.json` und den Gegenstellen-Speicher
+    schreiben. `head` sind die ersten Felder des Plans (`mode`, beim Pfad-Modus `paths`,
+    `range`, `base`, `target`, `log_base`, `root`; `mode` ist `range` oder `path`, ein Plan
+    ohne `mode` gilt als `range`, E8). `inside` (Pfad-Modus): die reviewten
+    Dateien des Pfads — Einträge, deren Gegenstellen alle darin liegen, fallen weg
+    (`_leaving_path`), in Speicher und Schlüsseln. Scheitert das Schreiben, bleibt kein
+    Laufordner."""
     # Der schon aufgelöste Span geht an die Sammler: kein zweites Auflösen der SHAs. Je Datei
     # abgelegt (`store_collected`), damit `counterparts` nicht noch einmal sammelt.
     collected = None
@@ -1103,6 +1142,10 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     if focus != "quality":
         per_file: dict = {}
         entries = _collect_all(repo, span, list(reviewed), per_file).entries
+        if inside is not None:
+            entries = _leaving_path(entries, inside)
+            for record in per_file.values():
+                record["entries"] = _leaving_path(record["entries"], inside)
         collected = _collected_payload(repo, span, focus, list(reviewed), per_file)
     keys = file_keys(repo, span.target, list(reviewed), entries)
     base_blobs = _file_blobs(repo, span.base, list(reviewed))
@@ -1112,21 +1155,16 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
              for path, lines in reviewed.items()}
 
     run_id, directory = _new_run_dir(repo, span.target)
-    meta = {"generated": _plan_command(rng, profile, focus, split_at, with_tests, level),
-            "run": run_id}
+    meta = {"generated": generated, "run": run_id}
     payload = {
-        "range": resolved,
-        "base": span.base,
-        "target": span.target,
-        "log_base": span.log_base,
-        "root": root,
+        **head,
         "profile": profile,
         "focus": focus,
         "level": PROFILE_LEVELS[profile] if level is None else level,
-        "split": split,
+        "split": len(packets) > 1,
         "split_at": split_at,
         "packet_size": packet_size,
-        "changed_lines": changed,
+        "changed_lines": sum(reviewed.values()),
         "packets": packets,
         "file_keys": keyed,
         "not_reviewed": not_reviewed,
@@ -1141,6 +1179,135 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     except BaseException:
         shutil.rmtree(directory, ignore_errors=True)
         raise
+
+
+# --- Pfad-Modus (Spec 28, Ablauf Schritt 1) -----------------------------------------------
+#
+# Ein Pfad wird wie ein Bereich vom leeren Stand bis zum Ziel behandelt (analog Wurzel-Commit):
+# Basis ist der Baum des Ziels ohne die Dateien des Pfads, gezählt wird `basis..ziel` — so
+# zählt jede Zeile der Pfad-Dateien als neu. Die Hilfscommits je Paket baut wie immer
+# `make_packet_range` (temporärer Index, E6).
+
+COUNTERPART_REF_RE = re.compile(r"- Gegenstelle .*? \[(.+?):\d+\]: ")   # Ort einer Gegenstelle
+PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Gegenstellen stehen hier nur für Aufrufe, deren "
+                   "Gegenstelle außerhalb der Dateien des Pfads liegt — die Dateien des Pfads "
+                   "reviewt dieses Review selbst.")
+
+
+def _path_list(paths) -> list:
+    """Die Pfade des Auftrags, repo-relativ in POSIX-Form, ohne Dopplung, in der gegebenen
+    Reihenfolge: Text (durch Komma getrennt) oder Liste. `\\` wird `/`, `./` und ein `/` am
+    Ende fallen weg. Leer, absolut oder mit `..` außerhalb des Repos: KitError."""
+    items = paths.split(",") if isinstance(paths, str) else paths
+    if not isinstance(items, (list, tuple)):
+        raise KitError(f"Pfade als Text oder Liste erwartet, nicht {paths!r}")
+    out: list[str] = []
+    for raw in items:
+        if not isinstance(raw, str):
+            raise KitError(f"Pfad {raw!r} ist kein Text")
+        text = raw.strip().replace("\\", "/")
+        if not text:
+            continue
+        if text.startswith("/") or re.match(r"[A-Za-z]:/", text):
+            raise KitError(f"Pfad {raw!r} ist absolut — gib ihn relativ zum Repo an")
+        norm = posixpath.normpath(text)
+        if norm == ".." or norm.startswith("../"):
+            raise KitError(f"Pfad {raw!r} liegt außerhalb des Repos")
+        if norm not in out:
+            out.append(norm)
+    if not out:
+        raise KitError("leerer Pfad — gib --path <pfad>[,<pfad>…] an (relativ zum Repo)")
+    return out
+
+
+def _path_files(repo: Path, target: str, paths: list) -> list:
+    """Die Dateien der `paths` im Baum von `target` (Ordner rekursiv, auch Symlinks und
+    Submodule), ohne `.skills/`, sortiert. Ein Pfad ohne Datei dort: KitError."""
+    files: set[str] = set()
+    for path in paths:
+        out = _git(repo, "ls-tree", "-r", "-z", "--name-only", "--full-tree", target, "--",
+                   f":(literal){path}")
+        found = [p for p in out.split("\0") if p and not _under_skills(p)]
+        if not found:
+            raise KitError(f"Pfad {path!r} fehlt am Ziel {target[:SHORT_SHA_LEN]} "
+                           "(oder enthält nur .skills/)")
+        files.update(found)
+    return sorted(files)
+
+
+def _tree_without(repo: Path, target: str, files: list) -> str:
+    """SHA des Baums von `target` ohne `files` — über einen temporären Index; HEAD, Index und
+    Arbeitsbaum des Nutzers bleiben (E6). Git schreibt nur das Baum-Objekt."""
+    null = "0" * len(target)
+    with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
+        env = _helper_env(Path(tmp) / "index")
+        _git(repo, "read-tree", target, env=env)
+        _git(repo, "update-index", "-z", "--index-info", env=env,
+             stdin=_index_info(files, {}, null))
+        return _git(repo, "write-tree", env=env).strip()
+
+
+def _leaving_path(entries, inside) -> list:
+    """Die Gegenstellen-Einträge, die den Pfad verlassen: mindestens eine ihrer Gegenstellen
+    (`- Gegenstelle … [<datei>:<zeile>]`) liegt außerhalb der Dateien `inside`, oder der
+    Eintrag nennt keine (Besitz-Default der RTL). Idempotent."""
+    out = []
+    for entry in entries:
+        refs = [m[1] for line in entry["lines"] if (m := COUNTERPART_REF_RE.match(line))]
+        if not refs or any(ref not in inside for ref in refs):
+            out.append(entry)
+    return out
+
+
+def _path_command(paths: list, profile: str, focus: str, with_tests: bool, level,
+                  target) -> str:
+    cmd = (f"{SCRIPT_CMD} plan --path {shlex.quote(','.join(paths))} --profile {profile} "
+           f"--focus {focus}")
+    cmd += f" --target {shlex.quote(target)}" if target is not None else ""
+    cmd += f" --level {level}" if level is not None else ""
+    return cmd + (" --with-tests" if with_tests else "")
+
+
+def build_path_plan(repo, paths, profile, focus, with_tests, *, level=None, target=None):
+    """Paketplan für Pfade schreiben und zurückgeben (Spec 28, Ablauf Schritt 1: `plan
+    --path`).
+
+    `paths`: Ordner oder Dateien relativ zum Repo (Text mit Komma oder Liste, `_path_list`).
+    Geprüft wird der Stand am Ziel `target` (None = `HEAD`), nicht der Arbeitsbaum. Die
+    Dateien der Pfade am Ziel gelten als neu, analog zum Wurzel-Commit: `base` ist der Baum des
+    Ziels ohne sie (`_tree_without`, ein Baum, kein Commit), gezählt wird `base..target` wie im
+    Bereichsmodus (`numstat`), also jede Zeile der Pfad-Dateien. Testdateien, Doku, Bilder,
+    Projektdateien und Pfade ohne UTF-8 stehen wie im Bereichsmodus unter `not_reviewed`
+    (`_sorted_files`). Bis `PATH_SPLIT_AT` Zeilen ein Paket `p1` (`split: false`), darüber
+    Pakete nach der Schnittregel bis `PATH_PACKET_SIZE`, eine größere Datei in Spannen
+    (`split_file_spans`); Fokus `security` ein Paket `s1`. Jedes Paket hat `range: null`: Einen
+    Originalbereich, den `/code-review` lesen könnte, gibt es nicht — den reviewbaren Bereich
+    liefern die Hilfscommits von `counterparts` (`von` = Ziel ohne die Paketdateien, `bis` =
+    Baum des Ziels).
+
+    Der Plan trägt `mode: "path"` und `paths`, dazu `range` = `<base>..<target>` (ein
+    Diff-Bereich über einen Baum, kein Log-Bereich), `log_base` null und `root` false; sonst
+    dieselben Felder und Dateien wie `build_plan`. Gegenstellen nur für Aufrufe, die den Pfad
+    verlassen (`_leaving_path`), im Speicher und in den Schlüsseln. `level` wie bei
+    `build_plan`. Ein leerer Pfad, ein Pfad, den das Ziel nicht hat, oder ein unbekanntes Ziel
+    ist ein KitError; ohne reviewte Datei „nichts zu reviewen"; kein Lauf."""
+    _check_plan_options(profile, focus, level)
+    wanted = _path_list(paths)
+    repo = _toplevel(repo)
+    target_sha = _commit(repo, DEFAULT_RANGE if target is None else target)
+    base = _tree_without(repo, target_sha, _path_files(repo, target_sha, wanted))
+    span = Span(base, target_sha, None)
+    stat = numstat(repo, span)
+    reviewed, not_reviewed = _sorted_files(stat.counts, with_tests,
+                                           f"im Pfad {','.join(wanted)!r}")
+    packed = _pack(reviewed, focus, PATH_SPLIT_AT, PATH_PACKET_SIZE, repo, span)
+    packets = [{**p, "range": None, "reused_from": None} for p in packed]
+    head = {"mode": "path", "paths": wanted, "range": f"{base}..{target_sha}", "base": base,
+            "target": target_sha, "log_base": None, "root": False}
+    return _write_new_plan(repo, span, _path_command(wanted, profile, focus, with_tests, level,
+                                                     target),
+                           head, profile, focus, level, PATH_SPLIT_AT, PATH_PACKET_SIZE,
+                           packets, reviewed, not_reviewed, inside=set(reviewed))
 
 
 # --- Paket-Bereiche und cleanup -------------------------------------------------------------
@@ -1291,7 +1458,8 @@ def _load_plan(repo: Path, run_id: str) -> tuple[Path, dict]:
     Objekten mit eindeutiger `id` (Text aus Buchstaben, Ziffern, `_`, `-`), `files` (Liste
     von Text) und `range` (Text oder null), `notes` eine Liste von Objekten mit `packet`,
     `kind`, `text` (Text) und `files` (Liste von Text), `profile` ein Wert aus `PROFILES`,
-    `level` (wenn gesetzt) einer aus `LEVELS`, `spans` eines Pakets (wenn gesetzt; ohne gilt
+    `level` (wenn gesetzt) einer aus `LEVELS`, `mode` (wenn gesetzt; ohne gilt `range`, E8)
+    einer aus `MODES` und bei `path` `paths` eine nicht leere Liste von Text, `spans` eines Pakets (wenn gesetzt; ohne gilt
     die ganze Datei, E8) eine Liste von `{"file": Datei des Pakets, "lines": [von, bis]}`.
     Alles andere ist ein KitError, kein TypeError."""
     path = run_dir(repo, run_id) / "plan.json"
@@ -1330,6 +1498,12 @@ def _read_plan(path: Path, run_id: str) -> dict:
         raise bad(f"profile {plan.get('profile')!r} ist kein Profil aus {', '.join(PROFILES)}")
     if plan.get("level") is not None and plan["level"] not in LEVELS:
         raise bad(f"level {plan['level']!r} ist keine Stufe aus {', '.join(LEVELS)}")
+    if plan.get("mode", "range") not in MODES:
+        raise bad(f"mode {plan.get('mode')!r} ist keiner aus {', '.join(MODES)}")
+    if plan.get("mode") == "path" and not (
+            isinstance(plan.get("paths"), list) and plan["paths"]
+            and all(isinstance(p, str) and p for p in plan["paths"])):
+        raise bad("paths ist keine Liste von Pfaden (mode path)")
     if not isinstance(plan["packets"], list):
         raise bad("packets ist keine Liste")
     seen = set()
@@ -1545,6 +1719,14 @@ def _range_message(repo: Path, log_base, target: str) -> bytes:
     return out.encode("utf-8", errors="surrogateescape")
 
 
+def _path_message(plan: dict) -> bytes:
+    """Message von `bis` im Pfad-Modus: Pfade und Ziel. Ein Verlauf gehört nicht dazu — der
+    Pfad-Modus prüft einen Stand, keine Änderung."""
+    text = (f"deep-review: Pfad {','.join(plan['paths'])} am Ziel {plan['target']}\n\n"
+            "Die Dateien des Pfads stehen in diesem Diff als neu.\n")
+    return text.encode("utf-8", errors="surrogateescape")
+
+
 def _index_info(files, entries: dict, null: str) -> bytes:
     """`update-index --index-info`-Eingabe: die Paketdateien auf den Stand von `entries`.
     Erst entfernen, dann setzen — so steht keine Datei einem gleichnamigen Ordner im Weg."""
@@ -1557,7 +1739,7 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
                     target_entries: dict, spans=None, memo=None) -> tuple[str, str]:
     """`von` = ZIEL mit den Paketdateien auf dem Stand der gezählten Basis (Parent ZIEL),
     `bis` = `von` mit den Paketdateien auf dem Stand von ZIEL (Parent `von`, die Messages
-    des Bereichs); beide unter `refs/deep-review/<lauf>/<id>/`. Nur temporärer Index,
+    des Bereichs, im Pfad-Modus `_path_message`); beide unter `refs/deep-review/<lauf>/<id>/`. Nur temporärer Index,
     Objekte und diese Refs.
 
     Der Baum von `bis` ist der von ZIEL. Nur wenn eine Paketdatei auf dem Stand der Basis
@@ -1591,7 +1773,8 @@ def _helper_commits(repo: Path, run_id: str, pid: str, plan: dict, files,
         von_entries[path] = (base[0] if first_here else target_entries[path][0], "blob", sha)
     von_info = _index_info(files, von_entries, null)
     bis_info = _index_info(files, target_entries, null)
-    message = _range_message(repo, plan["log_base"], target)
+    message = (_path_message(plan) if plan.get("mode") == "path"
+               else _range_message(repo, plan["log_base"], target))
     with tempfile.TemporaryDirectory(prefix="deep-review-index-") as tmp:
         env = _helper_env(Path(tmp) / "index")
         _git(repo, "read-tree", target, env=env)
@@ -4714,17 +4897,22 @@ def _has_delphi(packet: dict) -> bool:
 
 class _PromptInputs(NamedTuple):
     """Was für alle Pakete eines Plans gleich ist: der Auftragstext (`_brief_text`), das Soll
-    (`_soll_text`, None ohne) und die Delphi-Prüfliste (`_delphi_text`; None, wenn kein Paket
-    sie braucht)."""
+    (`_soll_text`, None ohne), die Delphi-Prüfliste (`_delphi_text`; None, wenn kein Paket
+    sie braucht) und im Pfad-Modus Pfade und Ziel (`paths`, `target`; sonst None)."""
     task: str
     soll: str | None
     delphi: str | None
+    paths: tuple | None = None
+    target: str | None = None
 
 
 def _prompt_inputs(repo: Path, plan: dict, delphi: bool) -> _PromptInputs:
     """`_PromptInputs` eines Plans, je Datei einmal gelesen; die Prüfliste nur mit `delphi`."""
+    path_mode = plan.get("mode") == "path"
     return _PromptInputs(_brief_text(plan.get("focus")), _soll_text(repo, plan),
-                         _delphi_text() if delphi else None)
+                         _delphi_text() if delphi else None,
+                         tuple(plan["paths"]) if path_mode else None,
+                         plan["target"] if path_mode else None)
 
 
 def write_prompt(run_path, packet, block, level, *, inputs=None):
@@ -4734,7 +4922,7 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     sie steht nur in der letzten Zeile), der Auftragstext aus
     `references/review-brief.md` (`_brief_text`, nach dem Fokus des Plans), der Bereich
     `<von>..<bis>` (`packet["range"]`; bei einem Paket mit `spans` dazu die Spanne als
-    `datei:von-bis`), die Stufe `level`, im Profil `checkpoint` das Soll
+    `datei:von-bis`; im Pfad-Modus dazu der Pfad und das Ziel), die Stufe `level`, im Profil `checkpoint` das Soll
     (Inhalt der Datei aus `--soll-file`) unter „## Soll“, der Paketblock `block` (Text von
     `packets/<id>.md` ohne Kopfzeile, ohne Änderung), bei Delphi-Dateien im Paket (`files`) die
     Prüfliste `references/delphi.md` ohne ihren HTML-Kopf, das Rückgabeformat (`level` als
@@ -4760,6 +4948,9 @@ def write_prompt(run_path, packet, block, level, *, inputs=None):
     task = inputs.task.replace("<von>..<bis>", str(rng)).replace("<id>", pid)
     shown_spans = _spans_text(packet)
     area = f"## Bereich\n\n`{rng}`"
+    if inputs.paths:
+        area += (f"\n\nPfad: `{','.join(inputs.paths)}` am Ziel `{inputs.target}` — die Dateien "
+                 "des Pfads stehen im Diff als neu; geprüft wird ihr Stand am Ziel.")
     if shown_spans:
         area += (f"\n\nSpanne: `{shown_spans}` — geändert sind nur diese Zeilen; der Rest der "
                  "Datei steht auf dem Stand des Ziels.")
@@ -4831,6 +5022,9 @@ def write_counterparts(repo, run_id):
     live mit `per_file`, eine Datei in mehreren Spannen einmal je Lauf) und nimmt nur die
     Stellen, deren Aufrufstelle in der Spanne liegt (`_stored_found` mit Spannen, die eine
     Stelle dieses Filters) — Zahl, Block und nicht aufgelöste Stellen gelten der Spanne.
+    Pfad-Modus (`mode: path`): Die Sammler bekommen den Span des Plans (Basis ist ein Baum, `range`
+    kein Log-Bereich), und es bleiben nur Einträge, deren Gegenstelle den Pfad verlässt
+    (`_leaving_path` über die reviewten Dateien); der Block sagt das im Satz `PATH_BLOCK_NOTE`.
     Rückgabe: je Paket in Plan-Reihenfolge `{"packet", "range"
     (der Bereich von `make_packet_range`, wie er im Plan steht), "path" (Block, repo-relativ),
     "prompt" (Auftrag mit Block und Marke, repo-relativ — die Datei für den Reviewer),
@@ -4842,6 +5036,13 @@ def write_counterparts(repo, run_id):
     plan_range = plan.get("range")
     if not isinstance(plan_range, str) or not plan_range:
         raise KitError(f"Plan von Lauf {run_id} hat keinen Bereich (range)")
+    # Pfad-Modus: `range` geht über einen Baum und ist kein Log-Bereich; die Sammler bekommen
+    # den Span des Plans, und nur Gegenstellen außerhalb der Pfad-Dateien bleiben.
+    inside = None
+    if plan.get("mode") == "path":
+        plan_range = Span(plan["base"], plan["target"], plan["log_base"])
+        inside = set(plan.get("file_keys") or ()) or {
+            str(f) for packet in plan["packets"] for f in packet["files"]}
     quality = plan.get("focus") == "quality"
     stored = None if quality else load_collected(run_dir(repo, run_id))
     stored = stored if _collected_matches(plan, stored) else None
@@ -4867,6 +5068,8 @@ def write_counterparts(repo, run_id):
                             + [c.collect(repo, plan_range, packet["files"]) for c in live])
         elif not quality:
             found = _collect_all(repo, plan_range, packet["files"])
+        if found is not None and inside is not None:
+            found = found._replace(entries=_leaving_path(found.entries, inside))
         collected.append((packet, rng, found))
     # Die Hinweise erst nach allen Paketen: Delphi-Units werden bei Bedarf gescannt, und
     # welche nicht aufgehen, darf nicht von der Reihenfolge der Pakete abhängen.
@@ -4904,6 +5107,8 @@ def write_counterparts(repo, run_id):
                     notes.append(f"{len(others)} {collector.language}-Datei(en) außerhalb des "
                                  f"Pakets am ZIEL nicht lesbar ({reasons}) — dort keine "
                                  "Gegenstellen gesucht.")
+            if inside is not None:
+                notes.insert(0, PATH_BLOCK_NOTE.format(paths=", ".join(plan["paths"])))
             shown_packet.update(unreadable=found.unparsed, notes=notes)
             body, shown = _render(shown_packet, found.entries, found.unresolved, cap)
             total, unresolved = len(found.entries), found.unresolved
@@ -5632,13 +5837,17 @@ def _plan_digest(plan: dict, run_id: str) -> str:
     `counterparts` und `cleanup` später, ohne dass der Plan ein anderer wird. `level` zählt nur,
     wenn der Plan das Feld trägt: Ein Plan aus Spec 26 ohne `level` behält seinen
     Fingerabdruck, seine Ergebnisse bleiben angenommen (E8); eine nach `record` geänderte oder
-    entfernte Stufe macht sie ungültig."""
+    entfernte Stufe macht sie ungültig. Ebenso `mode` und `paths` (Spec 28, Pfad-Modus): nur,
+    wenn der Plan sie trägt."""
     ident = {"run": run_id, "range": plan.get("range"), "base": plan["base"],
              "target": plan["target"], "profile": plan.get("profile"), "focus": plan.get("focus"),
              "packets": [[p["id"], list(p["files"])] + ([p["spans"]] if "spans" in p else [])
                          for p in plan["packets"]]}
     if "level" in plan:
         ident["level"] = plan["level"]
+    for key in ("mode", "paths"):
+        if key in plan:
+            ident[key] = plan[key]
     raw = json.dumps(ident, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8", errors="surrogateescape")).hexdigest()
 
@@ -6296,7 +6505,8 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     """Der Bericht ohne `## Einordnung` (Spec 28, Ablauf Schritt 7), deterministisch aus Plan,
     Gegenstellen-Speicher, angenommenen Ergebnissen und `findings.json` (`_RunState`):
     Kopfzeile `<!-- skill | schema | generated: python scripts/review_kit.py report --run
-    <lauf> | run | range | profile | focus | level | tool -->` (`level` fehlt bei Fokus
+    <lauf> | run | range | profile | focus | level | tool -->` (im Pfad-Modus `path: <pfade>`
+    statt `range` und der Titel `# deep-review Pfad <pfade>`; `level` fehlt bei Fokus
     security; `tool` die Werkzeuge der angenommenen Ergebnisse nach `_canonical_tool`, ohne
     Ergebnis das des Plans), Titel, `Funde: <N>` mit je Fund einer Zeile, Pakettabelle (bei
     einem Paket mit `spans` in der Spalte Dateien `<n> (<datei>:<von>-<bis>)`),
@@ -6314,9 +6524,14 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
     if not tools:
         tools = [CODE_REVIEW if level is not None else SECURITY_REVIEWS]
     head = {"skill": SKILL_NAME, "schema": SCHEMA_VERSION,
-            "generated": f"{REPORT_GENERATED} --run {run_id}", "run": run_id,
-            "range": plan.get("range") or REPORT_NO_DATA, "profile": plan.get("profile"),
-            "focus": plan.get("focus")}
+            "generated": f"{REPORT_GENERATED} --run {run_id}", "run": run_id}
+    if plan.get("mode") == "path":
+        head["path"] = ",".join(plan["paths"])
+        title = f"# deep-review Pfad {head['path']}"
+    else:
+        head["range"] = plan.get("range") or REPORT_NO_DATA
+        title = f"# deep-review {head['range']}"
+    head.update(profile=plan.get("profile"), focus=plan.get("focus"))
     if level is not None:
         head["level"] = level
     head["tool"] = ", ".join(tools)
@@ -6334,7 +6549,7 @@ def _report_text(directory: Path, run_id: str, state: _RunState) -> str:
         rows.append("| " + " | ".join(map(str, cells)) + " |")
     claim = "unvollständig" if state.gaps else "vollständig"
     lines = ["<!-- " + " | ".join(f"{k}: {v}" for k, v in head.items()) + " -->",
-             f"# deep-review {head['range']}", "",
+             title, "",
              f"Funde: {len(state.findings)}", *map(_finding_line, state.findings), "",
              *REPORT_TABLE_HEAD, *rows, "",
              f"- Hinweise: {_notes_text(plan)}",
@@ -6538,6 +6753,17 @@ def _cmd_plan(args) -> int:
     if args.profile == "checkpoint" and args.soll_file is None:
         # SINCE_PROFILES setzt voraus, dass jeder checkpoint-Lauf ein Soll hatte.
         raise KitError("Profil checkpoint braucht --soll-file <datei> (das Soll des Bereichs)")
+    if args.path is not None:
+        # Pfad-Modus: keine Folgeläufe (eine Datei ist dort ganz neu, eine Kette über
+        # Basis-Stände gibt es nicht) und feste Grenzwerte.
+        if args.since is not None:
+            raise KitError("--since gilt nur mit --range; der Pfad-Modus prüft einen Stand "
+                           "ohne frühere Läufe")
+        if args.split_at is not None:
+            raise KitError(f"--split-at gilt nur mit --range; der Pfad-Modus teilt ab "
+                           f"PATH_SPLIT_AT = {PATH_SPLIT_AT} Zeilen")
+    elif args.target is not None:
+        raise KitError("--target gilt nur mit --path; im Bereichsmodus nennt --range das Ziel")
     repo = _toplevel(args.repo)
     since, passed = None, []
     if args.since is not None:
@@ -6558,8 +6784,12 @@ def _cmd_plan(args) -> int:
         soll = _shown_path(repo, soll_path)
     ignore = repo / CACHE_DIR / CACHE_IGNORE
     fresh = not os.path.lexists(ignore)
-    plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at, args.with_tests,
-                      args.level)
+    if args.path is not None:
+        plan = build_path_plan(repo, args.path, args.profile, args.focus, args.with_tests,
+                               level=args.level, target=args.target)
+    else:
+        plan = build_plan(repo, args.rng, args.profile, args.focus, args.split_at,
+                          args.with_tests, args.level)
     # build_plan legt die .gitignore des Cache-Ordners an, wenn sie fehlte; das sagt plan.
     created = fresh and os.path.lexists(ignore)
     run_id = plan["_meta"]["run"]
@@ -6583,7 +6813,9 @@ def _cmd_plan(args) -> int:
     print(f"Plan: {(CACHE_DIR / run_id / 'plan.json').as_posix()}")
     if created:
         print(CACHE_CREATED)
-    print(f"Bereich: {plan['range']} · Profil {plan['profile']} · Fokus {plan['focus']} · "
+    where = (f"Pfad: {','.join(plan['paths'])} · Ziel {plan['target'][:SHORT_SHA_LEN]}"
+             if plan.get("mode") == "path" else f"Bereich: {plan['range']}")
+    print(f"{where} · Profil {plan['profile']} · Fokus {plan['focus']} · "
           f"split: {'true' if plan['split'] else 'false'} · {plan['changed_lines']} Zeilen")
     for packet in plan["packets"]:
         shown_spans = _spans_text(packet)
@@ -6681,7 +6913,12 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True, metavar="BEFEHL")
 
     plan = sub.add_parser("plan", parents=[common], help="Paketplan schreiben")
-    plan.add_argument("--range", dest="rng", help="BASIS..ZIEL oder Revision (Default: HEAD)")
+    scope = plan.add_mutually_exclusive_group()
+    scope.add_argument("--range", dest="rng", help="BASIS..ZIEL oder Revision (Default: HEAD)")
+    scope.add_argument("--path", help="Ordner oder Dateien relativ zum Repo, durch Komma "
+                                      "getrennt: ihr Stand am Ziel, jede Zeile als neu")
+    plan.add_argument("--target", default=None,
+                      help="nur mit --path: Ziel, dessen Stand geprüft wird (Default: HEAD)")
     plan.add_argument("--profile", choices=PROFILES, default="standard")
     plan.add_argument("--focus", choices=FOCI, default="bugs")
     plan.add_argument("--level", choices=LEVELS, default=None,
