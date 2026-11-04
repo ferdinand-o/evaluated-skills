@@ -6066,3 +6066,182 @@ def test_b_counterparts_store_with_non_utf8_path_outside(tmp_path, monkeypatch):
     assert calls == [] and b"1 Python-Datei(en)" in with_store["p1.md"]
     (kit.run_dir(root, run) / kit.COLLECTED_NAME).unlink()
     assert _packet_blocks(kit, root, run) == with_store and calls
+
+
+# --- Spec 28, Prüfpunkt 2, Runde 1 ------------------------------------------------------------
+
+DELPHI_A = _unit("A", "procedure RunA;\n", "procedure RunA;\nbegin\n  Bad.Check(1);\nend;\n",
+                 uses="Bad")
+DELPHI_B = _unit("B", "procedure RunB;\n", "procedure RunB;\nbegin\n  RunB;\nend;\n")
+DELPHI_C = _unit("C", "procedure RunC;\n", "procedure RunC;\nbegin\n  RunC;\nend;\n")
+
+
+def _delphi_since(kit, root, split_at=None):
+    """base: c/Bad.pas (Blöcke gehen nicht auf). t1: A.pas ruft Bad.Check, B.pas und C.pas
+    nicht. t2: B.pas und C.pas ändern sich. Lauf über base..t1 reviewt (ohne Funde), dann
+    base..t2 mit --since: A.pas übernommen, die Pakete tragen nur B.pas und C.pas."""
+    _fresh_repo(root)
+    _commit_files(root, "basis", {"c/Bad.pas": BAD_PAS, "README.md": "# x\n"})
+    git(root, "tag", "base")
+    _commit_files(root, "t1", {"A.pas": DELPHI_A, "B.pas": DELPHI_B, "C.pas": DELPHI_C})
+    git(root, "tag", "t1")
+    _commit_files(root, "t2", {"B.pas": DELPHI_B.replace("  RunB;\n", "  RunB;\n  RunB;\n"),
+                               "C.pas": DELPHI_C.replace("  RunC;\n", "  RunC;\n  RunC;\n")})
+    git(root, "tag", "t2")
+    run_a = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)
+    _record(kit, root, run_a, "p1", [])
+    plan_b = kit.build_plan(root, "base..t2", "standard", "bugs", split_at, False)
+    done = kit.plan_since(root, plan_b["_meta"]["run"], [run_a["_meta"]["run"]])
+    assert done["file_keys"]["A.pas"]["reused_from"] == run_a["_meta"]["run"]
+    assert sorted(f for p in done["packets"] for f in p["files"]) == ["B.pas", "C.pas"]
+    return done["_meta"]["run"]
+
+
+def test_b_cp2_f1_delphi_block_after_since_same_with_and_without_store(tmp_path, monkeypatch):
+    """Die nicht lesbare Unit erreicht nur das übernommene A.pas: Mit Speicher steht im Block
+    dasselbe wie ohne — nach --since sammelt Delphi live."""
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = tmp_path / "repo"
+    run = _delphi_since(kit, root)
+    with_store = _packet_blocks(kit, root, run)
+    (kit.run_dir(root, run) / kit.COLLECTED_NAME).unlink()
+    assert _packet_blocks(kit, root, run) == with_store
+
+
+def test_b_cp2_f2_since_packets_name_no_unit_only_a_reused_file_reaches(tmp_path, monkeypatch):
+    """Die Hinweise eines Pakets hängen nicht an Dateien außerhalb der Pakete: Kein Delphi-Paket
+    nennt c/Bad.pas, das nur das übernommene A.pas erreicht — auch mit Speicher."""
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = tmp_path / "repo"
+    run = _delphi_since(kit, root, split_at=1)
+    store = kit.load_collected(kit.run_dir(root, run))
+    assert store is not None and ["c/Bad.pas", kit.SKIP_UNBALANCED] in store["not_indexed"]["Delphi"]
+    blocks = _packet_blocks(kit, root, run)
+    assert sorted(blocks) == ["p1.md", "p2.md"]
+    for name, block in blocks.items():
+        assert b"Delphi-Datei(en)" not in block, name
+
+
+def _python_store_run(kit, tmp_path):
+    root = _commit_repo(tmp_path, {"app/m.py": "", "lib.py": LIB_STRICT},
+                        {"app/m.py": "from lib import f\n\n\ndef run():\n    return f(2)\n"})
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    run = plan["_meta"]["run"]
+    return root, run, kit.run_dir(root, run)
+
+
+def test_b_cp2_f3_store_with_bad_unresolved_items_is_collected_again(tmp_path, monkeypatch):
+    kit = _kit()
+    root, run, directory = _python_store_run(kit, tmp_path)
+    store = kit.load_collected(directory)
+    with_store = _packet_blocks(kit, root, run)
+    for bad in ([["app/m.py", [1], 2]], [[["a"], 1, 2]], [["app/m.py", 1, {"x": 1}]],
+                [["app/m.py", True, 2]], [[1, 2, 3]], ["abc"]):
+        record = {**store["files"]["app/m.py"], "unresolved": bad}
+        kit.store_collected(directory, {**store, "files": {**store["files"], "app/m.py": record}})
+        assert kit.load_collected(directory) is None, bad
+        assert _packet_blocks(kit, root, run) == with_store, bad
+    for entry in ({"file": "app/m.py", "line": True, "kind": "call", "lines": []},
+                  {"file": "app/m.py", "line": 5, "kind": "call", "lines": "x"}):
+        record = {**store["files"]["app/m.py"], "entries": [entry]}
+        kit.store_collected(directory, {**store, "files": {**store["files"], "app/m.py": record}})
+        assert kit.load_collected(directory) is None, entry
+
+
+def test_b_cp2_f4_since_reuses_only_runs_reviewed_at_least_as_high(tmp_path, monkeypatch):
+    kit = _kit()
+    _tick(kit, monkeypatch)
+    root = _since_repo(tmp_path / "repo")
+    low = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False, level="low")
+    _record(kit, root, low, "p1", [_finding("a.py", 5, "low")])
+    high_plan = kit.build_plan(root, "base..t2", "checkpoint", "bugs", None, False)
+    assert high_plan["level"] == "high"
+    # Ein Review auf low trägt keinen Plan auf high, auch keinen auf medium.
+    assert kit.apply_since(high_plan, [_run_path(root, low)]) == high_plan
+    medium_plan = kit.build_plan(root, "base..t2", "standard", "bugs", None, False)
+    assert kit.apply_since(medium_plan, [_run_path(root, low)]) == medium_plan
+    # Gleich hoch oder höher: übernommen.
+    top = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False, level="max")
+    _record(kit, root, top, "p1", [_finding("a.py", 5, "max")])
+    done = kit.apply_since(high_plan, [_run_path(root, low), _run_path(root, top)])
+    assert done["file_keys"]["a.py"]["reused_from"] == top["_meta"]["run"]
+    # Ein Lauf ohne level gilt mit dem Standard seines Profils (checkpoint: high).
+    old = kit.build_plan(root, "base..t1", "checkpoint", "bugs", None, False)
+    _record(kit, root, old, "p1", [_finding("a.py", 5, "alt")])
+    _rewrite_plan(root, old, lambda data: data.pop("level"))
+    done = kit.apply_since(high_plan, [_run_path(root, old)])
+    assert done["file_keys"]["a.py"]["reused_from"] == old["_meta"]["run"]
+    std = kit.build_plan(root, "base..t1", "standard", "bugs", None, False)   # standard: medium
+    _record(kit, root, std, "p1", [_finding("a.py", 5, "std")])
+    _rewrite_plan(root, std, lambda data: data.pop("level"))
+    assert kit.apply_since(medium_plan, [_run_path(root, std)])[
+        "file_keys"]["a.py"]["reused_from"] == std["_meta"]["run"]
+    std_high = kit.build_plan(root, "base..t2", "standard", "bugs", None, False, level="high")
+    assert kit.apply_since(std_high, [_run_path(root, std)]) == std_high
+
+
+def test_b_cp2_f5_store_of_another_schema_is_collected_again(tmp_path):
+    kit = _kit()
+    root, run, directory = _python_store_run(kit, tmp_path)
+    with_store = _packet_blocks(kit, root, run)
+    path = directory / kit.COLLECTED_NAME
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for schema in (kit.SCHEMA_VERSION + 1, 0, True, str(kit.SCHEMA_VERSION), None):
+        data["_meta"]["schema"] = schema
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert kit.load_collected(directory) is None, schema
+        assert _packet_blocks(kit, root, run) == with_store
+    data["_meta"]["schema"] = kit.SCHEMA_VERSION
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert kit.load_collected(directory) is not None
+
+
+def test_b_cp2_f6_store_write_error_keeps_the_run(tmp_path, monkeypatch):
+    """Der Speicher ist nur Zwischenspeicher: scheitert sein Schreiben mit OSError, entsteht
+    der Lauf ohne ihn, und counterparts sammelt selbst."""
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"app/m.py": "", "lib.py": LIB_STRICT},
+                        {"app/m.py": "from lib import f\n\n\ndef run():\n    return f(2)\n"})
+
+    def full_disk(run_path, collected):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(kit, "store_collected", full_disk)
+    plan = kit.build_plan(root, "base..HEAD", "standard", "bugs", None, False)
+    directory = kit.run_dir(root, plan["_meta"]["run"])
+    assert sorted(p.name for p in directory.iterdir()) == ["plan.json"]
+    calls = _counting_collectors(kit, monkeypatch)
+    blocks = _packet_blocks(kit, root, plan["_meta"]["run"])
+    assert calls and b"raise ValueError at lib.py:4" in blocks["p1.md"]
+
+
+def test_b_cp2_f7_one_collect_call_and_one_sort_key(tmp_path, monkeypatch):
+    kit = _kit()
+    root = _commit_repo(tmp_path, {"a.py": "", "b.py": ""}, {"a.py": "x = 1\n", "b.py": "y = 2\n"})
+    seen = []
+
+    def entry(path, line):
+        return {"file": path, "line": line, "kind": "call", "lines": [f"### {path}:{line}"]}
+
+    def fake(found):
+        def collect(*args, **kwargs):
+            seen.append(kwargs)
+            return kit.Collected(found, 0, [])
+        return collect
+
+    monkeypatch.setattr(kit, "COLLECTORS", (
+        kit.COLLECTORS[0]._replace(collect=fake([entry("a.py", 1), entry("b.py", 9)])),
+        kit.COLLECTORS[1]._replace(collect=fake([entry("a.py", 4)]))))
+    # Ein Aufruf je Sammler, per_file immer mitgegeben (auch als None).
+    kit._collect_all(root, "base..HEAD", ["a.py", "b.py"])
+    assert seen == [{"per_file": None}, {"per_file": None}]
+    # Ein Sortierschlüssel: _collect_all und file_keys folgen _entry_order.
+    entries = [entry("a.py", 1), entry("a.py", 4)]
+    target = _rev(root, "HEAD")
+    before = kit.file_keys(root, target, ["a.py"], entries)
+    monkeypatch.setattr(kit, "_entry_order", lambda e: (-e["line"], e["file"], e["kind"]))
+    assert [(e["file"], e["line"]) for e in kit._collect_all(root, "base..HEAD", ["a.py"]).entries] \
+        == [("b.py", 9), ("a.py", 4), ("a.py", 1)]
+    assert kit.file_keys(root, target, ["a.py"], entries) != before
