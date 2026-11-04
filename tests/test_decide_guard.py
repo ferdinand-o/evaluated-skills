@@ -268,6 +268,192 @@ def test_guard_main_reads_stdin_and_exits_zero(work, monkeypatch, capsys):
             assert out == ""
 
 
+# --- Prüfpunkt nach Task 3 (F1–F12) ----------------------------------------------------
+
+def test_guard_push_target_from_push_not_upstream(pushed, tmp_path):
+    """F1: Ziel aus @{push}; nur <remote> gilt nur, wenn es das Remote von @{push} ist;
+    push.default=matching und remote.<r>.push fragen nach."""
+    repo = pushed
+    write_ledger(repo, block(1, "freigegeben", "push:origin/**"))
+    fork = tmp_path / "fork.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(fork)], check=True)
+    git(repo, "remote", "add", "fork", str(fork))
+    git(repo, "push", "-q", "fork", "x")
+    assert reason(run("git push fork", repo)).endswith("immer Rückfrage (Remote ist nicht das von @{push})")
+    git(repo, "config", "push.default", "current")
+    git(repo, "config", "branch.x.pushRemote", "fork")
+    assert "keine Freigabe mit Schlüssel push:fork/x" in reason(run("git push", repo))
+    assert "immer Rückfrage" in reason(run("git push origin", repo))
+    git(repo, "config", "--unset", "branch.x.pushRemote")
+    assert run("git push", repo) == "" and run("git push origin", repo) == ""
+    git(repo, "config", "push.default", "matching")
+    assert "immer Rückfrage" in reason(run("git push", repo))
+    assert "immer Rückfrage" in reason(run("git push origin", repo))
+    assert run("git push origin x", repo) == ""                            # Refspec: Konfiguration egal
+    git(repo, "config", "push.default", "simple")
+    git(repo, "config", "remote.origin.push", "refs/heads/*:refs/heads/*")
+    assert "immer Rückfrage" in reason(run("git push", repo))
+    assert "immer Rückfrage" in reason(run("git push origin", repo))
+
+
+def test_guard_push_tag_source_asks(pushed):
+    """F2: Ein Tag als Quelle ist nie ein Zweig-Push."""
+    repo = pushed
+    write_ledger(repo, block(1, "freigegeben", "push:origin/**"))
+    git(repo, "tag", "v1.0")
+    assert "immer Rückfrage" in reason(run("git push origin v1.0", repo))
+    assert "immer Rückfrage" in reason(run("git push origin v1.0:v1.0", repo))
+    assert run("git push origin x", repo) == ""
+
+
+def test_guard_git_global_options_with_value(pushed, work):
+    """F3: Globale git-Optionen nehmen ihren Wert mit; `git -c … push` fragt nach."""
+    write_ledger(pushed, block(1, "freigegeben", "push:origin/**"))
+    assert "immer Rückfrage" in reason(run("git --git-dir .git push --force", pushed))
+    assert "immer Rückfrage" in reason(run("git -c remote.origin.url=/x push origin x", pushed))
+    assert "immer Rückfrage" in reason(run("git --config-env=remote.origin.url=U push origin x", pushed))
+    assert run("git --no-pager push origin x", pushed) == ""
+    for command in ("git --work-tree . reset --hard", "git --git-dir=.git reset --hard",
+                    "git --namespace n reset --hard", "git --config-env a=B reset --hard"):
+        assert dl.guard_decision(command, work) == ("unsaved-work", "immer Rückfrage"), command
+
+
+def test_guard_wrappers(work):
+    """F4: Wrapper vor dem Programm samt Optionen und Werten."""
+    for category, command in (
+            ("push", "timeout 60 git push --force"), ("push", "timeout -s KILL -k 5 60 git push --force"),
+            ("data-delete", "nice rm -rf src"), ("data-delete", "nice -n 10 rm -rf src"),
+            ("data-delete", "env -i rm -rf src"), ("data-delete", "env -u X A=1 rm -rf src"),
+            ("data-delete", "sudo --user root rm -rf src"), ("data-delete", "sudo -g wheel rm -rf src"),
+            ("data-delete", "doas -u root rm -rf src"), ("data-delete", "ionice -c 3 rm -rf src"),
+            ("data-delete", "stdbuf -oL rm -rf src"), ("data-delete", "nohup rm -rf src"),
+            ("data-delete", "time rm -rf src"), ("data-delete", "command rm -rf src"),
+            ("data-delete", "exec rm -rf src"), ("data-delete", "sudo -- rm -rf src")):
+        assert dl.guard_decision(command, work) == (category, "immer Rückfrage"), command
+    assert dl.guard_decision("timeout 60 ls", work) is None
+
+
+def test_guard_cd_sets_directory(pushed, tmp_path):
+    """F5: `cd` setzt das Verzeichnis für folgende Teile; unbekanntes Ziel → Push fragt; `(`/`)` trennen."""
+    repo = pushed
+    write_ledger(repo, block(1, "freigegeben", "push:origin/**"))
+    other = tmp_path / "other"
+    other.mkdir()
+    git(other, "init", "-q", "-b", "main")
+    git(other, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    assert run("git push origin main", repo) == ""
+    why = reason(run("cd ../other && git push origin main", repo))
+    assert "keine Freigabe mit Schlüssel push:origin/main" in why, why
+    for command in ("cd && git push origin x", "cd - && git push origin x", "cd $D && git push origin x",
+                    "cd ~/repo && git push origin x"):
+        assert "immer Rückfrage" in reason(run(command, repo)), command
+    assert run("cd . && git push origin x", repo) == ""
+    assert run("(cd ../other) && git push origin x", repo) == ""            # Subshell endet
+    assert dl.guard_decision("(cd sub && git reset --hard)", repo) == ("unsaved-work", "immer Rückfrage")
+    assert dl.guard_decision("(git reset --hard)", repo) == ("unsaved-work", "immer Rückfrage")
+
+
+def test_guard_rm_without_target_asks(work):
+    """F6: Bleibt nach dem Zerlegen kein Ziel übrig, fragt guard."""
+    for command in ('rm -rf "<x>"', "rm -rf '>out'", "rm -rf"):
+        assert dl.guard_decision(command, work) == ("data-delete", "immer Rückfrage"), command
+
+
+def test_guard_rm_exemptions_only_relative(work):
+    """F7: Ausnahmen nur für relative Pfade ohne `..`, `~`, `$`; absolut nur /tmp/."""
+    for command in ("rm -rf ~/build", "rm -rf /home/u/dist", 'rm -rf "$HOME/build"', "rm -rf $X/node_modules",
+                    "rm -rf ../build", "rm -rf /tmp/../build"):
+        assert dl.guard_decision(command, work) == ("data-delete", "immer Rückfrage"), command
+    for command in ("rm -rf build", "rm -rf a/dist", "rm -rf /tmp/x", "rm -rf .skills/cache/x"):
+        assert dl.guard_decision(command, work) is None, command
+
+
+FURTHER = [
+    ("unsaved-work", "git switch -f main"), ("unsaved-work", "git switch --discard-changes main"),
+    ("unsaved-work", "git switch --force main"), ("unsaved-work", "git reset --merge"),
+    ("unsaved-work", "git reset --keep HEAD~1"),
+    ("data-delete", "find . -name '*.pyc' -delete"), ("data-delete", "find . -type d -exec rm -rf {} +"),
+    ("data-delete", "find . -execdir /bin/rm {} ;"),
+    ("external", "gh api -X POST repos/o/r/issues"), ("external", "gh api --method=DELETE repos/o/r"),
+    ("external", "gh api -XPATCH repos/o/r"), ("external", "gh api --method PUT repos/o/r"),
+    ("external", "gh api repos/o/r/issues -f title=x"), ("external", "gh api repos/o/r -F a=1"),
+    ("external", "gh api repos/o/r --field a=1"), ("external", "gh api repos/o/r --raw-field=a=1"),
+    ("external", "gh api repos/o/r --input body.json"),
+    ("external", "gh pr comment 3 -b x"), ("external", "gh pr close 3"), ("external", "gh pr review 3 --approve"),
+    ("external", "gh pr edit 3 -t x"), ("external", "gh repo delete o/r"), ("external", "gh release delete v1"),
+    ("external", "yarn publish"), ("external", "pnpm publish"), ("external", "cargo publish"),
+    ("external", "uv publish"), ("external", "poetry publish"),
+]
+
+
+def test_guard_further_commands(work):
+    """F8: die Liste „Weitere Befehle“ aus Spec 28."""
+    for category, command in FURTHER:
+        assert dl.guard_decision(command, work) == (category, "immer Rückfrage"), command
+    for command in ("git switch main", "git switch -c neu", "git reset --soft HEAD~1", "find . -name x",
+                    "find . -exec grep a {} +", "gh api repos/o/r", "gh api -X GET repos/o/r", "gh pr view 3",
+                    "yarn install", "cargo build", "uv run pytest", "poetry install"):
+        assert dl.guard_decision(command, work) is None, command
+
+
+def test_guard_heredocs(work):
+    """F9: Heredoc-Rümpfe sind keine Befehle; an psql/sqlite3/mysql wird der Rumpf wie ein Argument geprüft."""
+    for command in ("cat <<'EOF' > notes.txt\ndon't rm -rf data\nEOF", "cat <<EOF > f\nrm -rf data\nEOF",
+                    "cat <<-\"END\"\n\tgit reset --hard\n\tEND", "psql app <<-SQL\n\tDELETE FROM t WHERE id=1;\n\tSQL",
+                    "cat <<<'rm -rf data'"):
+        assert dl.guard_decision(command, work) is None, command
+    for command in ("psql app <<EOF\nDROP TABLE users;\nEOF", "sqlite3 app.db <<'SQL'\ndelete from t;\nSQL",
+                    "mysql <<X\nselect 1;\ntruncate t;\nX"):
+        assert dl.guard_decision(command, work) == ("data-delete", "immer Rückfrage"), command
+    assert dl.guard_decision("cat <<EOF\nx\nEOF\nrm -rf data", work) == ("data-delete", "immer Rückfrage")
+    # ohne Endzeile: kein Schnitt, der Rest bleibt Befehl
+    assert dl.guard_decision("cat <<EOF\nrm -rf data", work) == ("data-delete", "immer Rückfrage")
+
+
+def test_guard_without_program_starts_no_subprocess(work, monkeypatch):
+    """F10: Ohne Programmnamen der Tabelle kein Git-Aufruf, keine Ausgabe."""
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("subprocess")
+    monkeypatch.setattr(dl.subprocess, "run", spy)
+    for command in ("ls -la", "echo hallo && python -m pytest -q", "cat a.txt | head"):
+        assert run(command, work) == "", command
+    assert calls == []
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="Hooks laufen über bash")
+def test_hook_snippet_python_fallback(work, tmp_path):
+    """F11: python3, sonst python, sonst Meldung „kein Python“."""
+    command = snippet_command()
+    (work / ".claude" / "hooks").mkdir(parents=True)
+    shutil.copy(SKILL_DIR / "scripts" / "decide_log.py", work / ".claude" / "hooks" / "decide_log.py")
+    only_python, empty = tmp_path / "only-python", tmp_path / "empty"
+    only_python.mkdir()
+    empty.mkdir()
+    (only_python / "python").symlink_to(sys.executable)
+
+    def hook(path):
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(work), "PATH": str(path)}
+        return subprocess.run([shutil.which("bash"), "-c", command], cwd=work, input=payload("rm -rf data", work),
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    done = hook(only_python)
+    assert done.returncode == 0, done
+    assert reason(done.stdout.strip()).startswith("decide: data-delete")
+    done = hook(empty)
+    assert done.returncode == 0, done
+    assert json.loads(done.stdout) == {"systemMessage": "[decide] Hook ungeprüft — kein Python"}
+
+
+def test_guard_noclobber_redirect(work):
+    """F12: `>|` ist eine Umleitung, kein Trenner — das Wort danach ist ihr Ziel."""
+    assert dl.guard_decision("rm -rf build >| log src", work) == ("data-delete", "immer Rückfrage")
+    assert dl.guard_decision("rm -rf build >| log", work) is None
+    assert ">\\|" not in dl._REDIRECT_OP_RE.pattern and ">\\|" not in dl._REDIRECT_RE.pattern
+
+
 # --- Gleichlauf mit der Reference ------------------------------------------------------
 
 def reference_commands():
@@ -286,9 +472,11 @@ def reference_commands():
 def test_guard_table_matches_reference():
     assert reference_commands() == dict(dl.GUARD_COMMANDS)
     assert len(dl.GUARD_COMMANDS) >= 25
-    # die Programmnamen aus Spec 28 („Befehl nicht zerlegbar“)
+    # die Programmnamen aus Spec 28 („Befehl nicht zerlegbar“, dazu „Weitere Befehle“)
     assert {c.split()[0] for c in dl.GUARD_COMMANDS} == {
-        "git", "gh", "rm", "curl", "wget", "psql", "sqlite3", "mysql", "npm", "twine", "docker", "terraform", "kubectl"}
+        "git", "gh", "rm", "curl", "wget", "psql", "sqlite3", "mysql", "npm", "twine", "docker", "terraform", "kubectl",
+        "find", "yarn", "pnpm", "cargo", "uv", "poetry"}
+    assert {category for category, _ in FURTHER} <= set(dl.GUARD_COMMANDS.values())
     assert set(dl.GUARD_COMMANDS.values()) == {"push", "external", "data-delete", "unsaved-work"}
     text = REVERSIBILITY.read_text(encoding="utf-8")
     assert "eine zweite Liste im Skript gibt es nicht" not in text

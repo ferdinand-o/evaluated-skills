@@ -107,9 +107,18 @@ hat keine Pfadmuster und steht deshalb nicht in der Tabelle; check vergleicht si
 
 `decide_log.py guard` ist ein optionaler `PreToolUse`-Hook auf Bash (`assets/hooks/decide-guard.json`,
 die Skill installiert ihn nie). Er zerlegt den Befehl an `&&`, `||`, `;`, `|`, `&` und
-Zeilenumbruch außerhalb von Anführungszeichen, überspringt je Teil führende Zuweisungen und
-`sudo`, bei `git` die globalen Optionen (`-C <pfad>` setzt das Verzeichnis), und erkennt
-Kurzoptionen auch gebündelt (`-rf`, `-sSd`, `-XPOST`). Ein erkannter Teil wird zur Rückfrage an den
+Zeilenumbruch außerhalb von Anführungszeichen (`(` und `)` trennen auch), überspringt je Teil
+führende Zuweisungen und die Wrapper `sudo`, `doas`, `env`, `timeout`, `nice`, `ionice`, `stdbuf`,
+`nohup`, `time`, `command`, `exec` samt Optionen und Werten, bei `git` die globalen Optionen samt
+Wert (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, auch `--opt=wert`;
+`-C <pfad>` setzt das Verzeichnis), und erkennt Kurzoptionen auch gebündelt (`-rf`, `-sSd`,
+`-XPOST`). `cd <dir>` als eigener Teil setzt das Verzeichnis für die folgenden Teile, nach einer
+Subshell `( … )` gilt wieder das vorige; `cd` ohne Ziel, `cd -` oder ein Ziel mit `$`/`~` macht es
+unbekannt, ein folgender Push fragt dann nach. `>|` ist eine Umleitung wie `>`. Ein Heredoc-Rumpf
+(`<<WORT`, `<<-WORT`, `<<'WORT'`, `<<"WORT"` bis zur Zeile `WORT`) ist kein Befehl; steht der
+Heredoc an `psql`, `sqlite3` oder `mysql`, wird der Rumpf wie ein Argument auf `DROP`, `TRUNCATE`
+und `DELETE FROM` ohne `WHERE` geprüft. Enthält der Text keinen Programmnamen der Tabelle, endet
+guard ohne Git-Aufruf und ohne Ausgabe. Ein erkannter Teil wird zur Rückfrage an den
 Nutzer (`ask`); nur `git push` mit freigegebenem Ziel geht still durch. Diese Tabelle ist dieselbe
 Liste wie `GUARD_COMMANDS` im Skript:
 
@@ -131,29 +140,48 @@ Liste wie `GUARD_COMMANDS` im Skript:
 | `external` | `kubectl delete` | immer | nein, immer Rückfrage |
 | `external` | `curl` | Methode außer `GET`/`HEAD` (`-X`, `-X<methode>`, `--request`, `--request=<methode>`), `--data*`, `--form*`, `--json`, `-T`/`--upload-file` oder ein Kurzoptions-Bündel mit `d` oder `F` | nein, immer Rückfrage |
 | `external` | `wget` | `--post-data`, `--post-file` oder `--method` | nein, immer Rückfrage |
-| `data-delete` | `rm` | `-r`, `-R`, `--recursive` oder ein Bündel mit `r`/`R`, außer jedes Ziel liegt unter `/tmp/` oder in der Ausnahmeliste | nein, immer Rückfrage |
+| `external` | `gh api` | Methode außer `GET` (`-X`, `--method`) oder `-f`, `-F`, `--field`, `--raw-field`, `--input` | nein, immer Rückfrage |
+| `external` | `gh pr comment` | immer | nein, immer Rückfrage |
+| `external` | `gh pr close` | immer | nein, immer Rückfrage |
+| `external` | `gh pr review` | immer | nein, immer Rückfrage |
+| `external` | `gh pr edit` | immer | nein, immer Rückfrage |
+| `external` | `gh repo delete` | immer | nein, immer Rückfrage |
+| `external` | `gh release delete` | immer | nein, immer Rückfrage |
+| `external` | `yarn publish` | immer | nein, immer Rückfrage |
+| `external` | `pnpm publish` | immer | nein, immer Rückfrage |
+| `external` | `cargo publish` | immer | nein, immer Rückfrage |
+| `external` | `uv publish` | immer | nein, immer Rückfrage |
+| `external` | `poetry publish` | immer | nein, immer Rückfrage |
+| `data-delete` | `rm` | `-r`, `-R`, `--recursive` oder ein Bündel mit `r`/`R`, außer jedes Ziel liegt unter `/tmp/` oder in der Ausnahmeliste; ohne verbleibendes Ziel immer | nein, immer Rückfrage |
 | `data-delete` | `git clean` | `-f`/`--force`, auch gebündelt (`-fdx`) | nein, immer Rückfrage |
 | `data-delete` | `git branch` | `-D` oder `--delete --force` | nein, immer Rückfrage |
 | `data-delete` | `psql` | `DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` (ohne Groß-/Kleinschreibung) in einem Argument | nein, immer Rückfrage |
 | `data-delete` | `sqlite3` | wie `psql` | nein, immer Rückfrage |
 | `data-delete` | `mysql` | wie `psql` | nein, immer Rückfrage |
-| `unsaved-work` | `git reset` | `--hard` | nein, immer Rückfrage |
+| `data-delete` | `find` | `-delete` oder `-exec`/`-execdir rm` | nein, immer Rückfrage |
+| `unsaved-work` | `git reset` | `--hard`, `--merge` oder `--keep` | nein, immer Rückfrage |
 | `unsaved-work` | `git checkout` | `--`, `.`, `-f`/`--force` oder ein Argument, das als Pfad im Arbeitsverzeichnis existiert | nein, immer Rückfrage |
 | `unsaved-work` | `git restore` | immer, außer nur mit `--staged`/`-S` ohne `--worktree`/`-W` | nein, immer Rückfrage |
 | `unsaved-work` | `git stash drop` | immer | nein, immer Rückfrage |
 | `unsaved-work` | `git stash clear` | immer | nein, immer Rückfrage |
+| `unsaved-work` | `git switch` | `-f`, `--force` oder `--discard-changes` | nein, immer Rückfrage |
 
 Ausnahmeliste für `rm` (*Annahme:* der Inhalt ist regenerierbar): `.skills/cache` als Präfix
 relativ zur Repo-Wurzel, sonst die Pfadkomponenten `__pycache__`, `.pytest_cache`, `.mypy_cache`,
-`.ruff_cache`, `node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe.
+`.ruff_cache`, `node_modules`, `build`, `dist`, `.venv` in beliebiger Tiefe — nur für relative Pfade
+ohne `..`, `~` und `$`; ein absoluter Pfad ist nur unter `/tmp/` ausgenommen.
 
 **Push-Ziel.** `-u`, `--set-upstream`, `-v`, `--verbose`, `-q`, `--quiet`, `--no-verify`,
 `--progress` und `--porcelain` ändern das Ziel nicht; jede andere Option (`--force`,
 `--force-with-lease`, `--delete`, `--tags`, `--all`, `--mirror`, `-o` …) ist immer Rückfrage. Ohne
-Argumente ist das Ziel der Upstream des Zweigs (ohne Upstream: Rückfrage), mit nur `<remote>`
-`<remote>/<aktueller zweig>`, mit genau einem Refspec `<remote>/<ziel>`: `HEAD` wird der aktuelle
-Zweig (abgelöster `HEAD`: Rückfrage), `refs/heads/<x>` wird `<x>`; ein anderes Ziel unter `refs/`,
-ein führendes `+`, eine leere Quelle (`:<ziel>`) und mehr als ein Refspec sind Rückfrage. Ein
+Argumente ist das Ziel `@{push}` des Zweigs (berücksichtigt `pushRemote` und `push.default`; ohne
+Ziel: Rückfrage), mit nur `<remote>` dasselbe, wenn dessen Remote `<remote>` ist (sonst Rückfrage);
+`push.default=matching` oder ein gesetztes `remote.<remote>.push` sind dabei Rückfrage, ebenso
+`git -c`, `--config-env`, `--git-dir` oder `--namespace` vor `push` und ein unbekanntes Verzeichnis
+nach `cd`. Mit genau einem Refspec ist das Ziel `<remote>/<ziel>`: `HEAD` wird der aktuelle Zweig
+(abgelöster `HEAD`: Rückfrage), `refs/heads/<x>` wird `<x>`; eine Quelle, die ein Tag ist, ein
+anderes Ziel unter `refs/`, ein führendes `+`, eine leere Quelle (`:<ziel>`) und mehr als ein
+Refspec sind Rückfrage. Ein
 beauftragter Push wird einmal abgelegt (`--approved-by-request`, `--key push:origin/claude/x`) und
 gilt dann für jeden weiteren Push dorthin; wie bei check gilt je Frage und Schlüssel nur der jüngste
 Block.
@@ -163,7 +191,8 @@ Der Grund der Rückfrage lautet „decide: <kategorie> — <befehl, höchstens 8
 „Befehl nicht zerlegbar“ (unbalancierte Anführungszeichen und ein Programmname der Tabelle im
 Text). Ein eigener Fehler des Hooks hält nichts an: `{"systemMessage": "[decide] Hook ungeprüft —
 <grund>"}`, Exit 0. Was guard nicht zerlegt — `$(…)` und Backticks außerhalb von Anführungszeichen,
-`bash -c`, `eval`, `xargs`, Aliase, Skripte, Werkzeuge außer Bash —, sieht es nicht; deshalb nennt
+`bash -c`, `eval`, `xargs`, Aliase, Skripte, ein Heredoc ohne Anführungszeichen, Wrapper außerhalb
+der Liste, Werkzeuge außer Bash —, sieht es nicht; deshalb nennt
 check `push`, `external`, `data-delete` und `unsaved-work` weiter als ungeprüft.
 
 ## Bis zur Freigabe bleibt alles stehen
