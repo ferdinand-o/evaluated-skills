@@ -1187,7 +1187,7 @@ def _write_new_plan(repo: Path, span: Span, generated: str, head: dict, profile:
 # `inherited … at`, `deklariert:`, die Wegzeilen nach `geändert: …; Weg:` (Ort der Zeile und
 # `[datei:zeile]` der Weitergabe) — je Treffer Datei und Zeile.
 COUNTERPART_REF_RE = re.compile(r"- Gegenstelle .*? \[(.+?):(\d+)\]: ")   # Ort einer Gegenstelle
-AT_REF_RE = re.compile(r"\s+(?:raise|inherited)\b.* at (.+):(\d+)$")
+AT_REF_RE = re.compile(r"\s+(?:raise|inherited|throw|panic)\b.* at (.+):(\d+)$")
 DECLARED_REF_RE = re.compile(r"\s+deklariert: (.+):(\d+)$")
 FLOW_HEAD_RE = re.compile(r"\s+geändert: .*; Weg:$")
 FLOW_REF_RE = re.compile(r" {4}(.+?):(\d+): ")
@@ -2006,6 +2006,16 @@ def cleanup(repo, run_id, stale):
 
 PYTHON_SUFFIXES = frozenset({".py"})                  # Endungen je Sammler, klein; alle mit
 DELPHI_SUFFIXES = frozenset({".pas", ".dpr", ".dpk"})  # Sammler: COUNTERPART_SUFFIXES (COLLECTORS)
+JS_SUFFIXES = frozenset({".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"})   # Sammler TypeScript
+JS_RESOLVE_ORDER = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")   # Endung zu `./x`, in dieser Folge
+NAME_LANGS = {".java": "typed", ".cs": "typed", ".c": "typed", ".h": "typed", ".cc": "typed",
+              ".cpp": "typed", ".cxx": "typed", ".hpp": "typed", ".hh": "typed", ".hxx": "typed",
+              ".go": "go", ".rs": "rust", ".kt": "kotlin", ".kts": "kotlin",
+              ".swift": "swift"}   # Namens-Rückfall: Endung → Form der Definition
+NAME_SUFFIXES = frozenset(NAME_LANGS)
+UNIQUE_NAME_MARK = "(Name eindeutig, ohne Sammler)"   # Marke im Block (Namens-Rückfall)
+ASYNC_NOTE = "  async: Aufruf ohne await, das Ergebnis und ein Fehler werden nicht abgewartet"
+THROW_TYPE_CHARS = 60      # Typ oder Ausdruck einer throw-/panic-Zeile höchstens so lang
 COUNTERPART_MAX_DEFS = 2   # Definitionen je Aufruf im Block (wie im Prototyp)
 RAISE_LINES_MAX = 8        # raise-Zeilen je Gegenstelle
 FLOW_LINES_MAX = 12        # Zeilen des Wegs je geändertem Schlüsselwort-Argument
@@ -4455,6 +4465,646 @@ def _branch_reason(unit: _PasUnit, lines: set):
     return f"{len(hit)} {SKIP_BRANCH} ({', '.join(spans)})"
 
 
+# --- Gegenstellen für TypeScript/JavaScript und Namens-Rückfall (Text-Scanner) -----------------
+#
+# Kein Parser und kein node: `_mask_c` blendet Strings, Template-Literale (`${…}` bleibt Code),
+# Regex-Literale und Kommentare aus (Länge und Zeilen bleiben, die Anführungszeichen stehen),
+# danach arbeiten Regexe und Klammerzählung auf dem maskierten Text. TypeScript löst nur
+# relative Importe auf (`import … from './x'`, `require('./x')`); `node_modules`, Pfad-Aliase
+# und Typinferenz sind nicht Teil davon (gezählt). Der Namens-Rückfall für Java, C#, Go, Rust,
+# C, C++, Kotlin und Swift nimmt eine Definition, wenn ihr Name im ganzen Repo genau einmal
+# vorkommt — ohne Importe, Überladungen und Besitz.
+
+_JS_KEYWORDS_BEFORE_REGEX = frozenset({"return", "typeof", "case", "in", "of", "void", "delete",
+                                       "throw", "else", "do", "yield", "await"})
+_C_CHAR_RE = re.compile(r"'(?:\\[^'\n]*|[^'\\\n])'")
+
+
+def _mask_c(text: str, js: bool) -> str:
+    """Quelltext mit ausgeblendeten Strings (`"…"`, bei `js` auch `'…'`), Template-Literalen
+    (`js`: Text zwischen `` ` `` und `${`/`}`; Code in `${…}` bleibt, auch verschachtelt;
+    sonst Go-Rohstrings), Regex-Literalen (`js`), Zeichenliterale (`'x'`, sonst) und den
+    Kommentaren `//` und `/* */`: jedes Zeichen darin wird ein Leerzeichen, Zeilenumbrüche
+    und die Anführungszeichen bleiben — gleiche Länge, gleiche Zeilen und Spalten."""
+    n, out = len(text), list(text)
+    i, depth, tpl, frames = 0, 0, False, []
+
+    def blank(a, b):
+        for k in range(a, min(b, n)):
+            if out[k] not in "\r\n":
+                out[k] = " "
+
+    def regex_here(k):
+        k -= 1
+        while k >= 0 and out[k] in " \t\r\n":
+            k -= 1
+        if k < 0 or out[k] in "(,=:[!&|?{};+-*%<>~^":
+            return True
+        end = k + 1
+        while k >= 0 and (out[k].isalnum() or out[k] in "_$"):
+            k -= 1
+        return "".join(out[k + 1:end]) in _JS_KEYWORDS_BEFORE_REGEX
+
+    while i < n:
+        c = text[i]
+        if tpl:
+            j = i
+            while j < n and text[j] != "`" and not text.startswith("${", j):
+                j += 2 if text[j] == "\\" else 1
+            blank(i, j)
+            if j >= n:
+                break
+            if text[j] == "`":
+                tpl, i = False, j + 1
+            else:
+                frames.append(depth)
+                depth, tpl, i = 0, False, j + 2
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            blank(i, j)
+            i = j
+        elif c == '"' and not js and text.startswith('"""', i):
+            j = text.find('"""', i + 3)
+            blank(i + 3, n if j < 0 else j)
+            i = n if j < 0 else j + 3
+        elif c == '"' or (c == "'" and js):
+            j = i + 1
+            while j < n and text[j] not in (c, "\n"):
+                j += 2 if text[j] == "\\" else 1
+            blank(i + 1, j)
+            i = j + 1 if j < n and text[j] == c else j
+        elif c == "'":
+            m = _C_CHAR_RE.match(text, i)
+            if m:
+                blank(i + 1, m.end() - 1)
+            i = m.end() if m else i + 1
+        elif c == "`":
+            if js:
+                tpl, i = True, i + 1
+            else:
+                j = text.find("`", i + 1)
+                j = n if j < 0 else j
+                blank(i + 1, j)
+                i = j + 1
+        elif c == "/" and js and regex_here(i):
+            j, cls = i + 1, False
+            while j < n and text[j] != "\n" and (cls or text[j] != "/"):
+                if text[j] == "\\":
+                    j += 1
+                elif text[j] == "[":
+                    cls = True
+                elif text[j] == "]":
+                    cls = False
+                j += 1
+            if j < n and text[j] == "/":
+                blank(i + 1, j)
+                i = j + 1
+            else:
+                i += 1
+        elif js and c == "{":
+            depth, i = depth + 1, i + 1
+        elif js and c == "}":
+            if depth == 0 and frames:
+                depth, tpl = frames.pop(), True
+            else:
+                depth = max(depth - 1, 0)
+            i += 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _balanced_end(masked: str, pos: int) -> int:
+    """Index des Zeichens, das die Klammer bei `pos` (`(`, `[` oder `{`) schließt, auf dem
+    maskierten Text; Textende, wenn sie nicht schließt."""
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = []
+    for k in range(pos, len(masked)):
+        ch = masked[k]
+        if ch in pairs:
+            stack.append(pairs[ch])
+        elif stack and ch == stack[-1]:
+            stack.pop()
+            if not stack:
+                return k
+    return len(masked)
+
+
+class _SrcFile:
+    """Eine Quelldatei: Text, maskierter Text und Zeilenanfänge."""
+
+    def __init__(self, raw: bytes, js: bool) -> None:
+        self.text = raw.decode("utf-8", errors="replace")
+        self.masked = _mask_c(self.text, js)
+        self._starts = [0] + [m.end() for m in re.finditer("\n", self.text)]
+
+    def line(self, pos: int) -> int:
+        return bisect.bisect_right(self._starts, pos)
+
+    def col(self, pos: int) -> int:
+        return pos - self._starts[self.line(pos) - 1]
+
+    def oneline(self, a: int, b: int) -> str:
+        return re.sub(r"\s+", " ", self.text[a:b]).strip()
+
+
+class _Def(NamedTuple):
+    """Eine Definition: Name, Zeile, Signaturzeile, async, Rumpf `(von, bis)` im maskierten
+    Text (`{` bis `}`) oder None, Position des Namens."""
+    name: str | None
+    line: int
+    sig: str
+    is_async: bool
+    body: tuple | None
+    pos: int
+
+
+JS_FUNC_RE = re.compile(
+    r"(?<![\w$.])(?:export\s+(default\s+)?)?(async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)?"
+    r"\s*(?:<[^()]*?>\s*)?\(")
+JS_VAR_RE = re.compile(
+    r"(?<![\w$.])(?:(?:export\s+)?(?:const|let|var)\s+|(?:module\.)?exports\.)([A-Za-z_$][\w$]*)"
+    r"\s*(?::[^=;(){}]*)?=\s*(async\s+)?(?:function\b\s*\*?\s*[\w$]*\s*(?:<[^()]*?>\s*)?(\()"
+    r"|(?:<[^()]*?>\s*)?(\()|[A-Za-z_$][\w$]*\s*=>)")
+JS_ARROW_RE = re.compile(r"\s*(?::[^=;]*?)?=>")
+JS_IMPORT_RE = re.compile(r"\bimport\s+(?!type\b)([^;'\"`]*?)\s*from\s*('[ ]*'|\"[ ]*\")")
+JS_REQUIRE_RE = re.compile(
+    r"\b(?:const|let|var)\s+(\{[^}]*\}|[\w$]+)\s*(?::[^=]+)?=\s*(?:await\s+)?require\s*\(\s*"
+    r"('[ ]*'|\"[ ]*\")\s*\)")
+JS_CALL_RE = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)(?:\s*\.\s*([A-Za-z_$][\w$]*))?\s*\(")
+JS_THROW_RE = re.compile(r"\bthrow\s+(?:new\s+)?([\w$.]+)?")
+JS_DEFAULT_NAME_RE = re.compile(r"\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;")
+JS_AWAITED_RE = re.compile(r"(?:\bawait|\breturn|=>)\s*(?:\(\s*)?$")
+JS_THEN_RE = re.compile(r"\s*\.\s*(?:then|catch|finally)\b")
+
+
+def _js_body(sf: _SrcFile, pos: int, arrow: bool) -> tuple:
+    """(Rumpf, Ende der Signatur) ab `pos` hinter der Parameterliste: bei einem Pfeil nach
+    `=>`; dazwischen steht ein Rückgabetyp. Rumpf `(von, bis)` oder None (Deklaration,
+    Ausdruck)."""
+    masked, n, k, depth = sf.masked, len(sf.masked), pos, 0
+    if arrow:
+        m = JS_ARROW_RE.match(masked, pos)
+        if not m:
+            return None, pos
+        k = m.end()
+        while k < n and masked[k] in " \t\r\n":
+            k += 1
+        if k < n and masked[k] == "{":
+            return (k, _balanced_end(masked, k)), k
+        return None, k
+    while k < n:
+        ch = masked[k]
+        if depth == 0 and ch == ";":
+            return None, k
+        if ch == "{":
+            j = k - 1
+            while j >= pos and masked[j] in " \t\r\n":
+                j -= 1
+            if depth == 0 and (j < pos or masked[j] not in ":|&,<("):
+                return (k, _balanced_end(masked, k)), k
+            k = _balanced_end(masked, k)
+        elif ch in "(<[" and not masked.startswith("=>", k - 1):
+            depth += 1
+        elif ch in ")>]" and not masked.startswith("=>", k - 1):
+            depth = max(depth - 1, 0)
+        k += 1
+    return None, pos
+
+
+def _js_defs(sf: _SrcFile) -> tuple[dict, _Def | None]:
+    """(Name → Definitionen der Datei, die Standard-Definition `export default function`).
+    Mit Rumpf zuerst (TypeScript-Überladungen ohne Rumpf stehen dahinter)."""
+    found, default = [], None
+    for m in JS_FUNC_RE.finditer(sf.masked):
+        name = m[3]
+        end = _balanced_end(sf.masked, m.end() - 1)
+        body, sig_end = _js_body(sf, end + 1, False)
+        sig = sf.oneline(m.start(), sig_end if body else end + 1)
+        sig = re.sub(r"^export\s+(default\s+)?", "", sig)[:DOC_CHARS]
+        item = _Def(name, sf.line(m.start()), sig, bool(m[2]), body, m.start())
+        if m[1]:
+            default = item
+        if name:
+            found.append(item)
+    for m in JS_VAR_RE.finditer(sf.masked):
+        if m[3] or m[4]:
+            end = _balanced_end(sf.masked, m.start(3) if m[3] else m.start(4))
+            body, sig_end = _js_body(sf, end + 1, not m[3])
+            if m[4] and body is None and sig_end == end + 1:
+                continue                      # `const x = (a + b)`: kein Pfeil
+        else:
+            body, sig_end = None, m.end()
+            at = sf.masked.find("{", m.end())
+            if at >= 0 and not sf.masked[m.end():at].strip():
+                body, sig_end = (at, _balanced_end(sf.masked, at)), at
+        sig = sf.oneline(m.start(), sig_end)
+        sig = re.sub(r"^export\s+", "", sig)[:DOC_CHARS]
+        found.append(_Def(m[1], sf.line(m.start()), sig, bool(m[2]), body, m.start()))
+    defs: dict[str, list] = {}
+    for item in sorted(found, key=lambda d: (d.body is None, d.pos)):
+        defs.setdefault(item.name, []).append(item)
+    if default is None:
+        m = JS_DEFAULT_NAME_RE.search(sf.masked)
+        if m and m[1] in defs:
+            default = defs[m[1]][0]
+    return defs, default
+
+
+def _js_throws(sf: _SrcFile, defs: dict, item: _Def, depth: int, seen: set) -> list:
+    """(Typ, Zeile) aller `throw` im Rumpf von `item`, transitiv über Aufrufe von Funktionen
+    derselben Datei bis `depth` Ebenen tief."""
+    if item.body is None or item.pos in seen:
+        return []
+    seen.add(item.pos)
+    a, b = item.body
+    out = []
+    for m in JS_THROW_RE.finditer(sf.masked, a, b):
+        out.append((m[1] or "?", sf.line(m.start())))
+    if depth > 0:
+        for m in JS_CALL_RE.finditer(sf.masked, a + 1, b):
+            if m[2] is None:
+                for other in defs.get(m[1], [])[:1]:
+                    out += _js_throws(sf, defs, other, depth - 1, seen)
+    return out
+
+
+class _JsIndex:
+    """Alle JavaScript-/TypeScript-Dateien am ZIEL: `files` (Pfad → `_SrcFile`, gelesen bei
+    Bedarf), `unreadable` (Pfad → Grund: Symlink, Pfad nicht UTF-8, Submodul), `links`."""
+
+    def __init__(self, sources: dict, skipped: dict | None = None,
+                 links: dict | None = None) -> None:
+        self.sources = sources
+        self.unreadable: dict[str, str] = dict(skipped or {})
+        self.links: dict[str, str | None] = dict(links or {})
+        self._files: dict[str, _SrcFile] = {}
+        self._defs: dict[str, tuple] = {}
+
+    def not_indexed(self) -> dict:
+        """Dateien am ZIEL, in denen keine Gegenstelle gesucht wird (Pfad → Grund): wie bei
+        Python `unreadable` ohne Submodule und ohne Symlinks auf eine gelesene Datei."""
+        return {rel: reason for rel, reason in self.unreadable.items()
+                if reason != SKIP_GITLINK
+                and not (reason == SKIP_SYMLINK and _link_target(self.links, rel) in self.sources)}
+
+    def file(self, rel: str):
+        if rel not in self.sources:
+            return None
+        if rel not in self._files:
+            self._files[rel] = _SrcFile(self.sources[rel], True)
+        return self._files[rel]
+
+    def defs(self, rel: str) -> tuple:
+        if rel not in self._defs:
+            self._defs[rel] = _js_defs(self.file(rel))
+        return self._defs[rel]
+
+    def resolve(self, rel: str, spec: str):
+        """Datei, die der relative Pfad `spec` in `rel` meint (Endung in `JS_RESOLVE_ORDER`,
+        dann `x/index.*`), None für Pakete, Pfad-Aliase und fehlende Dateien."""
+        if not (spec.startswith(("./", "../")) or spec in (".", "..")):
+            return None
+        base = posixpath.normpath(posixpath.join(posixpath.dirname(rel), spec))
+        if base == ".." or base.startswith("../"):
+            return None
+        stem = base[:-len(PurePosixPath(base).suffix)] if (
+            PurePosixPath(base).suffix.lower() in JS_SUFFIXES) else base
+        tries = [base] if base in self.sources and stem != base else []
+        tries += [stem + ext for ext in JS_RESOLVE_ORDER]
+        tries += [f"{base}/index{ext}" for ext in JS_RESOLVE_ORDER]
+        return next((t for t in tries if t in self.sources), None)
+
+
+@functools.lru_cache(maxsize=INDEX_CACHE_SIZE)
+def _js_index(repo: Path, target: str) -> _JsIndex:
+    """JavaScript-/TypeScript-Index am ZIEL, je (Repo, SHA) einmal gebaut; `node_modules`
+    steht nicht darin."""
+    links: dict = {}
+    sources, skipped = _tree_sources(
+        repo, target, lambda p: _is_js(p) and "node_modules" not in p.split("/"), links)
+    return _JsIndex(sources, skipped, links)
+
+
+def _is_js(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in JS_SUFFIXES
+
+
+def _js_bindings(sf: _SrcFile) -> dict:
+    """Name → (Pfad, Mitglied) der Importe: `import f from`/`{ f }`/`{ f as g }` und
+    `const { f } = require(…)` binden ein Mitglied (`default` beim Standardexport), `import *
+    as m`/`const m = require(…)` einen Namensraum (Mitglied None). Typ-Importe zählen nicht."""
+    out: dict[str, tuple] = {}
+
+    def spec_of(m, group):
+        return sf.text[m.start(group) + 1:m.end(group) - 1]
+
+    def names(inner, spec, split):
+        for part in inner.strip("{} \n\r\t").split(","):
+            part = part.strip()
+            if not part or part.startswith("type "):
+                continue
+            a, _, b = part.partition(split)
+            out[(b or a).strip()] = (spec, a.strip())
+
+    for m in JS_IMPORT_RE.finditer(sf.masked):
+        spec, clause = spec_of(m, 2), m[1].strip()
+        head = re.match(r"([\w$]+)\s*(?:,\s*(.*))?$", clause, re.S)
+        if head:
+            out[head[1]] = (spec, "default")
+            clause = (head[2] or "").strip()
+        if clause.startswith("*"):
+            ns = re.match(r"\*\s*as\s+([\w$]+)", clause)
+            if ns:
+                out[ns[1]] = (spec, None)
+        elif clause.startswith("{"):
+            names(clause, spec, " as ")
+    for m in JS_REQUIRE_RE.finditer(sf.masked):
+        spec = spec_of(m, 2)
+        if m[1].startswith("{"):
+            names(m[1], spec, ":")
+        else:
+            out[m[1]] = (spec, None)
+    return out
+
+
+def _js_call_sites(sf: _SrcFile, bindings: dict, changed: list):
+    """Aufrufe gebundener Namen auf geänderten Zeilen: (Position, Name, Pfad, Mitglied,
+    Zeile, Ende der Aufrufklammer)."""
+    for m in JS_CALL_RE.finditer(sf.masked):
+        first, second = m[1], m[2]
+        bound = bindings.get(first)
+        if bound is None or re.search(r"\b(?:function|new|class)\s*\*?\s*$", sf.masked[:m.start()]):
+            continue
+        if second is None:
+            if bound[1] is None:
+                continue
+            member = bound[1]
+        elif bound[1] is None:
+            member = second
+        else:
+            continue
+        end = _balanced_end(sf.masked, m.end() - 1)
+        line, last = sf.line(m.start()), sf.line(end)
+        if _touches(changed, line, last):
+            yield m.start(), (second or first), bound[0], member, line, end
+
+
+def _js_unawaited(sf: _SrcFile, start: int, end: int) -> bool:
+    """Steht der Aufruf ohne `await`, ohne `return`/Pfeil davor und ohne `.then(` danach?"""
+    before = sf.masked[max(0, start - 40):start]
+    return not (JS_AWAITED_RE.search(before) or JS_THEN_RE.match(sf.masked, end + 1))
+
+
+def _js_sites(index: _JsIndex, rel: str, sf: _SrcFile, lines: set, unresolved: set) -> list:
+    """Die Stellen einer Datei: je Aufruf eines über einen relativen Import gebundenen Namens
+    auf einer geänderten Zeile ein Eintrag, wenn die Gegenstelle etwas wirft (`throw`,
+    transitiv bis `RAISE_DEPTH`) oder `async` ist und der Aufruf ohne `await` steht."""
+    entries, shown, calls = [], set(), {}
+    for start, name, spec, member, line, end in _js_call_sites(
+            sf, _js_bindings(sf), sorted(lines)):
+        drel = index.resolve(rel, spec)
+        if drel is None:
+            unresolved.add((rel, line, sf.col(start)))
+            continue
+        defs, default = index.defs(drel)
+        item = default if member == "default" else (defs.get(member) or [None])[0]
+        if item is None:
+            continue
+        throws = sorted(set(_js_throws(index.file(drel), defs, item, RAISE_DEPTH, set())),
+                        key=lambda r: (r[1], r[0]))
+        floating = item.is_async and _js_unawaited(sf, start, end)
+        if not (throws or floating):
+            continue
+        body = [f"- Gegenstelle {item.name or member} [{drel}:{item.line}]: {item.sig}"]
+        if throws:
+            body.append("  wirft: " + ", ".join(sorted({t for t, _ in throws})))
+            body += [f"    throw {t} at {drel}:{n}" for t, n in throws[:RAISE_LINES_MAX]]
+        if floating:
+            body.append(ASYNC_NOTE)
+        key = (line, name, tuple(body))
+        if key not in shown:
+            shown.add(key)
+            entry = {"file": rel, "line": line, "kind": "call",
+                     "lines": [f"### {rel}:{line} ruft {name}(...)", *body]}
+            entries.append(entry)
+            calls.setdefault((line, name), []).append((entry, sf.col(start) + 1))
+    _mark_columns(rel, calls)
+    return entries
+
+
+def _mark_columns(rel: str, calls: dict) -> None:
+    """Mehrere Einträge für denselben Namen auf einer Zeile: die Überschrift nennt die Spalte."""
+    for (line, name), group in calls.items():
+        if len(group) > 1:
+            for entry, col in group:
+                entry["lines"][0] = f"### {rel}:{line}:{col} ruft {name}(...)"
+
+
+def collect_typescript(repo, rng, files, per_file=None):
+    """Gegenstellen der geänderten TypeScript-/JavaScript-Zeilen (Spec 28, Sammler), per
+    Text-Scanner.
+
+    `rng` und `files` wie bei `collect_python`; gezählt nur `.ts`, `.tsx`, `.js`, `.jsx`,
+    `.mjs`, `.cjs` (ohne Rücksicht auf Groß/Klein) außerhalb von `.skills/`. Der Code kommt
+    aus dem Baum des ZIELS in Git und wird nie ausgeführt; Strings, Template-Literale und
+    Kommentare sind ausgeblendet (`_mask_c`). Je Aufruf auf einer geänderten Zeile eines
+    Namens, den `import f from './x'`, `import { f } from '../y'`, `import * as m` oder
+    `const { f } = require('./z')`/`const m = require('./z')` (dann `m.f(…)`) an eine relative
+    Datei binden: die Definition (`function f`, `export function f`, `const f = (…) =>`,
+    `export const f = async …`, `exports.f = …`; Klassenmethoden nicht) mit Signaturzeile
+    und die `throw`-Zeilen ihres Rumpfs, transitiv in der Datei bis `RAISE_DEPTH`. Die Endung
+    von `./x` ergibt sich aus `JS_RESOLVE_ORDER`, dann `x/index.*`. Ist die Gegenstelle
+    `async` und steht der Aufruf ohne `await` (nicht als `return f(…)`, nicht vor `.then(`),
+    trägt der Eintrag die Zeile `ASYNC_NOTE`. Eine Stelle steht im Ergebnis, wenn die
+    Gegenstelle etwas wirft oder dieser Fall zutrifft. Nicht relative Importe (Pakete,
+    `@/x`) und relative ohne Datei am ZIEL stehen nicht im Block, sind aber in `unresolved`
+    gezählt. Rückgabe wie bei `collect_python`."""
+    return _collect(repo, rng, files, _is_js, _js_index,
+                    lambda index, rel: index.file(rel), _js_sites, per_file=per_file)
+
+
+# Namens-Rückfall --------------------------------------------------------------------------
+
+_NAME_HEADS = {
+    "go": re.compile(r"(?m)^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(?:\[[^\]\n]*\]\s*)?\("),
+    "rust": re.compile(r"\bfn\s+([A-Za-z_]\w*)\s*(?:<[^()\n]*>\s*)?\("),
+    "kotlin": re.compile(r"\bfun\s+(?:<[^()\n]*>\s*)?(?:[\w.<>?]+\.)?([A-Za-z_]\w*)\s*\("),
+    "swift": re.compile(r"\bfunc\s+([A-Za-z_]\w*)\s*(?:<[^()\n]*>\s*)?\("),
+    "typed": re.compile(
+        r"(?m)^[ \t]*(?:@\w+(?:\([^)\n]*\))?[ \t]+)*((?:[\w<>\[\],.?*&:~]+[ \t]+)+?)"
+        r"([A-Za-z_]\w*)[ \t]*\("),
+}
+_NAME_NOT_DEFS = frozenset({"if", "for", "while", "switch", "catch", "synchronized", "using",
+                            "lock", "foreach", "fixed", "return", "sizeof", "else", "new",
+                            "throw", "case", "typeof", "when"})
+_NAME_TYPED_TAIL = re.compile(
+    r"\s*(?:(?:const|noexcept|override|final|volatile|throws\s+[\w.,\s<>]+|where\s+[^{;]+)\s*)*\{")
+_NAME_CALL_RE = re.compile(
+    r"(?<![\w$])(?:[A-Za-z_]\w*\s*(?:\.|->|::|\?\.|!\.)\s*)*([A-Za-z_]\w*)\s*"
+    r"(?:<[^<>()\n]*>\s*)?\(")
+_NAME_THROWS = {"go": (re.compile(r"\bpanic\s*\(([^)\n]*)"), "panic"),
+                "rust": (re.compile(r"\bpanic!\s*\(([^)\n]*)"), "panic"),
+                "swift": (re.compile(r"\b(?:throw|fatalError\s*\()\s*([\w.]*)"), "throw")}
+_NAME_THROW_DEFAULT = (re.compile(r"\bthrow\s+(?:new\s+)?([\w.]*)"), "throw")
+
+
+def _name_body(sf: _SrcFile, group: str, pos: int):
+    """(Rumpf `(von, bis)` oder None, Ende der Signatur) hinter der Parameterliste ab `pos`:
+    das erste `{` auf Klammertiefe 0, vor `;` (Deklaration) und bei Kotlin vor `=`."""
+    masked, n, k, depth = sf.masked, len(sf.masked), pos, 0
+    limit = min(n, pos + 400)
+    while k < limit:
+        ch = masked[k]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(depth - 1, 0)
+        elif depth == 0 and (ch == ";" or (ch == "=" and group == "kotlin")):
+            return None, k
+        elif depth == 0 and ch == "{":
+            return (k, _balanced_end(masked, k)), k
+        k += 1
+    return None, pos
+
+
+def _name_defs(sf: _SrcFile, group: str) -> list:
+    """Die Definitionen einer Datei nach der einfachen Form ihrer Sprache: `_Def` mit Namen."""
+    found = []
+    for m in _NAME_HEADS[group].finditer(sf.masked):
+        name = m[2] if group == "typed" else m[1]
+        at = m.start(2) if group == "typed" else m.start(1)
+        if name in _NAME_NOT_DEFS:
+            continue
+        if group == "typed" and m[1].split()[-1] in _NAME_NOT_DEFS:
+            continue
+        end = _balanced_end(sf.masked, m.end() - 1)
+        if group == "typed":
+            tail = _NAME_TYPED_TAIL.match(sf.masked, end + 1)
+            if not tail:
+                continue
+            body, sig_end = (tail.end() - 1, _balanced_end(sf.masked, tail.end() - 1)), tail.end() - 1
+        else:
+            body, sig_end = _name_body(sf, group, end + 1)
+        start = m.start(1) if group == "typed" else m.start()
+        sig = sf.oneline(start, sig_end if body else end + 1)[:DOC_CHARS]
+        found.append(_Def(name, sf.line(at), sig, False, body, at))
+    return found
+
+
+class _NameIndex:
+    """Definitionen aller Dateien mit `NAME_SUFFIXES` am ZIEL: Name → [(Pfad, `_Def`)]; die
+    gelesenen Dateien in `files`, `unreadable` und `links` wie bei `_JsIndex`."""
+
+    def __init__(self, sources: dict, skipped: dict | None = None,
+                 links: dict | None = None) -> None:
+        self.unreadable: dict[str, str] = dict(skipped or {})
+        self.links: dict[str, str | None] = dict(links or {})
+        self.files: dict[str, _SrcFile] = {}
+        self.groups: dict[str, str] = {}
+        self.defs: dict[str, list] = {}
+        self.def_at: dict[str, set] = {}
+        for rel in sorted(sources):
+            group = NAME_LANGS[PurePosixPath(rel).suffix.lower()]
+            sf = self.files[rel] = _SrcFile(sources[rel], False)
+            self.groups[rel] = group
+            self.def_at[rel] = set()
+            for item in _name_defs(sf, group):
+                self.defs.setdefault(item.name, []).append((rel, item))
+                self.def_at[rel].add(item.pos)
+
+    not_indexed = _JsIndex.not_indexed
+    sources = property(lambda self: self.files)
+
+    def file(self, rel: str):
+        return self.files.get(rel)
+
+
+@functools.lru_cache(maxsize=INDEX_CACHE_SIZE)
+def _name_index(repo: Path, target: str) -> _NameIndex:
+    """Index der Definitionen für den Namens-Rückfall am ZIEL, je (Repo, SHA) einmal gebaut."""
+    links: dict = {}
+    sources, skipped = _tree_sources(repo, target, _is_named, links)
+    return _NameIndex(sources, skipped, links)
+
+
+def _is_named(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in NAME_SUFFIXES
+
+
+def _name_throws(index: _NameIndex, drel: str, item: _Def) -> list:
+    """(Ausdruck, Zeile, `throw` oder `panic`) der Rumpfzeilen von `item`, ohne Doppelte."""
+    if item.body is None:
+        return []
+    sf = index.files[drel]
+    regex, verb = _NAME_THROWS.get(index.groups[drel], _NAME_THROW_DEFAULT)
+    out = []
+    for m in regex.finditer(sf.masked, *item.body):
+        raw = sf.oneline(m.start(1), m.end(1)) if m.end(1) > m.start(1) else "?"
+        out.append((raw[:THROW_TYPE_CHARS] or "?", sf.line(m.start()), verb))
+    return out
+
+
+def _name_sites(index: _NameIndex, rel: str, sf: _SrcFile, lines: set, unresolved: set) -> list:
+    """Die Stellen einer Datei: je Aufruf auf einer geänderten Zeile, dessen Name im Repo
+    genau eine Definition hat, ein Eintrag mit `UNIQUE_NAME_MARK`, wenn ihr Rumpf `throw` oder
+    `panic` enthält; zwei oder mehr Definitionen desselben Namens: gezählt."""
+    entries, shown, calls = [], set(), {}
+    changed = sorted(lines)
+    for m in _NAME_CALL_RE.finditer(sf.masked):
+        name = m[1]
+        if m.start(1) in index.def_at[rel] or re.search(r"\bnew\s+$", sf.masked[:m.start()]):
+            continue
+        defs = index.defs.get(name)
+        if not defs:
+            continue
+        end = _balanced_end(sf.masked, m.end() - 1)
+        line = sf.line(m.start(1))
+        if not _touches(changed, line, sf.line(end)):
+            continue
+        if len(defs) > 1:
+            unresolved.add((rel, line, sf.col(m.start(1))))
+            continue
+        drel, item = defs[0]
+        throws = sorted(set(_name_throws(index, drel, item)), key=lambda r: (r[1], r[0]))
+        if not throws:
+            continue
+        body = [f"- Gegenstelle {name} [{drel}:{item.line}]: {item.sig} {UNIQUE_NAME_MARK}",
+                "  wirft: " + ", ".join(sorted({t for t, _n, _v in throws}))]
+        body += [f"    {v} {t} at {drel}:{n}" for t, n, v in throws[:RAISE_LINES_MAX]]
+        key = (line, name, tuple(body))
+        if key not in shown:
+            shown.add(key)
+            entry = {"file": rel, "line": line, "kind": "call",
+                     "lines": [f"### {rel}:{line} ruft {name}(...)", *body]}
+            entries.append(entry)
+            calls.setdefault((line, name), []).append((entry, sf.col(m.start(1)) + 1))
+    _mark_columns(rel, calls)
+    return entries
+
+
+def collect_by_name(repo, rng, files, per_file=None):
+    """Namens-Rückfall für Sprachen ohne eigenen Sammler (Spec 28, Sammler): Java, C#, Go,
+    Rust, C, C++, Kotlin und Swift (`NAME_SUFFIXES`).
+
+    `rng` und `files` wie bei `collect_python`; der Code kommt aus dem Baum des ZIELS in Git
+    und wird nie ausgeführt. Je Aufruf auf einer geänderten Zeile, dessen Name im Repo genau
+    einmal definiert ist (`func Name(` für Go, `fn name(` für Rust, `fun`/`func` für Kotlin
+    und Swift, Rückgabetyp plus `Name(…) {` für Java, C#, C und C++; auch über Dateien und
+    Sprachen hinweg), die Definition mit Signaturzeile, der Marke `UNIQUE_NAME_MARK` und den
+    `throw`-/`panic`-Zeilen ihres Rumpfs — im Block, wenn es solche gibt. Zwei oder mehr
+    gleichnamige Definitionen: nicht aufgelöst, gezählt. Keine Importe, Überladungen oder
+    Besitz. Rückgabe wie bei `collect_python`."""
+    return _collect(repo, rng, files, _is_named, _name_index,
+                    lambda index, rel: index.file(rel), _name_sites, per_file=per_file)
+
+
 class _Collector(NamedTuple):
     """Ein Sammler der Gegenstellen: Sprache (für den Hinweis am Paketende), Endungen (klein),
     Sammelfunktion `(repo, rng, files, per_file=None) -> Collected` (`per_file` wie bei
@@ -4472,7 +5122,9 @@ class _Collector(NamedTuple):
 
 
 COLLECTORS = (_Collector("Python", PYTHON_SUFFIXES, collect_python, _python_index),
-              _Collector("Delphi", DELPHI_SUFFIXES, collect_delphi, _delphi_index, True))
+              _Collector("Delphi", DELPHI_SUFFIXES, collect_delphi, _delphi_index, True),
+              _Collector("TypeScript", JS_SUFFIXES, collect_typescript, _js_index),
+              _Collector("Namenssuche", NAME_SUFFIXES, collect_by_name, _name_index))
 COUNTERPART_SUFFIXES = frozenset().union(*(c.suffixes for c in COLLECTORS))  # mit Sammler
 
 
