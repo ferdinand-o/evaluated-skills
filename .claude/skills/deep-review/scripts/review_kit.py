@@ -710,8 +710,10 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     (`PROFILE_LEVELS`; `max` also nur ausdrücklich); eine Stufe außerhalb von `LEVELS` ist ein
     KitError. Die Gegenstellen, die für die Schlüssel ohnehin gesammelt werden, legt
     `store_collected` je Datei im Laufordner ab; `write_counterparts` liest sie dort
-    (`load_collected`) statt sie je Paket noch einmal zu sammeln. Fokus `quality` sammelt
-    nichts und legt nichts ab."""
+    (`load_collected`) statt sie je Paket noch einmal zu sammeln (Delphi nach `--since` mit
+    übernommenen Delphi-Dateien ausgenommen, siehe dort). Der Speicher ist nur
+    Zwischenspeicher: Scheitert sein Schreiben (KitError oder OSError), entsteht der Lauf ohne
+    ihn. Fokus `quality` sammelt nichts und legt nichts ab."""
     if profile not in PROFILES:
         raise KitError(f"Profil {profile!r} unbekannt — erlaubt: {', '.join(PROFILES)}")
     if focus not in FOCI:
@@ -802,9 +804,9 @@ def build_plan(repo, rng, profile, focus, split_at, with_tests, level=None):
     }
     try:
         if collected is not None:
-            # Nur ein Zwischenspeicher: was `write_json` nicht schreiben kann, sammelt
-            # `counterparts` selbst; ein Fehler der Platte bleibt ein Fehler.
-            with contextlib.suppress(KitError):
+            # Nur ein Zwischenspeicher: was nicht geschrieben werden kann (KitError, auch ein
+            # OSError wie volle Platte oder fehlende Rechte), sammelt `counterparts` selbst.
+            with contextlib.suppress(KitError, OSError):
                 store_collected(directory, collected)
         return write_json(directory / "plan.json", meta, payload)
     except BaseException:
@@ -3882,18 +3884,21 @@ def _branch_reason(unit: _PasUnit, lines: set):
 class _Collector(NamedTuple):
     """Ein Sammler der Gegenstellen: Sprache (für den Hinweis am Paketende), Endungen (klein),
     Sammelfunktion `(repo, rng, files, per_file=None) -> Collected` (`per_file` wie bei
-    `_collect`), Index am ZIEL `(repo, ziel)` mit `not_indexed()`."""
+    `_collect`), Index am ZIEL `(repo, ziel)` mit `not_indexed()` und `on_demand`: liest der
+    Index Dateien erst beim Sammeln (Delphi scannt Units bei Bedarf), hängt `not_indexed()`
+    davon ab, welche Dateien gesammelt wurden."""
     language: str
     suffixes: frozenset
     collect: object
     index: object
+    on_demand: bool = False
 
     def accepts(self, path: str) -> bool:
         return PurePosixPath(path).suffix.lower() in self.suffixes
 
 
 COLLECTORS = (_Collector("Python", PYTHON_SUFFIXES, collect_python, _python_index),
-              _Collector("Delphi", DELPHI_SUFFIXES, collect_delphi, _delphi_index))
+              _Collector("Delphi", DELPHI_SUFFIXES, collect_delphi, _delphi_index, True))
 COUNTERPART_SUFFIXES = frozenset().union(*(c.suffixes for c in COLLECTORS))  # mit Sammler
 
 
@@ -3902,15 +3907,15 @@ def _collect_all(repo, rng, files, per_file=None) -> Collected:
     ignoriert fremde Endungen. Einträge zusammen nach Datei, Zeile, Art; `unresolved`
     addiert, `unparsed` vereinigt. Für `write_counterparts` und die Datei-Schlüssel;
     `per_file` (Dict) bekommt je Datei mit Sammler ihren Anteil (`_collect`)."""
-    if per_file is None:
-        results = [c.collect(repo, rng, files) for c in COLLECTORS]
-    else:
-        results = [c.collect(repo, rng, files, per_file=per_file) for c in COLLECTORS]
-    return Collected(
-        sorted((e for r in results for e in r.entries),
-               key=lambda e: (e["file"], e["line"], e["kind"])),
-        sum(r.unresolved for r in results),
-        sorted(pair for r in results for pair in r.unparsed))
+    return _joined([c.collect(repo, rng, files, per_file=per_file) for c in COLLECTORS])
+
+
+def _joined(results) -> Collected:
+    """Die `Collected` mehrerer Sammler (je über eigene Dateien) als eines: Einträge nach
+    `_entry_order`, `unresolved` addiert, `unparsed` vereinigt."""
+    return Collected(sorted((e for r in results for e in r.entries), key=_entry_order),
+                     sum(r.unresolved for r in results),
+                     sorted(pair for r in results for pair in r.unparsed))
 
 
 def _file_line(path: str, unreadable: dict) -> str:
@@ -4065,7 +4070,9 @@ def _collected_payload(repo: Path, span: Span, focus: str, files, per_file: dict
     je Sprache mit eigenen Dateien die nicht durchsuchten Dateien am ZIEL als Liste von Paaren
     `[pfad, grund]` (ein Pfad, der kein UTF-8 ist, escapt wie in `not_reviewed`; eine Liste,
     damit die Zahl auch dann stimmt) — nach dem Sammeln gelesen, denn Delphi scannt Units erst
-    bei Bedarf."""
+    bei Bedarf. Bei einem Sammler mit `on_demand` ist die Liste also ein Stand aller Dateien
+    des Plans und gilt für die Pakete nur, solange sie alle diese Dateien tragen; nach
+    `--since` sammelt `write_counterparts` diese Sprache deshalb live."""
     files = sorted({str(f) for f in files})
     not_indexed = {}
     for collector in COLLECTORS:
@@ -4091,31 +4098,45 @@ def store_collected(run_path, collected):
     return write_json(directory / COLLECTED_NAME, meta, payload)
 
 
+def _is_count(value) -> bool:
+    """Eine ganze Zahl ≥ 0 aus JSON (kein bool)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _is_entry(entry) -> bool:
     return (isinstance(entry, dict) and isinstance(entry.get("file"), str)
-            and isinstance(entry.get("line"), int) and isinstance(entry.get("kind"), str)
+            and _is_count(entry.get("line")) and isinstance(entry.get("kind"), str)
             and isinstance(entry.get("lines"), list)
             and all(isinstance(line, str) for line in entry["lines"]))
+
+
+def _is_site(item) -> bool:
+    """Eine nicht aufgelöste Stelle `[datei, zeile, spalte]` wie `_collect` sie ablegt."""
+    return (isinstance(item, list) and len(item) == 3 and isinstance(item[0], str)
+            and _is_count(item[1]) and _is_count(item[2]))
 
 
 def _is_record(record) -> bool:
     return (isinstance(record, dict) and isinstance(record.get("entries"), list)
             and all(_is_entry(e) for e in record["entries"])
             and isinstance(record.get("unresolved"), list)
-            and all(isinstance(item, list) and len(item) == 3 for item in record["unresolved"])
+            and all(_is_site(item) for item in record["unresolved"])
             and (record.get("unparsed") is None or isinstance(record["unparsed"], str)))
 
 
 def load_collected(run_path):
     """Den Gegenstellen-Speicher des Laufs lesen (`store_collected`); None, wenn er fehlt,
-    nicht lesbar ist oder nicht die Form hat — dann sammelt `write_counterparts` selbst. Ob
-    er zum Plan passt, prüft `_collected_matches`."""
+    nicht lesbar ist, ein anderes `_meta.schema` als `SCHEMA_VERSION` trägt oder nicht die
+    Form hat (jedes Feld geprüft, bis zu den Elementen von `unresolved`) — dann sammelt
+    `write_counterparts` selbst. Ob er zum Plan passt, prüft `_collected_matches`."""
     try:
         data = json.loads((Path(run_path) / COLLECTED_NAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not (isinstance(data, dict) and isinstance(data.get("_meta"), dict)
             and data["_meta"].get("skill") == SKILL_NAME
+            and _is_count(data["_meta"].get("schema"))
+            and data["_meta"]["schema"] == SCHEMA_VERSION
             and all(isinstance(data.get(key), str) for key in ("target", "base", "focus"))
             and isinstance(data.get("files"), dict)
             and all(_is_record(r) for r in data["files"].values())
@@ -4147,6 +4168,17 @@ def _collected_matches(plan: dict, stored) -> bool:
                if any(collector.accepts(path) for path in files))
 
 
+def _live_collectors(plan: dict, stored: dict) -> tuple:
+    """Die Sammler mit `on_demand`, die trotz passendem Speicher live sammeln: Der Speicher
+    trägt eigene Dateien, die in keinem Paket stehen (nach `--since` übernommen). Ihr
+    `not_indexed` im Speicher enthält dann, was erst das Sammeln dieser Dateien gelesen hat,
+    und der Hinweis eines Pakets wiche vom Live-Weg ab."""
+    covered = {str(f) for packet in plan["packets"] for f in packet["files"]}
+    outside = [path for path in stored["files"] if path not in covered]
+    return tuple(c for c in COLLECTORS
+                 if c.on_demand and any(c.accepts(path) for path in outside))
+
+
 def _stored_found(stored: dict, files) -> Collected:
     """`Collected` der Paketdateien aus dem Speicher — dasselbe, was `_collect_all` über die
     Paketdateien sammelte: Einträge nach Datei, Zeile, Art; nicht aufgelöste Stellen als
@@ -4174,14 +4206,19 @@ def write_counterparts(repo, run_id):
     ZIEL, mit Grund in der Dateiliste), `notes` = je Sprache mit eigenen Dateien im Paket die
     übrigen nicht durchsuchten Dateien dieser Sprache im Repo als eine Zahl mit den
     vorkommenden Gründen (`not_indexed` des Index: ohne Submodule und ohne Symlinks auf
-    gelesene Dateien; bei Delphi dazu die gescannten Units, deren Blöcke nicht aufgehen —
-    die Hinweise entstehen erst, wenn alle Pakete gesammelt sind, also unabhängig von ihrer
-    Reihenfolge), bei Fokus `quality` statt Gegenstellen `intro` = `QUALITY_INTRO`.
-    Höchstens `BLOCK_MAX_CHARS` Zeichen je Datei, Kopfzeile eingeschlossen. Schreibt atomar,
-    überschreibt einen früheren Block. Gesammelt wird nur, wenn der Speicher von `plan`
-    (`load_collected`) fehlt oder nicht zum Plan passt (`_collected_matches`); sonst kommen
-    Einträge, nicht aufgelöste Stellen, nicht lesbare Dateien und `not_indexed` aus dem
-    Speicher, und der Block ist byte-gleich. Rückgabe: je Paket in
+    gelesene Dateien; bei Delphi dazu die Units, die das Sammeln der Paketdateien aller
+    Pakete gescannt hat und deren Blöcke nicht aufgehen — die Hinweise entstehen erst, wenn
+    alle Pakete gesammelt sind, also unabhängig von ihrer Reihenfolge), bei Fokus `quality`
+    statt Gegenstellen `intro` = `QUALITY_INTRO`. Höchstens `BLOCK_MAX_CHARS` Zeichen je
+    Datei, Kopfzeile eingeschlossen. Schreibt atomar, überschreibt einen früheren Block.
+
+    Gesammelt wird nur, wenn der Speicher von `plan` (`load_collected`) fehlt oder nicht zum
+    Plan passt (`_collected_matches`); sonst kommen Einträge, nicht aufgelöste Stellen, nicht
+    lesbare Dateien und `not_indexed` aus dem Speicher. Ausnahme `_live_collectors`: Trägt der
+    Speicher Dateien eines Sammlers mit `on_demand` (Delphi), die in keinem Paket stehen
+    (`--since`), hält sein `not_indexed` auch Units, die nur diese Dateien erreicht haben; diese
+    Sprache wird dann über die Paketdateien live gesammelt, die übrigen kommen aus dem
+    Speicher. So ist der Block mit und ohne Speicher byte-gleich. Rückgabe: je Paket in
     Plan-Reihenfolge `{"packet", "range" (der Bereich von `make_packet_range`, wie er im Plan
     steht), "path" (repo-relativ), "counterparts", "shown", "unresolved"}`."""
     repo = _toplevel(repo)
@@ -4193,12 +4230,15 @@ def write_counterparts(repo, run_id):
     quality = plan.get("focus") == "quality"
     stored = None if quality else load_collected(run_dir(repo, run_id))
     stored = stored if _collected_matches(plan, stored) else None
+    live = () if stored is None else _live_collectors(plan, stored)
     collected = []
     for packet in plan["packets"]:
         rng = make_packet_range(repo, run_id, packet["id"], None, None)
         found = None
         if stored is not None:
-            found = _stored_found(stored, packet["files"])
+            kept = [f for f in packet["files"] if not any(c.accepts(str(f)) for c in live)]
+            found = _joined([_stored_found(stored, kept)]
+                            + [c.collect(repo, plan_range, packet["files"]) for c in live])
         elif not quality:
             found = _collect_all(repo, plan_range, packet["files"])
         collected.append((packet, rng, found))
@@ -4222,7 +4262,7 @@ def write_counterparts(repo, run_id):
                 own = {str(f) for f in packet["files"] if collector.accepts(str(f))}
                 if not own:
                     continue
-                if stored is not None:
+                if stored is not None and collector not in live:
                     missing = stored["not_indexed"][collector.language]
                 else:
                     if target is None:
@@ -4377,8 +4417,8 @@ def file_keys(repo, target, files, entries):
     Commit, eine Datei, die `target` nicht hat (gelöscht), mit einer eigenen Marke. `entries`
     sind die Einträge der Sammler
     (`Collected.entries`, auch mehrerer Sprachen zusammen); zur Datei gehören die mit
-    `entry["file"]` = ihr Pfad, in der Sortierung `(file, line, kind)`, je Eintrag
-    `"\\n".join(entry["lines"])` — Signatur und `raise`-Zeilen der Gegenstelle mit
+    `entry["file"]` = ihr Pfad, in der Sortierung `_entry_order` (Datei, Zeile, Art), je
+    Eintrag `"\\n".join(entry["lines"])` — Signatur und `raise`-Zeilen der Gegenstelle mit
     Datei:Zeile, so dass sich der Schlüssel des Aufrufers ändert, wenn sich die Gegenstelle
     ändert. Jeder Teil geht mit Art und Länge in den Hash, die Teile lassen sich nicht
     gegeneinander verschieben. Einträge für Dateien außerhalb von `files` zählen nicht.
@@ -4388,7 +4428,7 @@ def file_keys(repo, target, files, entries):
     repo = _toplevel(repo)
     wanted = sorted({str(f) for f in files})
     texts: dict[str, list] = {path: [] for path in wanted}
-    for entry in sorted(entries, key=lambda e: (e["file"], e["line"], e["kind"])):
+    for entry in sorted(entries, key=_entry_order):
         lines = entry["lines"]
         if not isinstance(lines, (list, tuple)) or not all(isinstance(x, str) for x in lines):
             raise KitError(f"Eintrag {entry.get('file')}:{entry.get('line')}: lines muss eine "
@@ -4593,7 +4633,10 @@ def apply_since(plan, run_dirs):
     (Pflicht) als Soll statt der Commit-Messages, einem Soll mindestens so genau. Also
     übernimmt ein `standard`-Plan aus `standard`- und `checkpoint`-Läufen, ein
     `checkpoint`-Plan nur aus `checkpoint`-Läufen (ein `standard`-Lauf hatte nur die
-    Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen. Darin gilt eine
+    Commit-Messages); eine Kette darf Läufe beider erlaubten Profile mischen. Ebenso zählen nur
+    Läufe, deren Stufe (`plan_level`: `level`, ohne den Standard ihres Profils) in `LEVELS`
+    mindestens so hoch ist wie die des neuen Plans — ein Review auf `low` trägt keinen Plan
+    auf `high`, weder als passender Lauf noch als Glied einer Kette. Darin gilt eine
     Datei als von einem Lauf reviewt, wenn sein Paket ein angenommenes `results/<id>.json` hat
     oder er sie selbst übernommen hat. Passend ist ein Lauf, der sie mit demselben
     Datei-Schlüssel reviewt hat. Der Schlüssel deckt nur den Stand am ZIEL; was ein Lauf
@@ -4655,6 +4698,9 @@ def apply_since(plan, run_dirs):
         raise KitError("apply_since braucht einen deep-review-Plan mit file_keys und packets")
     _check_file_keys(plan["file_keys"],
                      lambda why: KitError(f"apply_since braucht einen deep-review-Plan ({why})"))
+    if plan_level(plan) not in LEVELS:
+        raise KitError(f"apply_since braucht einen deep-review-Plan (level {plan['level']!r} "
+                       f"ist keine Stufe aus {', '.join(LEVELS)})")
     new = copy.deepcopy(plan)
     own_run = (plan.get("_meta") or {}).get("run") if isinstance(plan.get("_meta"), dict) else None
     earlier, repo = {}, None
@@ -4663,7 +4709,8 @@ def apply_since(plan, run_dirs):
         if run_id == own_run:
             raise KitError(f"Lauf {run_id} kann nicht auf sich selbst folgen (--since)")
         if eplan.get("focus") != plan.get("focus") \
-                or eplan.get("profile") not in SINCE_PROFILES.get(plan.get("profile"), ()):
+                or eplan.get("profile") not in SINCE_PROFILES.get(plan.get("profile"), ()) \
+                or LEVELS.index(plan_level(eplan)) < LEVELS.index(plan_level(plan)):
             continue
         earlier[run_id] = (_run_age(Path(directory), run_id), _earlier_files(Path(directory), eplan))
         repo = repo or _layout(Path(directory))[0]
