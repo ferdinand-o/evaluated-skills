@@ -8,6 +8,7 @@
     decide_log.py open                          offene große Fragen
     decide_log.py summary                       Einträge der laufenden Sitzung
     decide_log.py check --range <rev>           teure Änderungen seit <rev> ohne Freigabe, dann Übergabe
+    decide_log.py guard                         PreToolUse-Hook auf Bash: Hook-JSON auf stdin, Exit immer 0
 
 Aufruf: `python "${CLAUDE_SKILL_DIR}/scripts/decide_log.py"`. Repo-Wurzel ist einmal
 `git rev-parse --show-toplevel` (`repo_root`), sonst das Arbeitsverzeichnis. Die Sitzung ist
@@ -20,7 +21,10 @@ Ablageorte:
 - `.skills/decide/rules.md` und `~/.skills/decide/rules.md` — Regeln `immer fragen` / `nie fragen`
 
 Regeln und Formate stehen nicht hier, sondern an je einer Stelle: Kategorien, Pfadmuster,
-Schlüssel und was check sieht in `references/reversibility.md`; Ablage, Optionen und Empfehlung in
+Schlüssel und was check sieht in `references/reversibility.md` — eine zweite Liste der Kategorien
+und Pfadmuster im Skript gibt es nicht. Nur die Befehle, die guard erkennt, stehen als Konstante
+`GUARD_COMMANDS` hier, weil die Hook-Kopie unter `.claude/hooks/` ohne `references/` und `assets/`
+läuft; `reversibility.md` trägt dieselbe Liste, ein Test hält beide gleich. Ablage, Optionen und Empfehlung in
 `references/option-memo.md`; Vorlage des Auftrags an einen Subagenten in
 `references/brief.md` (kein Skript liest sie); Ablauf, Belegzeile und Regeln in `SKILL.md`. Die Funktions-Docstrings
 beschreiben das Verhalten im Einzelnen.
@@ -28,13 +32,17 @@ beschreiben das Verhalten im Einzelnen.
 Exit-Codes: 0 Erfolg; 1 abgewiesen oder nicht geschrieben (Grund auf stderr) bzw. bei check
 mindestens ein Befund (Bericht auf stdout); 2 falscher Aufruf (argparse) und jedes
 „ungeprüft — …“ (kein Git, Git antwortet nicht, Reference fehlt oder parst nicht), nie ein Erfolg.
-Das Skript meldet; es hält niemanden an.
+`guard` endet immer mit 0: Rückfrage (`ask`) oder „[decide] Hook ungeprüft — …“ stehen im JSON.
+Das Skript meldet; anhalten kann nur guard als installierter Hook, bis der Nutzer antwortet.
 """
 import argparse
 import errno
 import functools
+import json
 import os
+import posixpath
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -80,7 +88,7 @@ LEDGER_SHOWN = LEDGER.as_posix()
 SKILL_DIR = Path(__file__).resolve().parent.parent
 LEDGER_ASSET = SKILL_DIR / "assets" / "big-decisions.md"
 LEDGER_LOCK = Path(".skills") / "cache" / "decide" / "big-decisions.md"   # Sperrdatei: dies + „.lock“
-# Die eine Quelle für Kategorien, Grad und Pfadmuster (load_categories); keine Liste im Skript.
+# Die eine Quelle für Kategorien, Grad und Pfadmuster (load_categories); keine zweite Liste davon im Skript.
 REFERENCE = SKILL_DIR / "references" / "reversibility.md"
 REFERENCE_COLUMNS = ("Kategorie", "Bedeutung", "Beispiel", "Grad", "Pfadmuster", "Grenze")
 GRADES = ("geprüft", "teilweise", "ungeprüft")
@@ -1377,7 +1385,12 @@ def _read_untracked(path):
         if not stat.S_ISREG(info.st_mode) or info.st_size > UNTRACKED_LIMIT:
             return None
         handle = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
-        with os.fdopen(handle, "rb") as file:
+        try:
+            file = os.fdopen(handle, "rb")
+        except BaseException:
+            os.close(handle)                            # fdopen hat den Deskriptor nicht übernommen
+            raise
+        with file:
             data = file.read(UNTRACKED_LIMIT + 1)
     except OSError:
         return None
@@ -1702,6 +1715,437 @@ def list_rules(root, home):
     return 0, "\n".join(lines)
 
 
+# --- guard: PreToolUse-Hook auf Bash (G3, optional) ----------------------------------------
+
+# Die Befehle, die guard erkennt, mit ihrer Kategorie. Dieselbe Liste steht in
+# `references/reversibility.md` („Befehle, die guard erkennt“); sie steht auch hier, weil die
+# Hook-Kopie unter `.claude/hooks/` ohne `references/` läuft. Ein Test hält beide gleich.
+GUARD_COMMANDS = {
+    "git push": "push", "gh pr merge": "push", "gh release create": "push",
+    "gh pr create": "external", "gh issue create": "external", "gh issue close": "external",
+    "gh issue comment": "external", "npm publish": "external", "twine upload": "external",
+    "docker push": "external", "terraform apply": "external", "terraform destroy": "external",
+    "kubectl apply": "external", "kubectl delete": "external", "curl": "external", "wget": "external",
+    "rm": "data-delete", "git clean": "data-delete", "git branch": "data-delete",
+    "psql": "data-delete", "sqlite3": "data-delete", "mysql": "data-delete",
+    "git reset": "unsaved-work", "git checkout": "unsaved-work", "git restore": "unsaved-work",
+    "git stash drop": "unsaved-work", "git stash clear": "unsaved-work",
+}
+# `rm -r` bleibt still, wenn jedes Ziel unter /tmp/ oder hier liegt (Annahme Spec 28: regenerierbar).
+RM_EXEMPT_PREFIX = ".skills/cache"                  # relativ zur Repo-Wurzel, als Präfix
+RM_EXEMPT_PARTS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "node_modules",
+                             "build", "dist", ".venv"})          # Pfadkomponenten in beliebiger Tiefe
+RM_TMP = "/tmp/"
+GUARD_ALWAYS = "immer Rückfrage"
+GUARD_UNPARSED = "Befehl nicht zerlegbar"
+GUARD_SHOWN = 80                                    # Zeichen des Befehls im Grund (Annahme, nicht gemessen)
+HOOK_UNCHECKED = "[decide] Hook ungeprüft"
+_GUARD_PROGRAMS = tuple(dict.fromkeys(command.split()[0] for command in GUARD_COMMANDS))
+_PROGRAM_RE = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, _GUARD_PROGRAMS)) + r")(?![\w.-])")
+_SEPARATOR_CHARS = ";&|\n"
+_CONTINUATION_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")         # `\` am Zeilenende: Zeile geht weiter
+_REDIRECT_OP_RE = re.compile(r"\d*(?:>>?|<<?<?|>\||<>|>&|<&)")   # Umleitung ohne Ziel im selben Wort
+_REDIRECT_RE = re.compile(r"\d*(?:>>?|<<?<?|>\||<>)\S")          # Umleitung mit Ziel im selben Wort
+_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_PREFIX_WORDS = frozenset({"!", "(", "{", "if", "then", "else", "elif", "do", "while", "until", "time",
+                           "exec", "command", "nohup", "env"})
+_SUDO_VALUE = frozenset("ugpChDRTU")                # sudo-Kurzoptionen mit Wert im nächsten Wort
+_CURL_VALUE = frozenset("AbcCDeEHKmoPQrtuUwxyYz")   # curl-Kurzoptionen mit Wert (Rest des Worts oder nächstes)
+_PUSH_QUIET = frozenset({"-u", "--set-upstream", "-v", "--verbose", "-q", "--quiet", "--no-verify", "--progress",
+                         "--porcelain"})
+_SQL_DROP_RE = re.compile(r"(?i)\b(?:DROP|TRUNCATE)\s")
+_SQL_DELETE_RE = re.compile(r"(?i)\bDELETE\s+FROM\b")
+_SQL_WHERE_RE = re.compile(r"(?i)\bWHERE\b")
+
+
+def _split_parts(command):
+    """Die Teile eines Bash-Befehls als Wortlisten. Zerlegt mit `shlex` (posix, Trenner `;&|` und
+    Zeilenumbruch nur außerhalb von Anführungszeichen, kein Kommentarzeichen — `#` mitten im Wort wie in
+    `https://x/#a` beendet bei Bash nichts); `\\` am Zeilenende verbindet die Zeilen wie in Bash.
+    Umleitungen (`2>&1`, `>/dev/null`, `&> log`) fallen weg, `&` darin trennt nichts. Wirft ValueError
+    bei unbalancierten Anführungszeichen."""
+    lexer = shlex.shlex(_CONTINUATION_RE.sub(r"\1", command), posix=True, punctuation_chars=_SEPARATOR_CHARS)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    tokens = list(lexer)
+    parts, words, i = [], [], 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if not token or not set(token) <= set(_SEPARATOR_CHARS):
+            words.append(token)
+        elif token == "&" and words and re.fullmatch(r"\d*[<>]", words[-1]) and i < len(tokens):
+            words.pop()                                 # `2>&1`, `>&2`: Umleitung, kein Hintergrund
+            i += 1
+        elif token == "&" and i < len(tokens) and tokens[i].startswith(">"):
+            continue                                    # `&>log`, `&> log`: Umleitung folgt
+        elif words:
+            parts.append(words)
+            words = []
+    if words:
+        parts.append(words)
+    return [kept for kept in (_without_redirects(part) for part in parts) if kept]
+
+
+def _without_redirects(words):
+    kept, skip = [], False
+    for word in words:
+        if skip:
+            skip = False
+        elif _REDIRECT_OP_RE.fullmatch(word):
+            skip = True                                 # das Ziel steht im nächsten Wort
+        elif not _REDIRECT_RE.match(word):
+            kept.append(word)
+    return kept
+
+
+def _program_words(words):
+    """Die Wörter ab dem Programmnamen: führende Zuweisungen (`VAR=x`), `sudo` samt Optionen und
+    Schlüsselwörter wie `then`, `do`, `(` fallen weg."""
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if _ASSIGNMENT_RE.match(word) or word in _PREFIX_WORDS:
+            i += 1
+        elif word == "sudo":
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                option = words[i]
+                i += 1
+                if option == "--":
+                    break
+                if len(option) == 2 and option[1] in _SUDO_VALUE:
+                    i += 1
+        else:
+            break
+    rest = words[i:]
+    if rest and rest[0].startswith("(") and rest[0] != "(":
+        rest = [rest[0].lstrip("(")] + rest[1:]
+    return rest
+
+
+def _split_args(args):
+    """(lange Optionen ohne `=…`, Buchstaben aller Kurzoptions-Bündel, Operanden, `--` gesehen)."""
+    longs, shorts, operands, dashdash = set(), set(), [], False
+    for arg in args:
+        if dashdash or arg == "-" or not arg.startswith("-"):
+            operands.append(arg)
+        elif arg == "--":
+            dashdash = True
+        elif arg.startswith("--"):
+            longs.add(arg.split("=", 1)[0])
+        else:
+            shorts.update(arg[1:])
+    return longs, shorts, operands, dashdash
+
+
+def _rm_exempt(target, cwd, root):
+    """Liegt das Ziel unter /tmp/ (wie angegeben, nicht über `cwd` aufgelöst — ein Repo unter /tmp
+    bleibt geschützt), unter `.skills/cache` (relativ zur Wurzel) oder hat es eine Pfadkomponente aus
+    `RM_EXEMPT_PARTS` (relativ zur Wurzel, sonst wie angegeben)? `..` wird vorher aufgelöst."""
+    path = posixpath.normpath(target)
+    if path.startswith(RM_TMP):
+        return True
+    full = posixpath.normpath(posixpath.join(Path(cwd).as_posix(), path))
+    base = Path(root).as_posix().rstrip("/") + "/"
+    rel = full[len(base):] if full.startswith(base) else None
+    if rel is not None and (rel == RM_EXEMPT_PREFIX or rel.startswith(RM_EXEMPT_PREFIX + "/")):
+        return True
+    return any(part in RM_EXEMPT_PARTS for part in (path if rel is None else rel).split("/"))
+
+
+def _rm_hit(args, cwd, root):
+    longs, shorts, operands, _ = _split_args(args)
+    if "--recursive" not in longs and not shorts & {"r", "R"}:
+        return False
+    return not all(_rm_exempt(target, cwd, root) for target in operands)
+
+
+def _method_hit(method):
+    return method.upper() not in ("GET", "HEAD")
+
+
+def _curl_hit(args, cwd, root):
+    """Methode außer GET/HEAD (`-X`, `-X<m>`, `--request`, `--request=<m>`), `--data*`, `--form*`,
+    `--json`, `-T`/`--upload-file` oder ein Kurzoptions-Bündel mit `d` oder `F`."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if arg == "--":
+            break
+        if arg.startswith("--"):
+            name, eq, value = arg.partition("=")
+            if name.startswith(("--data", "--form")) or name in ("--json", "--upload-file"):
+                return True
+            if name == "--request":
+                if not eq:
+                    value, i = (args[i] if i < len(args) else ""), i + 1
+                if _method_hit(value):
+                    return True
+            continue
+        if not arg.startswith("-") or arg == "-":
+            continue
+        for k, letter in enumerate(arg[1:], 2):
+            if letter in "dFT":
+                return True
+            if letter == "X" or letter in _CURL_VALUE:
+                value = arg[k:]
+                if not value:
+                    value, i = (args[i] if i < len(args) else ""), i + 1
+                if letter == "X" and _method_hit(value):
+                    return True
+                break
+    return False
+
+
+def _wget_hit(args, cwd, root):
+    return any(arg == opt or arg.startswith(opt + "=") for arg in args
+               for opt in ("--post-data", "--post-file", "--method"))
+
+
+def _sql_hit(args, cwd, root):
+    """`DROP`, `TRUNCATE` oder `DELETE FROM` ohne `WHERE` (je Anweisung) in einem Argument."""
+    return any(_SQL_DROP_RE.search(statement)
+               or (_SQL_DELETE_RE.search(statement) and not _SQL_WHERE_RE.search(statement))
+               for arg in args for statement in arg.split(";"))
+
+
+def _git_checkout_hit(args, cwd, root):
+    longs, shorts, operands, dashdash = _split_args(args)
+    return (dashdash or "." in operands or "f" in shorts or "--force" in longs
+            or any(os.path.lexists(Path(cwd) / operand) for operand in operands))
+
+
+def _git_restore_hit(args, cwd, root):
+    longs, shorts, _, _ = _split_args(args)
+    staged = "--staged" in longs or "S" in shorts
+    worktree = "--worktree" in longs or "W" in shorts
+    return not (staged and not worktree)
+
+
+def _git_branch_hit(args, cwd, root):
+    longs, shorts, _, _ = _split_args(args)
+    force = "--force" in longs or "f" in shorts
+    return "D" in shorts or (("--delete" in longs or "d" in shorts) and force)
+
+
+_GUARD_CHECKS = {
+    "rm": _rm_hit, "curl": _curl_hit, "wget": _wget_hit,
+    "psql": _sql_hit, "sqlite3": _sql_hit, "mysql": _sql_hit,
+    "git clean": lambda args, cwd, root: "--force" in _split_args(args)[0] or "f" in _split_args(args)[1],
+    "git branch": _git_branch_hit,
+    "git reset": lambda args, cwd, root: "--hard" in _split_args(args)[0],
+    "git checkout": _git_checkout_hit,
+    "git restore": _git_restore_hit,
+}                                                   # fehlt ein Befehl hier: erkannt heißt immer Rückfrage
+
+
+def _current_branch(directory):
+    """Der aktuelle Zweig in `directory`; None bei abgelöstem HEAD oder Fehler."""
+    result = _git(directory, "rev-parse", "--abbrev-ref", "HEAD")
+    branch = result.stdout.strip()
+    return branch if result.returncode == 0 and branch and branch != "HEAD" else None
+
+
+def _push_target(args, directory):
+    """(Ziel `<remote>/<zweig>`, None) oder (None, Grund) für `git push <args>` nach Spec 28
+    „Push-Ziel“; (None, None) bei `-n`/`--dry-run` (nichts erkannt)."""
+    for option in args[:args.index("--")] if "--" in args else args:
+        letters = option[1:].split("o", 1)[0] if option.startswith("-") and not option.startswith("--") else ""
+        if option == "--dry-run" or "n" in letters:          # `-n`, auch gebündelt vor einem `-o`
+            return None, None
+    positional, dashdash = [], False
+    for arg in args:
+        if dashdash or arg == "-" or not arg.startswith("-"):
+            positional.append(arg)
+        elif arg == "--":
+            dashdash = True
+        elif arg not in _PUSH_QUIET and (arg.startswith("--") or not set(arg[1:]) <= set("uvq")):
+            return None, GUARD_ALWAYS
+    if not positional:
+        upstream = _git(directory, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        target = upstream.stdout.strip()
+        if upstream.returncode != 0 or not target:
+            return None, f"{GUARD_ALWAYS} (kein Upstream)"
+        return target, None
+    if len(positional) > 2:
+        return None, GUARD_ALWAYS
+    remote = positional[0]
+    if len(positional) == 1:
+        branch = _current_branch(directory)
+        return (f"{remote}/{branch}", None) if branch else (None, f"{GUARD_ALWAYS} (abgelöster HEAD)")
+    refspec = positional[1]
+    source, colon, dest = refspec.partition(":")
+    if refspec.startswith("+") or (colon and not source):
+        return None, GUARD_ALWAYS
+    if not colon:
+        dest = source
+    if source == "HEAD":
+        branch = _current_branch(directory)
+        if not branch:
+            return None, f"{GUARD_ALWAYS} (abgelöster HEAD)"
+        dest = branch if dest == "HEAD" else dest
+    if dest.startswith("refs/heads/"):
+        dest = dest[len("refs/heads/"):]
+    elif dest.startswith("refs/") or not dest:
+        return None, GUARD_ALWAYS
+    return f"{remote}/{dest}", None
+
+
+def _push_approved(target, ledger_root):
+    """(freigegeben, Hinweis zur Ablage): ein Block mit Status `freigegeben` und Schlüssel
+    `push:<muster>` ohne `#<text>`, dessen Muster das Ziel trifft; je Frage und Schlüssel gilt nur der
+    jüngste Block (`_latest`, wie bei check)."""
+    blocks, problem = read_ledger(ledger_root)
+    for block in _latest(blocks)[0]:
+        parsed, _ = parse_key(block["key"])
+        if (block["status"] == "freigegeben" and parsed and parsed[0] == "push" and not parsed[2]
+                and glob_to_regex(parsed[1]).fullmatch(target)):
+            return True, None
+    return False, problem
+
+
+def _guard_git(args, cwd, root):
+    """(Kategorie, Grund) oder None für `git <args>`. Globale Optionen fallen weg; `-C <pfad>` (relativ
+    zu `cwd`) ist das Verzeichnis für Upstream, Zweig, Ablage und vorhandene Pfade."""
+    directory, moved, i = Path(cwd), False, 0
+    while i < len(args) and args[i].startswith("-"):
+        option = args[i]
+        i += 1
+        if option in ("-C", "-c") and i < len(args):
+            if option == "-C":
+                directory, moved = directory / args[i], True
+            i += 1
+    if i >= len(args):
+        return None
+    sub, rest = args[i], args[i + 1:]
+    if sub == "push":
+        try:
+            target, why = _push_target(rest, directory)
+        except (NoGit, GitTimeout) as error:
+            return "push", f"{GUARD_ALWAYS} (Ziel nicht bestimmbar: {error})"
+        if target is None:
+            return None if why is None else ("push", why)
+        approved, problem = _push_approved(target, repo_root(directory) if moved else root)
+        if approved:
+            return None
+        return "push", f"keine Freigabe mit Schlüssel push:{target} in {LEDGER_SHOWN}" + (
+            f" ({problem})" if problem else "")
+    if sub == "stash":
+        sub = "stash " + next((arg for arg in rest if not arg.startswith("-")), "")
+    command = f"git {sub}"
+    if command not in GUARD_COMMANDS:
+        return None
+    check = _GUARD_CHECKS.get(command)
+    return (GUARD_COMMANDS[command], GUARD_ALWAYS) if check is None or check(rest, directory, root) else None
+
+
+def _contains(args, words):
+    return any(args[i:i + len(words)] == words for i in range(len(args) - len(words) + 1))
+
+
+def _guard_part(words, cwd, root):
+    """(Kategorie, Grund) oder None für einen Teil des Befehls."""
+    words = _program_words(words)
+    if not words:
+        return None
+    program, args = words[0].rsplit("/", 1)[-1], words[1:]
+    if program == "git":
+        return _guard_git(args, cwd, root)
+    for command, category in GUARD_COMMANDS.items():
+        name, *sub = command.split()
+        if name == program and (not sub or _contains(args, sub)):
+            check = _GUARD_CHECKS.get(command)
+            if check is None or check(args, cwd, root):
+                return category, GUARD_ALWAYS
+    return None
+
+
+def _shown_command(text):
+    text = " ".join(text.split())
+    return text if len(text) <= GUARD_SHOWN else text[:GUARD_SHOWN - 1] + "…"
+
+
+def _guard_hit(command, root, cwd=None):
+    """(Kategorie, Teil auf `GUARD_SHOWN` Zeichen gekürzt, Grund) der ersten Rückfrage, oder None."""
+    cwd = Path(cwd or root)
+    try:
+        parts = _split_parts(command)
+    except ValueError:
+        names = set(_PROGRAM_RE.findall(command))
+        if not names:
+            return None
+        categories = dict.fromkeys(category for cmd, category in GUARD_COMMANDS.items()
+                                   if cmd.split()[0] in names)
+        return ", ".join(categories), _shown_command(command), GUARD_UNPARSED
+    for words in parts:
+        hit = _guard_part(words, cwd, Path(root))
+        if hit:
+            return hit[0], _shown_command(" ".join(words)), hit[1]
+    return None
+
+
+def guard_decision(command, root, cwd=None):
+    """None (nichts erkannt, oder `git push` mit freigegebenem Ziel) oder (Kategorie, Grund) für den
+    Bash-Befehl `command`; bei mehreren Teilen zählt die erste Rückfrage. `root` ist die Repo-Wurzel
+    (Ablage), `cwd` das Arbeitsverzeichnis des Befehls (Default `root`). Grund ist „immer Rückfrage“
+    (manchmal mit Ursache in Klammern), „keine Freigabe mit Schlüssel push:<ziel> in
+    docs/big-decisions.md“ oder „Befehl nicht zerlegbar“. Was erkannt wird, steht in `GUARD_COMMANDS`,
+    den Prüfungen `_GUARD_CHECKS` und `_push_target` (Spec 28, Abschnitt Hook)."""
+    hit = _guard_hit(command, root, cwd)
+    return None if hit is None else (hit[0], hit[2])
+
+
+def _hook_unchecked(why):
+    return json.dumps({"systemMessage": f"{HOOK_UNCHECKED} — {why}"})
+
+
+def guard(text):
+    """Antwort des Hooks auf das Hook-JSON `text` (`tool_input.command`, `cwd`): "" (nichts erkannt
+    oder freigegeben), eine Zeile `{"hookSpecificOutput": {"hookEventName": "PreToolUse",
+    "permissionDecision": "ask", "permissionDecisionReason": "decide: <kategorie> — <befehl>: <grund>"}}`
+    oder bei einem eigenen Fehler `{"systemMessage": "[decide] Hook ungeprüft — <grund>"}`. Wirft nie;
+    JSON mit ASCII-Escapes, damit keine Kodierung von stdout stört."""
+    try:
+        try:
+            data = json.loads(text)
+        except ValueError as error:
+            return _hook_unchecked(f"kein JSON auf stdin ({getattr(error, 'msg', error)})")
+        tool_input = data.get("tool_input") if isinstance(data, dict) else None
+        if not isinstance(tool_input, dict):
+            return _hook_unchecked("tool_input fehlt")
+        command = tool_input.get("command")
+        if not isinstance(command, str):
+            return _hook_unchecked("tool_input.command fehlt")
+        cwd = data.get("cwd") if isinstance(data.get("cwd"), str) and data.get("cwd") else os.getcwd()
+        hit = _guard_hit(command, repo_root(cwd), cwd)
+        if hit is None:
+            return ""
+        category, part, why = hit
+        return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                                  "permissionDecisionReason": f"decide: {category} — {part}: {why}"}})
+    except Exception as error:                      # guard hält nie wegen eines eigenen Fehlers an
+        return _hook_unchecked(f"{type(error).__name__}: {error}")
+
+
+def _guard_main():
+    """`guard`: stdin lesen, Antwort schreiben, immer Exit 0."""
+    try:
+        stream = getattr(sys.stdin, "buffer", None)
+        text = stream.read().decode("utf-8", errors="replace") if stream else sys.stdin.read()
+        out = guard(text)
+    except Exception as error:
+        out = _hook_unchecked(f"{type(error).__name__}: {error}")
+    if out:
+        try:
+            print(out)
+        except Exception:
+            pass
+    return 0
+
+
 # --- Kommandozeile ----------------------------------------------------------------------
 
 def build_parser():
@@ -1729,12 +2173,15 @@ def build_parser():
     chk = sub.add_parser("check", parents=[common],
                          help="teure Änderungen seit einer Revision ohne Freigabe, dann Übergabe")
     chk.add_argument("--range", dest="rev", required=True, metavar="<rev>")
+    sub.add_parser("guard", help="PreToolUse-Hook auf Bash: Hook-JSON auf stdin, Exit immer 0")
     return parser
 
 
 def main(argv):
     """Einstieg; `argv` ohne Programmnamen (None: `sys.argv[1:]`). Gibt den Exit-Code zurück."""
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv == ["guard"]:
+        return _guard_main()                        # vor allem anderen: der Hook endet immer mit 0
     args = build_parser().parse_args(argv)
     root = repo_root(Path.cwd())
     home = home_dir()
