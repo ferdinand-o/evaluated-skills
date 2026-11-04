@@ -44,7 +44,11 @@ den Laufordner `.skills` und die Refs (`review_kit.py cleanup`); der Block liegt
 `cleanup` scheitern, wenn der Plan nicht genau ein Paket hat, dessen Bereich der getippte ist
 (geteilter Plan, Wurzel-Commit, Hilfsrefs), oder wenn danach noch Refs unter `refs/deep-review`
 stehen; auch dann steht eine Zeile in `status.txt`, mit `cost/turns/err=abbruch:<schritt>` und
-`probe=n/a`. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
+`probe=n/a`, und `out/<name>.json` und `.err` eines früheren Laufs gleichen Namens werden gelöscht,
+damit `match.py` sie nicht unter diesem Namen wertet. Ebenso bricht `crx` mit
+`abbruch:counterparts` ab, wenn `counterparts.py` scheitert oder einen leeren Block liefert, und
+jedes Werkzeug mit `abbruch:klon`, wenn `git clone`, `fetch` oder `remote remove` scheitern
+(`secs=0`). Begleittext und Block setzt `run.sh` für `crx` und `crb` an einer Stelle zusammen. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
 und `Edit` nur unter `./.skills/cache/deep-review/` für `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`
@@ -57,7 +61,9 @@ vor dem ersten `mkdir`.
 
 `DRY=1 bash run.sh …` führt alles bis unmittelbar vor `claude -p` aus, gibt Prompt, Länge des
 Systemprompts und den Anfang des Blocks auf stderr aus, löscht den Workspace und endet mit Exit 0.
-Nach `out/` schreibt es nichts: der Block liegt unter `work/`, eine Abbruchzeile geht nur auf stderr.
+Jeder nichtleere Wert außer `0` gilt als Probe (`DRY=true`, `DRY=yes`). Nach `out/` schreibt und
+löscht es nichts: der Block liegt unter `work/`, eine Abbruchzeile geht nur auf stderr; ein
+Klonfehler endet mit Exit 1 ohne Abbruchzeile, ein anderer Abbruch mit Exit 1.
 
 Vorbereitung:
 

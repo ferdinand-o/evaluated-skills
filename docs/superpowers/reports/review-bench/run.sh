@@ -1,7 +1,8 @@
 #!/bin/bash
 # run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|crb|eng|sp|dr|drnc
-# DRY=1: alles bis unmittelbar vor claude -p, dann Prompt und Länge des Systemprompts auf stderr,
-# Workspace weg, Exit 0; nichts in out/ (Block unter work/, Abbruchzeilen nur auf stderr).
+# DRY=1 (jeder nichtleere Wert außer 0): alles bis unmittelbar vor claude -p, dann Prompt und Länge
+# des Systemprompts auf stderr, Workspace weg, Exit 0 (Exit 1 bei Abbruch); nichts in out/ (Block
+# unter work/, Abbruchzeilen nur auf stderr).
 set -uo pipefail
 [ $# -eq 3 ] || { echo "Aufruf: run.sh <repo> <tool> <nr>" >&2; exit 2; }
 REPO=$1; TOOL=$2; N=$3
@@ -11,7 +12,8 @@ AN=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 [[ $N =~ ^[$AN]+$ ]] || { echo "Laufnummer '$N': nur 0-9, A-Z, a-z, nicht leer; nichts angelegt" >&2; exit 2; }
 [[ $REPO =~ ^[$AN-]+$ ]] || { echo "Repo '$REPO': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
 [[ $TOOL =~ ^[$AN-]+$ ]] || { echo "Werkzeug '$TOOL': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
-DRY=${DRY:-}
+# Jeder nichtleere Wert außer 0 ist eine Probe (auch DRY=true, yes); danach ist DRY 1 oder leer.
+case ${DRY:-} in ''|0) DRY= ;; *) DRY=1 ;; esac
 START=""
 NAME=$REPO-$TOOL-$N
 HERE=$(dirname "$(readlink -f "$0")")
@@ -76,15 +78,24 @@ CTX=$OUT/$NAME.ctx.md
 status() {
   if [ "$DRY" = 1 ]; then echo "DRY $1" >&2; else echo "$1" >> "$OUT/status.txt"; fi
 }
-# Abbruch von crb nach dem Klonen: Statuszeile mit Fehlerkennung statt Kosten, Workspace weg.
-crb_abort() {
+# Abbruch (Klon, crx, crb): Statuszeile mit Fehlerkennung statt Kosten, Workspace und Block weg,
+# ohne DRY auch out/<name>.json und .err eines früheren Laufs gleichen Namens, die match.py sonst
+# unter diesem Namen wertet. secs ab START, vor START 0.
+abort() {
   echo "$NAME: $2" >&2
-  status "$NAME exit=1 secs=$(( $(date +%s) - START )) cost/turns/err=abbruch:$1 probe=n/a"
-  rm -rf "$W" "$CTX"; exit 1
+  local secs=0
+  [ -z "$START" ] || secs=$(( $(date +%s) - START ))
+  status "$NAME exit=1 secs=$secs cost/turns/err=abbruch:$1 probe=n/a"
+  rm -rf "$W" "$CTX"
+  [ "$DRY" = 1 ] || rm -f "$OUT/$NAME.json" "$OUT/$NAME.err"
+  exit 1
 }
-git clone -q "$B/repos/$REPO" "$W"
-git -C "$W" fetch -q --tags
-git -C "$W" remote remove origin
+if ! { git clone -q "$B/repos/$REPO" "$W" && git -C "$W" fetch -q --tags \
+       && git -C "$W" remote remove origin; }; then
+  # Mit DRY ohne Statuszeile: nur die Meldung, Workspace weg, Exit 1.
+  [ "$DRY" = 1 ] && { echo "$NAME: Klon von $B/repos/$REPO gescheitert" >&2; rm -rf "$W"; exit 1; }
+  abort klon "Klon von $B/repos/$REPO gescheitert"
+fi
 BASE=$(git -C "$W" rev-parse --verify -q base || true)
 HEAD=$(git -C "$W" rev-parse HEAD)
 case $REPO in
@@ -140,10 +151,9 @@ case $TOOL in
        EXTRA=(--append-system-prompt "In every review, for each changed line, look up the counterpart it calls or that calls it - including vendored libraries, base classes and framework code outside the diff - and check the contract the change relies on: which exceptions the callee raises, what it returns for edge cases (empty, None, zero), who owns and frees objects, and what a flag or parameter does downstream. Report a finding when the changed code violates that contract.") ;;
   crx) PROMPT="/code-review --max-findings all $TARGET"
        # shellcheck disable=SC2086  # TARGET ist absichtlich eine Liste von Pfaden
-       python3 -I "$HERE/counterparts.py" "$W" $TARGET --root src --max-bytes 60000 > "$CTX"
-       EXTRA=(--append-system-prompt "$COMPANION
-
-$(cat "$CTX")") ;;
+       python3 -I "$HERE/counterparts.py" "$W" $TARGET --root src --max-bytes 60000 > "$CTX" \
+         || abort counterparts "counterparts.py gescheitert"
+       grep -q '[^[:space:]]' "$CTX" || abort counterparts "counterparts.py lieferte einen leeren Block" ;;
   crb) PROMPT="/code-review $LEVEL --max-findings all $TARGET"
        # Block aus review_kit.py (nicht counterparts.py): Plan und Gegenstellen im Workspace, die
        # Skill wird nicht kopiert. Die Zeit läuft ab plan, wie bei dr/drnc, wo review_kit.py im
@@ -152,24 +162,21 @@ $(cat "$CTX")") ;;
        START=$(date +%s)
        KIT=$ROOT/skills/deep-review/scripts/review_kit.py
        RUN=$(python3 -I "$KIT" plan --repo "$W" --range "$TARGET" --split-at 100000 | sed -n '1s/^Lauf: *//p')
-       [ -n "$RUN" ] || crb_abort plan "review_kit.py plan gescheitert"
+       [ -n "$RUN" ] || abort plan "review_kit.py plan gescheitert"
        python3 -I "$KIT" counterparts --repo "$W" --run "$RUN" >&2 \
-         || crb_abort counterparts "review_kit.py counterparts gescheitert"
+         || abort counterparts "review_kit.py counterparts gescheitert"
        WANT=$(git -C "$W" rev-parse --verify -q "${TARGET%%..*}^{commit}")..$HEAD
        python3 -I -c "$CRB_PY" "$W/.skills/cache/deep-review/$RUN" "$WANT" > "$CTX"
        case $? in
          0) ;;
-         3) crb_abort bereich "Plan deckt nicht genau den getippten Bereich $TARGET mit einem Paket" ;;
-         *) crb_abort block "Block aus dem Plan nicht lesbar" ;;
+         3) abort bereich "Plan deckt nicht genau den getippten Bereich $TARGET mit einem Paket" ;;
+         *) abort block "Block aus dem Plan nicht lesbar" ;;
        esac
        python3 -I "$KIT" cleanup --repo "$W" --run "$RUN" >&2 \
-         || crb_abort cleanup "review_kit.py cleanup gescheitert"
+         || abort cleanup "review_kit.py cleanup gescheitert"
        rm -rf "$W/.skills"
        REFS=$(git -C "$W" for-each-ref refs/deep-review)
-       [ -z "$REFS" ] || crb_abort refs "nach cleanup noch Refs unter refs/deep-review: $REFS"
-       EXTRA=(--append-system-prompt "$COMPANION
-
-$(cat "$CTX")") ;;
+       [ -z "$REFS" ] || abort refs "nach cleanup noch Refs unter refs/deep-review: $REFS" ;;
   eng) PROMPT="/engineering:code-review $TARGET" ;;
   sp)
     mkdir -p "$W/.claude/skills"
@@ -192,7 +199,12 @@ $(cat "$CTX")") ;;
     # *-path im Pfad-Modus (oben vorausgesetzt) ebenso wie auf Bereichen.
     [ "$TOOL" = drnc ] && PROMPT="$PROMPT Führe Schritt 3 (counterparts) nur für die Paket-Bereiche aus: gib dem Reviewer den Block aus packets/<id>.md nicht mit und lies ihn nicht."
     ;;
-  *) echo "unbekanntes Werkzeug: $TOOL" >&2; exit 2 ;;
+esac
+# crx und crb: Begleittext und Block an einer Stelle, damit beide denselben Text bekommen.
+case $TOOL in
+  crx|crb) EXTRA=(--append-system-prompt "$COMPANION
+
+$(cat "$CTX")") ;;
 esac
 
 # Gesperrt für Read/Grep/Glob (//pfad = absolut): System-Python, Caches und Nutzer-Installs
