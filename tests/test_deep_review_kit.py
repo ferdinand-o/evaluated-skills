@@ -8000,7 +8000,7 @@ def test_b_path_mode(tmp_path, monkeypatch, capsys):
     block = (directory / "packets" / "p1.md").read_text(encoding="utf-8")
     assert "ruft fail(...)" in block and "lib/errors.py" in block
     assert "ruft helper(...)" not in block and "KeyError" not in block
-    assert "Gegenstellen in Dateien dieses Pakets stehen nicht im Block" in block
+    assert "Ein Eintrag fehlt hier nur, wenn alle seine Orte" in block
     assert item["counterparts"] == 1
     stored = json.loads((directory / kit.COLLECTED_NAME).read_text(encoding="utf-8"))
     assert [e["line"] for e in stored["files"]["src/a.py"]["entries"]] == [6, 7]   # ungefiltert
@@ -8147,7 +8147,7 @@ def test_b_path_mode_inside_per_packet(tmp_path, monkeypatch):
     block = (root / items[owner["id"]]["path"]).read_text(encoding="utf-8")
     assert "ruft f(...)" in block and "KeyError" in block and "src/b.py" in block
     assert "except ValueError" in block and items[owner["id"]]["counterparts"] == 2
-    assert "Gegenstellen in Dateien dieses Pakets stehen nicht im Block" in block
+    assert "Ein Eintrag fehlt hier nur, wenn alle seine Orte" in block
     assert "reviewt dieses Review selbst" not in block
 
 

@@ -1193,10 +1193,11 @@ FLOW_HEAD_RE = re.compile(r"\s+geändert: .*; Weg:$")
 FLOW_REF_RE = re.compile(r" {4}(.+?):(\d+): ")
 FLOW_CALL_REF_RE = re.compile(r"\S+ -> .*\[(.+?):(\d+)\]$")
 RTL_LINE_RE = re.compile(r"\s*Besitz \(RTL\): ")   # Angabe ohne Datei im Repo
-PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Gegenstellen in Dateien dieses Pakets stehen nicht im "
-                   "Block — diese Dateien reviewt dieses Paket selbst; Gegenstellen in anderen "
-                   "Dateien oder Spannen (auch anderer Pakete des Pfads) und Besitz-Defaults der "
-                   "RTL stehen hier.")
+PATH_BLOCK_NOTE = ("Pfad-Modus ({paths}): Ein Eintrag fehlt hier nur, wenn alle seine Orte "
+                   "(Gegenstelle, raise, Weg) in Dateien oder Spannen dieses Pakets liegen — die "
+                   "reviewt dieses Paket selbst. Einträge mit einem Ort außerhalb (auch in anderen "
+                   "Paketen des Pfads) und Besitz-Defaults der RTL stehen hier, auch wenn ihre "
+                   "Gegenstelle im eigenen Paket liegt.")
 
 
 def _path_list(paths) -> list:
