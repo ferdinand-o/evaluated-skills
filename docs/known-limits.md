@@ -2539,6 +2539,33 @@ Je Grenze: was passiert, warum nicht behoben, was man stattdessen tut.
   `Dateien (`, erlaubte Kopfzeilen). Ändert sich der Paketkopf, endet `crb` mit
   `abbruch:block`; dann `run.sh` mit anpassen.
 
+**Aus der Abnahme B (2026-11-05)**
+
+- **Die Kosten-Schwellen sind verfehlt, auf jeder Eingabe.** Große Diffs 5,1× (`py-diff`) und
+  3,9× (`dl-diff`) eines `/code-review`-Laufs, Pfad 2,0×, kleine Diffs 3,4× bis 8,2×. Die
+  Hauptschleife trägt auf den großen Diffs nur noch 15–17 %; den Rest kosten die Reviews
+  `/code-review medium` je Paket. Umgang: kleine Diffs und Pfade mit `/code-review` direkt
+  prüfen (Description, „Not for"); deep-review für große Diffs, wo es mehr findet.
+- **`audit` vertraut `_meta` der Ergebnisdatei.** Eine von Hand geschriebene
+  `results/<id>.json` mit abgeschriebenem `_meta` und passender Marke gilt als angenommen;
+  `record` führt kein Protokoll, an dem `audit` das prüfen könnte. In der Abnahme kam das nicht
+  vor. Nicht behoben, weil ein Protokoll im Laufordner genauso schreibbar wäre (Grenze wie bei
+  der Marke, E2). Umgang: bei Zweifel das Transkript des Unteragenten ansehen, nicht seine
+  Rückgabe.
+- **Die Werkzeugliste in der Rückgabe eines Unteragenten ist unvollständig.** Die Zeile
+  `<tools-used-before-summary>` nannte in vier Läufen „Glob, Read, Write“ o. ä., obwohl das
+  Transkript `Skill` (`/code-review`) und `Bash` (`record`) zeigt. Die Hauptschleife schloss
+  daraus auf eine Fälschung, legte Läufe neu an oder hielt vor `merge` an. Behoben in SKILL.md
+  (Zeile der Anti-Rationalisierung: es gilt `audit`); den Kontrolllauf nennt der Report
+  (Abschnitt „Abnahme B“).
+- **Die Stufe im Rückgabeobjekt ist die gemeldete.** `/code-review` gab in den Unteragenten der
+  kleinen Fixtures `"stufe": "high"` zurück, obwohl `medium` aufgerufen war; `record` nimmt eine
+  höhere Stufe an, ob sie lief, bleibt offen (siehe „Die Stufe im Plan …" oben).
+- **Headless-Freigaben bremsen die Hauptschleife.** Verkettete Befehle mit Variablen
+  (`K=…; python $K …`) und `mkdir`/`mv` im Laufordner bekamen in `run.sh` keine Freigabe; die
+  Befehle des SKILL.md (einzeln, mit vollem Pfad) liefen. Umgang: die Befehle so aufrufen, wie
+  SKILL.md sie zeigt.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·

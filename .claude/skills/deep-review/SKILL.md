@@ -53,9 +53,8 @@ und `refs/deep-review/` (Hilfscommits) an; in den Cache-Ordner schreibt `plan` e
    von `record`: dann entscheidest du, das Paket bleibt bis dahin `missing`). Der Auftrag ist
    `packets/<id>.prompt.md` unter dem Pfad aus `counterparts`; das Ergebnis ist
    `{"marke", "stufe", "findings"}`, ohne Funde `"findings": []`; Block und Fundliste liest du
-   dann nicht. Ohne Agent-Werkzeug startest du
-   `/code-review` je Paket selbst mit demselben Auftragstext und rufst `record` selbst auf
-   (abgewiesen: Objekt korrigieren, erneut; Ausgang wie beim Unteragenten):
+   dann nicht. Ohne Agent-Werkzeug startest du `/code-review` je Paket selbst mit demselben
+   Auftragstext und rufst `record` selbst auf (abgewiesen: Objekt korrigieren, erneut; Ausgang wie beim Unteragenten):
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" record --run <lauf> --packet <id> --tool code-review -
    ```
@@ -134,6 +133,7 @@ im Profil `checkpoint` behebt subagent-dev die Funde über `fix-task`, sonst nen
 | „Das Audit meldet nur ein fehlendes Paket, ich nenne es trotzdem fertig" | Dann steht „unvollständig" mit dem Paket in der Übergabe. |
 | „Ich fasse zwei Pakete in einem Review zusammen" | `record` nimmt je Paket genau ein Ergebnis an; der Zuschnitt war der Zweck. |
 | „Ich nehme den Originalbereich, das ist einfacher" | Bei Hilfscommits zeigt er das ganze Branch-Diff, nicht das Paket. Nimm `<von>..<bis>` aus `counterparts`. |
+| „Die Rückgabe des Unteragenten nennt nur Read und Write, er hat das Ergebnis von Hand geschrieben" | Die Werkzeugliste der Rückgabe zeigt die Aufrufe in `/code-review` und oft auch `record` nicht. Angenommen ist, was `audit` nicht unter `missing` oder `stale` nennt; ein Verdacht verwirft kein Ergebnis und hält `merge` nicht auf. |
 | „Ein Paket ohne Funde braucht kein `record`" | Ohne Ergebnis ist das Paket nicht reviewt; es bekommt `"findings": []`. |
 | „Ein kleiner Bereich braucht trotzdem sechs Schritte mit Hilfscommits" | Bis `--split-at` (Standard 800 Zeilen) ist es ein Paket und ein kurzer Bericht. |
 
