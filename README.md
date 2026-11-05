@@ -99,8 +99,8 @@ also carries a delimitation clause against its two strongest competitors.
 | bug, failing test | debug-ledger | feature-spec |
 | test plan, repo-type question | testing-strategy | test-first (the cycle *during* implementation), feature-spec (produces the test stubs, testing-strategy implements from them) |
 | implement new behaviour, regression test after diagnosis | test-first | testing-strategy (which tests are missing), debug-ledger (diagnosis first), superpowers:test-driven-development (doctrine without evidence) |
-| review a diff | `/code-review` (built in) | deep-review (up to 800 changed lines it only adds the counterparts), review-context (collects context and the intended behaviour, does not review) |
-| thorough review of a large range or a checkpoint (branch, plan checkpoint, with evidence per packet) | deep-review | `/code-review` over everything (loses findings in large ranges), review-context, subagent-dev (sets the checkpoints, does not review) |
+| review a diff, also a small diff or a path | `/code-review` (built in) | deep-review (on small diffs and paths the same findings at 2.0 to 8.2 times the cost, acceptance B in Spec 28; only when proof per packet is asked for explicitly, a path via `--path`), review-context (collects context and the intended behaviour, does not review) |
+| thorough review of a large range or a checkpoint (branch, plan checkpoint, with evidence per packet) | deep-review — on large diffs more findings than `/code-review` at 3.9 to 5.1 times the cost (acceptance B, Spec 28); `plan` states the number of reviews up front | `/code-review` over everything (loses findings in large ranges), review-context, subagent-dev (sets the checkpoints, does not review) |
 | security | `/security-review`, trailofbits | all skills of this collection; deep-review passes focus `security` on to `/security-review` when its scope covers the range and is no security skill |
 | UI: style and tokens | ui-architect | enterprise-ui (product UI), motion-landing (motion) |
 | UI: product surfaces, tables, forms | enterprise-ui | ui-architect (marketing/brand) |

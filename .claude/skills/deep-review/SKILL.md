@@ -1,13 +1,14 @@
 ---
 name: deep-review
-description: Use when a large range, a branch or a plan checkpoint must be reviewed thoroughly and you need proof that every part was looked at — „großen Branch prüfen", „gründlich", „Prüfpunkt", „in Paketen", „wurde jedes Stück angeschaut", „Sicherheitsreview mit deep-review". A Tier-1 script cuts the range into packets, adds the contracts of the called code (definition, raise sites, ownership) to each packet, and audits that every packet has an accepted review result; the review itself is /code-review per packet. Not for a small diff or a path (use /code-review directly), not for a security audit of a whole system (use /security-review), not for gathering context and intended behaviour of a diff (use review-context).
+description: Use when a large range, a branch or a plan checkpoint must be reviewed thoroughly and you need proof that every part was looked at — „großen Branch prüfen", „gründlich", „Prüfpunkt", „in Paketen", „wurde jedes Stück angeschaut", „Sicherheitsreview mit deep-review"; a small diff or a path only when proof per packet is asked for explicitly. A Tier-1 script cuts the range into packets, adds the contracts of the called code (definition, raise sites, ownership) to each packet, and audits that every packet has an accepted review result; the review itself is /code-review per packet. On a large diff it found more than a single /code-review over everything, at 3.9–5.1× its cost. Not for a small diff or a path without that explicit request (use /code-review directly, it found the same at a fraction of the cost), not for a security audit of a whole system (use /security-review), not for gathering context and intended behaviour of a diff (use review-context).
 ---
 
 # deep-review — `/code-review` in Paketen, mit den Verträgen der Gegenstellen
 
 Große Bereiche verlieren in einem Review Funde. Diese Skill schneidet sie in Pakete, gibt jedem
 Reviewer die Gegenstellen der geänderten Aufrufe mit und weist je Paket ein angenommenes
-Ergebnis nach. Das Review selbst ist `/code-review`.
+Ergebnis nach. Das Review selbst ist `/code-review`. Auf großen Diffs fand das mehr als ein
+`/code-review` über alles, zu 3,9–5,1× seinen Kosten (Abnahme B, Spec 28).
 
 ## Eiserne Regel
 
@@ -21,15 +22,14 @@ Lücken und einen Bericht, der nicht zu den Daten passt, meldet `audit` (G2).
 
 ## Ablauf
 
-Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner); lief `plan` mit `--repo`, brauchen
-alle folgenden Befehle dasselbe `--repo`. Die Skill legt `.skills/cache/deep-review/` (Läufe)
-und `refs/deep-review/` (Hilfscommits) an; in den Cache-Ordner schreibt `plan` eine
-`.gitignore` mit `*`, wenn sie fehlt. Arbeitsbaum, Index und HEAD bleiben unberührt
-(Cache-Lage: packets.md).
+Jeder Befehl nimmt `--repo` (Standard: aktueller Ordner); lief `plan` mit `--repo`, brauchen alle
+folgenden Befehle dasselbe `--repo`. Die Skill legt `.skills/cache/deep-review/` (Läufe) und
+`refs/deep-review/` (Hilfscommits) an; in den Cache-Ordner schreibt `plan` eine `.gitignore` mit
+`*`, wenn sie fehlt. Arbeitsbaum, Index und HEAD bleiben unberührt (Cache-Lage: packets.md).
 
 1. **Bereich oder Pfade, Profil, Fokus.** Bereich `BASIS..ZIEL` (Standard `HEAD`) oder Pfade
-   `--path <pfad>[,…]` (Einzelheiten: packets.md); Profil und Fokus aus der Tabelle unten.
-   Ein Pfad geht nicht direkt an `/code-review`, sondern durch `plan`.
+   `--path <pfad>[,…]` (packets.md), Profil und Fokus (Tabelle unten). Pfad und kleiner Diff nur
+   auf ausdrücklichen Wunsch nach Nachweis je Paket (sonst `/code-review`); dann durch `plan`.
 2. **Plan:**
    ```bash
    python "${CLAUDE_SKILL_DIR}/scripts/review_kit.py" plan --range <bereich> | --path <pfad>[,…] [--profile …] [--focus …] [--level …] [--verify] [--split-at N] [--soll-file <datei>] [--since <lauf>[,<lauf>…]] [--with-tests]
@@ -144,6 +144,6 @@ im Profil `checkpoint` behebt subagent-dev die Funde über `fix-task`, sonst nen
 - **subagent-dev** — legt Prüfpunkte fest und ruft deep-review mit `--profile checkpoint` auf.
 - **debug-ledger**, **test-first** — für Funde mit unklarer Ursache bzw. den Regressionstest;
   deep-review diagnostiziert nicht und schreibt keine Tests.
-- `/code-review` — kleiner Diff oder PR; hier je Paket aufgerufen, auch für Pfade.
+- `/code-review` — kleiner Diff, Pfad oder PR: gleiche Treffer, deep-review kostete 2,0–8,2× so viel (Abnahme B); hier je Paket aufgerufen.
 - `/security-review` — Sicherheitsaudit eines Systems; Fokus `security` wird nur durchgereicht,
   wenn dessen Umfang dem Plan entspricht. deep-review ist keine Sicherheits-Skill.
