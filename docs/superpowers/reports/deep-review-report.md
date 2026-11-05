@@ -934,7 +934,105 @@ in der Abnahme 0,67 und 0,54 USD, also rund das 2,5- bis 3-Fache. Die Kosten-Sch
 für kleine Eingaben ist damit nur erreichbar, wenn der Rahmen um ein einzelnes Paket auf wenige
 Cent fällt; sonst bleiben kleine Diffs nach der Regel aus Spec 28 bei `/code-review`.
 
+## Abnahme B (Spec 28, 2026-11-05)
+
+Abnahme nach der Tabelle „Abnahme B" der Spec, vom Nutzer auf 30 USD begrenzt (statt bis rund
+45 USD). Claude Code 2.1.318, headless, `run.sh` mit Lesesperre, Werkzeug `dr` mit `Agent`
+(je Paket ein Unteragent nach der Vorlage in `review-brief.md`), Stufe `medium`. Treffer am Text
+geprüft: `match.py` für die großen Repos, für die Fixtures die Einbauten aus ihrer
+`description`, je Fund in `results/<id>.json` und `findings.json`. Die Fixtures `dr-ts`,
+`dr-seeded` und `dr-bigfile` liegen als `py-drts`, `py-drseeded` und `py-drbigfile` unter
+`$BENCH/repos` (gebaut mit `evalkit.workspace.prepare`).
+
+| Eingabe | Pakete | Treffer deep-review | Vergleich `cr` | Treffer-Schwelle | Kosten | Kosten-Schwelle |
+| --- | --- | --- | --- | --- | --- | --- |
+| `py-diff` | 4 | **6/6** (P1–P6, dazu R1; R2 nicht) | 4,5/6, 1,06 USD | ≥ 5,5, P2: erfüllt (ein Lauf) | 5,37 USD | ≤ 2,12: verfehlt, 5,1× |
+| `dl-diff` | 4 | **6/6** (D1–D6) | 5,0/6, 2,33 USD | ≥ 5,5: erfüllt (ein Lauf) | 9,06 USD | ≤ 4,66: verfehlt, 3,9× |
+| `dl-path` (Pfad-Modus) | 1 | 6/6 (E1–E6) | 6/6, 1,29 USD | 6/6: erfüllt | 2,61 USD | ≤ 1,94: verfehlt, 2,0× |
+| `dr-seeded` | 1 | 5/5 im angenommenen Ergebnis; Lauf ohne `merge` und Bericht (unten) | 5/5, 0,37 USD | 5/5: erfüllt | 1,26 USD | ≤ 0,56: verfehlt, 3,4× |
+| `dr-seeded`, Kontrolllauf nach dem Fix | 1 | 5/5, Audit lückenlos | dito | 5/5: erfüllt | 1,39 USD | verfehlt, 3,8× |
+| `dr-contract` | 1 | Einbau (`app/groups.py:14`) | Einbau in 2/2, im Mittel 0,23 USD | ≥ `cr`: erfüllt | 1,21 USD | ≤ 0,35: verfehlt, 5,3× |
+| `dr-delphi` | 1 | Einbau (`Query.pas:22`) | Einbau in 2/2, im Mittel 0,21 USD | ≥ `cr`: erfüllt | 1,73 USD | ≤ 0,32: verfehlt, 8,2× |
+| `dr-ts` | 1 | Einbau (`src/gebuehr.ts:27`, `TarifFormatError`) | Einbau in 2/2 (`py-drts-cr-B1`, `-B2`: `kasse.ts:5`, `TarifFormatError`), im Mittel 0,25 USD | ≥ `cr`: erfüllt | 1,13 USD | ≤ 0,37: verfehlt, 4,6× |
+| `dr-bigfile` | 3 Spannen | keine Einbauten; Eval 8 erfüllt (`spans`, `p3`), Audit lückenlos, 23 Funde | — | — | 3,03 USD | — |
+
+`py-diff-dr-B1` und `dl-diff-dr-B1` treffen wie die Läufe der ersten Abnahme (`py-diff-dr-1`
+7/8 mit R1, `dl-diff-dr-1` 6/6) mehr als die `cr`-Läufe auf demselben Diff (`py-diff`: kein
+Lauf irgendeines Werkzeugs ohne Paket fand P2, höchstens 6/8; `dl-diff`: `cr` 5/6 in beiden
+Läufen, `crc-1` und `eng-1` je 6/6). Beide Audits lückenlos (4/4), `no_block` und `below_level` leer.
+
+**Kosten.** Summe der Läufe 25,89 USD (dazu der Kontrolllauf `py-drseeded-dr-B2` mit 1,39 USD, unten; zusammen 27,28 USD). Nach Tokens gewichtet wie in
+„Sonde B" trägt die Hauptschleife auf `py-diff` noch 17 % (Abnahme: 33 %), auf `dl-diff` 15 %
+(19 %), auf `dl-path` 20 %, auf `dr-bigfile` 26 %. Der Hebel der Spec wirkt also auf die
+Hauptschleife, aber die Gesamtkosten der großen Diffs sinken kaum (`py-diff` 5,87 → 5,37 USD) oder
+steigen (`dl-diff` 7,43 → 9,06 USD): Den Rest tragen die vier Reviews `/code-review medium`, je
+Paket rund 1,1 bzw. 1,9 USD. Auf den kleinen Fixtures liegt die Hauptschleife bei 44–62 %, weil
+dort ein Lauf aus einem Paket besteht und die Hauptschleife in allen vier Läufen das Ergebnis
+anzweifelte (unten); im Kontrolllauf ohne Zweifel 38 %.
+
+**Fehlalarm der Hauptschleife.** In `py-drseeded`, `py-drcontract`, `dl-drdelphi` und `py-drts`
+hielt die Hauptschleife die Zeile `<tools-used-before-summary>` der Rückgabe (etwa „Glob, Read,
+Write") für die Werkzeuge des Unteragenten und schloss auf ein von Hand geschriebenes Ergebnis.
+Die Transkripte der Unteragenten zeigen in allen vier Läufen den Aufruf `/code-review medium`
+über das Skill-Werkzeug, einen Reviewer auf Tiefe 2 und ein von `record` angenommenes Ergebnis
+(„p1: 12 Fund(e) angenommen"). Folgen: `py-drseeded` hielt vor `merge` an und bat um Freigabe zum
+Verschieben der Datei (headless: Ende, kein Bericht, `audit` mit `lost_findings`); `py-drcontract`
+legte einen zweiten Lauf an und prüfte im Hauptkontext („Review ohne /code-review");
+`dl-drdelphi` legte einen zweiten Lauf an und startete `/code-review` selbst; `py-drts` nahm das
+Ergebnis mit Vorbehalt. Die Treffer oben stammen aus dem angenommenen Ergebnis des ersten Laufs
+(bei `dr-contract` und `dr-delphi` fanden beide Läufe den Einbau). Behoben in SKILL.md, Zeile der
+Anti-Rationalisierung: angenommen ist, was `audit` nicht unter `missing` oder `stale` nennt; die
+Werkzeugliste der Rückgabe ist kein Beleg. Kontrolllauf `py-drseeded-dr-B2` danach (1,39 USD): ohne
+Zweifel durchgelaufen, Audit lückenlos, 5/5 Einbauten, Bericht mit Kopfzeile von `report`;
+Hauptschleife 38 %. Ein Lauf, also nur ein Hinweis, dass die Zeile wirkt.
+
+**Stufe im Rückgabeobjekt.** `/code-review` meldete in den Unteragenten der kleinen Fixtures
+`"stufe": "high"`, obwohl `medium` aufgerufen war (die großen Läufe: `medium`). `record` nimmt
+eine höhere Stufe an; ob der Reviewer wirklich höher lief, zeigt das Transkript nicht.
+
+**Präzision** (Hinweis, kein Beleg; je fünf statt zehn Funde wegen des Budgets): aus
+`py-diff-cr-1` (14 Funde) die Funde 1, 4, 7, 10, 13, aus `py-diff-dr-B1` (35 Funde) die Funde 1,
+8, 15, 22, 29, je isoliert von einem Sonnet-Prüfer (Auftrag mit Datei, Zeile, Szenario und
+Commit, ohne die Zusammenfassung, nur lesen). `cr`: 5 bestätigt. deep-review: 4 bestätigt,
+1 `unklar` (Fund 22: Hinweis auf doppeltes Parsen in `models/wheel.py` mit Zeile 369 einer Datei
+mit 139 Zeilen; kein Fehlerablauf). Widerlegt: 0 bei beiden. Die Schwelle (Anteil `widerlegt`
+nicht höher als bei `cr`) ist erfüllt; bei fünf Funden entscheidet ein einziger.
+
+**Evals am gespeicherten Laufordner** (`$BENCH/out/<lauf>.kit`): Eval 8 (`dr-bigfile`: `spans`,
+`p3`) erfüllt; Eval 10 (`dr-ts`: `wirft: TarifFormatError` und `lib/` in `packets/p1.md`)
+erfüllt; Eval 7 (Marke in `results/p1.json`, `no_block: []`) im zweiten Lauf von `dr-contract`
+erfüllt; Eval 1 (`dr-seeded`: `split: false`, Bericht, Audit vollständig) im ersten Lauf
+verfehlt (kein Bericht, Fehlalarm oben), im Kontrolllauf `py-drseeded-dr-B2` erfüllt. Eval 9 (Pfad auf `dr-delphi`) lief nicht; den
+Pfad-Modus zeigt `dl-path-dr-B1` (`mode: path`, ein Paket, Audit 1/1).
+
+**Ergebnis der Routing-Regel:**
+- **Große Diffs** (`py-diff`, `dl-diff`): Treffer-Schwelle erfüllt, je in einem Lauf →
+  deep-review bleibt zuständig. Die Kosten-Schwelle ist verfehlt (5,1× und 3,9× von `cr`); der
+  Bericht nennt den Faktor, die Zeile `Reviews:` von `plan` die Zahl der Reviews vorab.
+- **Kleine Diffs** (`dr-seeded`, `dr-contract`, `dr-delphi`, `dr-ts`): Treffer gleich `cr`,
+  Kosten 3,4× bis 8,2× → bleiben bei `/code-review`; die Description nennt sie unter „Not for".
+  Auch ohne den Fehlalarm läge jede über 1,5×: Schon der Anteil der Unteragenten (nach Tokens
+  gewichtet, eine Schätzung) liegt darüber, etwa `dr-ts` ≈ 0,53, `dr-contract` ≈ 0,46 und
+  `dr-seeded` im Kontrolllauf ≈ 0,86 USD.
+- **Pfad** (`dl-path`): Treffer gleich, Kosten 2,0× → bleibt bei `/code-review`. Der Pfad-Modus
+  bleibt für den ausdrücklichen Wunsch nach Nachweis je Paket.
+
+**Abweichungen vom Plan (Budget):** `dr` auf `py-diff` und `dl-diff` je einmal statt zweimal,
+also kein Mittel und keine Streuung; Präzision mit fünf statt zehn Funden je Werkzeug; Eval 9
+nicht im Bench; Evals 1, 7, 8 und 10 nur an den Laufordnern der Abnahme, nicht als eigene Läufe.
+
 ## Was nicht gemessen wurde
+
+**deep-review nach Spec 28: Abnahme B reduziert (Budget 30 USD)** — Nicht gelaufen:
+- der zweite Lauf auf `py-diff` und `dl-diff`; „≥ 5,5 im Mittel" ist mit je einem Lauf nur
+  als Einzelwert belegt, Streuung unbekannt;
+- je zehn Funde für die Präzision (fünf je Werkzeug, nur auf `py-diff`; Delphi ohne Compiler
+  gar nicht);
+- Eval 9 (Pfad auf `dr-delphi`) und Evals als eigene Läufe mit und ohne Skill; Evals 1, 7, 8 und
+  10 nur an den Laufordnern der Abnahme;
+- ein Lauf mit der Stufe `high` (Profil `checkpoint`) auf einem großen Diff;
+- ob die Zeile gegen den Fehlalarm der Werkzeugliste trägt: ein Kontrolllauf auf `dr-seeded`;
+- die Kostenzerlegung nach Tokens ist eine Schätzung, keine Abrechnung je Unteragent.
 
 **deep-review: nur reduziert abgenommen (Task 16)** — je ein Lauf auf `py-diff` und `dl-diff` und
 Eval 3 und 4 mit Skill (Abschnitt „Abnahme“). Nicht gelaufen:
