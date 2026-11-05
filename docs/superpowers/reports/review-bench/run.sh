@@ -190,7 +190,7 @@ case $TOOL in
     cp -r "$ROOT/skills/deep-review" "$W/.claude/skills/deep-review"
     echo ".claude/" >> "$W/.git/info/exclude"
     TO=3600
-    ALLOW+=("Bash(python3:*)" "Bash(python:*)" Skill "Edit(./.skills/cache/deep-review/**)")
+    ALLOW+=("Bash(python3:*)" "Bash(python:*)" Skill Agent "Edit(./.skills/cache/deep-review/**)")
     case $REPO in
       *-path) PROMPT="Prüf die Pfade $TARGET mit deep-review." ;;
       *) PROMPT="Review $TARGET mit deep-review." ;;

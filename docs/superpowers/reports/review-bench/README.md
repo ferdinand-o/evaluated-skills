@@ -50,7 +50,7 @@ damit `match.py` sie nicht unter diesem Namen wertet. Ebenso bricht `crx` mit
 jedes Werkzeug mit `abbruch:klon`, wenn `git clone`, `fetch` oder `remote remove` scheitern
 (`secs=0`). Begleittext und Block setzt `run.sh` für `crx` und `crb` an einer Stelle zusammen. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
-und `Edit` nur unter `./.skills/cache/deep-review/` für `report.md`. Ein `claude -p` startet
+`Agent` (ab Spec 28: je Paket ein Unteragent nach der Vorlage in `review-brief.md`) und `Edit` nur unter `./.skills/cache/deep-review/` für die `## Einordnung` in `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`
 lässt Schritt 3 laufen, weil `counterparts` die Paket-Bereiche baut; nur der Block fehlt. Den
 Laufordner (`report.md`, `findings.json`) sichert `run.sh` nach `$BENCH/out/<name>.kit/`;
