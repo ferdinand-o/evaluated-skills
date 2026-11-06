@@ -31,7 +31,7 @@ Werkzeuge von `run.sh`:
 | `eng` | `/engineering:code-review <bereich>` | 1800 s |
 | `sp` | superpowers `requesting-code-review` über `base..HEAD` | 1800 s |
 | `dr` | `Review <bereich> mit deep-review.` mit `skills/deep-review` aus diesem Repo im Workspace | 3600 s |
-| `drnc` | wie `dr`, der Gegenstellen-Block geht nicht an den Reviewer | 3600 s |
+| `drnc` | wie `dr`, der Gegenstellen-Block geht nicht an den Reviewer; seit Spec 28 Exit 2 vor dem ersten `mkdir` (der Block steht im Paket-Auftrag `packets/<id>.prompt.md`, den der Reviewer liest), die Läufe davor bleiben auswertbar | 3600 s |
 
 Der Bereich ist `base..HEAD`, bei `py-c*` `mid..HEAD`, bei den Pfad-Szenarien die Pfadliste.
 `dr` und `drnc` laufen auch auf `py-path` und `dl-path`, aber nur, wenn `review_kit.py plan --help`
@@ -50,7 +50,7 @@ damit `match.py` sie nicht unter diesem Namen wertet. Ebenso bricht `crx` mit
 jedes Werkzeug mit `abbruch:klon`, wenn `git clone`, `fetch` oder `remote remove` scheitern
 (`secs=0`). Begleittext und Block setzt `run.sh` für `crx` und `crb` an einer Stelle zusammen. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
-`Agent` (ab Spec 28: je Paket ein Unteragent nach der Vorlage in `review-brief.md`) und `Edit` nur unter `./.skills/cache/deep-review/` für die `## Einordnung` in `report.md`. Ein `claude -p` startet
+`Agent` und `Task` (ab Spec 28: je Paket ein Unteragent nach der Vorlage in `review-brief.md`; `Task` ist der ältere Name des Werkzeugs) und `Edit` nur unter `./.skills/cache/deep-review/` für die `## Einordnung` in `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`
 lässt Schritt 3 laufen, weil `counterparts` die Paket-Bereiche baut; nur der Block fehlt. Den
 Laufordner (`report.md`, `findings.json`) sichert `run.sh` nach `$BENCH/out/<name>.kit/`;

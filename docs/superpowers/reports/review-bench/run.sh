@@ -12,6 +12,9 @@ AN=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 [[ $N =~ ^[$AN]+$ ]] || { echo "Laufnummer '$N': nur 0-9, A-Z, a-z, nicht leer; nichts angelegt" >&2; exit 2; }
 [[ $REPO =~ ^[$AN-]+$ ]] || { echo "Repo '$REPO': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
 [[ $TOOL =~ ^[$AN-]+$ ]] || { echo "Werkzeug '$TOOL': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
+# drnc (ohne Gegenstellen-Block) geht seit Spec 28 nicht mehr: der Block steht in
+# packets/<id>.prompt.md, und genau diese Datei liest der Reviewer (Unteragent je Paket).
+[ "$TOOL" = drnc ] && { echo "drnc: seit Spec 28 steht der Block im Paket-Auftrag packets/<id>.prompt.md; ein Lauf ohne Block ist mit dieser Skill nicht messbar; nichts angelegt" >&2; exit 2; }
 # Jeder nichtleere Wert außer 0 ist eine Probe (auch DRY=true, yes); danach ist DRY 1 oder leer.
 case ${DRY:-} in ''|0) DRY= ;; *) DRY=1 ;; esac
 START=""
@@ -184,13 +187,14 @@ case $TOOL in
     echo ".claude/" >> "$W/.git/info/exclude"
     PROMPT="/requesting-code-review Review the change base..HEAD of this repository. BASE_SHA: $BASE HEAD_SHA: $HEAD. DESCRIPTION and PLAN_OR_REQUIREMENTS: the commit message of HEAD (git log -1 HEAD). When the reviewer returns, print its complete list of issues verbatim, each with file:line." ;;
   dr|drnc)
-    # deep-review aus diesem Repo; je Paket ein /code-review in einem claude -p (bis 7 Pakete
-    # zu 3-5 Minuten), daher 3600 s. Python für review_kit.py, Edit für report.md im Laufordner.
+    # deep-review aus diesem Repo; je Paket ein Unteragent (Agent, älterer Name Task), der
+    # /code-review startet (bis 7 Pakete zu 3-5 Minuten), daher 3600 s. Python für
+    # review_kit.py, Skill für /code-review, Edit für die Einordnung in report.md.
     mkdir -p "$W/.claude/skills"
     cp -r "$ROOT/skills/deep-review" "$W/.claude/skills/deep-review"
     echo ".claude/" >> "$W/.git/info/exclude"
     TO=3600
-    ALLOW+=("Bash(python3:*)" "Bash(python:*)" Skill Agent "Edit(./.skills/cache/deep-review/**)")
+    ALLOW+=("Bash(python3:*)" "Bash(python:*)" Skill Agent Task "Edit(./.skills/cache/deep-review/**)")
     case $REPO in
       *-path) PROMPT="Prüf die Pfade $TARGET mit deep-review." ;;
       *) PROMPT="Review $TARGET mit deep-review." ;;
