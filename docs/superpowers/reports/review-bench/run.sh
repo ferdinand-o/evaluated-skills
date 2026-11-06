@@ -1,5 +1,5 @@
 #!/bin/bash
-# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|crb|eng|sp|dr|drnc
+# run.sh <repo> <tool> <run-nr>   repo: py-diff|py-path|dl-diff|dl-path|py-c1..3   tool: cr|crc|crx|crb|eng|sp|dr (drnc seit Spec 28: Exit 2)
 # DRY=1 (jeder nichtleere Wert außer 0): alles bis unmittelbar vor claude -p, dann Prompt und Länge
 # des Systemprompts auf stderr, Workspace weg, Exit 0 (Exit 1 bei Abbruch); nichts in out/ (Block
 # unter work/, Abbruchzeilen nur auf stderr).
@@ -12,9 +12,6 @@ AN=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 [[ $N =~ ^[$AN]+$ ]] || { echo "Laufnummer '$N': nur 0-9, A-Z, a-z, nicht leer; nichts angelegt" >&2; exit 2; }
 [[ $REPO =~ ^[$AN-]+$ ]] || { echo "Repo '$REPO': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
 [[ $TOOL =~ ^[$AN-]+$ ]] || { echo "Werkzeug '$TOOL': nur 0-9, A-Z, a-z, '-'; nichts angelegt" >&2; exit 2; }
-# drnc (ohne Gegenstellen-Block) geht seit Spec 28 nicht mehr: der Block steht in
-# packets/<id>.prompt.md, und genau diese Datei liest der Reviewer (Unteragent je Paket).
-[ "$TOOL" = drnc ] && { echo "drnc: seit Spec 28 steht der Block im Paket-Auftrag packets/<id>.prompt.md; ein Lauf ohne Block ist mit dieser Skill nicht messbar; nichts angelegt" >&2; exit 2; }
 # Jeder nichtleere Wert außer 0 ist eine Probe (auch DRY=true, yes); danach ist DRY 1 oder leer.
 case ${DRY:-} in ''|0) DRY= ;; *) DRY=1 ;; esac
 START=""
@@ -45,7 +42,10 @@ case $REPO in
 esac
 case $TOOL in
   cr|crc|crx|eng|sp) ;;
-  dr|drnc)
+  # drnc (ohne Gegenstellen-Block) geht seit Spec 28 nicht mehr: der Block steht in
+  # packets/<id>.prompt.md, und genau diese Datei liest der Reviewer (Unteragent je Paket).
+  drnc) echo "drnc: seit Spec 28 steht der Block im Paket-Auftrag packets/<id>.prompt.md; ein Lauf ohne Block ist mit dieser Skill nicht messbar; nichts angelegt" >&2; exit 2 ;;
+  dr)
     # Auf *-path nur mit Pfad-Modus der Skill (plan --path); ohne ihn reicht deep-review den Pfad
     # an /code-review weiter, ohne Plan und ohne Laufordner.
     case $REPO in
@@ -159,7 +159,7 @@ case $TOOL in
        grep -q '[^[:space:]]' "$CTX" || abort counterparts "counterparts.py lieferte einen leeren Block" ;;
   crb) PROMPT="/code-review $LEVEL --max-findings all $TARGET"
        # Block aus review_kit.py (nicht counterparts.py): Plan und Gegenstellen im Workspace, die
-       # Skill wird nicht kopiert. Die Zeit läuft ab plan, wie bei dr/drnc, wo review_kit.py im
+       # Skill wird nicht kopiert. Die Zeit läuft ab plan, wie bei dr, wo review_kit.py im
        # Lauf steckt. Der Block muss den ganzen getippten Bereich decken (CRB_PY), sonst Abbruch.
        # Danach Laufordner und Refs weg, der Reviewer sieht beides nicht; bleibt ein Ref, Abbruch.
        START=$(date +%s)
@@ -186,7 +186,7 @@ case $TOOL in
     cp -r "$B/superpowers/skills/requesting-code-review" "$W/.claude/skills/"
     echo ".claude/" >> "$W/.git/info/exclude"
     PROMPT="/requesting-code-review Review the change base..HEAD of this repository. BASE_SHA: $BASE HEAD_SHA: $HEAD. DESCRIPTION and PLAN_OR_REQUIREMENTS: the commit message of HEAD (git log -1 HEAD). When the reviewer returns, print its complete list of issues verbatim, each with file:line." ;;
-  dr|drnc)
+  dr)
     # deep-review aus diesem Repo; je Paket ein Unteragent (Agent, älterer Name Task), der
     # /code-review startet (bis 7 Pakete zu 3-5 Minuten), daher 3600 s. Python für
     # review_kit.py, Skill für /code-review, Edit für die Einordnung in report.md.
@@ -199,9 +199,6 @@ case $TOOL in
       *-path) PROMPT="Prüf die Pfade $TARGET mit deep-review." ;;
       *) PROMPT="Review $TARGET mit deep-review." ;;
     esac
-    # drnc: ohne Gegenstellen-Block. Schritt 3 läuft trotzdem, er baut die Paket-Bereiche, auf
-    # *-path im Pfad-Modus (oben vorausgesetzt) ebenso wie auf Bereichen.
-    [ "$TOOL" = drnc ] && PROMPT="$PROMPT Führe Schritt 3 (counterparts) nur für die Paket-Bereiche aus: gib dem Reviewer den Block aus packets/<id>.md nicht mit und lies ihn nicht."
     ;;
 esac
 # crx und crb: Begleittext und Block an einer Stelle, damit beide denselben Text bekommen.

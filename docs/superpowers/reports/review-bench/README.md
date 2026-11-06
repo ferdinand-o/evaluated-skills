@@ -34,7 +34,7 @@ Werkzeuge von `run.sh`:
 | `drnc` | wie `dr`, der Gegenstellen-Block geht nicht an den Reviewer; seit Spec 28 Exit 2 vor dem ersten `mkdir` (der Block steht im Paket-Auftrag `packets/<id>.prompt.md`, den der Reviewer liest), die Läufe davor bleiben auswertbar | 3600 s |
 
 Der Bereich ist `base..HEAD`, bei `py-c*` `mid..HEAD`, bei den Pfad-Szenarien die Pfadliste.
-`dr` und `drnc` laufen auch auf `py-path` und `dl-path`, aber nur, wenn `review_kit.py plan --help`
+`dr` läuft auch auf `py-path` und `dl-path`, aber nur, wenn `review_kit.py plan --help`
 die Option `--path` nennt (Pfad-Modus, Spec 28, Task 7); sonst Exit 2 vor dem ersten `mkdir`. Der
 Prompt lautet dort `Prüf die Pfade <liste> mit deep-review.`. `crb` läuft nur auf Bereichen (`review_kit.py plan`
 braucht `--range`); auf `*-path` bricht `run.sh` mit Exit 2 ab, ebenso bei `LEVEL` außerhalb von
@@ -48,11 +48,12 @@ stehen; auch dann steht eine Zeile in `status.txt`, mit `cost/turns/err=abbruch:
 damit `match.py` sie nicht unter diesem Namen wertet. Ebenso bricht `crx` mit
 `abbruch:counterparts` ab, wenn `counterparts.py` scheitert oder einen leeren Block liefert, und
 jedes Werkzeug mit `abbruch:klon`, wenn `git clone`, `fetch` oder `remote remove` scheitern
-(`secs=0`). Begleittext und Block setzt `run.sh` für `crx` und `crb` an einer Stelle zusammen. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`/`drnc`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
+(`secs=0`). Begleittext und Block setzt `run.sh` für `crx` und `crb` an einer Stelle zusammen. Die Zeit (`secs`) läuft bei `crb` ab `plan`, wie bei `dr`. `dr` kopiert die Skill nach `$W/.claude/skills/deep-review` (über `.git/info/exclude` aus Git
 heraus) und erlaubt zusätzlich `Bash(python3:*)`, `Bash(python:*)` für `review_kit.py`, `Skill`
 `Agent` und `Task` (ab Spec 28: je Paket ein Unteragent nach der Vorlage in `review-brief.md`; `Task` ist der ältere Name des Werkzeugs) und `Edit` nur unter `./.skills/cache/deep-review/` für die `## Einordnung` in `report.md`. Ein `claude -p` startet
 je Paket ein `/code-review`; bei bis zu 7 Paketen zu 3–5 Minuten reichen 1800 s nicht. `drnc`
-lässt Schritt 3 laufen, weil `counterparts` die Paket-Bereiche baut; nur der Block fehlt. Den
+ließ vor Spec 28 Schritt 3 laufen, weil `counterparts` die Paket-Bereiche baut, nur der Block
+fehlte; seit Spec 28 bricht es vor dem ersten `mkdir` ab (Tabelle oben). Den
 Laufordner (`report.md`, `findings.json`) sichert `run.sh` nach `$BENCH/out/<name>.kit/`;
 `match.py` liest ihn mit.
 
