@@ -2538,6 +2538,18 @@ Je Grenze: was passiert, warum nicht behoben, was man stattdessen tut.
 - **`run.sh` (`crb`) liest den Block über das Kopfformat von `review_kit.py`** (Präfix
   `Dateien (`, erlaubte Kopfzeilen). Ändert sich der Paketkopf, endet `crb` mit
   `abbruch:block`; dann `run.sh` mit anpassen.
+- **`drnc` ist seit Spec 28 abgewiesen,** weil der Block im Paket-Auftrag steht, den der
+  Reviewer liest. Die Absage steht im `case` der Werkzeuge, also nach den Prüfungen von
+  `BENCH` und Repo: Ein Aufruf mit einem zweiten Fehler meldet diesen zuerst. Zwei Stellen der
+  README nennen `dr`/`drnc` weiter zusammen (`match.py` wertet alte `drnc`-Läufe, die
+  Lesesperre); gemeint sind die Läufe vor Spec 28. Rest nach zwei Fix-Runden am finalen
+  Prüfpunkt, ohne Absturz und ohne falsches Ergebnis.
+- **Der finale Prüfpunkt von Spec 28 lief nur über den Bereich seit Prüfpunkt 10** (`6a738d1..`,
+  auf Wunsch des Nutzers): `--since` übernimmt die Funde früherer Läufe nur bei gleichem
+  Datei-Schlüssel, und der hängt an den geänderten Stellen des jeweiligen Bereichs. Über
+  `base..HEAD` wären 18 Reviews fällig gewesen, acht davon für die Kopie unter
+  `.claude/skills/`. Umgang: Nachprüfungen über die Fix-Commits, der finale Prüfpunkt über den
+  Bereich seit dem letzten `mark`, und das im Bericht sagen.
 
 **Aus der Abnahme B (2026-11-05)**
 

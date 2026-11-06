@@ -1021,6 +1021,23 @@ Pfad-Modus zeigt `dl-path-dr-B1` (`mode: path`, ein Paket, Audit 1/1).
 also kein Mittel und keine Streuung; Präzision mit fünf statt zehn Funden je Werkzeug; Eval 9
 nicht im Bench; Evals 1, 7, 8 und 10 nur an den Laufordnern der Abnahme, nicht als eigene Läufe.
 
+### Finaler Prüfpunkt von Spec 28 (2026-11-06)
+
+deep-review über `6a738d1..713bd2d` statt `base..HEAD`, auf Wunsch des Nutzers: Seit Prüfpunkt 10
+änderte sich am Code nur `run.sh`, der Rest ist Doku; über `base..HEAD` hätte `plan` 18 Reviews
+angesetzt (kein Lauf übernommen, die Datei-Schlüssel hängen am Bereich; acht Pakete für die
+Kopie unter `.claude/skills/`). Ein Paket, Unteragent nach der Vorlage, `--verify` gesetzt (alle
+Funde mit `evidence`, daher keine Prüfaufträge).
+
+| Lauf | Bereich | Funde | Ergebnis |
+| --- | --- | --- | --- |
+| `2026-11-05-083633-cbf005d-q5lw` | `6a738d1..cbf005d` | 2: `drnc` kann seit Spec 28 keinen Lauf ohne Block messen (der Block steht im Paket-Auftrag); veralteter Kommentar, kein Rückfall auf den Namen `Task` | Runde 1: `drnc` mit Exit 2, Kommentar, `Task` erlaubt |
+| `2026-11-06-175423-31aec43-xtbr` | `cbf005d..31aec43` | 4: README und Kopfzeile nennen `drnc` noch als lauffähig, Absage gehört in den `case`, tote `drnc`-Pfade | Runde 2: alle behoben |
+| `2026-11-06-175630-713bd2d-31hr` | `31aec43..713bd2d` | 2: zwei README-Stellen `dr`/`drnc`, Reihenfolge der Fehlermeldungen | nach der Fix-Regel in known-limits |
+
+Audit aller drei Läufe lückenlos (1/1). Gesamttests nach Runde 2: 1942 bestanden, der bekannte
+umgebungsbedingte Fehler in `test_rest_api_architect_gate`.
+
 ## Was nicht gemessen wurde
 
 **deep-review nach Spec 28: Abnahme B reduziert (Budget 30 USD)** — Nicht gelaufen:
