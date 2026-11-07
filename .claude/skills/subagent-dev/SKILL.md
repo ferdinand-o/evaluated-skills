@@ -69,16 +69,16 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 6. **Merge und Prüfpunkt:** sequenziell nach Plan-Abhängigkeit, Tests nach jedem
    Merge, dann `plan_to_tasks.py checkpoint status --after-task <N>` (bei roten
    Gesamttests nach deren Behebung mit `--tests-red`). Nur wenn `due` wahr ist, läuft
-   das Review über den gemeldeten `range` — `/code-review --max-findings all <range>`,
-   solange deep-review fehlt;
-   die Übergabe sagt dann „Review ohne Abdeckungsnachweis". Funde → `fix-task`, Fix in
-   frischem Worktree, `verify`, Merge, Review des Fixes, dann
-   `checkpoint mark --commit HEAD --run <lauf|none> --tasks <liste>`; höchstens zwei
-   Fix-Runden je Prüfpunkt. Je Runde und Prüfpunkt eine Zeile über
-   `plan_to_tasks.py log`. Zum Schluss der finale Prüfpunkt über `base..HEAD`.
-   Ein Interface-Bruch zwischen zwei Paketen ist ein Gate-Fehler (Überlappung
-   falsch beurteilt) — als Lesson im Plan vermerken, nicht einfach fixen und
-   weiter. Details: [references/merge-protocol.md](references/merge-protocol.md).
+   deep-review über `range` mit dem `profile` aus `checkpoint.json` (`checkpoint` mit
+   `--soll-file`); ohne die Skill `/code-review --max-findings all <range>`, und die
+   Übergabe sagt „Review ohne Abdeckungsnachweis". Funde (`findings.json` von deep-review,
+   im Ersatz die JSON-Liste von `/code-review`) → `fix-task`, Fix in frischem Worktree,
+   `verify`, Merge, Nachprüfung bis `HEAD` mit `--since <lauf>`, dann `checkpoint mark` je
+   Lauf ([references/checkpoints.md](references/checkpoints.md)); höchstens zwei
+   Fix-Runden je Prüfpunkt, je Runde und Prüfpunkt eine Zeile über `plan_to_tasks.py log`.
+   Zum Schluss der finale Prüfpunkt über `base..HEAD`. Ein Interface-Bruch zwischen zwei
+   Paketen ist ein Gate-Fehler (Überlappung falsch beurteilt) — als Lesson im Plan
+   vermerken, nicht einfach fixen und weiter. Details: [references/merge-protocol.md](references/merge-protocol.md).
 7. **Recherche-/Analyse-Fan-out** (großer Codebase-Scan, der den Hauptkontext
    fluten würde) läuft unabhängig vom Gate: siehe
    [references/research-fanout.md](references/research-fanout.md). Die
@@ -140,6 +140,6 @@ Das verlangt diese Datei (G1); `verify` meldet den Abnehmer-Bruch (G2).
 - Das eingebaute **Agent**-Werkzeug — Delegation ohne Plan, ohne Gate und ohne
   `verify`. Liegt ein Plan vor und die Frage ist „parallel oder sequenziell, und was
   bekommt jeder Agent", gehört sie hierher.
-- `/code-review` — das Review am Prüfpunkt, solange `deep-review` (Spec 26) nicht gebaut
-  ist; subagent-dev prüft selbst nur Vertrag und Signaturen.
+- **deep-review** — das Review am Prüfpunkt, in Paketen mit Nachweis je Paket; ohne die
+  Skill `/code-review`. subagent-dev prüft selbst nur Vertrag und Signaturen.
 - test-first — Rot vor Grün je Test; subagent-dev liest dessen Log nur als Hinweis.

@@ -32,6 +32,7 @@ PROJECT_SKILLS = [
     "architecture-map",
     "debug-ledger",
     "decide",
+    "deep-review",
     "dev-report",
     "feature-spec",
     "handoff",

@@ -122,5 +122,7 @@ nichts an. Ohne Hook bleibt es bei G2.
 - **`feature-spec`** — neues Feature, keine Fehlersuche. Nicht diese Skill.
 - **`test-first`** — der Regressionstest nach der Diagnose: rot vor dem Fix, grün
   danach, belegt im Log. Diese Skill findet die Ursache; test-first hält den Fix fest.
+- **deep-review** — meldet Funde eines Reviews, diagnostiziert sie nicht. Ein bestätigter
+  Fund mit unklarer Ursache kommt hierher.
 - Ohne Git-Repo funktioniert das Ledger trotzdem (reine Dateien unter
   `docs/debugging/`); nur `bisect_run.py` braucht Git.

@@ -1,0 +1,129 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-small-range-one-packet",
+      "class": "contract",
+      "fixture": "dr-seeded",
+      "prompt": "Review base..HEAD mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"split\":\\s*false"},
+        {"type": "artifact_header", "path": ".skills/cache/deep-review/*/report.md"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/report.md", "pattern": "generated: python scripts/review_kit\\.py report"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"complete\":\\s*true"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"report_mismatch\":\\s*\\[\\]"},
+        {"type": "git_head_unchanged"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 1, nachgezogen in Spec 28 — der Pflicht-Anti-Zeremonie-Eval (E5): base..HEAD auf dr-seeded liegt unter split_at (800), also ein Paket p1 über den Originalbereich, keine Hilfscommits, ein kurzer Bericht. Diskriminator: plan.json unter .skills/cache/deep-review/<lauf>/ schreibt nur review_kit.py plan (write_json rückt mit zwei Leerzeichen ein, daher \\s* nach dem Doppelpunkt), und report.md mit der Kopfzeile <!-- skill: deep-review | … | generated: python scripts/review_kit.py report --run <lauf> --> schreibt nur review_kit.py report; ohne Skill gibt es weder Datei noch Kopfzeile. Die Anti-Zeremonie-Grenze selbst prüft audit: der Teil vor ## Einordnung muss Zeile für Zeile dem entsprechen, was report schreibt, und unter ## Einordnung stehen bei split: false höchstens EINORDNUNG_MAX_LINES (8) Textzeilen, ohne Überschrift, Leerzeilen und HTML-Kommentare; ein abweichender oder längerer Bericht steht unter report_mismatch, dann ist complete false. Darum sind complete: true und report_mismatch: [] in audit.json (schreibt nur review_kit.py audit) der Diskriminator der Länge. Eine feste Zeilengrenze auf report.md (früher file_max_lines 60) gibt es nicht: der Skript-Bericht wächst um eine Zeile je Fund, mit --max-findings all ließe sie einen gültigen Lauf scheitern, und die Länge prüft audit schon. git_head_unchanged: die Skill committet nichts, Hilfscommits gäbe es nur unter refs/deep-review/. Ein Lauf je Workspace: der Glob nimmt den alphabetisch ersten, also den frühesten Lauf."
+    },
+    {
+      "id": "large-range-is-split-and-covered",
+      "class": "contract",
+      "fixture": "dr-split",
+      "prompt": "Prüf base..HEAD mit deep-review, teile ab 200 Zeilen.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"id\":\\s*\"p3\""},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"complete\":\\s*true"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"missing\":\\s*\\[\\]"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 2. „teile ab 200 Zeilen\" heißt plan --split-at 200, also packet_size 200. dr-split hat rund 450 geänderte Zeilen in export/, fahrten/ und kosten/ (je rund 150); keine zwei Verzeichnisse passen zusammen in 200 Zeilen, die Schnittregel ergibt genau p1, p2, p3. Diskriminator: Paket-IDs in plan.json und complete/missing in audit.json schreibt nur review_kit.py (plan, audit); audit sagt complete: true nur, wenn record für jedes der drei Pakete ein Ergebnis angenommen hat (Spec 28: als Objekt mit der Marke aus packets/<id>.prompt.md; ohne Marke nur mit --no-block, dann steht das Paket unter no_block) und report.md der Bericht von review_kit.py report ist. Ohne Skill entsteht weder Plan noch Audit. Ob die Reviews je Paket Funde liefern, prüft dieser Eval nicht."
+    },
+    {
+      "id": "narrowed-except-gets-callee-raises",
+      "class": "contract",
+      "fixture": "dr-contract",
+      "prompt": "Review den letzten Commit mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "wirft:[^\\n]*TypeError"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "vendor/grouplib\\.py"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 3. Der letzte Commit verengt in app/groups.py except (ValueError, TypeError) auf except ValueError, direkt um den Aufruf von group_by aus vendor/grouplib.py; dessen Hilfsfunktion _require_sequence wirft TypeError, und app/members.py liefert None, solange keine Liste abgelegt ist. Der Diff nennt weder vendor/grouplib.py noch ein raise TypeError. Diskriminator: packets/p1.md schreibt nur review_kit.py counterparts; der Eintrag „- Gegenstelle group_by [vendor/grouplib.py:<zeile>]\" mit „  wirft: TypeError, ValueError\" entsteht nur im Python-Sammler (Ausnahmen der Aufrufe im try einer geänderten except-Klausel, raise-Stellen transitiv bis Tiefe 2). Ob der Reviewer den Fehler daraus meldet, ist stochastisch und gehört in die Abnahme der Trefferquote, nicht in diesen Eval."
+    },
+    {
+      "id": "delphi-extract-shows-ownership",
+      "class": "contract",
+      "fixture": "dr-delphi",
+      "prompt": "Review den letzten Commit mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "inherited Create\\(True\\)"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "TObjectList"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 4. Tree.pas deklariert TQueryTree = class(TObjectList<TNode>), der Konstruktor ruft inherited Create(True); der letzte Commit ersetzt in Query.pas (DropEmpty) ATree.Remove durch ATree.Extract, ATree ist ein Parameter vom Typ TQueryTree — der entnommene Knoten wird nicht mehr freigegeben. Der Diff berührt Tree.pas nicht und nennt weder TObjectList noch inherited Create(True). Diskriminator: packets/p1.md schreibt nur review_kit.py counterparts; der Besitz-Eintrag „### Query.pas:<zeile> Extract auf ATree: TQueryTree\" mit Klassendeklaration, inherited-Zeile und „Besitz (RTL): TObjectList<…>\" entsteht nur im Delphi-Sammler. Die Fixture nutzt absichtlich ein anderes Besitzmuster als das Beispiel in references/delphi.md, damit die Prüfliste den Fall nicht vorsagt. Ob der Reviewer das Leck meldet, gehört in die Abnahme."
+    },
+    {
+      "id": "security-focus-is-one-packet",
+      "class": "contract",
+      "fixture": "dr-contract",
+      "prompt": "Mach ein Sicherheitsreview von base..HEAD mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"focus\":\\s*\"security\""},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"id\":\\s*\"s1\""},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"complete\":\\s*true"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 5. „Sicherheitsreview\" heißt plan --focus security: ein Paket s1 über den ganzen Bereich, ohne Hilfscommits. Der Workspace hat kein origin/HEAD, also läuft /security-review nicht (sein Bereich entspräche nicht dem Plan); der Review läuft im Hauptkontext über den Bereich von s1 und wird mit --tool \"Review ohne /security-review\" und der Marke von s1 angenommen. Diskriminator: focus und die Paket-ID s1 in plan.json sowie complete in audit.json schreibt nur review_kit.py (plan, audit); ohne Skill entsteht keine der beiden Dateien. Welches Werkzeug lief und ob ein Review lief, prüft kein Eval (Spec 26, Open questions)."
+    },
+    {
+      "id": "routing-large-branch-without-skill-name",
+      "class": "contract",
+      "fixture": "dr-split",
+      "prompt": "Prüf base..HEAD gründlich in Paketen auf Fehler und weise nach, dass jedes Paket angeschaut wurde.",
+      "must": [
+        {"type": "file_exists", "path": ".skills/cache/deep-review/*/plan.json"}
+      ],
+      "must_not": [],
+      "notes": "Spec 26, Eval 6 — Routing-Eval ohne Skill-Namen im Prompt: Landet „gründlich in Paketen prüfen und Abdeckung nachweisen\" bei deep-review oder bei /code-review über den ganzen Bereich? Diskriminator: plan.json unter .skills/cache/deep-review/ schreibt nur review_kit.py plan; /code-review legt keinen Plan an. Mit dem Standard split_at 800 bleiben die rund 450 Zeilen ein Paket p1, der Eval fragt nur, ob die Skill gewählt wurde. Routing-Evals sind stochastisch (docs/known-limits.md, „Stichprobe\"): ein roter Lauf zeigt eine Kollision mit /code-review, ein grüner beweist nichts."
+    },
+    {
+      "id": "packet-result-carries-marker",
+      "class": "contract",
+      "fixture": "dr-contract",
+      "prompt": "Review den letzten Commit mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/results/p1.json", "pattern": "\"marke\":\\s*\"dr-p1-[0-9a-f]{6}\""},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"no_block\":\\s*\\[\\]"}
+      ],
+      "must_not": [],
+      "notes": "Spec 28, Eval 7. Der letzte Commit auf dr-contract ist ein Paket p1. counterparts schreibt neben dem Block packets/p1.md den Auftrag packets/p1.prompt.md, dessen letzte Zeile die Marke dr-p1-<6 Hex> trägt (MARKER_HEX); record nimmt das Ergebnis als Objekt {\"marke\", \"stufe\", \"findings\"} nur mit genau dieser Marke an und legt sie in results/p1.json ab. Ein Ergebnis ohne Marke geht nur mit --no-block durch und steht dann in audit.json unter no_block. Diskriminator-Frage: Steht in results/p1.json eine Marke im Format dr-p1-<hex>, und ist no_block in audit.json leer? Die Marke erzeugt nur counterparts; das Basismodell kennt weder Datei noch Format, ohne Skill gibt es weder results/p1.json noch audit.json. Die Marke ist eine Auskunft über den Weg mit Auftrag und Block; die Übergabe selbst zeigt nur ein Transkript (Spec 28, Alternatives considered)."
+    },
+    {
+      "id": "big-file-split-at-definitions",
+      "class": "contract",
+      "fixture": "dr-bigfile",
+      "prompt": "Prüf base..HEAD mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"spans\":\\s*\\[\\s*\\{"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"id\":\\s*\"p3\""}
+      ],
+      "must_not": [],
+      "notes": "Spec 28, Eval 8. base..HEAD auf dr-bigfile legt ein neues Python-Modul bibliothek/bestand.py mit 1.315 Zeilen in 17 Klassen an. Mit den Standardgrenzen (SPLIT_AT 800, PACKET_SIZE 600) teilt plan die eine Datei in drei Spannen-Pakete p1 bis p3 (1-523, 524-1001, 1002-1315), geschnitten vor einer Klasse der obersten Ebene (ast, nie importiert). Diskriminator-Frage: Hat plan.json Pakete mit spans und ein Paket p3? Nach Spec 26 wäre die Datei ein Paket, eine Datei ließ sich nicht teilen; spans und p3 schreibt nur review_kit.py plan, ohne Skill gibt es keinen Plan. Ob der Schnitt an einer Definition liegt, prüft test_evals_and_fixtures am Quelltext."
+    },
+    {
+      "id": "path-review-has-plan-and-audit",
+      "class": "contract",
+      "fixture": "dr-delphi",
+      "prompt": "Prüf die Units Query.pas und Tree.pas mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/plan.json", "pattern": "\"mode\":\\s*\"path\""},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/audit.json", "pattern": "\"complete\":\\s*true"}
+      ],
+      "must_not": [],
+      "notes": "Spec 28, Eval 9. „die Units Query.pas und Tree.pas\" heißt plan --path Query.pas,Tree.pas; dr-delphi hat seine Units im Wurzelordner. Der Pfad-Modus baut Hilfscommits über einen temporären Index, in denen die Dateien neu sind (E6: HEAD, Index und Arbeitsbaum bleiben), und schreibt mode: path in plan.json; danach counterparts, record je Paket mit Marke, merge, report, audit wie im Bereich. Diskriminator-Frage: Steht mode: path in plan.json und complete: true in audit.json? Ohne Skill entsteht weder Plan noch Audit; nach Spec 26 ginge der Pfad ohne Plan an /code-review. Ob ein Pfad-Review mehr findet als /code-review, gehört in die Abnahme (dl-path), nicht in diesen Eval."
+    },
+    {
+      "id": "typescript-throw-gets-counterpart",
+      "class": "contract",
+      "fixture": "dr-ts",
+      "prompt": "Review den letzten Commit mit deep-review.",
+      "must": [
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "wirft:[^\\n]*[A-Za-z]+Error"},
+        {"type": "file_matches", "path": ".skills/cache/deep-review/*/packets/p1.md", "pattern": "lib/"}
+      ],
+      "must_not": [],
+      "notes": "Spec 28, Eval 10. Der letzte Commit verengt in src/gebuehr.ts den catch-Block um den Aufruf von parseTarif auf SyntaxError und wirft alles andere weiter; parseTarif aus lib/tarif.ts (relativer Import ../lib/tarif) wirft TarifFormatError, direkt und über die Hilfsfunktion zahl. Der Diff nennt weder lib/tarif.ts noch TarifFormatError. Diskriminator-Frage: Steht im Block packets/p1.md eine Zeile wirft: …Error mit der Gegenstelle unter lib/? Den Block schreibt nur review_kit.py counterparts; der Eintrag „### src/gebuehr.ts:<zeile> catch (fehler)\" mit „- Gegenstelle parseTarif [lib/tarif.ts:<zeile>]\" und „  wirft: TarifFormatError\" entsteht nur im Sammler TypeScript (geänderte catch-Klausel, throw-Zeilen der Aufrufe im try transitiv bis RAISE_DEPTH). Ob der Reviewer den Fehler daraus meldet, gehört in die Abnahme."
+    }
+  ]
+}

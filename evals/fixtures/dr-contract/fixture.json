@@ -1,0 +1,25 @@
+{
+  "git": true,
+  "description": "Kontraktfixture fuer deep-review (Spec 26, Eval narrowed-except-gets-callee-raises und security-focus-is-one-packet): Vereinsverwaltung bei Tag base, darauf ein Commit, der in `app/groups.py` die Klausel `except (ValueError, TypeError)` vor dem Aufruf von `group_by` aus `vendor/grouplib.py` auf `except ValueError` verengt. `vendor/grouplib.py` wirft TypeError in `_require_sequence`, wenn items keine Folge ist; `app/members.py` liefert None, solange keine Liste abgelegt ist, und `app/overview.py` reicht das ungeprueft an by_department weiter — der Aushang stirbt seit dem Commit an TypeError statt leer zu bleiben. Der Diff allein zeigt das nicht; erst die raise-Zeilen der Gegenstelle im Paketblock packets/p1.md.",
+  "commits": [
+    {
+      "message": "Vereinsverwaltung 0.4: Mitgliederliste, Abteilungsübersicht und Aushang",
+      "touch": {
+        ".gitignore": "__pycache__/\n",
+        "app/__init__.py": "\"\"\"Vereinsverwaltung: Mitglieder und Aushang.\"\"\"\n",
+        "app/groups.py": "\"\"\"Mitglieder nach Abteilung gruppieren, für die Übersicht im Aushang.\"\"\"\n\nfrom vendor.grouplib import group_by\n\n\ndef by_department(members):\n    \"\"\"Mitglieder je Abteilung; ohne verwertbare Daten eine leere Übersicht.\"\"\"\n    try:\n        return group_by(members, key=lambda m: m.get(\"department\"), sort=True)\n    except (ValueError, TypeError):\n        return {}\n",
+        "app/members.py": "\"\"\"Mitgliederliste aus der Ablage des Vereinsbüros.\"\"\"\n\nimport json\nfrom pathlib import Path\n\n\ndef load_members(path):\n    \"\"\"Mitglieder aus einer JSON-Datei; None, solange das Büro noch keine Liste abgelegt hat.\"\"\"\n    source = Path(path)\n    if not source.exists():\n        return None\n    return json.loads(source.read_text(encoding=\"utf-8\"))\n",
+        "app/overview.py": "\"\"\"Aushang: Mitglieder je Abteilung als Text.\"\"\"\n\nfrom app.groups import by_department\nfrom app.members import load_members\n\n\ndef render(path):\n    lines = []\n    for department, members in by_department(load_members(path)).items():\n        names = \", \".join(sorted(m[\"name\"] for m in members))\n        lines.append(f\"{department}: {names}\")\n    return \"\\n\".join(lines) or \"Noch keine Mitglieder erfasst.\"\n",
+        "vendor/__init__.py": "",
+        "vendor/grouplib.py": "\"\"\"grouplib 0.3 — Einträge nach einem Schlüssel gruppieren (vendort, unverändert).\"\"\"\n\n\ndef _require_sequence(items):\n    if isinstance(items, (str, bytes)) or not hasattr(items, \"__iter__\"):\n        raise TypeError(f\"items muss eine Folge sein, nicht {type(items).__name__}\")\n    return list(items)\n\n\ndef _key_of(entry, key):\n    value = key(entry)\n    if value is None:\n        raise ValueError(f\"kein Schlüssel für {entry!r}\")\n    return value\n\n\ndef group_by(items, key, *, sort=False):\n    \"\"\"Gruppiert Einträge nach key(entry), Gruppen in der Reihenfolge des Eingangs.\"\"\"\n    groups = {}\n    for entry in _require_sequence(items):\n        groups.setdefault(_key_of(entry, key), []).append(entry)\n    if sort:\n        return dict(sorted(groups.items()))\n    return groups\n"
+      },
+      "tag": "base"
+    },
+    {
+      "message": "Übersicht: nur fehlende Abteilung abfangen und protokollieren",
+      "touch": {
+        "app/groups.py": "\"\"\"Mitglieder nach Abteilung gruppieren, für die Übersicht im Aushang.\"\"\"\n\nimport logging\n\nfrom vendor.grouplib import group_by\n\nlog = logging.getLogger(__name__)\n\n\ndef by_department(members):\n    \"\"\"Mitglieder je Abteilung; ohne Abteilungsangabe eine leere Übersicht.\"\"\"\n    try:\n        return group_by(members, key=lambda m: m.get(\"department\"), sort=True)\n    except ValueError as exc:\n        log.warning(\"Übersicht leer, Abteilung fehlt: %s\", exc)\n        return {}\n"
+      }
+    }
+  ]
+}
