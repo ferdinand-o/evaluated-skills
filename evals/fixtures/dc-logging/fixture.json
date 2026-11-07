@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Paket mit CONTRIBUTING.md (Regeln zu Logging und Tests), app/legacy.py (import_customers mit print-Ausgaben) und app/sync.py (sync() ohne Logging). Kein .skills/, kein docs/."
+}

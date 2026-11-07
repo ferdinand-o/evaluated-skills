@@ -2986,3 +2986,52 @@ def test_b_fix_task_skips_refuted(tmp_path):
     else:
         raise AssertionError("alle Funde widerlegt: keine Task-Datei erwartet")
     assert not (tmp_path / "t3").exists()
+
+
+# --------------------------------------------------------------------------
+# Spec 28 (decide), Ablauf 5: fester Satz für Subagenten unter Nicht-Ziele
+# --------------------------------------------------------------------------
+
+# Wörtlich aus Spec 28, Ablauf 5 (Tasks von subagent-dev) — hier ausgeschrieben, nicht aus
+# dem Skript gelesen, damit eine Umformulierung im Skript den Test rot macht.
+TASK_SUBAGENT_SENTENCE = (
+    "Eigene Fragen mit zwei Lesarten und teuer umkehrbare Schritte, die nicht in dieser Task "
+    "stehen, entscheidest und trägst du nicht selbst ein; nenn sie in deinem Bericht mit Frage, "
+    "Optionen, Folgen und Empfehlung. Der Hauptagent ordnet sie ein."
+)
+
+
+def test_task_file_subagent_sentence(tmp_path):
+    """`generate` schreibt den Satz wörtlich unter Nicht-Ziele jeder Task-Datei, ohne decide
+    zu nennen (subagent-dev läuft auch ohne decide); `verify` liest die Datei danach
+    unverändert, der JSON-Block bleibt parsbar."""
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text(SAMPLE_PLAN, encoding="utf-8")
+    out_dir = tmp_path / "out"
+    assert ptt.main(["generate", str(plan_path), "--out-dir", str(out_dir)]) == 0
+    task_files = sorted(out_dir.glob("task-*.md"))
+    assert len(task_files) == 4
+    for task_file in task_files:
+        text = task_file.read_text(encoding="utf-8")
+        non_goals = text.split("## Nicht-Ziele\n", 1)[1].split("```json", 1)[0]
+        assert TASK_SUBAGENT_SENTENCE in non_goals, task_file.name
+        assert "decide" not in non_goals
+        assert ptt.parse_task_machine_block(text)["task_id"] in {1, 2, 3, 4}
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    git(worktree, "init", "--quiet", "--initial-branch=main")
+    git(worktree, "config", "user.email", "t@example.invalid")
+    git(worktree, "config", "user.name", "Test")
+    (worktree / "src").mkdir()
+    (worktree / "src" / "parser.py").write_text("def parse(line):\n    return {}\n", encoding="utf-8")
+    (worktree / "tests").mkdir()
+    (worktree / "tests" / "test_parser.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "--quiet", "-m", "base")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree, capture_output=True, text=True,
+                          check=True).stdout.strip()
+    task_file = out_dir / "task-1-parser.md"
+    before = task_file.read_bytes()
+    assert ptt.main(["verify", "--task-file", str(task_file), "--worktree", str(worktree), "--base", base]) == 0
+    assert task_file.read_bytes() == before

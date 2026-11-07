@@ -94,3 +94,4 @@ nicht verfügbar." Nie stillschweigend als fertig melden.
 | Befund zur Architektur oder zur API, der Arbeit nach sich zieht | **architecture-map**, **rest-api-architect** | work-plan plant die Arbeit, der Befund bleibt dort |
 | der Rot-Grün-Zyklus innerhalb eines Code-Tasks | test-first | work-plan nennt den Zyklus nur als Steps |
 | Plan im Gespräch ohne Datei | eingebauter Plan-Modus | work-plan — die Datei ist für subagent-dev |
+| eigene Frage während der Arbeit, außerhalb eines Plans | **decide** | work-plan — Annahmen eines Plans stehen hier in `- Annahme:`-Zeilen |

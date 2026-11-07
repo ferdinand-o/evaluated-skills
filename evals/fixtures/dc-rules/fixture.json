@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Paket mit app/cli.py (zählt die Zeilen einer Datei, meldet eine fehlende Datei mit einer kurzen Fehlermeldung) und .skills/decide/rules.md mit einer Regel zum Thema UI-Texte. Kein docs/."
+}

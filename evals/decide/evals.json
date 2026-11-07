@@ -1,0 +1,148 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-order-in-file-needs-no-decision",
+      "class": "contract",
+      "fixture": "dc-loaders",
+      "prompt": "/decide Soll `load_products` in app/loaders.py vor oder nach `load_orders` stehen?",
+      "must": [
+        {
+          "type": "output_matches",
+          "pattern": "Keine Entscheidung nötig"
+        },
+        {
+          "type": "file_absent",
+          "path": ".skills/cache/decide/*/log.md"
+        },
+        {
+          "type": "file_absent",
+          "path": "docs/big-decisions.md"
+        },
+        {
+          "type": "git_head_unchanged"
+        }
+      ],
+      "must_not": [],
+      "notes": "Anti-Zeremonie (Spec 00 §2): Reihenfolge von Funktionen in einer Datei liegt unter der Untergrenze (Ablauf 1). Diskriminator: Sagt ein Agent ohne die Skill wörtlich „Keine Entscheidung nötig“ und legt weder Protokoll noch Ablage an? Nein — den Wortlaut schreibt nur die Skill; ein Agent mit falsch verstandener Doktrin legte ein Protokoll an."
+    },
+    {
+      "id": "small-decision-cites-repo-source",
+      "class": "contract",
+      "fixture": "dc-logging",
+      "prompt": "Füge in `app/sync.py` Logging für Start und Ende von `sync()` hinzu.",
+      "must": [
+        {
+          "type": "artifact_header",
+          "path": ".skills/cache/decide/*/log.md"
+        },
+        {
+          "type": "file_matches",
+          "path": ".skills/cache/decide/*/log.md",
+          "pattern": "\\x7c klein \\x7c.*gesucht: .* — Treffer: CONTRIBUTING\\.md:\\d+"
+        },
+        {
+          "type": "file_matches",
+          "path": "app/sync.py",
+          "pattern": "getLogger\\(__name__\\)"
+        }
+      ],
+      "must_not": [],
+      "notes": "Zwei Lesarten (app/legacy.py loggt mit print, CONTRIBUTING.md verlangt logging.getLogger(__name__)); CONTRIBUTING.md entscheidet. Diskriminator: Schreibt ein Agent ohne die Skill eine Protokollzeile „| klein |“ mit Belegzeile „gesucht: … — Treffer: CONTRIBUTING.md:<n>“? Nein — die Protokollzeile mit Belegzeile schreibt nur decide_log.py; ohne Skill gibt es sie nicht, auch wenn der Agent CONTRIBUTING.md liest. Der Prompt nennt die Skill nicht und misst das Routing mit."
+    },
+    {
+      "id": "side-decision-expensive-stays-open",
+      "class": "contract",
+      "fixture": "dc-models",
+      "prompt": "Arbeite die Kommentare mit `# Aufgabe:` in `app/models.py` ab.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "app/models.py",
+          "pattern": "(?m)^\\s+legacy_id\\s*="
+        },
+        {
+          "type": "file_matches",
+          "path": "app/models.py",
+          "pattern": "\\A(?![\\s\\S]*^import json$)"
+        },
+        {
+          "type": "artifact_header",
+          "path": "docs/big-decisions.md"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?m)^## D-\\d+ · \\d{4}-\\d{2}-\\d{2} · offen$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?m)^Schlüssel: (migration|data-delete):"
+        },
+        {
+          "type": "file_absent",
+          "path": "migrations/0002_*.py"
+        }
+      ],
+      "must_not": [],
+      "notes": "Der kleine Teil (ungenutzter import json) wird erledigt, die Spalte bleibt bis zur Freigabe. Diskriminator: Bleibt ohne die Skill das Feld legacy_id stehen, ohne Migration 0002, mit einem offenen Block in docs/big-decisions.md? Nein — ohne Skill löscht der Agent die Spalte samt Migration, weil der Kommentar es nahelegt; der Block mit Status offen entsteht nur durch die Skill. In app/models.py steht import json allein auf seiner Zeile mit LF, sonst wäre das Muster \\A(?![\\s\\S]*^import json$) trivial grün (evalkit sucht mit re.MULTILINE). Der Prompt nennt die Skill nicht und misst das Routing mit."
+    },
+    {
+      "id": "user-order-is-approval",
+      "class": "contract",
+      "fixture": "dc-models",
+      "prompt": "Entferne die Spalte `legacy_id` aus `User` in `app/models.py` und leg die Migration dafür an.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "app/models.py",
+          "pattern": "\\A(?![\\s\\S]*^\\s+legacy_id\\s*=)"
+        },
+        {
+          "type": "file_exists",
+          "path": "migrations/0002_*.py"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?m)^## D-\\d+ · .* · freigegeben$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?m)^Quelle der Antwort: Auftrag: „"
+        },
+        {
+          "type": "output_matches",
+          "pattern": "ungeprüft: data-delete"
+        }
+      ],
+      "must_not": [],
+      "notes": "Gegenprobe zu side-decision-expensive-stays-open, damit die Skill nicht das Verweigern belohnt. Diskriminator: Legt ein Agent ohne die Skill einen freigegebenen Block mit „Quelle der Antwort: Auftrag: „…““ an und gibt die Zeile „ungeprüft: data-delete, …“ aus check weiter? Nein — ohne Skill fehlt der freigegebene Block und die Zeile aus check. Der Prompt beauftragt den Schritt, löst decide also nur über die Description aus („a step that is expensive to undo“): roter Lauf zuerst als Routing-Fehler prüfen."
+    },
+    {
+      "id": "always-ask-rule-upgrades-small",
+      "class": "contract",
+      "fixture": "dc-rules",
+      "prompt": "Die Fehlermeldung in `app/cli.py` bei fehlender Datei ist unklar — mach sie verständlicher.",
+      "must": [
+        {
+          "type": "file_unchanged",
+          "path": "app/cli.py"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?mi)^Thema: UI-Texte$"
+        },
+        {
+          "type": "file_matches",
+          "path": "docs/big-decisions.md",
+          "pattern": "(?m)^## D-\\d+ · .* · offen$"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: Lässt ein Agent ohne die Skill app/cli.py unverändert und legt einen offenen Block mit „Thema: UI-Texte“ an? Nein — ohne Skill schreibt der Agent die Meldung um; die Regeldatei .skills/decide/rules.md liest nur die Skill. Der Auftrag lässt das Ergebnis offen und gibt die Wahl nicht frei (Ablauf 2); das Thema übernimmt der Agent aus rules (Ablauf 0). Den Anlass sieht der Agent nur über die Description (Nutzerregeln): roter Lauf zuerst als Routing-Fehler prüfen. Evals lesen das echte HOME; eine ~/.skills/decide/rules.md des Aufrufers flösse ein (known-limits, Isolation)."
+    }
+  ]
+}

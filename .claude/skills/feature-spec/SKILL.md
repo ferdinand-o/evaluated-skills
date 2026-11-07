@@ -97,6 +97,8 @@ Fragen sind die Ausnahme (siehe Fallback in Schritt 2), nicht der Einstieg.
   greift diese Skill nicht.
 - **work-plan** — Zerlegung der fertigen Spec in
   Arbeitspakete. Diese Skill endet bei Spec plus Stubs, sie zerlegt nicht.
+- **decide** — eigene Fragen während der Arbeit außerhalb eines Spec-Entwurfs; die
+  Annahmen des Entwurfs protokolliert decide nicht noch einmal.
 - setup-repo — richtet das Repo für Claude Code ein; ein neues Feature spezifiziert es
   nicht.
 - Ohne existierende Codebase (leeres Repo, neues Projekt) ist Draft-first

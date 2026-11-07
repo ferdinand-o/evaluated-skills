@@ -1,0 +1,4 @@
+{
+  "git": true,
+  "description": "Paket mit app/loaders.py: load_users und load_orders lesen je eine JSON-Datei aus data/ über den Helfer _load. Kein .skills/, kein docs/."
+}

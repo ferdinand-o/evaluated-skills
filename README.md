@@ -30,7 +30,7 @@ list; once installed, skills are namespaced by plugin, e.g. `evaluated-dev:hando
 Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
 - `/plugin install evaluated-dev --marketplace ferdinand-o/evaluated-skills` — development, always
-  on: architecture-map, debug-ledger, deep-review, dev-report, feature-spec, handoff,
+  on: architecture-map, debug-ledger, decide, deep-review, dev-report, feature-spec, handoff,
   rest-api-architect, review-context, sql-schema-architect, subagent-dev, test-first,
   testing-strategy, work-plan.
 - `/plugin install evaluated-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
@@ -110,6 +110,7 @@ also carries a delimitation clause against its two strongest competitors.
 | explain a concept or topic (no code) | explain | learning-coach (session with retrieval), visual-summary (condenses what exists), architecture-map (codebase) |
 | implementation plan for a spec | impl-plan | work-plan (other repos), brainstorming (your own profile skill, not superpowers: the spec comes first), subagent-dev (splits and dispatches the finished plan) |
 | plan for work in any repo (spec, finding, task) | work-plan | impl-plan (specs of this collection), built-in plan mode (plan only in the conversation), subagent-dev (splits and dispatches the finished plan) |
+| own question during the work, "entscheide selbst", "was hast du entschieden", `/decide` | decide | feature-spec (assumptions of a spec draft), work-plan (assumptions of a plan) |
 | build or change a skill | skill-forge | skill-creator (outside this collection, its own eval schema), superpowers:writing-skills (discipline skills with pressure scenarios), impl-plan (the plan only) |
 | write or rework a text that must not sound like a model | human-prose | setup-writing-style (builds the voice profile, in the user profile), visual-summary (condenses, does not change style), explain (explains, with its own answer contract) |
 | end of session, handover | handoff | visual-summary, dev-report |
