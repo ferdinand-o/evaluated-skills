@@ -1,5 +1,5 @@
 """Repo-Test für .claude-plugin/marketplace.json (Spec 20, plugin-split): vier Plugins mit
-Root-Quelle und `skills`-Liste, die je Eintrag die vollständige Menge ist (Claude-Code-Doku,
+Root-Quelle und `skills`-Liste, dazu ui-everything mit Git-Quelle (cc-frontend), die je Eintrag die vollständige Menge ist (Claude-Code-Doku,
 plugins/manifest-reference: „only those subdirectories load"). Jede Skill unter skills/
 steht in genau einer Liste oder mit Grund in .claude-plugin/excluded.json — eine neue
 Skill, die niemand einträgt, macht den Test rot, statt still im Plugin zu fehlen. Dazu die
@@ -18,7 +18,12 @@ EXCLUDED_JSON = REPO_ROOT / ".claude-plugin" / "excluded.json"
 SKILLS = REPO_ROOT / "skills"
 
 # Zuschnitt aus Spec 20: Name -> defaultEnabled.
-PLUGINS = {"evaluated-dev": True, "evaluated-setup": True, "evaluated-ui": False, "evaluated-knowledge": True}
+PLUGINS = {"evaluated-dev": True, "evaluated-setup": True, "evaluated-ui": False, "evaluated-knowledge": True,
+           "ui-everything": False}
+
+# Plugins, deren Dateien nicht in diesem Repo liegen: Quelle ist ein anderes GitHub-Repo, der Skill-Ordner
+# wird beim Installieren von dort geholt. Name -> erwartete Quelle.
+EXTERNAL_PLUGINS = {"ui-everything": {"source": "github", "repo": "ferdinand-o/cc-frontend"}}
 
 # Plugins nur für Claude Code: ihre Skills dürfen Frontmatter tragen, das claude.ai (Web)
 # nicht kennt. Alle anderen müssen sich dort hinzufügen lassen.
@@ -43,6 +48,8 @@ def _listed() -> dict[str, list[str]]:
     """Skill-Name -> Plugins, in deren Liste er steht."""
     out: dict[str, list[str]] = {}
     for name, entry in _entries().items():
+        if name in EXTERNAL_PLUGINS:
+            continue
         for path in entry.get("skills", []):
             out.setdefault(Path(path).name, []).append(name)
     return out
@@ -57,7 +64,10 @@ def test_plugin_entries_are_fixed():
     entries = _entries()
     assert sorted(entries) == sorted(PLUGINS)
     for name, entry in entries.items():
-        assert entry["source"] == "./", name
+        if name in EXTERNAL_PLUGINS:
+            assert entry["source"] == EXTERNAL_PLUGINS[name], name
+        else:
+            assert entry["source"] == "./", name
         assert entry["strict"] is False, f"{name}: ohne plugin.json ist der Eintrag die ganze Definition"
         assert entry.get("defaultEnabled", True) is PLUGINS[name], name
         assert "version" not in entry, f"{name}: mit version blieben Nutzer auf der Cache-Kopie"
@@ -66,7 +76,8 @@ def test_plugin_entries_are_fixed():
         assert paths and paths == sorted(set(paths)), f"{name}: Liste sortiert, ohne Doppel"
         for path in paths:
             assert path.startswith("./skills/") and ".." not in path, path
-            assert (REPO_ROOT / path / "SKILL.md").is_file(), path
+            if name not in EXTERNAL_PLUGINS:
+                assert (REPO_ROOT / path / "SKILL.md").is_file(), path
 
 
 def test_every_skill_in_exactly_one_plugin():
@@ -188,7 +199,7 @@ def test_web_plugins_pass_claude_ai_upload_rules():
     evaluated-setup, und dieser Test hält die übrigen Plugins importierbar."""
     findings = []
     for name, entry in _entries().items():
-        if name in CLAUDE_CODE_ONLY_PLUGINS:
+        if name in CLAUDE_CODE_ONLY_PLUGINS or name in EXTERNAL_PLUGINS:
             continue
         for path in entry["skills"]:
             for f in _claude_ai_findings(REPO_ROOT / path):

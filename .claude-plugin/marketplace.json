@@ -4,7 +4,7 @@
   "owner": {
     "name": "ferdinand-o"
   },
-  "description": "Skill-Sammlung nach Spec 00 in vier Plugins (Spec 20): Entwicklung, UI, Wissen und die Einrichtung von Claude Code. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
+  "description": "Skill-Sammlung nach Spec 00 in fünf Plugins (Spec 20): Entwicklung, UI, Web-UI aus cc-frontend, Wissen und die Einrichtung von Claude Code. Ein Eval-Harness, eine Routing-Matrix, jede Skill mit Anti-Zeremonie-Eval.",
   "plugins": [
     {
       "name": "evaluated-dev",
@@ -55,7 +55,7 @@
     {
       "name": "evaluated-ui",
       "source": "./",
-      "description": "UI-Skills: Stil und Tokens, Produktoberflächen, Landing-Page-Bewegung, Mobil-Prüfung. Standardmäßig aus, je Frontend-Repo einschalten.",
+      "description": "UI-Skills: Mobil-Prüfung. Standardmäßig aus, je Frontend-Repo einschalten. Die Gestaltungs-Skills (ui-architect, enterprise-ui, motion-landing) sind durch ui-everything ersetzt.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",
       "license": "MIT",
       "keywords": [
@@ -66,10 +66,26 @@
       "strict": false,
       "defaultEnabled": false,
       "skills": [
-        "./skills/enterprise-ui",
-        "./skills/mobile-audit",
-        "./skills/motion-landing",
-        "./skills/ui-architect"
+        "./skills/mobile-audit"
+      ]
+    },
+    {
+      "name": "ui-everything",
+      "source": {
+        "source": "github",
+        "repo": "ferdinand-o/cc-frontend"
+      },
+      "description": "Web-UI-Skill (web-ui) aus ferdinand-o/cc-frontend, gepflegt dort und hier nur eingebunden: Landing, App, Dashboard, Formular, Theme und Dark Mode in einem Skill. Ersetzt ui-architect, enterprise-ui und motion-landing. Standardmäßig aus, je Frontend-Repo einschalten.",
+      "repository": "https://github.com/ferdinand-o/cc-frontend",
+      "keywords": [
+        "skills",
+        "evals",
+        "german"
+      ],
+      "strict": false,
+      "defaultEnabled": false,
+      "skills": [
+        "./skills/web-ui"
       ]
     },
     {
