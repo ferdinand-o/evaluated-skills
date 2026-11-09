@@ -1,6 +1,6 @@
 # evaluated-skills
 
-A collection of Claude skills, shipped as four Claude Code plugins. Every skill comes
+A collection of Claude skills, shipped as five Claude Code plugins. Every skill comes
 with a written specification and an eval suite, and has to prove in a baseline run
 that it adds something over the bare model.
 
@@ -24,8 +24,8 @@ that it adds something over the bare model.
 
 ## Install as plugins
 
-The repo is a Claude Code marketplace (`.claude-plugin/marketplace.json`) with four
-plugins. All use the repo root as source and load only the skills in their `skills`
+The repo is a Claude Code marketplace (`.claude-plugin/marketplace.json`) with five
+plugins. Four use the repo root as source and load only the skills in their `skills`
 list; once installed, skills are namespaced by plugin, e.g. `evaluated-dev:handoff`. From
 Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together:
 
@@ -36,12 +36,18 @@ Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together
 - `/plugin install evaluated-setup --marketplace ferdinand-o/evaluated-skills` — Claude Code setup,
   **CLI only**: setup-repo and setup-user, available only as `/evaluated-setup:setup-repo`
   and `/evaluated-setup:setup-user`. Both carry `disable-model-invocation`, which claude.ai
-  (web) does not know; on the web, add only `evaluated-dev`, `evaluated-ui` and `evaluated-knowledge`.
+  (web) does not know; on the web, add only `evaluated-dev`, `evaluated-ui`, `ui-everything` and `evaluated-knowledge`.
 - `/plugin install evaluated-ui --marketplace ferdinand-o/evaluated-skills` — UI, **off by default**
-  (`defaultEnabled: false`): enterprise-ui, mobile-audit, motion-landing,
-  ui-architect. Enable it per frontend repo in that repo's `.claude/settings.json` with
+  (`defaultEnabled: false`): mobile-audit. Enable it per frontend repo in that repo's `.claude/settings.json` with
   `"enabledPlugins": {"evaluated-ui@evaluated-skills": true}`; the project setting wins over the
   `false` that the installation writes to the user settings.
+- `/plugin install ui-everything --marketplace ferdinand-o/evaluated-skills` — web UI, **off by
+  default** (`defaultEnabled: false`): the `web-ui` skill. Unlike the four plugins above, its
+  source is another repository, [`ferdinand-o/cc-frontend`](https://github.com/ferdinand-o/cc-frontend)
+  (`"source": {"source": "github", "repo": "ferdinand-o/cc-frontend"}`), so the skill is maintained
+  there and only referenced here: no copy, no drift. It replaces ui-architect, enterprise-ui and
+  motion-landing. Enable it per frontend repo with `"enabledPlugins": {"ui-everything@evaluated-skills": true}`.
+  The skill is namespaced `ui-everything:web-ui`.
 - `/plugin install evaluated-knowledge --marketplace ferdinand-o/evaluated-skills` — knowledge,
   always on: exercise-forge, explain, human-prose, learning-coach, verified-research,
   visual-summary.
@@ -50,12 +56,14 @@ With older versions, first run `/plugin marketplace add ferdinand-o/evaluated-sk
 `/plugin install evaluated-dev@evaluated-skills` and so on. New commits arrive with
 `/plugin marketplace update evaluated-skills`, followed by `/reload-plugins`.
 
-**In no plugin** are three skills, each with its reason in `.claude-plugin/excluded.json`:
+**In no plugin** are six skills, each with its reason in `.claude-plugin/excluded.json`:
 
 - impl-plan and skill-forge apply only to specs and skills of this collection. They
   exist only as project copies under `.claude/skills/` and load when Claude Code runs
   in this repo.
 - cad-parts is excluded because it needs an `stl-cad-server` MCP server.
+- ui-architect, enterprise-ui and motion-landing are replaced by `ui-everything`. Folder, spec and
+  evals stay in the repo; only the plugin membership is gone.
 
 **Project copies.** `.claude/skills/` holds eleven skills for working on this repo:
 impl-plan, skill-forge and nine from `evaluated-dev` (all except rest-api-architect,
