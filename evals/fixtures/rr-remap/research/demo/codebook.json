@@ -1,0 +1,41 @@
+{
+ "question": "Welche Fehler nennen Gründer in Postmortems?",
+ "relevance_rule": "Beitrag nennt einen konkreten Fehler eines gescheiterten Startups.",
+ "constructive_rule": "konkrete Empfehlung mit Begründung",
+ "stance": [
+  "pro",
+  "contra",
+  "mixed",
+  "neutral"
+ ],
+ "categories": [
+  {
+   "id": "C01",
+   "label": "Marketing zu spät begonnen",
+   "definition": "Vertrieb/Marketing erst nach dem Produkt",
+   "include": "Launch ohne Publikum",
+   "exclude": "falscher Markt",
+   "example": "t3_aaa001"
+  },
+  {
+   "id": "C02",
+   "label": "Kein Markt",
+   "definition": "Produkt löst kein bezahltes Problem",
+   "include": "Nutzer zahlen nicht",
+   "exclude": "schlechtes Marketing",
+   "example": "t3_aaa002"
+  },
+  {
+   "id": "C03",
+   "label": "Pivot verpasst",
+   "definition": "Kurswechsel zu spät",
+   "include": "Warnzeichen ignoriert",
+   "exclude": "Kein Markt"
+  },
+  {
+   "id": "OTHER",
+   "label": "Sonstiges",
+   "definition": "relevant, keine Kategorie passt"
+  }
+ ]
+}

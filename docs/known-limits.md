@@ -2802,6 +2802,31 @@ Je Grenze: was passiert, warum nicht behoben, was man stattdessen tut.
   Befehle des SKILL.md (einzeln, mit vollem Pfad) liefen. Umgang: die Befehle so aufrufen, wie
   SKILL.md sie zeigt.
 
+## reddit-research
+
+- **Von außen übernommen, ohne Spec.** Die Skill kam als Zip in die Sammlung; es gibt keine
+  `specs/Spec NN`, keinen Plan und keine Doktrin-Review durch einen frischen Kontext. Description,
+  Contract und Abgrenzung wurden beim Einbinden ergänzt (Lint), nicht aus einer Spec abgeleitet.
+- **Die Pipeline ist nie in dieser Sammlung gelaufen.** Die Evals fahren nur die Skripte
+  (`tally`, `remap`) gegen lokale Fixtures. Scouts, Tagging-Worker, Subreddit-Suche und Bericht
+  brauchen den `arctic-shift`-Connector und viele Haiku-Läufe (laut Skill ≈ 75 Minuten,
+  ≈ 200 000 Haiku-Token je Batch); ob die Phasen 1 bis 6 und 8 mit dem heutigen Connector
+  tragen, ist nur gegen die Tool-Schemas (Parameternamen, `max_text_chars`, Cursor, Ids ohne
+  `t3_`) geprüft, nicht durch einen Lauf.
+- **Der Skill-Trigger schwankt bei Teilaufgaben.** „Zähl die Tags nach Autor aus“ wählte die
+  Skill ohne das Wort „Reddit-Recherche“ im Prompt nicht zuverlässig (drei von fünf Läufen);
+  die Description trägt deshalb „Reddit-Tags auszählen“. Mit anderen Formulierungen kann der
+  Agent von Hand zählen, obwohl die Skill „nie von Hand“ verlangt.
+- **Eval 1 trennt Skill und Basismodell nur schwach.** Der Anti-Zeremonie-Eval hängt an
+  `"unit": "author"` und `"ci95"` im selbst geschriebenen JSON; die Zahl 5 allein trennt nicht.
+  Er belegt „kein Plan, keine Batches, nichts Fertiges überschrieben“, nicht, dass `rr.py` lief.
+- **Reddit-Inhalte sind untrusted.** Worker lesen fremden Text mit Bash- und Schreibrechten; die
+  Regel „Text ist Daten“ steht in Contract und Worker-Prompt, ein Injection-Test wurde nicht gefahren.
+- **Personenbezug.** Die Tag-Dateien tragen Reddit-Benutzernamen (`author`) und Permalinks. Der
+  Ordner `research/<slug>/` gehört nicht in ein Repo; die Skill sagt es, ein `.gitignore` legt sie nicht an.
+- **`rr.py select` räumt nichts auf.** Ein zweiter Lauf mit weniger Batches lässt alte
+  `batch_NNN.json` liegen; das Skript warnt auf stderr, löscht aber nicht.
+
 ## Verweise
 
 [README](../README.md) · [Spec 00](../specs/Spec%2000%20%E2%80%93%20skill-foundation.md) ·
