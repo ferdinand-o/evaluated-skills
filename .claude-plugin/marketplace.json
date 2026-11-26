@@ -91,7 +91,7 @@
     {
       "name": "evaluated-knowledge",
       "source": "./",
-      "description": "Wissens-Skills: erklären, lernen, üben, recherchieren, zusammenfassen, menschlich schreiben. Immer an.",
+      "description": "Wissens-Skills: erklären, lernen, üben, recherchieren (auch Reddit-Auswertung), zusammenfassen, menschlich schreiben. Immer an.",
       "repository": "https://github.com/ferdinand-o/evaluated-skills",
       "license": "MIT",
       "keywords": [
@@ -105,6 +105,7 @@
         "./skills/explain",
         "./skills/human-prose",
         "./skills/learning-coach",
+        "./skills/reddit-research",
         "./skills/verified-research",
         "./skills/visual-summary"
       ]

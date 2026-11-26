@@ -1,0 +1,112 @@
+{
+  "evals": [
+    {
+      "id": "anti-ceremony-retally-by-author",
+      "class": "contract",
+      "fixture": "rr-finished",
+      "prompt": "Die Reddit-Recherche unter research/demo ist fertig und nach Thread ausgezählt (results.md). Zähl die vorhandenen Tags aus tags_final nur noch einmal nach Autor statt nach Thread aus, mit Konfidenzintervallen, und schreib das Ergebnis nach research/demo/results_author.json. Sonst nichts anfassen, keine neue Recherche.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": "research/demo/results_author.json"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results_author.json",
+          "pattern": "\"unit\": \"author\""
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results_author.json",
+          "pattern": "\"n_[a-z_]*\": 5\\b"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results_author.json",
+          "pattern": "\"ci95\""
+        },
+        {
+          "type": "file_unchanged",
+          "path": "research/demo/results.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "research/demo/plan.md"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "research/demo/codebook.json"
+        }
+      ],
+      "must_not": [
+        {
+          "type": "file_exists",
+          "path": "research/demo/candidates/*.jsonl"
+        },
+        {
+          "type": "file_exists",
+          "path": "research/demo/batches/*.json"
+        }
+      ],
+      "notes": "Pflicht-Anti-Zeremonie-Eval (Spec 00 §2). Diskriminator: results_author.json mit den Schlüsseln \"unit\": \"author\" und \"n_units\" ist das Artefakt von `rr.py tally --unit author --out-json`; ein Basismodell zählt von Hand oder schreibt ein anderes Schema. Die Skill darf trotz Phasenplan weder Plan, Scouts noch neue Batches anlegen und die fertigen Dateien nicht überschreiben (file_unchanged). Nur contract, kein Connector nötig. Ungefahren: in diesem Commit nicht gelaufen (docs/superpowers/reports/reddit-research-report.md). Fix-Runde (Baseline): ohne Skill war der Eval grün, weil results.json der Fixture die Schlüssel \"unit\" und \"n_units\" vorsagte; die Fixture trägt sie nicht mehr, und die Assertion verlangt zusätzlich \"ci95\", das nur rr.py schreibt. Zweite Fix-Runde: Mit einer results.json in der Fixture baute der Agent deren Struktur nach und zählte von Hand (die Skill wurde nicht genutzt); die Fixture trägt jetzt nur results.md ohne Schema, der Prompt verlangt Konfidenzintervalle. Dritte Fix-Runde: Der Agent schrieb die Datei selbst aus der Ausgabe von rr.py (Schlüssel n_authors_total statt n_units); die Assertion verlangt jetzt irgendeinen n_…-Schlüssel mit 5 statt exakt n_units. Dadurch trägt der Diskriminator vor allem \"unit\": \"author\" plus \"ci95\" neben der Anti-Zeremonie (keine Plan-/Batch-Dateien, fertige Dateien unverändert); das Basismodell wird nur durch die beiden Schlüssel getrennt, nicht durch die Zahl."
+    },
+    {
+      "id": "tally-counts-with-script",
+      "class": "contract",
+      "fixture": "rr-tags",
+      "prompt": "Für die Reddit-Recherche unter research/demo liegen die Roh-Tags eines Workers in tags/. Ermittle die Anteile je Kategorie nach Thread mit Konfidenzintervallen und lege das Ergebnis als research/demo/results.json ab.",
+      "must": [
+        {
+          "type": "file_exists",
+          "path": "research/demo/results.json"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results.json",
+          "pattern": "\"n_units\": 6\\b"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results.json",
+          "pattern": "\"invalid_lines\": 1\\b"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results.json",
+          "pattern": "(?s)\"unknown_categories\":\\s*\\[\\s*\"C09\""
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results.json",
+          "pattern": "\"ci95\""
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: `invalid_lines`, `unknown_categories` und `ci95` stehen nur in der Ausgabe von `rr.py tally --out-json`; die Fixture hat eine abgeschnittene Zeile und die Kategorie C09 ohne Codebuch-Eintrag, die eine Handzählung selten meldet. Ein Basismodell erfindet ein anderes JSON-Schema. Ungefahren."
+    },
+    {
+      "id": "remap-keeps-worker-files",
+      "class": "contract",
+      "fixture": "rr-remap",
+      "prompt": "In der Reddit-Recherche research/demo stehen unter tags/ drei Items mit OTHER und dem Label \"Pivot verpasst\"; other_map.json ordnet es C03 zu. Übernimm das, ohne die Worker-Dateien zu verändern, und zähl danach nach Thread nach; das Ergebnis kommt nach research/demo/results.json.",
+      "must": [
+        {
+          "type": "file_matches",
+          "path": "research/demo/tags_final/batch_001.jsonl",
+          "pattern": "remapped_from_other"
+        },
+        {
+          "type": "file_unchanged",
+          "path": "research/demo/tags/batch_001.jsonl"
+        },
+        {
+          "type": "file_matches",
+          "path": "research/demo/results.json",
+          "pattern": "(?s)\"label\": \"Pivot verpasst\",\\s*\"units\": 3\\b"
+        }
+      ],
+      "must_not": [],
+      "notes": "Diskriminator: das Feld `remapped_from_other` und der Ordner tags_final/ entstehen nur durch `rr.py remap`; ein Basismodell würde die Originaldatei umschreiben (file_unchanged) oder ein anderes Feld setzen. `results.json` mit `\"label\": \"Pivot verpasst\", \"units\": 3` entsteht nur durch `rr.py tally --codebook … --out-json` auf den umgemappten Dateien. Fix-Runde: die erste Fassung prüfte eine Tabellenzeile in der Agent-Ausgabe und fiel an der Wortwahl des Agenten, nicht an der Skill. Ungefahren. Zweite Fix-Runde: Im Lauf davor löste der Agent die Zuordnung im Speicher und schrieb nur results.json, ohne tags_final/ — der Prompt nannte Reddit nicht, die Skill wurde vermutlich gar nicht gewählt; der Prompt benennt jetzt die Reddit-Recherche."
+    }
+  ]
+}

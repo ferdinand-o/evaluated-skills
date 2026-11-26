@@ -49,8 +49,8 @@ Claude Code 2.1.275 on, one line per plugin adds marketplace and plugin together
   motion-landing. Enable it per frontend repo with `"enabledPlugins": {"ui-everything@evaluated-skills": true}`.
   The skill is namespaced `ui-everything:web-ui`.
 - `/plugin install evaluated-knowledge --marketplace ferdinand-o/evaluated-skills` — knowledge,
-  always on: exercise-forge, explain, human-prose, learning-coach, verified-research,
-  visual-summary.
+  always on: exercise-forge, explain, human-prose, learning-coach, reddit-research,
+  verified-research, visual-summary. reddit-research needs the `arctic-shift` MCP connector and stops with a message if it is missing.
 
 With older versions, first run `/plugin marketplace add ferdinand-o/evaluated-skills`, then
 `/plugin install evaluated-dev@evaluated-skills` and so on. New commits arrive with
@@ -114,6 +114,7 @@ also carries a delimitation clause against its two strongest competitors.
 | UI: product surfaces, tables, forms | enterprise-ui | ui-architect (marketing/brand) |
 | landing-page motion | motion-landing | ui-architect (style/tokens), enterprise-ui |
 | broken on mobile, "does it work on a phone?" | mobile-audit | enterprise-ui / ui-architect / motion-landing — they *build* mobile with `references/mobile.md`, mobile-audit only checks |
+| what people on Reddit think, counted over many threads ("was sagt Reddit zu X") | reddit-research | verified-research (source tiers, primary sources), visual-summary (condenses what exists), the connector directly (one thread or a quick look) |
 | ad-hoc "summarise this" | visual-summary | dev-report (periodic), handoff (end of session) |
 | explain a concept or topic (no code) | explain | learning-coach (session with retrieval), visual-summary (condenses what exists), architecture-map (codebase) |
 | implementation plan for a spec | impl-plan | work-plan (other repos), brainstorming (your own profile skill, not superpowers: the spec comes first), subagent-dev (splits and dispatches the finished plan) |

@@ -1,0 +1,3 @@
+{
+  "description": "Tags mit drei OTHER-Items (Label 'Pivot verpasst') und fertiger Map nach C03. Prüft, dass die Worker-Dateien unberührt bleiben und tags_final per rr.py remap entsteht."
+}

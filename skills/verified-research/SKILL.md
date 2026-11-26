@@ -79,5 +79,7 @@ sie sagt.
   keine Tiers, kein Gedächtnis über frühere Läufe. Wenn Quellenqualität und
   Nachvollziehbarkeit zählen, diese Skill statt deep-research.
 - **visual-summary** — fasst vorhandene Dokumente/Chats zusammen, recherchiert nicht.
+- **reddit-research** — zählt Stimmen aus vielen Reddit-Threads (Meinungen, Erfahrungen); Reddit ist
+  dort Datenmenge, hier wäre es höchstens Tier 3.
 - Ohne belastbare Quellen (reines Brainstorming, Meinungsfrage) ist diese Skill zu
   schwer — dann reicht ein normales Gespräch.
